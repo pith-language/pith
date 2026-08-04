@@ -1,7 +1,7 @@
 ---
 schema: design-doc/v1
 id: project-readme
-title: whatever comes after nix
+title: pith
 summary: entry point for the design notebook
 kind: index
 status: active
@@ -16,17 +16,16 @@ relations:
   supersedes: []
 ---
 
-# whatever comes after nix
+# pith
 
-this repository is the design notebook for a system built from the ideas that made Nix useful, without treating Nix's current architecture as a constraint.
+this repository is the design notebook for **Pith**, a system built from the ideas that made Nix useful, without treating Nix's current architecture as a constraint.
 
 the rough idea is a typed, incremental, capability-controlled computation kernel. builds, packages, development environments, services, system management, deployment, and other automation models are libraries built on that kernel. the first-party libraries should be useful enough to make a complete tool, but they do not get private access to the engine.
-
-the name is intentionally temporary.
 
 ## start here
 
 - [documentation index](docs/index.md) is the complete map.
+- [name and brand](docs/foundation/name.md) defines the project's name, word forms, file extension, store paths, ecosystem vocabulary, forge strategy, and domain plan.
 - [scope](docs/foundation/scope.md) defines what the project owns and where it stops.
 - [principles](docs/foundation/principles.md) contains the design rules that constrain the architecture.
 - [kernel architecture](docs/design/kernel.md) draws the boundary between the generic engine and domain libraries.

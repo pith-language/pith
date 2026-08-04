@@ -24,6 +24,7 @@ the repository separates current design from the evidence and decisions that pro
 - [problem](foundation/problem.md)
 - [scope](foundation/scope.md)
 - [principles](foundation/principles.md)
+- [name and brand](foundation/name.md)
 - [glossary](foundation/glossary.md)
 
 ## design
