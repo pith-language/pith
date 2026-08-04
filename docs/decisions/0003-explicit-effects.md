@@ -21,6 +21,8 @@ relations:
 
 # model effects and capabilities explicitly
 
+> amended by [0019: five type-level effect categories, with nondeterminism as a tracked dependency](0019-effect-categories-and-nondeterminism.md), which adds `Opaque` as a fifth, foundational category and fixes the type-level shape of all five. the four categories below stand; the amendment is recorded in 0019 and reflected in the effects-and-capabilities design doc.
+
 ## context
 
 build commands, filesystem observations, cloud API reads, secret resolution, and deployment mutations all interact with the outside world. treating them as normal functions breaks caching and hides authority. treating them as one undifferentiated `IO` operation loses information needed by schedulers and plans.

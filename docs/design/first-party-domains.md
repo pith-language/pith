@@ -2,7 +2,7 @@
 schema: design-doc/v1
 id: design-first-party-domains
 title: first-party domains
-summary: the useful build, package, environment, system, and deployment libraries shipped without private engine hooks
+summary: the build, package, environment, service, system, deployment, secrets, and policy libraries shipped without private engine hooks
 kind: design
 status: proposed
 created: 2026-04-09
@@ -40,6 +40,10 @@ the package library adds semantic package identity, versions, variants, dependen
 
 the environment library composes tools, packages, variables, commands, and local services without mutating global host configuration.
 
+## services
+
+the services library models long-running processes, supervisors, and service-level contracts as values a system or deployment can own and observe. *to be written.*
+
 ## system management
 
 the system library defines filesystems, users, services, mounts, devices, networking, boot configuration, persistent data, and operating-system composition.
@@ -49,6 +53,14 @@ Linux is the first target. systemd and other Linux mechanisms remain adapter cho
 ## deployment
 
 the deployment library combines desired values, observations, ownership, transition constraints, and mutation capabilities. it supports plan inspection, one-shot application, and later continuous reconciliation through the same model.
+
+## secrets
+
+the secrets library models secret references, consumers, rotation, and capability-grained access without passing secret bytes through ordinary configuration. *to be written.*
+
+## policy
+
+the policy library expresses authorization, admission, and composition constraints as inspectable values rather than ambient rules. *to be written.*
 
 ## the extension test
 

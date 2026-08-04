@@ -28,9 +28,9 @@ where a question has a proposed decision against it, the decision is named in pa
 
 several questions block milestones rather than sitting alongside the implementation work. the current gates:
 
-- milestone 5 (Linux system library) and 6 (deployment library) are gated by decision 0012 (revision-pinned plans) and 0013 (managed-object identity)
-- the reproducibility story in milestone 3 (first build library) is gated by decision 0014
-- the kernel prototype (milestone 1) was gated by the rule-selection question; decision 0015 now proposes an answer, so the gate is conditional on 0015 being accepted and prototyped
+- milestone M-5 (Linux system library) and M-6 (deployment library) are gated by decision 0012 (revision-pinned plans) and 0013 (managed-object identity)
+- the reproducibility story in milestone M-3 (first build library) is gated by decision 0014
+- the kernel prototype (milestone M-1) is gated by the rule-selection question and the effect-algebra question; decisions 0015 and 0019 propose answers, so the gate is conditional on both being accepted and prototyped
 
 ## language and types
 
@@ -57,7 +57,7 @@ several questions block milestones rather than sitting alongside the implementat
 
 ## actions and effects
 
-- are `Action`, `Observation`, and `Mutation` separate primitives or handlers of one effect calculus?
+- are `Action`, `Observation`, and `Mutation` separate primitives or handlers of one effect calculus? (decision 0019 proposes five type-level categories — `Pure`, `Action`, `Observation`, `Mutation`, `Opaque` — with nondeterminism tracked as a dependency)
 - which action properties can be enforced and which can only be claimed by an adapter? (decision 0014 addresses the reproducibility subcase; the general enforcement question is open)
 - how is secret taint tracked through values and diagnostics?
 - how should retry safety and compensation be represented for mutations? (decision 0012 names the validity scope; retry-safety representation is open)

@@ -16,19 +16,21 @@ relations:
     - research-deployment-and-state
   depends_on:
     - decision-0003-explicit-effects
+    - decision-0019-effect-categories-and-nondeterminism
     - design-rules-and-graph
   supersedes: []
 ---
 
 # effects and capabilities
 
-the design currently distinguishes four semantic categories:
+the design distinguishes five semantic categories:
 
 ```text
 Pure<A>
 Action<A>
 Observation<A>
 Mutation<A>
+Opaque<A>
 ```
 
 `Pure` computes from immutable values.
@@ -38,6 +40,8 @@ Mutation<A>
 `Observation` reads external state and records source, freshness, revision, and uncertainty.
 
 `Mutation` changes external state. it carries authority, ownership, retry behavior, known failure modes, and whatever evidence can confirm completion.
+
+`Opaque` is effectful work that has not been modeled into one of the four categories above. it is the adoption on-ramp and the visibly distinct escape hatch: the graph records that the rule performed effectful work but does not know its category, declared inputs, or authority, and treats it as a fixed-output boundary whose interior the engine cannot inspect. decision 0019 establishes `Opaque` as foundational, not a future amendment, so the category system can be opt-in by progression rather than required up front.
 
 the final implementation may express these through one effect calculus. their different behavior must remain available to the scheduler, cache, policy engine, and user interface.
 

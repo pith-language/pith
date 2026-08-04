@@ -22,6 +22,8 @@ relations:
 
 # separate identity types
 
+> amended by [0013: managed-object identity](0013-managed-object-identity.md), which adds a fifth identity type. the four types below stand; the amendment is recorded in 0013 and reflected in the glossary and identity-and-storage design doc.
+
 ## context
 
 a content digest answers whether immutable bytes are equal. it does not say that two builds represent the same package across platforms. a configuration address can name desired meaning, while a cloud provider assigns another identifier to the current remote object.

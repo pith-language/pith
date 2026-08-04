@@ -24,7 +24,7 @@ relations:
 
 ## context
 
-the notebook sometimes writes about reproducibility as if it were one property the engine provides. requirement A-6 ("clean-build equivalence") is currently doing the work of three distinct claims, and the identity-and-storage design doc slides between "a signature over content does not silently imply reproducibility" and language that treats reproducibility as an engine guarantee.
+reproducibility is often treated as one property the engine provides. requirement A-6 ("clean-build equivalence") carries the weight of three distinct claims, and "a signature over content does not silently imply reproducibility" is easy to slide into language that treats reproducibility as an engine guarantee.
 
 the Reproducible Builds project, which is the only place the bit-for-bit property has been operationalized at scale, defines it precisely:
 
@@ -80,7 +80,7 @@ build every action twice and compare, as a default. the most rigorous option and
 
 ## consequences
 
-requirement A-6 is narrowed to clean-build equivalence, which is the property the engine actually provides. a new requirement should record the bit-for-bit verification property framed honestly: the engine verifies reproducibility by comparison and records the result. it does not produce it.
+requirement A-6 is narrowed to clean-build equivalence, which is the property the engine actually provides. requirement A-9 records the bit-for-bit verification property framed honestly: the engine verifies reproducibility by comparison and records the result. it does not produce it.
 
 the artifact and identity model gains a provenance field for verified-reproducible status. the supply-chain story in T-4 and T-5 inherits this. a reproducibility attestation is a distinct claim, derived from the graph, with its own trust state.
 

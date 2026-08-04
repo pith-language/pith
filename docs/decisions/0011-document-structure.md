@@ -21,9 +21,7 @@ relations:
 
 ## context
 
-the first draft placed scope, principles, requirements, architecture, research, and open questions directly under `docs` or one level below it. documents used a generic `related` list.
-
-that structure was small, but it did not clearly distinguish historical evidence from accepted choices and the current design. `related` also said that two documents were connected without preserving how.
+documentation has to distinguish historical evidence, accepted choices, and the current design. a flat directory with a generic `related` list does not preserve that distinction: it mixes evidence, decisions, current design, and requirements, and a `related` field says two documents are connected without recording how.
 
 ## decision
 
@@ -31,7 +29,7 @@ documents are grouped into `foundation`, `design`, `requirements`, `research`, `
 
 every Markdown document uses the `design-doc/v1` frontmatter schema with a stable ID, title, summary, kind, status, dates, tags, and directional relations.
 
-the relation vocabulary currently contains `informed_by`, `depends_on`, and `supersedes`. relations use stable document IDs instead of paths.
+the relation vocabulary contains `informed_by`, `depends_on`, and `supersedes`. relations use stable document IDs instead of paths.
 
 only one relation direction is stored. backlinks are derived.
 

@@ -41,7 +41,7 @@ the caller resolves ambiguity by being more specific, not by the engine ranking 
 
 interfaces carry enough to disambiguate in real cases. an interface is not just an output type. it includes required capabilities, input constraints, target platform, and the identity of any domain noun the rule operates on. the interface is precise enough that accidental matches are rare, and the rare case is an error rather than a guess.
 
-this is the rule-selection question named as the gate on milestone 1 in the open questions list. resolving it unblocks the semantic prototype.
+this is the rule-selection question named as the gate on milestone M-1 in the open questions list. the semantic prototype depends on it.
 
 ## alternatives considered
 

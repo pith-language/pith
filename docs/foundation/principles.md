@@ -2,7 +2,7 @@
 schema: design-doc/v1
 id: foundation-principles
 title: design principles
-summary: the small set of rules currently constraining the architecture
+summary: the small set of rules constraining the architecture
 kind: foundation
 status: proposed
 created: 2026-02-26
@@ -19,7 +19,7 @@ relations:
 
 # design principles
 
-this is a shorter version of the larger design checklist that started the project. these are the ones that currently constrain the architecture. the rest should appear as requirements where they become concrete.
+these are the principles that constrain the architecture. others appear as concrete requirements where they apply.
 
 ## define meaning once
 
@@ -55,7 +55,7 @@ registration order is not an acceptable conflict-resolution rule.
 
 declared configuration can make many invalid states unrepresentable. external reality cannot. machines become unreachable, observations go stale, and APIs return incomplete information.
 
-the types should say this directly. `Unknown`, `Unreachable`, `Stale`, and `Unchecked` are more useful than a value that only looks trustworthy.
+the types should say this directly. `Unknown`, `Unreachable`, `Stale`, `Conflicted`, and `Unchecked` are more useful than a value that only looks trustworthy.
 
 known failures belong in contracts. faults in the engine or an adapter cross a separate boundary.
 

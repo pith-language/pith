@@ -19,6 +19,7 @@ relations:
     - decision-0001-generic-kernel
     - decision-0003-explicit-effects
     - decision-0004-first-party-without-privilege
+    - decision-0013-managed-object-identity
   supersedes: []
 ---
 
@@ -34,7 +35,7 @@ it does not know what a package, service, machine, deployment, cloud, or contain
 
 a feature belongs in the kernel when every domain needs one shared implementation to preserve correctness, security, composition, or inspectability.
 
-putting less in the kernel would force libraries to build incompatible dependency graphs, caches, effect models, and identities. putting more in it would turn current domain assumptions into permanent engine semantics.
+putting less in the kernel would force libraries to build incompatible dependency graphs, caches, effect models, and identities. putting more in it would turn domain assumptions into permanent engine semantics.
 
 ## kernel responsibilities
 

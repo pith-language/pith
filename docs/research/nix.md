@@ -26,7 +26,7 @@ the goal is not to reproduce the current Nix interface with cleaner syntax. some
 
 ## what should survive
 
-the original project notes identify several ideas worth keeping:
+several Nix ideas are worth keeping:
 
 - build results depend on declared inputs instead of machine history
 - different dependency versions can coexist
@@ -39,7 +39,7 @@ these are semantic goals. the exact Nix expression language, derivation format, 
 
 ## where the current shape fights the goals
 
-the project notes call out recurring problems across Nix, NixOS, and nixpkgs:
+recurring problems across Nix, NixOS, and nixpkgs:
 
 - a dynamically typed lazy language delays many mistakes and produces errors far from their source
 - package functions, derivations, overlays, modules, options, flakes, and command-line installables expose several overlapping composition models
@@ -77,7 +77,6 @@ reconsider the language, module algebra, identity model, effect boundary, deploy
 
 ## sources
 
-- [original AFFiNE project note](https://affine.desk.karolbroda.com/workspace/ac3c3e9d-50c9-46b7-95f2-f4198f11e892/iuvlvERQJXeRG0DPX8zuS)
 - [Nix language](https://nix.dev/manual/nix/latest/language/)
 - [Nix store](https://nix.dev/manual/nix/latest/store/)
 - [NixOS module system](https://nixos.org/manual/nixos/stable/#sec-writing-modules)

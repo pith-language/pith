@@ -2,7 +2,7 @@
 schema: design-doc/v1
 id: design-values-and-types
 title: values and types
-summary: the immutable value model and the current language constraints
+summary: the immutable value model and the language constraints
 kind: design
 status: proposed
 created: 2026-04-07
@@ -23,7 +23,7 @@ relations:
 
 all information passed between rules is an immutable typed value. libraries can define new domain types without engine support.
 
-the required type features currently include records, variants, generics, interfaces, opaque types, and validation that can refine an uncertain value into a stronger type.
+the required type features include records, variants, generics, interfaces, opaque types, and validation that can refine an uncertain value into a stronger type.
 
 declared configuration should make invalid combinations impossible where enough information exists. external and legacy input can remain `Unknown` or `Unchecked<T>` until validation succeeds.
 
@@ -43,5 +43,5 @@ these operations should return values with provenance. there is no global magic 
 
 values crossing a persistent cache or process boundary need a canonical representation and a versioned schema. local opaque values may exist when their rule contract makes the limitation clear.
 
-the exact language and type calculus remain open. the accepted direction is stronger typing, pure evaluation, and honest dynamic boundaries.
+the exact language and type calculus remain open. decision 0010 sets the direction: stronger typing, pure evaluation, and honest dynamic boundaries.
 

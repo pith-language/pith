@@ -45,6 +45,7 @@ when an accepted decision changes, a new record supersedes it. the old record st
 - [0016: implement the kernel in rust, graph by arena and index](0016-implementation-language.md)
 - [0017: structural types by default, nominal by declaration](0017-structural-with-nominal.md)
 - [0018: total pure evaluation by construction, with cycle detection and a backstop limit](0018-termination-and-recursion.md)
+- [0019: five type-level effect categories, with nondeterminism as a tracked dependency](0019-effect-categories-and-nondeterminism.md)
 
 note: 0013 amends 0005 to add a fifth identity type. 0005 stands; the amendment is recorded in 0013.
 

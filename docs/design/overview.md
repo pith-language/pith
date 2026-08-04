@@ -29,7 +29,7 @@ the project has four layers of responsibility.
 
 ```text
 first-party domains
-build, package, environment, service, system, deployment
+build, package, development environments, services, system management, deployment, secrets, policy
 
 ordinary libraries
 constraints, state models, transitions, formats, policies

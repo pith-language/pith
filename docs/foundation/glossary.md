@@ -4,7 +4,7 @@ id: foundation-glossary
 title: glossary
 summary: working meanings for terms used across the design
 kind: foundation
-status: draft
+status: active
 created: 2026-03-25
 updated: 2026-03-25
 tags:
@@ -64,9 +64,17 @@ the identity of the durable external object a deployment owns and mutates across
 
 an effect that changes external state.
 
+## opaque
+
+an effect category for work that has not been modeled into pure, action, observation, or mutation. the engine records that effectful work occurred but does not know its category, declared inputs, or authority. opaque is the adoption on-ramp and the visibly distinct escape hatch permitted by the principles.
+
 ## observation
 
 a time- or revision-bound statement about external state, including its source and uncertainty.
+
+## nondeterminism
+
+a dependency on a source of variation outside the declared deterministic inputs: wall-clock time, randomness, filesystem readdir order, locale, address-space layout, and the rest of the reproducibility lineage. tracked as a capability dependency in the graph. the kernel provides one `Nondeterminism` primitive; the granular taxonomy is a library refinement.
 
 ## realization
 

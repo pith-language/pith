@@ -27,7 +27,7 @@ Nix showed how much becomes possible when package construction, dependency closu
 
 build systems such as Bazel and Buck2 have stronger incremental engines and remote execution models. configuration languages such as Dhall, Nickel, and CUE explore typing, totality, contracts, and constraints. Terraform and Kubernetes model external state, but make provider resources or controller-owned API objects central. none of these systems supplies the whole model we are looking for.
 
-the project should find the smaller mechanism underneath these domains. it needs to be strong enough that libraries share dependency tracking, effects, identity, caching, provenance, and diagnostics. it also needs to stay generic enough that today's idea of a package or service does not become a permanent engine primitive.
+the project should find the smaller mechanism underneath these domains. it needs to be strong enough that libraries share dependency tracking, effects, identity, caching, provenance, and diagnostics. it also needs to stay generic enough that a package or service does not become a permanent engine primitive.
 
 the practical problem is therefore two-sided:
 

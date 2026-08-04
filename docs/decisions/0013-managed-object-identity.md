@@ -81,7 +81,7 @@ leave managed-object identity entirely to the deployment library with no kernel 
 
 ## consequences
 
-decision 0005 is amended to name five identity types rather than four. the glossary entry and the identity-and-storage design doc need to follow.
+decision 0005 is amended to name five identity types rather than four. the glossary and the identity-and-storage design doc name five identity types.
 
 adapters gain a responsibility. they attest not only to the observed state of a managed object and its revision, but to the managed object's identity across observations. an adapter that cannot establish continuity, because the platform provides no stable handle, declares that. the plan surfaces the weaker guarantee.
 

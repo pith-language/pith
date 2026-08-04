@@ -2,7 +2,7 @@
 schema: design-doc/v1
 id: decision-0009-peer-first-party-domains
 title: keep first-party domains as peers
-summary: builds, packages, environments, systems, and deployments compose without one becoming the universal parent model
+summary: builds, packages, development environments, services, system management, and deployments compose without one becoming the universal parent model
 kind: decision
 status: accepted
 created: 2026-03-31

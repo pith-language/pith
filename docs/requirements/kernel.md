@@ -39,7 +39,7 @@ every input that can affect a cached result appears in the dependency graph. dyn
 
 ## K-5: explicit effects
 
-external interaction occurs through typed effects. the graph distinguishes pure computation, bounded actions, observations, and mutations.
+external interaction occurs through typed effects. the graph distinguishes pure computation, bounded actions, observations, mutations, and opaque effectful work.
 
 ## K-6: capability control
 

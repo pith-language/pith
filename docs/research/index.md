@@ -44,7 +44,7 @@ the deployment note is the next strongest. it covers Terraform, Kubernetes, Pulu
 
 the reproducibility note covers the Reproducible Builds project and the SOURCE_DATE_EPOCH specification. it grounds decision 0014.
 
-the Nix baseline comes from the original project notes plus Nix documentation. it needs a closer pass over the thesis, early mailing-list discussions, module-system history, flakes, and content-addressed derivations.
+the Nix baseline draws on Nix documentation and the project's own analysis of Nix's ideas. it needs a closer pass over the thesis, early mailing-list discussions, module-system history, flakes, and content-addressed derivations.
 
 configuration, artifact, and trust notes contain confirmed mechanisms and working questions. they are not finished historical accounts yet.
 

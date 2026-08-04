@@ -24,9 +24,8 @@ this file tracks sources already used or queued for a deeper pass. a link here d
 
 ## project material
 
-- [AFFiNE project note and child pages](https://affine.desk.karolbroda.com/workspace/ac3c3e9d-50c9-46b7-95f2-f4198f11e892/iuvlvERQJXeRG0DPX8zuS)
-- the design principles supplied during the 2026-08-04 discussion
-- the scope, declarativity, and generic-kernel decisions from the same discussion
+- [design principles](../foundation/principles.md)
+- [scope](../foundation/scope.md), [declarative semantics](../decisions/0002-declarative-semantics.md), and the [generic-kernel decision](../decisions/0001-generic-kernel.md)
 
 ## Nix
 
