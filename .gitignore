@@ -1,0 +1,13 @@
+# rust
+/target
+
+# insta pending snapshots (accepted .snap files are committed)
+*.snap.new
+
+# nix
+/result
+/result-*
+
+# editor
+/.direnv
+/.devenv
