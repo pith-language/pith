@@ -465,6 +465,15 @@ impl Engine {
                 return Err(diagnostics);
             }
         };
+        let capabilities_used = canonical_capabilities(&execution.report.capabilities_used);
+        let Some(node) = self.computations.get_mut(computation) else {
+            return Err(internal_diag("action evaluator lost its computation node"));
+        };
+        node.dependencies.extend(
+            capabilities_used
+                .into_iter()
+                .map(|capability| DependencyEdge::CapabilityUse { capability }),
+        );
         if let Err(diagnostics) = self.validate_execution(&plan.spec, &execution) {
             self.mark_action_failed(computation, Some(execution.report));
             return Err(diagnostics);

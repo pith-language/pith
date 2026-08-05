@@ -51,6 +51,9 @@ pub enum DependencyEdge {
     Blob {
         id: ContentId,
     },
+    CapabilityUse {
+        capability: CapabilityRequirement,
+    },
     Action {
         request: Request<Action>,
         computation: ComputationId,
@@ -58,14 +61,14 @@ pub enum DependencyEdge {
 }
 
 impl DependencyEdge {
-    /// The computation this edge points at, if any. `Blob` edges point at
-    /// content, not a computation.
+    /// The computation this edge points at, if any. `Blob` and `CapabilityUse`
+    /// edges point at non-computation dependencies.
     pub fn computation_id(&self) -> Option<ComputationId> {
         match self {
             Self::Request { computation, .. } | Self::Action { computation, .. } => {
                 Some(*computation)
             }
-            Self::Blob { .. } => None,
+            Self::Blob { .. } | Self::CapabilityUse { .. } => None,
         }
     }
 }

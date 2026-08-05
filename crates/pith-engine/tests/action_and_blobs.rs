@@ -194,6 +194,8 @@ impl Executor for FixtureExecutor {
 
 struct UndeclaredCapabilityExecutor;
 
+struct ObservedCapabilityExecutor;
+
 struct WrongPlatformExecutor;
 
 struct DenyDoubleCapability;
@@ -228,6 +230,16 @@ impl Executor for UndeclaredCapabilityExecutor {
                 .into(),
             },
         })
+    }
+}
+
+#[async_trait::async_trait]
+impl Executor for ObservedCapabilityExecutor {
+    async fn execute(&self, invocation: &ActionInvocation) -> PithResult<CapturedActionExecution> {
+        let mut execution = FixtureExecutor.execute(invocation).await?;
+        execution.report.access = AccessVerification::Observed;
+        execution.report.capabilities_used = [double_capability()].into();
+        Ok(execution)
     }
 }
 
@@ -535,6 +547,54 @@ fn action_dependency_driven_through_run() {
 }
 
 #[test]
+fn actual_capability_uses_are_dependency_edges() {
+    let mut engine = fixture_engine();
+    let action_iface = interface(&[Type::Int], Type::Blob);
+    let pure_iface = interface(&[], Type::Blob);
+    engine.register_action_rule(action_rule("double", action_iface.clone()), DoubleAction);
+    engine.register_rule(
+        pure_rule("entry", pure_iface.clone()),
+        ActionDepRule {
+            dependency: action_request("double", action_iface, [Value::Int(21)]),
+        },
+    );
+
+    let evaluation = match engine.run(
+        &pure_request("entry", pure_iface, []),
+        &TokioRuntime,
+        &AllowAllActions,
+        &ObservedCapabilityExecutor,
+    ) {
+        Ok(Ok(evaluation)) => evaluation,
+        Ok(Err(_)) => unreachable!("observed capability fixture failed evaluation"),
+        Err(_) => unreachable!("observed capability fixture failed to drive runtime"),
+    };
+
+    let query = engine.query();
+    let Some(action_computation) = query
+        .dependencies_of(evaluation.computation)
+        .and_then(|dependencies| dependencies.first())
+        .and_then(pith_engine::DependencyEdge::computation_id)
+    else {
+        unreachable!("pure evaluation has no action dependency");
+    };
+    let Some(uses) = query.capability_uses_of(action_computation) else {
+        unreachable!("action computation is missing");
+    };
+    let uses: Vec<_> = uses.cloned().collect();
+    let Some(mut parent_uses) = query.capability_uses_of(evaluation.computation) else {
+        unreachable!("pure computation is missing");
+    };
+
+    assert_eq!(uses, [double_capability()]);
+    assert!(parent_uses.next().is_none());
+    assert_eq!(
+        query.capabilities_of(evaluation.computation),
+        Some(effective_double_capabilities().as_slice())
+    );
+}
+
+#[test]
 fn action_output_bytes_are_imported_by_the_engine() {
     let mut engine = fixture_engine();
     let action_iface = interface(&[Type::Int], Type::Blob);
@@ -669,6 +729,28 @@ fn undeclared_capability_use_is_rejected() {
     let err = result.unwrap_err();
     let diag = err.iter().next().unwrap();
     assert_eq!(diag.code, StableCode::engine(208));
+
+    let query = engine.query();
+    let Some((computation, node)) = query.computations().find(|(_, node)| node.action.is_some())
+    else {
+        unreachable!("rejected action has no computation");
+    };
+    let Some(uses) = query.capability_uses_of(computation) else {
+        unreachable!("rejected action computation is missing");
+    };
+    let uses: Vec<_> = uses.cloned().collect();
+    let reported = node
+        .action
+        .as_ref()
+        .and_then(|action| action.report.as_ref())
+        .map(|report| report.capabilities_used.as_ref());
+
+    assert_eq!(uses.len(), 1);
+    assert_eq!(
+        uses.first().map(|use_| use_.name.as_ref()),
+        Some("fixture.clock")
+    );
+    assert_eq!(reported, Some(uses.as_slice()));
 }
 
 #[test]

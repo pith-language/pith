@@ -65,6 +65,20 @@ impl<'engine> EngineQuery<'engine> {
             .map(|node| node.capabilities.as_ref())
     }
 
+    pub fn capability_uses_of(
+        &self,
+        id: ComputationId,
+    ) -> Option<impl Iterator<Item = &'engine CapabilityRequirement>> {
+        self.engine.computations.get(id).map(|node| {
+            node.dependencies.iter().filter_map(|edge| match edge {
+                DependencyEdge::CapabilityUse { capability } => Some(capability),
+                DependencyEdge::Request { .. }
+                | DependencyEdge::Blob { .. }
+                | DependencyEdge::Action { .. } => None,
+            })
+        })
+    }
+
     pub fn dependents_of(
         &self,
         dependency: ComputationId,

@@ -35,7 +35,7 @@ impl Engine {
     pub(super) fn pure_reuse_decision(&self, dependencies: &[DependencyEdge]) -> ReuseDecision {
         for dependency in dependencies {
             let computation = match dependency {
-                DependencyEdge::Blob { .. } => continue,
+                DependencyEdge::Blob { .. } | DependencyEdge::CapabilityUse { .. } => continue,
                 DependencyEdge::Request { computation, .. }
                 | DependencyEdge::Action { computation, .. } => *computation,
             };

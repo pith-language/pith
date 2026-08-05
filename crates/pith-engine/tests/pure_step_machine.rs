@@ -251,7 +251,9 @@ fn parent_resumes_with_child_value_and_records_the_edge() {
             assert_eq!(dependents.len(), 1);
             assert_eq!(dependents.first().unwrap().0, evaluation.computation);
         }
-        DependencyEdge::Blob { .. } | DependencyEdge::Action { .. } => {
+        DependencyEdge::Blob { .. }
+        | DependencyEdge::CapabilityUse { .. }
+        | DependencyEdge::Action { .. } => {
             unreachable!("this test exercises pure-rule dependencies only")
         }
     }
