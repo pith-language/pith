@@ -6,6 +6,7 @@
 
 pub mod action;
 pub mod effect;
+mod manifest;
 pub mod rule;
 pub mod value;
 

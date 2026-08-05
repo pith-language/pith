@@ -6,7 +6,10 @@ use pith_ids::{PureComputationDigest, RuleIdentity, RuleRevision};
 use smallvec::SmallVec;
 use std::marker::PhantomData;
 
-use crate::{EffectCategory, Pure, Type, Value};
+use crate::{
+    EffectCategory, Pure, Type, Value,
+    manifest::{encode_bytes, encode_length, encode_str},
+};
 
 define_arena!(RuleId, RuleArena, RuleBrand);
 
@@ -175,7 +178,7 @@ fn encode_type(manifest: &mut Vec<u8>, value_type: &Type) {
         Type::Blob => manifest.push(5),
         Type::Nominal { name } => {
             manifest.push(6);
-            encode_bytes(manifest, name.as_bytes());
+            encode_str(manifest, name);
         }
     }
 }
@@ -193,7 +196,7 @@ fn encode_value(manifest: &mut Vec<u8>, value: &Value) {
         }
         Value::Text(value) => {
             manifest.push(3);
-            encode_bytes(manifest, value.as_bytes());
+            encode_str(manifest, value);
         }
         Value::Bytes(value) => {
             manifest.push(4);
@@ -204,15 +207,6 @@ fn encode_value(manifest: &mut Vec<u8>, value: &Value) {
             manifest.extend_from_slice(value.digest().as_bytes());
         }
     }
-}
-
-fn encode_length(manifest: &mut Vec<u8>, length: usize) {
-    manifest.extend_from_slice(&(length as u64).to_le_bytes());
-}
-
-fn encode_bytes(manifest: &mut Vec<u8>, bytes: &[u8]) {
-    encode_length(manifest, bytes.len());
-    manifest.extend_from_slice(bytes);
 }
 
 /// Zero, one, or multiple matching providers. Ambiguity is never ranked.

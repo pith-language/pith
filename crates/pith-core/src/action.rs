@@ -6,6 +6,8 @@
 use pith_diag::{Diag, EngineCode, Span};
 use pith_ids::{ActionSpecDigest, ContentId};
 
+use crate::manifest::{encode_length, encode_str};
+
 /// Immutable content made available to an action at a relative path.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ActionInput {
@@ -222,7 +224,7 @@ impl ActionSpec {
 
         encode_length(&mut manifest, self.arguments.len());
         for argument in &self.arguments {
-            encode_bytes(&mut manifest, argument.as_bytes());
+            encode_str(&mut manifest, argument);
         }
 
         let mut inputs: Vec<_> = self.inputs.iter().collect();
@@ -240,7 +242,7 @@ impl ActionSpec {
         });
         encode_length(&mut manifest, inputs.len());
         for input in inputs {
-            encode_bytes(&mut manifest, input.path.as_bytes());
+            encode_str(&mut manifest, &input.path);
             manifest.push(action_input_content_tag(input.content));
             manifest.extend_from_slice(action_input_content_id(input.content).digest().as_bytes());
         }
@@ -253,7 +255,7 @@ impl ActionSpec {
         });
         encode_length(&mut manifest, outputs.len());
         for output in outputs {
-            encode_bytes(&mut manifest, output.path.as_bytes());
+            encode_str(&mut manifest, &output.path);
             manifest.push(action_output_kind_tag(output.kind));
         }
 
@@ -265,8 +267,8 @@ impl ActionSpec {
         });
         encode_length(&mut manifest, environment.len());
         for variable in environment {
-            encode_bytes(&mut manifest, variable.name.as_bytes());
-            encode_bytes(&mut manifest, variable.value.as_bytes());
+            encode_str(&mut manifest, &variable.name);
+            encode_str(&mut manifest, &variable.value);
         }
 
         match &self.platform {
@@ -276,8 +278,8 @@ impl ActionSpec {
                 architecture,
             } => {
                 manifest.push(1);
-                encode_bytes(&mut manifest, operating_system.as_bytes());
-                encode_bytes(&mut manifest, architecture.as_bytes());
+                encode_str(&mut manifest, operating_system);
+                encode_str(&mut manifest, architecture);
             }
         }
 
@@ -289,8 +291,8 @@ impl ActionSpec {
         });
         encode_length(&mut manifest, capabilities.len());
         for capability in capabilities {
-            encode_bytes(&mut manifest, capability.name.as_bytes());
-            encode_bytes(&mut manifest, capability.scope.as_bytes());
+            encode_str(&mut manifest, &capability.name);
+            encode_str(&mut manifest, &capability.scope);
         }
 
         match &self.network {
@@ -301,7 +303,7 @@ impl ActionSpec {
                 hosts.sort();
                 encode_length(&mut manifest, hosts.len());
                 for host in hosts {
-                    encode_bytes(&mut manifest, host.as_bytes());
+                    encode_str(&mut manifest, host);
                 }
             }
             NetworkPolicy::AllowAll => manifest.push(2),
@@ -375,15 +377,6 @@ fn action_output_kind_tag(kind: ActionOutputKind) -> u8 {
         ActionOutputKind::Blob => 0,
         ActionOutputKind::Tree => 1,
     }
-}
-
-fn encode_length(manifest: &mut Vec<u8>, length: usize) {
-    manifest.extend_from_slice(&(length as u64).to_le_bytes());
-}
-
-fn encode_bytes(manifest: &mut Vec<u8>, bytes: &[u8]) {
-    encode_length(manifest, bytes.len());
-    manifest.extend_from_slice(bytes);
 }
 
 #[cfg(test)]
