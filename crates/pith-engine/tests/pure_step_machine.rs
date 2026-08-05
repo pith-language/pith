@@ -205,3 +205,29 @@ fn independent_evaluations_keep_distinct_computations() {
     assert!(engine.computation(first.computation).is_some());
     assert!(engine.computation(second.computation).is_some());
 }
+
+#[test]
+fn computation_ids_do_not_cross_engine_instances() {
+    let signature = interface(&[], Type::Int);
+    let mut first = Engine::new();
+    first.register_rule(
+        rule("first provider", signature.clone()),
+        ConstantRule(Value::Int(1)),
+    );
+    let first_evaluation = first
+        .evaluate(&request("first request", signature.clone()))
+        .unwrap();
+
+    let mut second = Engine::new();
+    second.register_rule(
+        rule("second provider", signature.clone()),
+        ConstantRule(Value::Int(2)),
+    );
+    let second_evaluation = second
+        .evaluate(&request("second request", signature))
+        .unwrap();
+
+    assert_ne!(first_evaluation.computation, second_evaluation.computation);
+    assert!(second.computation(first_evaluation.computation).is_none());
+    assert!(first.computation(second_evaluation.computation).is_none());
+}
