@@ -1,7 +1,9 @@
 //! The data types of the dependency graph: steps, edges, nodes, and the
 //! evaluator's private frame. Pure data; no engine logic.
 
-use pith_core::{Action, ActionSpec, Interface, Pure, Request, RuleId, Value};
+use pith_core::{
+    Action, ActionSpec, CapabilityRequirement, Interface, Pure, Request, RuleId, Value,
+};
 use pith_diag::PithResult;
 use pith_ids::{ActionSpecDigest, ComputationId, ContentId};
 use smallvec::SmallVec;
@@ -113,6 +115,7 @@ pub struct ComputationNode {
     pub dependencies: SmallVec<[DependencyEdge; 4]>,
     pub result: Option<Value>,
     pub action: Option<ActionRecord>,
+    pub capabilities: Box<[CapabilityRequirement]>,
     pub reuse: ReuseDecision,
 }
 

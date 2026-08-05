@@ -2,6 +2,7 @@
 //! driver that crosses the sync/async boundary for blob fetches and action
 //! execution (decisions 0021, 0022).
 
+mod capabilities;
 pub mod ir;
 pub mod query;
 mod reuse;
@@ -21,6 +22,7 @@ use smallvec::SmallVec;
 
 use crate::action::{ActionExecution, ActionRule, Executor};
 use crate::runtime::Runtime;
+use capabilities::canonical_capabilities;
 use ir::EvalFrame;
 use reuse::PureComputationIndex;
 
@@ -231,6 +233,7 @@ impl Engine {
             dependencies: SmallVec::new(),
             result: None,
             action: None,
+            capabilities: Box::new([]),
             reuse: ReuseDecision::Pending,
         });
         self.index_pure_computation(rule, &request, computation);
@@ -262,14 +265,23 @@ impl Engine {
                 ),
             )));
         }
-        let reuse = match self.computations.get(completed.computation) {
-            Some(node) => self.pure_reuse_decision(&node.dependencies),
+        let (reuse, capabilities) = match self.computations.get(completed.computation) {
+            Some(node) => (
+                self.pure_reuse_decision(&node.dependencies),
+                self.effective_capabilities(&node.dependencies),
+            ),
             None => return Err(internal_diag("pure evaluator lost a computation node")),
+        };
+        let Some(capabilities) = capabilities else {
+            return Err(internal_diag(
+                "pure evaluator lost a capability dependency computation",
+            ));
         };
         let Some(node) = self.computations.get_mut(completed.computation) else {
             return Err(internal_diag("pure evaluator lost a computation node"));
         };
         node.result = Some(value.clone());
+        node.capabilities = capabilities;
         node.reuse = reuse;
         Ok(Evaluation {
             value,
@@ -396,6 +408,7 @@ impl Engine {
                 spec: plan.spec.clone(),
                 report: None,
             }),
+            capabilities: canonical_capabilities(&plan.spec.capabilities),
             reuse: ReuseDecision::Pending,
         });
 

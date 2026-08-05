@@ -1,6 +1,6 @@
 //! The read-only query interface over a built graph (requirement K-12).
 
-use pith_core::{Action, Pure, Request, Rule, RuleId, select_rule};
+use pith_core::{Action, CapabilityRequirement, Pure, Request, Rule, RuleId, select_rule};
 use pith_diag::{Diag, PithResult};
 use pith_ids::ComputationId;
 
@@ -56,6 +56,13 @@ impl<'engine> EngineQuery<'engine> {
             .computations
             .get(id)
             .map(|node| node.dependencies.as_slice())
+    }
+
+    pub fn capabilities_of(&self, id: ComputationId) -> Option<&'engine [CapabilityRequirement]> {
+        self.engine
+            .computations
+            .get(id)
+            .map(|node| node.capabilities.as_ref())
     }
 
     pub fn dependents_of(

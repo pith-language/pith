@@ -94,6 +94,7 @@ impl ActionRule for DoubleAction {
             operating_system: "fixture".into(),
             architecture: "fixture".into(),
         };
+        spec.capabilities = [double_capability()].into();
         spec.outputs = [ActionOutput {
             path: "result".into(),
             kind: ActionOutputKind::Blob,
@@ -236,6 +237,13 @@ fn double_result(number: i64) -> ContentId {
     ContentId::of_blob(number.saturating_mul(2).to_string().as_bytes())
 }
 
+fn double_capability() -> CapabilityRequirement {
+    CapabilityRequirement {
+        name: "fixture.compute".into(),
+        scope: "double".into(),
+    }
+}
+
 fn fixture_platform() -> ExecutionPlatform {
     ExecutionPlatform {
         operating_system: "fixture".into(),
@@ -359,6 +367,7 @@ fn action_dependency_driven_through_run() {
         .unwrap();
     assert_eq!(plan.spec.executable, double_executable());
     assert_eq!(plan.spec_digest, plan.spec.digest().unwrap());
+    assert_eq!(plan.spec.capabilities.as_ref(), &[double_capability()]);
     assert_eq!(
         plan.spec
             .arguments
@@ -398,6 +407,14 @@ fn action_dependency_driven_through_run() {
     assert_eq!(
         action.report.as_ref().map(|report| report.access),
         Some(AccessVerification::Prevented)
+    );
+    assert_eq!(
+        engine.query().capabilities_of(action_computation),
+        Some([double_capability()].as_slice())
+    );
+    assert_eq!(
+        engine.query().capabilities_of(evaluation.computation),
+        Some([double_capability()].as_slice())
     );
 }
 
