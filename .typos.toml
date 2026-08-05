@@ -1,0 +1,17 @@
+[default]
+locale = "en-us"
+
+[default.extend-words]
+# crate names and terms that are intentionally spelled this way
+hd = "hd"
+intra = "intra"
+flate = "flate"
+
+[files]
+extend-exclude = [
+    "docs/",
+    "flake.lock",
+    "Cargo.lock",
+    "*.snap",
+    "*.snap.new",
+]
