@@ -1,0 +1,26 @@
+[package]
+name = "pith-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The pith command-line interface"
+
+[[bin]]
+name = "pith"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+pith-diag.workspace = true
+pith-core.workspace = true
+pith-engine.workspace = true
+pith-output.workspace = true
+clap.workspace = true
+miette.workspace = true
+anstream.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

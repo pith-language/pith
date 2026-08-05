@@ -1,0 +1,114 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/pith-diag",
+    "crates/pith-output",
+    "crates/pith-ids",
+    "crates/pith-arena",
+    "crates/pith-core",
+    "crates/pith-engine",
+    "crates/pith-cli",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "Apache-2.0"
+repository = "https://github.com/pith-language/pith"
+
+# ---------------------------------------------------------------------------
+# External dependencies, declared once here and inherited by every crate via
+# `dep.workspace = true`. External crates that appear in public signatures are
+# wrapped behind pith-owned traits (decision 0021); they are listed here as
+# dependencies but never named in public types outside their adapter module.
+# ---------------------------------------------------------------------------
+
+[workspace.dependencies]
+# Error handling & diagnostics (decision on errors: typed Diag + PithResult).
+thiserror = "2"
+miette = { version = "7", features = ["fancy"] }
+
+# Instrumentation. Orthogonal to user-facing output; span tree doubles as a
+# provenance source. Never used for source-span diagnostics.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Arena & graph representation (decisions 0016, 0021). Wrapped behind
+# pith-arena, never named in public types.
+la-arena = "0.3"
+
+# Source spans: byte-based, utf-8-correct (decision 0021). Wrapped behind
+# pith-diag, never named in public types.
+text-size = "1.1"
+line-index = "0.1"
+
+# Deterministic map types. HashMap is banned from output-affecting code paths
+# (decision 0021); IndexMap is the default.
+indexmap = "2"
+
+# Small collections for fixed-small IR node fields.
+smallvec = { version = "1", features = ["serde"] }
+
+# Serialization. Appears ONLY in pith-output (the DTO crate); not a public
+# concern of any other crate.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Hashing for content identity. Wrapped behind pith-ids, never named publicly.
+blake3 = "1"
+
+# Async runtime. Appears ONLY inside pith-engine's scheduler module, behind a
+# Runtime trait (decisions 0021, 0022). Never named in public signatures.
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros"] }
+
+# Terminal output rendering. Used by pith-output renderers and pith-cli.
+anstream = "0.6"
+anstyle = "1"
+owo-colors = "4"  # crate name has hyphen; import is `owo_colors`
+
+# CLI parsing, at the pith-cli boundary only.
+clap = { version = "4", features = ["derive"] }
+
+# ---------------------------------------------------------------------------
+# Test-only dependencies. Pulled in via [dev-dependencies] per crate.
+# ---------------------------------------------------------------------------
+
+# Property testing for invariants (K-9, 0015, 0018 expressed as properties).
+proptest = "1"
+proptest-derive = "0.5"
+arbitrary = { version = "1", features = ["derive"] }
+
+# Snapshot testing for diagnostics and --output json contracts.
+insta = { version = "1", features = ["json"] }
+
+# First-party crates, so path + version resolve consistently across the workspace.
+pith-diag = { path = "crates/pith-diag", version = "0.1.0" }
+pith-output = { path = "crates/pith-output", version = "0.1.0" }
+pith-ids = { path = "crates/pith-ids", version = "0.1.0" }
+pith-arena = { path = "crates/pith-arena", version = "0.1.0" }
+pith-core = { path = "crates/pith-core", version = "0.1.0" }
+pith-engine = { path = "crates/pith-engine", version = "0.1.0" }
+
+# ---------------------------------------------------------------------------
+# Lints. The kernel claims it cannot panic on untrusted input; the lint set
+# enforces that structurally. indexing_slicing is load-bearing because arena
+# lookup by a stray Id is how an index bug becomes a panic.
+# ---------------------------------------------------------------------------
+
+[workspace.lints.clippy]
+# No panic-shaped escapes.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unwrap_in_result = "deny"
+# No indexing; force .get(). Arena lookups must go through checked access.
+indexing_slicing = "deny"
+# Integer arithmetic that can overflow on untrusted input.
+arithmetic_side_effects = "deny"
+# Honest docs: if it can panic or fail, say so.
+missing_panics_doc = "warn"
+missing_errors_doc = "warn"

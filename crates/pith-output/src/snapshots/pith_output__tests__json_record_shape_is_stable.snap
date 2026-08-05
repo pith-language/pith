@@ -1,0 +1,15 @@
+---
+source: crates/pith-output/src/lib.rs
+assertion_line: 243
+expression: json
+---
+{
+  "code": 0,
+  "detail": "summary",
+  "errors": 0,
+  "hits": 3,
+  "kind": "summary",
+  "misses": 2,
+  "reuses": 1,
+  "wall_ms": 42
+}

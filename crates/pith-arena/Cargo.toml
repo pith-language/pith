@@ -1,0 +1,15 @@
+[package]
+name = "pith-arena"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Brand-typed arena indices and interners for the pith kernel"
+
+[lints]
+workspace = true
+
+[dependencies]
+la-arena.workspace = true
+indexmap.workspace = true

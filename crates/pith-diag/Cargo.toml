@@ -1,0 +1,19 @@
+[package]
+name = "pith-diag"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Diagnostic primitives for pith: spans, diagnostics, stable codes, and the result type"
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+miette.workspace = true
+# Spans are byte-based and utf-8-correct (decision 0021). These are wrapped
+# behind pith-diag's own Span/SourceFile types and never named publicly.
+text-size.workspace = true
+line-index.workspace = true

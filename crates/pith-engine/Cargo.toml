@@ -1,0 +1,29 @@
+[package]
+name = "pith-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The pith kernel engine: arena graph, sync step machine, async scheduler"
+
+[lints]
+workspace = true
+
+[dependencies]
+pith-diag.workspace = true
+pith-ids.workspace = true
+pith-arena.workspace = true
+pith-core.workspace = true
+pith-output.workspace = true
+indexmap.workspace = true
+smallvec.workspace = true
+tracing.workspace = true
+
+# tokio appears only in the scheduler module, behind the Runtime trait
+# (decisions 0021, 0022). Not named in any public signature.
+tokio.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+insta.workspace = true

@@ -1,0 +1,23 @@
+[package]
+name = "pith-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Typed semantic IR for the pith kernel: values, types, effects, capabilities, rules, requests"
+
+[lints]
+workspace = true
+
+[dependencies]
+pith-diag.workspace = true
+pith-ids.workspace = true
+pith-arena.workspace = true
+pith-output.workspace = true
+smallvec.workspace = true
+indexmap.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+insta.workspace = true
