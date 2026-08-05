@@ -10,16 +10,23 @@ use pith_diag::PithResult;
 use pith_ids::ContentId;
 
 /// Deterministically turn typed request inputs into an inspectable contract.
-pub trait ActionPlanner: Send + Sync {
+pub trait ActionRule: Send + Sync {
     /// # Errors
     /// Returns structured diagnostics when the inputs cannot form a contract.
     fn plan(&self, inputs: &[Value]) -> PithResult<ActionSpec>;
+
+    /// Convert captured execution outputs into the rule's typed result.
+    ///
+    /// # Errors
+    /// Returns structured diagnostics when the execution cannot produce the
+    /// declared semantic result.
+    fn complete(&self, inputs: &[Value], execution: &ActionExecution) -> PithResult<Value>;
 }
 
 /// Adapter boundary for local, remote, or test action execution.
 #[async_trait]
 pub trait Executor: Send + Sync {
-    /// Execute `spec` and return its typed result and execution evidence.
+    /// Execute `spec` and return captured outputs and execution evidence.
     ///
     /// # Errors
     /// Returns structured diagnostics when the action cannot be executed.
@@ -28,7 +35,6 @@ pub trait Executor: Send + Sync {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActionExecution {
-    pub value: Value,
     pub evidence: ExecutionEvidence,
 }
 

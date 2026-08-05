@@ -9,8 +9,7 @@ pub mod graph;
 pub mod runtime;
 
 pub use action::{
-    ActionExecution, ActionPlanner, ContractVerification, ExecutionEvidence, Executor,
-    ProducedOutput,
+    ActionExecution, ActionRule, ContractVerification, ExecutionEvidence, Executor, ProducedOutput,
 };
 pub use graph::{
     ActionPlan, ActionRecord, ComputationKind, ComputationNode, DependencyEdge, Engine,

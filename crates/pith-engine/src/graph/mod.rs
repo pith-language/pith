@@ -19,7 +19,7 @@ use pith_ids::{ComputationArena, ComputationId, ContentId};
 use pith_store::{ContentStore, MemoryContentStore};
 use smallvec::SmallVec;
 
-use crate::action::{ActionExecution, ActionPlanner, Executor};
+use crate::action::{ActionExecution, ActionRule, Executor};
 use crate::runtime::Runtime;
 use ir::EvalFrame;
 use reuse::{ActionComputationIndex, PureComputationIndex};
@@ -28,7 +28,7 @@ pub struct Engine {
     pub(crate) rules: RuleArena<Rule<Pure>>,
     pub(crate) bodies: IndexMap<RuleId, Box<dyn PureRule>>,
     pub(crate) action_rules: RuleArena<Rule<Action>>,
-    pub(crate) action_planners: IndexMap<RuleId, Box<dyn ActionPlanner>>,
+    pub(crate) action_bodies: IndexMap<RuleId, Box<dyn ActionRule>>,
     pub(crate) computations: ComputationArena<ComputationNode>,
     pure_computations: PureComputationIndex,
     action_computations: ActionComputationIndex,
@@ -41,7 +41,7 @@ impl Engine {
             rules: RuleArena::new(),
             bodies: IndexMap::new(),
             action_rules: RuleArena::new(),
-            action_planners: IndexMap::new(),
+            action_bodies: IndexMap::new(),
             computations: ComputationArena::new(),
             pure_computations: IndexMap::new(),
             action_computations: IndexMap::new(),
@@ -60,12 +60,12 @@ impl Engine {
     }
 
     /// Register an action rule together with its deterministic planner.
-    pub fn register_action_rule<P>(&mut self, rule: Rule<Action>, planner: P) -> RuleId
+    pub fn register_action_rule<B>(&mut self, rule: Rule<Action>, body: B) -> RuleId
     where
-        P: ActionPlanner + 'static,
+        B: ActionRule + 'static,
     {
         let id = self.action_rules.push(rule);
-        self.action_planners.insert(id, Box::new(planner));
+        self.action_bodies.insert(id, Box::new(body));
         id
     }
 
@@ -361,10 +361,10 @@ impl Engine {
         let rule = select_rule(request, &self.action_rules)
             .into_result(request, &self.action_rules)
             .map_err(one_diag)?;
-        let Some(planner) = self.action_planners.get(&rule) else {
-            return Err(internal_diag("selected action rule has no planner"));
+        let Some(body) = self.action_bodies.get(&rule) else {
+            return Err(internal_diag("selected action rule has no body"));
         };
-        let spec = planner.plan(&request.inputs)?;
+        let spec = body.plan(&request.inputs)?;
         let spec_digest = spec.digest().map_err(one_diag)?;
         Ok(ActionPlan {
             rule,
@@ -408,7 +408,10 @@ impl Engine {
 
         let execution = executor.execute(&plan.spec).await?;
         self.validate_execution(&plan.spec, &execution)?;
-        let value = execution.value;
+        let Some(body) = self.action_bodies.get(&rule) else {
+            return Err(internal_diag("selected action rule has no body"));
+        };
+        let value = body.complete(&request.inputs, &execution)?;
         validate_action_result(&value, &declared_output, &rule_label, rule_span)?;
         let is_reusable = execution.evidence.contract == crate::ContractVerification::Enforced;
 
