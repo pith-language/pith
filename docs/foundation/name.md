@@ -94,10 +94,10 @@ the general form for a third-party package is `<topic>-pith`.
 
 the canonical source and the collaboration point is github.
 
-- the organization is `github.com/pith-lang`.
+- the organization is `github.com/pith-language`.
 - issues, pull requests, and releases live there.
 - continuous integration runs on github actions. public-repo minutes are free without limit.
-- a read-only copy is mirrored at `codeberg.org/pith-lang`, with issues and pull requests disabled.
+- a read-only copy is mirrored at `codeberg.org/pith`, with issues and pull requests disabled.
 
 the choice is pragmatic. a new ecosystem needs contributor reach and free CI, and the alternatives impose either operational cost, in the self-hosted case, or limited capacity and reach, in the codeberg case.
 
@@ -122,5 +122,5 @@ one root domain is used, with subdomains for each surface.
 ## namespaces
 
 - the crates are `pith`, `cambium`, `xylem`, `phloem`, `bark`, `periderm`, and `lenticel`.
-- the github and codeberg organization is `pith-lang`.
+- the github organization is `pith-language` and the codeberg organization is `pith`.
 - the package registry namespace is `pithpkgs`.
