@@ -75,14 +75,14 @@ fn eval(
     request: &str,
 ) -> Result<(), pith_diag::DiagnosticSink> {
     let mut engine = Engine::new();
-    let req = Request {
-        label: request.into(),
-        interface: Interface {
+    let req = Request::new(
+        request,
+        Interface {
             inputs: Box::new([]),
             output: Type::Unit,
         },
-        span: Span::none(),
-    };
+        Span::none(),
+    );
     match engine.evaluate(&req) {
         Ok(evaluation) => {
             let _ = sink.emit(&OutputRecord {

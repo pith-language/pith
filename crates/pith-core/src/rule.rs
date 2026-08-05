@@ -3,8 +3,9 @@
 use pith_arena::define_arena;
 use pith_diag::{Diag, Severity, Span, StableCode};
 use smallvec::SmallVec;
+use std::marker::PhantomData;
 
-use crate::Type;
+use crate::{EffectCategory, Pure, Type};
 
 define_arena!(RuleId, RuleArena, RuleBrand);
 
@@ -31,17 +32,41 @@ impl std::fmt::Display for Interface {
 /// A request for a typed result. `label` exists only for diagnostics and
 /// provenance; selection uses `interface` exclusively (decision 0015).
 #[derive(Clone, Debug)]
-pub struct Request {
+pub struct Request<K: EffectCategory = Pure> {
     pub label: Box<str>,
     pub interface: Interface,
     pub span: Span,
+    effect: PhantomData<fn() -> K>,
 }
 
 #[derive(Clone, Debug)]
-pub struct Rule {
+pub struct Rule<K: EffectCategory = Pure> {
     pub label: Box<str>,
     pub interface: Interface,
     pub span: Span,
+    effect: PhantomData<fn() -> K>,
+}
+
+impl<K: EffectCategory> Request<K> {
+    pub fn new(label: impl Into<Box<str>>, interface: Interface, span: Span) -> Self {
+        Self {
+            label: label.into(),
+            interface,
+            span,
+            effect: PhantomData,
+        }
+    }
+}
+
+impl<K: EffectCategory> Rule<K> {
+    pub fn new(label: impl Into<Box<str>>, interface: Interface, span: Span) -> Self {
+        Self {
+            label: label.into(),
+            interface,
+            span,
+            effect: PhantomData,
+        }
+    }
 }
 
 /// Zero, one, or multiple matching providers. Ambiguity is never ranked.
@@ -55,7 +80,10 @@ pub enum SelectOutcome {
 /// Select rules by exact typed-interface match, independent of registration
 /// order. Candidate order is canonical so diagnostics are deterministic.
 #[must_use]
-pub fn select_rule(request: &Request, rules: &RuleArena<Rule>) -> SelectOutcome {
+pub fn select_rule<K: EffectCategory>(
+    request: &Request<K>,
+    rules: &RuleArena<Rule<K>>,
+) -> SelectOutcome {
     let mut candidates: Vec<(Interface, Box<str>, RuleId)> = rules
         .iter()
         .filter(|(_, rule)| rule.interface == request.interface)
@@ -75,7 +103,11 @@ impl SelectOutcome {
     /// # Errors
     /// `E-1101` when no rule matched; `E-1102` naming every candidate when more
     /// than one matched.
-    pub fn into_result(self, request: &Request, rules: &RuleArena<Rule>) -> Result<RuleId, Diag> {
+    pub fn into_result<K: EffectCategory>(
+        self,
+        request: &Request<K>,
+        rules: &RuleArena<Rule<K>>,
+    ) -> Result<RuleId, Diag> {
         match self {
             Self::One(id) => Ok(id),
             Self::NoMatch => Err(Diag::new(
@@ -124,19 +156,11 @@ mod tests {
     }
 
     fn rule(label: &str, interface: Interface) -> Rule {
-        Rule {
-            label: label.into(),
-            interface,
-            span: Span::none(),
-        }
+        Rule::new(label, interface, Span::none())
     }
 
     fn request(label: &str, interface: Interface) -> Request {
-        Request {
-            label: label.into(),
-            interface,
-            span: Span::none(),
-        }
+        Request::new(label, interface, Span::none())
     }
 
     #[test]

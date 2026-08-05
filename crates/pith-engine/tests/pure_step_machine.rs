@@ -88,19 +88,11 @@ fn interface(inputs: &[Type], output: Type) -> Interface {
 }
 
 fn rule(label: &str, interface: Interface) -> Rule {
-    Rule {
-        label: label.into(),
-        interface,
-        span: Span::none(),
-    }
+    Rule::new(label, interface, Span::none())
 }
 
 fn request(label: &str, interface: Interface) -> Request {
-    Request {
-        label: label.into(),
-        interface,
-        span: Span::none(),
-    }
+    Request::new(label, interface, Span::none())
 }
 
 #[test]

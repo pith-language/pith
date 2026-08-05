@@ -1,7 +1,7 @@
 //! The arena dependency graph and synchronous pure evaluator (0021, 0022).
 
 use indexmap::IndexMap;
-use pith_core::{Request, Rule, RuleArena, RuleId, Value, select_rule};
+use pith_core::{Pure, Request, Rule, RuleArena, RuleId, Value, select_rule};
 use pith_diag::{Diag, DiagnosticSink, PithResult, Severity, Span, StableCode};
 use pith_ids::{ComputationArena, ComputationId};
 use smallvec::SmallVec;
@@ -12,7 +12,7 @@ use smallvec::SmallVec;
 /// engine. It cannot call the engine or the async runtime directly.
 #[derive(Clone, Debug)]
 pub enum PureStep {
-    Need(Request),
+    Need(Request<Pure>),
     Complete(Value),
 }
 
@@ -38,14 +38,14 @@ pub trait PureRule {
 #[derive(Clone, Debug)]
 pub enum DependencyEdge {
     Request {
-        request: Request,
+        request: Request<Pure>,
         computation: ComputationId,
     },
 }
 
 /// One rule application in the in-memory graph.
 pub struct ComputationNode {
-    pub request: Request,
+    pub request: Request<Pure>,
     pub rule: RuleId,
     pub dependencies: SmallVec<[DependencyEdge; 4]>,
     pub result: Option<Value>,
@@ -61,13 +61,13 @@ pub struct Evaluation {
 struct EvalFrame {
     computation: ComputationId,
     rule: RuleId,
-    request: Request,
+    request: Request<Pure>,
     body: Box<dyn PureRuleFrame>,
     resume_with: Option<Value>,
 }
 
 pub struct Engine {
-    rules: RuleArena<Rule>,
+    rules: RuleArena<Rule<Pure>>,
     bodies: IndexMap<RuleId, Box<dyn PureRule>>,
     computations: ComputationArena<ComputationNode>,
 }
@@ -82,7 +82,7 @@ impl Engine {
     }
 
     /// Register semantic rule metadata together with its executable pure body.
-    pub fn register_rule<B>(&mut self, rule: Rule, body: B) -> RuleId
+    pub fn register_rule<B>(&mut self, rule: Rule<Pure>, body: B) -> RuleId
     where
         B: PureRule + 'static,
     {
@@ -91,7 +91,7 @@ impl Engine {
         id
     }
 
-    pub fn rules_iter(&self) -> impl Iterator<Item = (RuleId, &Rule)> {
+    pub fn rules_iter(&self) -> impl Iterator<Item = (RuleId, &Rule<Pure>)> {
         self.rules.iter()
     }
 
@@ -102,7 +102,21 @@ impl Engine {
     /// matches, `E-1102` (naming every candidate) when more than one matches,
     /// `E-1203` when evaluation detects a dependency cycle, or diagnostics
     /// emitted by a rule body.
-    pub fn evaluate(&mut self, request: &Request) -> PithResult<Evaluation> {
+    ///
+    /// ```compile_fail
+    /// use pith_core::{Interface, Mutation, Request, Type};
+    /// use pith_diag::Span;
+    /// use pith_engine::Engine;
+    ///
+    /// let request = Request::<Mutation>::new(
+    ///     "write",
+    ///     Interface { inputs: Box::new([]), output: Type::Unit },
+    ///     Span::none(),
+    /// );
+    /// let mut engine = Engine::new();
+    /// let _ = engine.evaluate(&request);
+    /// ```
+    pub fn evaluate(&mut self, request: &Request<Pure>) -> PithResult<Evaluation> {
         let rule = self.resolve_rule(request)?;
         let root = self.start_frame(request.clone(), rule)?;
         let mut stack = vec![root];
@@ -172,13 +186,13 @@ impl Engine {
             .map(|node| node.dependencies.as_slice())
     }
 
-    fn resolve_rule(&self, request: &Request) -> PithResult<RuleId> {
+    fn resolve_rule(&self, request: &Request<Pure>) -> PithResult<RuleId> {
         select_rule(request, &self.rules)
             .into_result(request, &self.rules)
             .map_err(one_diag)
     }
 
-    fn start_frame(&mut self, request: Request, rule: RuleId) -> PithResult<EvalFrame> {
+    fn start_frame(&mut self, request: Request<Pure>, rule: RuleId) -> PithResult<EvalFrame> {
         let Some(body) = self.bodies.get(&rule) else {
             return Err(internal_diag("selected rule has no executable body"));
         };
@@ -251,25 +265,25 @@ mod tests {
     }
 
     fn rule(label: &str) -> Rule {
-        Rule {
-            label: label.into(),
-            interface: Interface {
+        Rule::new(
+            label,
+            Interface {
                 inputs: Box::new([]),
                 output: Type::Int,
             },
-            span: Span::none(),
-        }
+            Span::none(),
+        )
     }
 
     fn request(label: &str) -> Request {
-        Request {
-            label: label.into(),
-            interface: Interface {
+        Request::new(
+            label,
+            Interface {
                 inputs: Box::new([]),
                 output: Type::Int,
             },
-            span: Span::none(),
-        }
+            Span::none(),
+        )
     }
 
     #[test]

@@ -8,7 +8,7 @@ pub mod effect;
 pub mod rule;
 pub mod value;
 
-pub use effect::{Action, EffectCat, Mutation, Observation, Opaque, Pure};
+pub use effect::{Action, EffectCategory, Mutation, Observation, Opaque, Pure};
 pub use rule::{Interface, Request, Rule, RuleArena, RuleId, SelectOutcome, select_rule};
 pub use value::{Type, Value, ValueArena, ValueId};
 
