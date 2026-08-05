@@ -35,6 +35,14 @@ use capabilities::canonical_capabilities;
 use ir::EvalFrame;
 use reuse::PureComputationIndex;
 
+enum ActionRunOutcome {
+    PlanningFailed(DiagnosticSink),
+    Started {
+        computation: ComputationId,
+        result: PithResult<Value>,
+    },
+}
+
 pub struct Engine {
     pub(crate) rules: RuleArena<Rule<Pure>>,
     pub(crate) bodies: IndexMap<RuleId, Box<dyn PureRule>>,
@@ -199,8 +207,14 @@ impl Engine {
                     }
                 }
                 PureStep::NeedAction(action_request) => {
-                    let (value, action_computation) =
-                        self.run_action(&action_request, policy, executor).await?;
+                    let outcome = self.run_action(&action_request, policy, executor).await;
+                    let (action_computation, result) = match outcome {
+                        ActionRunOutcome::PlanningFailed(diagnostics) => return Err(diagnostics),
+                        ActionRunOutcome::Started {
+                            computation,
+                            result,
+                        } => (computation, result),
+                    };
                     let Some(parent) = stack.last() else {
                         return Err(internal_diag("action requested with no frame on the stack"));
                     };
@@ -211,6 +225,7 @@ impl Engine {
                         computation: action_computation,
                         request: action_request,
                     });
+                    let value = result?;
                     let Some(parent) = stack.last_mut() else {
                         return Err(internal_diag("action requested with no frame on the stack"));
                     };
@@ -404,8 +419,11 @@ impl Engine {
         request: &Request<Action>,
         policy: &P,
         executor: &E,
-    ) -> PithResult<(Value, ComputationId)> {
-        let plan = self.plan_action(request)?;
+    ) -> ActionRunOutcome {
+        let plan = match self.plan_action(request) {
+            Ok(plan) => plan,
+            Err(diagnostics) => return ActionRunOutcome::PlanningFailed(diagnostics),
+        };
         let rule = plan.rule;
         let authorization = policy.authorize(&plan);
         let denial = match &authorization {
@@ -419,7 +437,9 @@ impl Engine {
         };
 
         let Some(action_rule) = self.action_rules.get(rule) else {
-            return Err(internal_diag("selected action rule has no metadata"));
+            return ActionRunOutcome::PlanningFailed(internal_diag(
+                "selected action rule has no metadata",
+            ));
         };
         let declared_output = action_rule.interface.output.clone();
         let rule_span = action_rule.span;
@@ -440,73 +460,81 @@ impl Engine {
             reuse: ReuseDecision::Pending,
         });
 
-        if let Some(diagnostics) = denial {
-            let Some(node) = self.computations.get_mut(computation) else {
-                return Err(internal_diag(
-                    "policy evaluator lost its action computation",
-                ));
-            };
-            node.reuse = ReuseDecision::NotReusable(ReuseReason::PolicyDenied);
-            return Err(diagnostics);
-        }
+        let result: PithResult<Value> = async {
+            if let Some(diagnostics) = denial {
+                let Some(node) = self.computations.get_mut(computation) else {
+                    return Err(internal_diag(
+                        "policy evaluator lost its action computation",
+                    ));
+                };
+                node.reuse = ReuseDecision::NotReusable(ReuseReason::PolicyDenied);
+                return Err(diagnostics);
+            }
 
-        let invocation = self.materialize_action(&plan.spec)?;
-        let captured = match executor.execute(&invocation).await {
-            Ok(execution) => execution,
-            Err(diagnostics) => {
-                self.mark_action_failed(computation, None);
-                return Err(diagnostics);
-            }
-        };
-        let execution = match self.import_execution(captured) {
-            Ok(execution) => execution,
-            Err(diagnostics) => {
-                self.mark_action_failed(computation, None);
-                return Err(diagnostics);
-            }
-        };
-        let capabilities_used = canonical_capabilities(&execution.report.capabilities_used);
-        let Some(node) = self.computations.get_mut(computation) else {
-            return Err(internal_diag("action evaluator lost its computation node"));
-        };
-        node.dependencies.extend(
-            capabilities_used
-                .into_iter()
-                .map(|capability| DependencyEdge::CapabilityUse { capability }),
-        );
-        if let Err(diagnostics) = self.validate_execution(&plan.spec, &execution) {
-            self.mark_action_failed(computation, Some(execution.report));
-            return Err(diagnostics);
-        }
-        let Some(body) = self.action_bodies.get(&rule) else {
-            self.mark_action_failed(computation, Some(execution.report));
-            return Err(internal_diag("selected action rule has no body"));
-        };
-        let value = match body.complete(&request.inputs, &execution) {
-            Ok(value) => value,
-            Err(diagnostics) => {
+            let invocation = self.materialize_action(&plan.spec)?;
+            let captured = match executor.execute(&invocation).await {
+                Ok(execution) => execution,
+                Err(diagnostics) => {
+                    self.mark_action_failed(computation, None);
+                    return Err(diagnostics);
+                }
+            };
+            let execution = match self.import_execution(captured) {
+                Ok(execution) => execution,
+                Err(diagnostics) => {
+                    self.mark_action_failed(computation, None);
+                    return Err(diagnostics);
+                }
+            };
+            let capabilities_used = canonical_capabilities(&execution.report.capabilities_used);
+            let Some(node) = self.computations.get_mut(computation) else {
+                return Err(internal_diag("action evaluator lost its computation node"));
+            };
+            node.dependencies.extend(
+                capabilities_used
+                    .into_iter()
+                    .map(|capability| DependencyEdge::CapabilityUse { capability }),
+            );
+            if let Err(diagnostics) = self.validate_execution(&plan.spec, &execution) {
                 self.mark_action_failed(computation, Some(execution.report));
                 return Err(diagnostics);
             }
-        };
-        if let Err(diagnostics) =
-            validate_action_result(&value, &declared_output, &rule_label, rule_span)
-        {
-            self.mark_action_failed(computation, Some(execution.report));
-            return Err(diagnostics);
+            let Some(body) = self.action_bodies.get(&rule) else {
+                self.mark_action_failed(computation, Some(execution.report));
+                return Err(internal_diag("selected action rule has no body"));
+            };
+            let value = match body.complete(&request.inputs, &execution) {
+                Ok(value) => value,
+                Err(diagnostics) => {
+                    self.mark_action_failed(computation, Some(execution.report));
+                    return Err(diagnostics);
+                }
+            };
+            if let Err(diagnostics) =
+                validate_action_result(&value, &declared_output, &rule_label, rule_span)
+            {
+                self.mark_action_failed(computation, Some(execution.report));
+                return Err(diagnostics);
+            }
+
+            let Some(node) = self.computations.get_mut(computation) else {
+                return Err(internal_diag("action evaluator lost its computation node"));
+            };
+            node.result = Some(value.clone());
+            node.reuse = ReuseDecision::NotReusable(ReuseReason::ActionCachingDisabled);
+            let Some(action) = node.action.as_mut() else {
+                return Err(internal_diag("action evaluator lost its action record"));
+            };
+            action.report = Some(execution.report);
+
+            Ok(value)
         }
+        .await;
 
-        let Some(node) = self.computations.get_mut(computation) else {
-            return Err(internal_diag("action evaluator lost its computation node"));
-        };
-        node.result = Some(value.clone());
-        node.reuse = ReuseDecision::NotReusable(ReuseReason::ActionCachingDisabled);
-        let Some(action) = node.action.as_mut() else {
-            return Err(internal_diag("action evaluator lost its action record"));
-        };
-        action.report = Some(execution.report);
-
-        Ok((value, computation))
+        ActionRunOutcome::Started {
+            computation,
+            result,
+        }
     }
 
     fn materialize_action(&self, spec: &pith_core::ActionSpec) -> PithResult<ActionInvocation> {

@@ -14,9 +14,9 @@ use pith_diag::{Diag, DiagnosticSink, PithResult, Severity, Span, StableCode};
 use pith_engine::{
     AccessVerification, ActionAuthorization, ActionExecution, ActionInvocation, ActionPlan,
     ActionPolicy, ActionRule, AllowAllActions, CapturedActionExecution, CapturedExecutionReport,
-    CapturedOutput, CapturedOutputContent, Engine, EvaluationSource, ExecutionPlatform, Executor,
-    MaterializedContent, PureRule, PureRuleFrame, PureStep, ReuseDecision, ReuseReason,
-    TokioRuntime,
+    CapturedOutput, CapturedOutputContent, ComputationKind, Engine, EvaluationSource,
+    ExecutionPlatform, Executor, MaterializedContent, PureRule, PureRuleFrame, PureStep,
+    ReuseDecision, ReuseReason, TokioRuntime,
 };
 use pith_ids::ContentId;
 
@@ -792,10 +792,14 @@ fn policy_denial_is_recorded_before_execution() {
     assert_eq!(diagnostic.code, StableCode::engine(213));
     assert_eq!(executions.load(Ordering::Relaxed), 0);
 
-    let (denied_node, denied_action) = engine
-        .query()
+    let query = engine.query();
+    let (denied_computation, denied_node, denied_action) = query
         .computations()
-        .find_map(|(_, node)| node.action.as_ref().map(|action| (node, action)))
+        .find_map(|(computation, node)| {
+            node.action
+                .as_ref()
+                .map(|action| (computation, node, action))
+        })
         .unwrap();
     assert_eq!(
         denied_action.authorization,
@@ -809,6 +813,18 @@ fn policy_denial_is_recorded_before_execution() {
         denied_node.reuse,
         ReuseDecision::NotReusable(ReuseReason::PolicyDenied)
     );
+    let denied_parent = query
+        .computations()
+        .find(|(_, node)| matches!(node.kind, ComputationKind::Pure(_)))
+        .map(|(_, node)| node)
+        .unwrap();
+    assert!(denied_parent.dependencies.iter().any(|dependency| {
+        matches!(
+            dependency,
+            pith_engine::DependencyEdge::Action { computation, .. }
+                if *computation == denied_computation
+        )
+    }));
 }
 
 #[test]
@@ -839,10 +855,10 @@ fn executor_must_report_the_planned_platform() {
     let diagnostics = runtime_result.unwrap_err();
     let diagnostic = diagnostics.iter().next().unwrap();
     assert_eq!(diagnostic.code, StableCode::engine(212));
-    let failed_action = engine
-        .query()
+    let query = engine.query();
+    let (failed_computation, failed_action) = query
         .computations()
-        .find_map(|(_, node)| node.action.as_ref())
+        .find_map(|(computation, node)| node.action.as_ref().map(|action| (computation, action)))
         .unwrap();
     assert_eq!(
         failed_action
@@ -851,6 +867,18 @@ fn executor_must_report_the_planned_platform() {
             .map(|report| report.platform.operating_system.as_ref()),
         Some("other")
     );
+    let failed_parent = query
+        .computations()
+        .find(|(_, node)| matches!(node.kind, ComputationKind::Pure(_)))
+        .map(|(_, node)| node)
+        .unwrap();
+    assert!(failed_parent.dependencies.iter().any(|dependency| {
+        matches!(
+            dependency,
+            pith_engine::DependencyEdge::Action { computation, .. }
+                if *computation == failed_computation
+        )
+    }));
 }
 
 #[test]
