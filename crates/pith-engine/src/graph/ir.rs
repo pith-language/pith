@@ -85,10 +85,11 @@ pub struct ActionPlan {
     pub spec: ActionSpec,
 }
 
-/// Declared contract and executor report retained as action provenance.
+/// Declared contract, authorization, and executor report retained as action provenance.
 pub struct ActionRecord {
     pub spec_digest: ActionSpecDigest,
     pub spec: ActionSpec,
+    pub authorization: crate::ActionAuthorization,
     pub report: Option<crate::ExecutionReport>,
 }
 
@@ -102,6 +103,7 @@ pub enum ReuseDecision {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReuseReason {
     ActionCachingDisabled,
+    PolicyDenied,
     DependencyPending { computation: ComputationId },
     DependencyNotReusable { computation: ComputationId },
     DependencyMissing { computation: ComputationId },

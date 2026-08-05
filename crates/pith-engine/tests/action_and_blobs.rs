@@ -11,9 +11,9 @@ use pith_core::{
 };
 use pith_diag::{Diag, DiagnosticSink, PithResult, Severity, Span, StableCode};
 use pith_engine::{
-    AccessVerification, ActionExecution, ActionRule, Engine, EvaluationSource, ExecutionPlatform,
-    ExecutionReport, Executor, ProducedOutput, PureRule, PureRuleFrame, PureStep, ReuseDecision,
-    ReuseReason, TokioRuntime,
+    AccessVerification, ActionAuthorization, ActionExecution, ActionPlan, ActionPolicy, ActionRule,
+    AllowAllActions, Engine, EvaluationSource, ExecutionPlatform, ExecutionReport, Executor,
+    ProducedOutput, PureRule, PureRuleFrame, PureStep, ReuseDecision, ReuseReason, TokioRuntime,
 };
 use pith_ids::ContentId;
 
@@ -171,6 +171,22 @@ struct UndeclaredCapabilityExecutor;
 
 struct WrongPlatformExecutor;
 
+struct DenyDoubleCapability;
+
+impl ActionPolicy for DenyDoubleCapability {
+    fn authorize(&self, plan: &ActionPlan) -> ActionAuthorization {
+        if plan.spec.capabilities.contains(&double_capability()) {
+            return ActionAuthorization::Denied {
+                policy: "deny-double-capability".into(),
+                reason: "fixture compute access is disabled".into(),
+            };
+        }
+        ActionAuthorization::Allowed {
+            policy: "deny-double-capability".into(),
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl Executor for UndeclaredCapabilityExecutor {
     async fn execute(&self, _spec: &ActionSpec) -> PithResult<ActionExecution> {
@@ -306,6 +322,7 @@ fn blob_dependency_resumes_with_bytes_and_records_edge() {
         .run(
             &pure_request("length", interface(&[], Type::Int), []),
             &TokioRuntime,
+            &AllowAllActions,
             &FixtureExecutor,
         )
         .unwrap()
@@ -335,6 +352,7 @@ fn missing_blob_reports_clean_diagnostic() {
         .run(
             &pure_request("length", interface(&[], Type::Int), []),
             &TokioRuntime,
+            &AllowAllActions,
             &FixtureExecutor,
         )
         .unwrap();
@@ -380,6 +398,7 @@ fn action_dependency_driven_through_run() {
         .run(
             &pure_request("entry", pure_iface, []),
             &TokioRuntime,
+            &AllowAllActions,
             &FixtureExecutor,
         )
         .unwrap()
@@ -404,6 +423,12 @@ fn action_dependency_driven_through_run() {
         .unwrap();
     assert_eq!(action.spec_digest, action.spec.digest().unwrap());
     assert_eq!(action.spec.executable, double_executable());
+    assert_eq!(
+        action.authorization,
+        ActionAuthorization::Allowed {
+            policy: "allow-all-actions".into(),
+        }
+    );
     assert_eq!(
         action.report.as_ref().map(|report| report.access),
         Some(AccessVerification::Prevented)
@@ -435,6 +460,7 @@ fn action_result_type_checked_against_interface() {
         .run(
             &pure_request("entry", pure_iface, []),
             &TokioRuntime,
+            &AllowAllActions,
             &FixtureExecutor,
         )
         .unwrap();
@@ -461,6 +487,7 @@ fn undeclared_capability_use_is_rejected() {
         .run(
             &pure_request("entry", pure_iface, []),
             &TokioRuntime,
+            &AllowAllActions,
             &UndeclaredCapabilityExecutor,
         )
         .unwrap();
@@ -468,6 +495,59 @@ fn undeclared_capability_use_is_rejected() {
     let err = result.unwrap_err();
     let diag = err.iter().next().unwrap();
     assert_eq!(diag.code, StableCode::engine(208));
+}
+
+#[test]
+fn policy_denial_is_recorded_before_execution() {
+    let mut engine = Engine::new();
+    let action_interface = interface(&[Type::Int], Type::Blob);
+    let root_interface = interface(&[], Type::Blob);
+    engine.register_action_rule(
+        action_rule("double", action_interface.clone()),
+        DoubleAction,
+    );
+    engine.register_rule(
+        pure_rule("entry", root_interface.clone()),
+        ActionDepRule {
+            dependency: action_request("double", action_interface, [Value::Int(21)]),
+        },
+    );
+    let executions = Arc::new(AtomicUsize::new(0));
+    let executor = CountingExecutor {
+        executions: executions.clone(),
+    };
+
+    let runtime_result = engine
+        .run(
+            &pure_request("entry", root_interface, []),
+            &TokioRuntime,
+            &DenyDoubleCapability,
+            &executor,
+        )
+        .unwrap();
+
+    let diagnostics = runtime_result.unwrap_err();
+    let diagnostic = diagnostics.iter().next().unwrap();
+    assert_eq!(diagnostic.code, StableCode::engine(213));
+    assert_eq!(executions.load(Ordering::Relaxed), 0);
+
+    let (denied_node, denied_action) = engine
+        .query()
+        .computations()
+        .find_map(|(_, node)| node.action.as_ref().map(|action| (node, action)))
+        .unwrap();
+    assert_eq!(
+        denied_action.authorization,
+        ActionAuthorization::Denied {
+            policy: "deny-double-capability".into(),
+            reason: "fixture compute access is disabled".into(),
+        }
+    );
+    assert!(denied_action.report.is_none());
+    assert_eq!(
+        denied_node.reuse,
+        ReuseDecision::NotReusable(ReuseReason::PolicyDenied)
+    );
 }
 
 #[test]
@@ -490,6 +570,7 @@ fn executor_must_report_the_planned_platform() {
         .run(
             &pure_request("entry", root_interface, []),
             &TokioRuntime,
+            &AllowAllActions,
             &WrongPlatformExecutor,
         )
         .unwrap();
@@ -532,12 +613,14 @@ fn action_dependencies_are_not_reused_without_a_cache_identity() {
     };
     let root_request = pure_request("entry", root_interface, []);
 
-    let first_runtime_result = engine.run(&root_request, &TokioRuntime, &executor);
+    let first_runtime_result =
+        engine.run(&root_request, &TokioRuntime, &AllowAllActions, &executor);
     assert!(matches!(&first_runtime_result, Ok(Ok(_))));
     let first_evaluation_result = first_runtime_result.unwrap();
     let first = first_evaluation_result.unwrap();
 
-    let second_runtime_result = engine.run(&root_request, &TokioRuntime, &executor);
+    let second_runtime_result =
+        engine.run(&root_request, &TokioRuntime, &AllowAllActions, &executor);
     assert!(matches!(&second_runtime_result, Ok(Ok(_))));
     let second_evaluation_result = second_runtime_result.unwrap();
     let second = second_evaluation_result.unwrap();
@@ -600,6 +683,7 @@ fn distinct_parents_do_not_share_action_results() {
             [Value::Bool(true)],
         ),
         &TokioRuntime,
+        &AllowAllActions,
         &executor,
     );
     assert!(matches!(&boolean_runtime_result, Ok(Ok(_))));
@@ -613,6 +697,7 @@ fn distinct_parents_do_not_share_action_results() {
             [Value::Text("input".into())],
         ),
         &TokioRuntime,
+        &AllowAllActions,
         &executor,
     );
     assert!(matches!(&text_runtime_result, Ok(Ok(_))));
@@ -659,12 +744,14 @@ fn unverified_action_dependencies_are_not_reused() {
     };
     let root_request = pure_request("entry", root_interface, []);
 
-    let first_runtime_result = engine.run(&root_request, &TokioRuntime, &executor);
+    let first_runtime_result =
+        engine.run(&root_request, &TokioRuntime, &AllowAllActions, &executor);
     assert!(matches!(&first_runtime_result, Ok(Ok(_))));
     let first_evaluation_result = first_runtime_result.unwrap();
     let first = first_evaluation_result.unwrap();
 
-    let second_runtime_result = engine.run(&root_request, &TokioRuntime, &executor);
+    let second_runtime_result =
+        engine.run(&root_request, &TokioRuntime, &AllowAllActions, &executor);
     assert!(matches!(&second_runtime_result, Ok(Ok(_))));
     let second_evaluation_result = second_runtime_result.unwrap();
     let second = second_evaluation_result.unwrap();

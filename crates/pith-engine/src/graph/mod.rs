@@ -21,6 +21,7 @@ use pith_store::{ContentStore, MemoryContentStore};
 use smallvec::SmallVec;
 
 use crate::action::{ActionExecution, ActionRule, Executor};
+use crate::policy::{ActionAuthorization, ActionPolicy};
 use crate::runtime::Runtime;
 use capabilities::canonical_capabilities;
 use ir::EvalFrame;
@@ -134,26 +135,29 @@ impl Engine {
     /// Evaluate a request, crossing the sync/async boundary as needed: pure
     /// steps run synchronously inside the loop, blob fetches hit the content
     /// store synchronously, and declared action contracts are driven through
-    /// `executor` via `runtime`.
+    /// `executor` via `runtime` after `policy` authorizes the action plan.
     ///
     /// # Errors
     /// `Ok(Ok(_))` on success. `Ok(Err(_))` when evaluation produced
     /// diagnostics (same codes as [`Engine::evaluate_pure`] plus `E-1205`
     /// blob-not-available, `E-1208` through `E-1210` for executor reports
     /// outside the declared contract, and `E-1212` for a missing or mismatched
-    /// execution platform). `Err(_)` when the runtime could not be driven.
-    pub fn run<R: Runtime, E: Executor>(
+    /// execution platform, and `E-1213` for policy denial). `Err(_)` when the
+    /// runtime could not be driven.
+    pub fn run<R: Runtime, P: ActionPolicy, E: Executor>(
         &mut self,
         request: &Request<Pure>,
         runtime: &R,
+        policy: &P,
         executor: &E,
     ) -> Result<PithResult<Evaluation>, crate::runtime::RuntimeError> {
-        runtime.block_on(self.run_inner(request, executor))
+        runtime.block_on(self.run_inner(request, policy, executor))
     }
 
-    async fn run_inner<E: Executor>(
+    async fn run_inner<P: ActionPolicy, E: Executor>(
         &mut self,
         request: &Request<Pure>,
+        policy: &P,
         executor: &E,
     ) -> PithResult<Evaluation> {
         let rule = self.resolve_pure_rule(request)?;
@@ -188,7 +192,7 @@ impl Engine {
                 }
                 PureStep::NeedAction(action_request) => {
                     let (value, action_computation) =
-                        self.run_action(&action_request, executor).await?;
+                        self.run_action(&action_request, policy, executor).await?;
                     let Some(parent) = stack.last() else {
                         return Err(internal_diag("action requested with no frame on the stack"));
                     };
@@ -383,13 +387,24 @@ impl Engine {
         })
     }
 
-    async fn run_action<E: Executor>(
+    async fn run_action<P: ActionPolicy, E: Executor>(
         &mut self,
         request: &Request<Action>,
+        policy: &P,
         executor: &E,
     ) -> PithResult<(Value, ComputationId)> {
         let plan = self.plan_action(request)?;
         let rule = plan.rule;
+        let authorization = policy.authorize(&plan);
+        let denial = match &authorization {
+            ActionAuthorization::Allowed { .. } => None,
+            ActionAuthorization::Denied { policy, reason } => Some(one_diag(Diag::new(
+                Severity::Error,
+                StableCode::engine(213),
+                request.span,
+                format!("action denied by policy `{policy}`: {reason}"),
+            ))),
+        };
 
         let Some(action_rule) = self.action_rules.get(rule) else {
             return Err(internal_diag("selected action rule has no metadata"));
@@ -406,11 +421,22 @@ impl Engine {
             action: Some(ActionRecord {
                 spec_digest: plan.spec_digest,
                 spec: plan.spec.clone(),
+                authorization,
                 report: None,
             }),
             capabilities: canonical_capabilities(&plan.spec.capabilities),
             reuse: ReuseDecision::Pending,
         });
+
+        if let Some(diagnostics) = denial {
+            let Some(node) = self.computations.get_mut(computation) else {
+                return Err(internal_diag(
+                    "policy evaluator lost its action computation",
+                ));
+            };
+            node.reuse = ReuseDecision::NotReusable(ReuseReason::PolicyDenied);
+            return Err(diagnostics);
+        }
 
         let execution = match executor.execute(&plan.spec).await {
             Ok(execution) => execution,

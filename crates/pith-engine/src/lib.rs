@@ -6,6 +6,7 @@
 
 pub mod action;
 pub mod graph;
+pub mod policy;
 pub mod runtime;
 
 pub use action::{
@@ -17,6 +18,7 @@ pub use graph::{
     EngineQuery, Evaluation, EvaluationSource, PureRule, PureRuleFrame, PureStep, ReuseDecision,
     ReuseReason, RuleSelection,
 };
+pub use policy::{ActionAuthorization, ActionPolicy, AllowAllActions};
 pub use runtime::{Runtime, RuntimeError, TokioRuntime};
 
 use pith_output::{IntoOutput, OutputRecord, Payload, PhaseStatus};
