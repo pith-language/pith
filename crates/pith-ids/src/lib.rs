@@ -40,12 +40,25 @@ define_arena!(
 pub struct ContentDigest([u8; 32]);
 
 impl ContentDigest {
+    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
     pub fn of_bytes(bytes: &[u8]) -> Self {
         Self(blake3::hash(bytes).into())
     }
 
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
+    }
+}
+
+impl std::fmt::Display for ContentDigest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for byte in &self.0 {
+            write!(f, "{byte:02x}")?;
+        }
+        Ok(())
     }
 }
 
@@ -248,6 +261,7 @@ mod tests {
         assert!(s.ends_with(')'));
         let hex = &s["ContentDigest(".len()..s.len() - 1];
         assert_eq!(hex.len(), 64);
+        assert_eq!(d.to_string(), hex);
     }
 
     #[test]

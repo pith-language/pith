@@ -121,6 +121,12 @@ the graph remains an arena during evaluation. persistence does not replace the r
 
 initial schema incompatibility trades cache loss for correctness and implementation speed. this is appropriate before release and must be replaced by explicit migration policy before persisted provenance becomes a stable user contract.
 
+## prototype evidence
+
+the engine accepts any content adapter through the pith-owned `ContentStore` interface and defaults to the in-memory implementation. the filesystem adapter stores blobs and canonical tree manifests under content digests, publishes same-directory temporary files after flushing them, verifies raced existing objects, and rejects stored data whose content does not reproduce the requested identity. file executability, subtree identity, and symlink target bytes survive a store reopen through the canonical tree manifest.
+
+sqlite engine metadata, durable graph hydration, attempt lifecycle persistence, dependency revalidation, and cross-process cache reuse remain unimplemented.
+
 ## unresolved
 
 retention policy, garbage collection, database compaction, and historical-provenance limits need workload evidence.
@@ -128,4 +134,3 @@ retention policy, garbage collection, database compaction, and historical-proven
 remote content stores and remote cache metadata use the same durable identities but need separate trust, transport, and authorization decisions.
 
 the exact canonical encoding of future structural values and module identities belongs to the values and module work. each implemented subset is versioned before it is persisted.
-

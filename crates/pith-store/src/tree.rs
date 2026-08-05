@@ -1,5 +1,5 @@
 use crate::StoreError;
-use pith_ids::ContentId;
+use pith_ids::{ContentDigest, ContentId};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum TreeEntryContent {
@@ -89,6 +89,102 @@ impl Tree {
 
     pub fn entries(&self) -> &[TreeEntry] {
         &self.entries
+    }
+
+    pub(crate) fn manifest(&self) -> Result<Vec<u8>, StoreError> {
+        canonical_manifest(&self.entries)
+    }
+
+    pub(crate) fn from_manifest(manifest: &[u8]) -> Result<Self, StoreError> {
+        let mut reader = ManifestReader::new(manifest);
+        let entry_count = reader.read_length()?;
+        let mut entries = Vec::new();
+        for _ in 0..entry_count {
+            let name = reader.read_text()?;
+            let tag = reader.read_byte()?;
+            let content = match tag {
+                0 => TreeEntryContent::File {
+                    content: reader.read_content_id()?,
+                    executable: false,
+                },
+                1 => TreeEntryContent::File {
+                    content: reader.read_content_id()?,
+                    executable: true,
+                },
+                2 => TreeEntryContent::Tree(reader.read_content_id()?),
+                3 => TreeEntryContent::Symlink {
+                    target: reader.read_bytes()?.into(),
+                },
+                _ => return Err(StoreError::new("tree manifest has an unknown entry tag")),
+            };
+            entries.push(TreeEntry::new(name, content)?);
+        }
+        if !reader.is_empty() {
+            return Err(StoreError::new("tree manifest has trailing bytes"));
+        }
+        let tree = Self::new(entries)?;
+        if tree.manifest()?.as_slice() != manifest {
+            return Err(StoreError::new("tree manifest is not canonical"));
+        }
+        Ok(tree)
+    }
+}
+
+struct ManifestReader<'manifest> {
+    remaining: &'manifest [u8],
+}
+
+impl<'manifest> ManifestReader<'manifest> {
+    fn new(manifest: &'manifest [u8]) -> Self {
+        Self {
+            remaining: manifest,
+        }
+    }
+
+    fn read_length(&mut self) -> Result<usize, StoreError> {
+        let bytes = self.take(size_of::<u64>())?;
+        let mut encoded = [0; size_of::<u64>()];
+        encoded.copy_from_slice(bytes);
+        usize::try_from(u64::from_le_bytes(encoded))
+            .map_err(|_| StoreError::new("tree manifest length is not representable"))
+    }
+
+    fn read_byte(&mut self) -> Result<u8, StoreError> {
+        let Some((byte, remaining)) = self.remaining.split_first() else {
+            return Err(StoreError::new("tree manifest ended unexpectedly"));
+        };
+        self.remaining = remaining;
+        Ok(*byte)
+    }
+
+    fn read_bytes(&mut self) -> Result<&'manifest [u8], StoreError> {
+        let length = self.read_length()?;
+        self.take(length)
+    }
+
+    fn read_text(&mut self) -> Result<&'manifest str, StoreError> {
+        std::str::from_utf8(self.read_bytes()?)
+            .map_err(|_| StoreError::new("tree manifest entry name is not utf-8"))
+    }
+
+    fn read_content_id(&mut self) -> Result<ContentId, StoreError> {
+        let bytes = self.take(size_of::<[u8; 32]>())?;
+        let mut digest = [0; 32];
+        digest.copy_from_slice(bytes);
+        Ok(ContentId::from_digest(ContentDigest::from_bytes(digest)))
+    }
+
+    fn take(&mut self, length: usize) -> Result<&'manifest [u8], StoreError> {
+        if self.remaining.len() < length {
+            return Err(StoreError::new("tree manifest ended unexpectedly"));
+        }
+        let (value, remaining) = self.remaining.split_at(length);
+        self.remaining = remaining;
+        Ok(value)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.remaining.is_empty()
     }
 }
 
