@@ -93,6 +93,32 @@ impl std::fmt::Debug for ContentId {
     }
 }
 
+/// Stable digest of a canonical declared action contract.
+///
+/// This is a persistent specialization of computation identity, not content
+/// identity: equal action contracts have equal digests even before they run.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ActionDigest(ContentDigest);
+
+impl ActionDigest {
+    pub fn of_manifest(manifest: &[u8]) -> Self {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(b"pith:action:v1\0");
+        hasher.update(manifest);
+        Self(ContentDigest(hasher.finalize().into()))
+    }
+
+    pub fn digest(self) -> ContentDigest {
+        self.0
+    }
+}
+
+impl std::fmt::Debug for ActionDigest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ActionDigest({:?})", self.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,5 +180,14 @@ mod tests {
         let id = ContentId::of_blob(b"remote");
 
         assert_eq!(ContentId::from_digest(id.digest()), id);
+    }
+
+    #[test]
+    fn action_digest_is_domain_separated() {
+        let action = ActionDigest::of_manifest(b"same");
+
+        assert_eq!(action, ActionDigest::of_manifest(b"same"));
+        assert_ne!(action.digest(), ContentDigest::of_bytes(b"same"));
+        assert_ne!(action.digest(), ContentId::of_blob(b"same").digest());
     }
 }
