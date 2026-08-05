@@ -30,7 +30,8 @@ several questions block milestones rather than sitting alongside the implementat
 
 - milestone M-5 (Linux system library) and M-6 (deployment library) are gated by decision 0012 (revision-pinned plans) and 0013 (managed-object identity)
 - the reproducibility story in milestone M-3 (first build library) is gated by decision 0014
-- the kernel prototype (milestone M-1) is gated by the rule-selection question and the effect-algebra question; decisions 0015 and 0019 propose answers, so the gate is conditional on both being accepted and prototyped
+
+milestone M-1 used decisions 0015 and 0019 as prototype hypotheses and is complete at its semantic-prototype scope. those decisions remain proposed: their broader interface and effect-category claims stay open until the later milestones exercise them.
 
 ## language and types
 

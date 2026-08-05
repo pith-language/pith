@@ -112,13 +112,13 @@ the adapter discipline (every nontrivial external crate behind a pith-owned trai
 
 ## prototype evidence
 
-the in-memory prototype interns completed pure applications by selected rule, typed interface, and input values. diagnostic labels and spans do not participate in reuse. distinct roots share completed pure dependencies.
+the in-memory prototype interns completed pure applications by a versioned, domain-separated key over provisional selected-rule identity, the request interface, and input values. the provisional rule identity is currently derived from the rule label and interface because executable rust rule bodies do not expose durable semantic revisions. request labels and spans do not participate in reuse. distinct roots share completed pure dependencies.
 
 action contracts are validated before receiving a versioned, domain-separated digest over their complete canonical representation. this digest identifies the declared contract, not a reusable computation: it does not include the selected rule's completion semantics, the resolved execution platform, or policy decisions. action computations therefore remain non-reusable, and that decision propagates to pure parents.
 
-action computations record their canonical declared capability requirements. completed pure computations derive the canonical union of their dependency requirements, and the query interface exposes that effective set. this proves propagation through the implemented `Pure` and `Action` composition path; the other effect categories and per-use capability edges remain open.
+action computations record their canonical declared capability requirements and actual capability use as dependency edges, including uses reported by an execution that is later rejected. completed pure computations derive the canonical union of their dependency requirements, and the query interface exposes both effective requirements and direct use edges. this proves propagation and use recording through the implemented `Pure` and `Action` composition path; the other effect categories remain open.
 
-the graph records a structured reuse decision instead of a boolean, so queries can distinguish reusable pure computations from actions whose caching is disabled and parents with non-reusable dependencies. this proves exact pure reuse inside one engine instance. it does not settle action cache identity, persistent pure-computation identity, durable cache storage, invalidation after changed durable inputs, or cache explanations, so the decision remains proposed.
+the graph records a structured reuse decision instead of a boolean, so queries can distinguish reusable pure computations from actions whose caching is disabled and parents with non-reusable dependencies. this proves exact pure reuse and the shape of a pure-computation key inside one engine instance. it does not settle durable rule-revision identity, action cache identity, persistent graph or cache storage, invalidation after changed durable inputs, or cache explanations, so the decision remains proposed.
 
 ## unresolved
 

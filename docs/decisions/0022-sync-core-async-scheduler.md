@@ -114,11 +114,13 @@ the first rust prototype establishes the boundary but does not yet establish the
 
 `Pure` rule bodies run as synchronous frames and yield typed requests. an `Action` rule plans an inert contract containing its executable content identity, arguments, inputs, outputs, environment, platform requirement, capabilities, and network policy. callers can query that plan and its stable contract digest without executing it. every scheduler run receives an explicit action policy. the engine gives the complete plan to that policy and records its named allow or deny decision before invoking the executor; denial returns a stable diagnostic and the executor is not called. before execution, the engine resolves the declared executable and inputs from its content store and passes only that materialized view to the executor. an async executor adapter is the only surface that performs an authorized action. it returns captured output bytes or trees plus a report containing the selected platform, access-verification mechanism, and capability use. the engine imports the captured outputs into its store, validates the resulting report against the contract, and retains it as provenance; the action rule derives the typed semantic result from those engine-owned content identities. the engine does not treat either policy approval or an executor's claim as sufficient proof for cache reuse.
 
+the current rust-hosted prototype requires `Send` on pure frames and `Send + Sync` on pure rule bodies because its runtime adapter drives a `Send` evaluation future. those bounds are a host-integration constraint, not evidence for the decision's intended language-level pure boundary. whether the scheduler can remove them from the semantic pure evaluator remains open.
+
 the current driver awaits one action at a time. it does not yet schedule independent work concurrently, cancel superseded requests, or enforce timeouts. the executor interface makes those additions possible without returning ambient async authority to pure rules, but the decision remains proposed until those scheduler properties are prototyped.
 
 ## unresolved
 
-the exact shape of the `Request` value a step yields, and how resumption carries the result and any new graph edges back into the step machine, needs a prototype. the design here fixes the boundary; the message format is open.
+the prototype now has concrete `PureStep` variants for pure requests, blobs, actions, and completion, with typed values carrying resumption results. the common request and resumption representation for `Observation`, `Mutation`, and `Opaque`, including category-specific provenance, remains open.
 
 how cancellation propagates from the scheduler into a suspended pure step, and whether a cancelled step can leave partial graph structure that must be collected or can be discarded with its arena frame, needs the prototype to answer.
 
