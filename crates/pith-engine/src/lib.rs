@@ -10,8 +10,11 @@ pub mod policy;
 pub mod runtime;
 
 pub use action::{
-    AccessVerification, ActionExecution, ActionRule, ExecutionPlatform, ExecutionReport, Executor,
-    ProducedOutput,
+    AccessVerification, ActionExecution, ActionInvocation, ActionRule, CapturedActionExecution,
+    CapturedExecutionReport, CapturedOutput, CapturedOutputContent, CapturedTree,
+    CapturedTreeEntry, CapturedTreeEntryContent, ExecutionPlatform, ExecutionReport, Executor,
+    MaterializedActionInput, MaterializedContent, MaterializedTree, MaterializedTreeEntry,
+    MaterializedTreeEntryContent, ProducedOutput,
 };
 pub use graph::{
     ActionPlan, ActionRecord, ComputationKind, ComputationNode, DependencyEdge, Engine,

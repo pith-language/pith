@@ -6,14 +6,16 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use pith_core::{
-    Action, ActionOutput, ActionOutputKind, ActionSpec, CapabilityRequirement, Interface,
-    PlatformRequirement, Pure, Request, Rule, Type, Value,
+    Action, ActionInput, ActionInputContent, ActionOutput, ActionOutputKind, ActionSpec,
+    CapabilityRequirement, Interface, PlatformRequirement, Pure, Request, Rule, Type, Value,
 };
 use pith_diag::{Diag, DiagnosticSink, PithResult, Severity, Span, StableCode};
 use pith_engine::{
-    AccessVerification, ActionAuthorization, ActionExecution, ActionPlan, ActionPolicy, ActionRule,
-    AllowAllActions, Engine, EvaluationSource, ExecutionPlatform, ExecutionReport, Executor,
-    ProducedOutput, PureRule, PureRuleFrame, PureStep, ReuseDecision, ReuseReason, TokioRuntime,
+    AccessVerification, ActionAuthorization, ActionExecution, ActionInvocation, ActionPlan,
+    ActionPolicy, ActionRule, AllowAllActions, CapturedActionExecution, CapturedExecutionReport,
+    CapturedOutput, CapturedOutputContent, Engine, EvaluationSource, ExecutionPlatform, Executor,
+    MaterializedContent, PureRule, PureRuleFrame, PureStep, ReuseDecision, ReuseReason,
+    TokioRuntime,
 };
 use pith_ids::ContentId;
 
@@ -94,6 +96,11 @@ impl ActionRule for DoubleAction {
             operating_system: "fixture".into(),
             architecture: "fixture".into(),
         };
+        spec.inputs = [ActionInput {
+            path: "operand".into(),
+            content: ActionInputContent::Blob(double_input()),
+        }]
+        .into();
         spec.capabilities = declared_double_capabilities().into();
         spec.outputs = [ActionOutput {
             path: "result".into(),
@@ -133,8 +140,26 @@ struct FixtureExecutor;
 
 #[async_trait::async_trait]
 impl Executor for FixtureExecutor {
-    async fn execute(&self, spec: &ActionSpec) -> PithResult<ActionExecution> {
+    async fn execute(&self, invocation: &ActionInvocation) -> PithResult<CapturedActionExecution> {
+        let spec = &invocation.spec;
         let content = if spec.executable == double_executable() {
+            let Some(input) = invocation.inputs.first() else {
+                return Err(fixture_error("double action fixture requires one input"));
+            };
+            if invocation.inputs.len() != 1 || input.path.as_ref() != "operand" {
+                return Err(fixture_error(
+                    "double action fixture received undeclared inputs",
+                ));
+            }
+            match &input.content {
+                MaterializedContent::Blob { id, bytes }
+                    if *id == double_input() && bytes.as_ref() == b"fixture input" => {}
+                _ => {
+                    return Err(fixture_error(
+                        "double action fixture received the wrong input content",
+                    ));
+                }
+            }
             let Some(argument) = spec.arguments.first() else {
                 return Err(fixture_error("double action fixture requires one argument"));
             };
@@ -143,19 +168,19 @@ impl Executor for FixtureExecutor {
                     "double action fixture requires an integer argument",
                 ));
             };
-            double_result(number)
+            CapturedOutputContent::Blob(double_result_bytes(number))
         } else {
-            ContentId::of_blob(b"wrong type result")
+            CapturedOutputContent::Blob(b"wrong type result".as_slice().into())
         };
         let Some(output) = spec.outputs.first() else {
             return Err(fixture_error("fixture action requires one declared output"));
         };
-        Ok(ActionExecution {
-            report: ExecutionReport {
+        Ok(CapturedActionExecution {
+            report: CapturedExecutionReport {
                 executor: "fixture".into(),
                 platform: fixture_platform(),
                 access: AccessVerification::Prevented,
-                outputs: [ProducedOutput {
+                outputs: [CapturedOutput {
                     path: output.path.clone(),
                     kind: output.kind,
                     content,
@@ -189,9 +214,9 @@ impl ActionPolicy for DenyDoubleCapability {
 
 #[async_trait::async_trait]
 impl Executor for UndeclaredCapabilityExecutor {
-    async fn execute(&self, _spec: &ActionSpec) -> PithResult<ActionExecution> {
-        Ok(ActionExecution {
-            report: ExecutionReport {
+    async fn execute(&self, _invocation: &ActionInvocation) -> PithResult<CapturedActionExecution> {
+        Ok(CapturedActionExecution {
+            report: CapturedExecutionReport {
                 executor: "fixture".into(),
                 platform: fixture_platform(),
                 access: AccessVerification::Observed,
@@ -208,8 +233,8 @@ impl Executor for UndeclaredCapabilityExecutor {
 
 #[async_trait::async_trait]
 impl Executor for WrongPlatformExecutor {
-    async fn execute(&self, spec: &ActionSpec) -> PithResult<ActionExecution> {
-        let mut execution = FixtureExecutor.execute(spec).await?;
+    async fn execute(&self, invocation: &ActionInvocation) -> PithResult<CapturedActionExecution> {
+        let mut execution = FixtureExecutor.execute(invocation).await?;
         execution.report.platform.operating_system = "other".into();
         Ok(execution)
     }
@@ -223,11 +248,15 @@ struct UnverifiedCountingExecutor {
     executions: Arc<AtomicUsize>,
 }
 
+struct NeverExecutor {
+    executions: Arc<AtomicUsize>,
+}
+
 #[async_trait::async_trait]
 impl Executor for UnverifiedCountingExecutor {
-    async fn execute(&self, spec: &ActionSpec) -> PithResult<ActionExecution> {
+    async fn execute(&self, invocation: &ActionInvocation) -> PithResult<CapturedActionExecution> {
         self.executions.fetch_add(1, Ordering::Relaxed);
-        let mut execution = FixtureExecutor.execute(spec).await?;
+        let mut execution = FixtureExecutor.execute(invocation).await?;
         execution.report.access = AccessVerification::Unverified;
         Ok(execution)
     }
@@ -235,9 +264,17 @@ impl Executor for UnverifiedCountingExecutor {
 
 #[async_trait::async_trait]
 impl Executor for CountingExecutor {
-    async fn execute(&self, spec: &ActionSpec) -> PithResult<ActionExecution> {
+    async fn execute(&self, invocation: &ActionInvocation) -> PithResult<CapturedActionExecution> {
         self.executions.fetch_add(1, Ordering::Relaxed);
-        FixtureExecutor.execute(spec).await
+        FixtureExecutor.execute(invocation).await
+    }
+}
+
+#[async_trait::async_trait]
+impl Executor for NeverExecutor {
+    async fn execute(&self, _invocation: &ActionInvocation) -> PithResult<CapturedActionExecution> {
+        self.executions.fetch_add(1, Ordering::Relaxed);
+        Err(fixture_error("executor should not be called"))
     }
 }
 
@@ -245,12 +282,24 @@ fn double_executable() -> ContentId {
     ContentId::of_blob(b"fixture:double")
 }
 
+fn double_input() -> ContentId {
+    ContentId::of_blob(b"fixture input")
+}
+
 fn wrong_type_executable() -> ContentId {
     ContentId::of_blob(b"fixture:wrong-type")
 }
 
+fn double_result_bytes(number: i64) -> Box<[u8]> {
+    number
+        .saturating_mul(2)
+        .to_string()
+        .into_bytes()
+        .into_boxed_slice()
+}
+
 fn double_result(number: i64) -> ContentId {
-    ContentId::of_blob(number.saturating_mul(2).to_string().as_bytes())
+    ContentId::of_blob(&double_result_bytes(number))
 }
 
 fn double_capability() -> CapabilityRequirement {
@@ -293,6 +342,30 @@ fn fixture_error(message: &str) -> DiagnosticSink {
     diagnostics
 }
 
+fn fixture_engine() -> Engine {
+    let mut engine = Engine::new();
+    assert_eq!(
+        put_fixture_blob(&mut engine, b"fixture:double"),
+        double_executable()
+    );
+    assert_eq!(
+        put_fixture_blob(&mut engine, b"fixture:wrong-type"),
+        wrong_type_executable()
+    );
+    assert_eq!(
+        put_fixture_blob(&mut engine, b"fixture input"),
+        double_input()
+    );
+    engine
+}
+
+fn put_fixture_blob(engine: &mut Engine, bytes: &[u8]) -> ContentId {
+    match engine.put_blob(bytes) {
+        Ok(identity) => identity,
+        Err(error) => unreachable!("memory content store failed to store fixture blob: {error}"),
+    }
+}
+
 fn interface(inputs: &[Type], output: Type) -> Interface {
     Interface {
         inputs: inputs.to_vec().into_boxed_slice(),
@@ -326,7 +399,7 @@ fn action_request(
 
 #[test]
 fn blob_dependency_resumes_with_bytes_and_records_edge() {
-    let mut engine = Engine::new();
+    let mut engine = fixture_engine();
     let blob_id = engine.put_blob(b"hello").unwrap();
     engine.register_rule(
         pure_rule("length", interface(&[], Type::Int)),
@@ -356,7 +429,7 @@ fn blob_dependency_resumes_with_bytes_and_records_edge() {
 
 #[test]
 fn missing_blob_reports_clean_diagnostic() {
-    let mut engine = Engine::new();
+    let mut engine = fixture_engine();
     let absent = ContentId::of_blob(b"not stored");
     engine.register_rule(
         pure_rule("length", interface(&[], Type::Int)),
@@ -379,7 +452,7 @@ fn missing_blob_reports_clean_diagnostic() {
 
 #[test]
 fn action_dependency_driven_through_run() {
-    let mut engine = Engine::new();
+    let mut engine = fixture_engine();
     let action_iface = interface(&[Type::Int], Type::Blob);
     let pure_iface = interface(&[], Type::Blob);
     engine.register_action_rule(action_rule("double", action_iface.clone()), DoubleAction);
@@ -462,8 +535,91 @@ fn action_dependency_driven_through_run() {
 }
 
 #[test]
-fn action_result_type_checked_against_interface() {
+fn action_output_bytes_are_imported_by_the_engine() {
+    let mut engine = fixture_engine();
+    let action_iface = interface(&[Type::Int], Type::Blob);
+    let pure_iface = interface(&[], Type::Blob);
+    engine.register_action_rule(action_rule("double", action_iface.clone()), DoubleAction);
+    engine.register_rule(
+        pure_rule("entry", pure_iface.clone()),
+        ActionDepRule {
+            dependency: action_request("double", action_iface, [Value::Int(21)]),
+        },
+    );
+
+    let action_evaluation = engine
+        .run(
+            &pure_request("entry", pure_iface, []),
+            &TokioRuntime,
+            &AllowAllActions,
+            &FixtureExecutor,
+        )
+        .unwrap()
+        .unwrap();
+    let Value::Blob(output) = action_evaluation.value else {
+        unreachable!("fixture action returns a blob")
+    };
+
+    engine.register_rule(
+        pure_rule("length", interface(&[], Type::Int)),
+        BlobLenRule { blob: output },
+    );
+    let bytes_evaluation = engine
+        .run(
+            &pure_request("length", interface(&[], Type::Int), []),
+            &TokioRuntime,
+            &AllowAllActions,
+            &FixtureExecutor,
+        )
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(output, double_result(21));
+    assert_eq!(bytes_evaluation.value, Value::Int(2));
+}
+
+#[test]
+fn missing_action_input_is_rejected_before_executor_call() {
     let mut engine = Engine::new();
+    assert_eq!(
+        put_fixture_blob(&mut engine, b"fixture:double"),
+        double_executable()
+    );
+    let action_interface = interface(&[Type::Int], Type::Blob);
+    let root_interface = interface(&[], Type::Blob);
+    engine.register_action_rule(
+        action_rule("double", action_interface.clone()),
+        DoubleAction,
+    );
+    engine.register_rule(
+        pure_rule("entry", root_interface.clone()),
+        ActionDepRule {
+            dependency: action_request("double", action_interface, [Value::Int(21)]),
+        },
+    );
+    let executions = Arc::new(AtomicUsize::new(0));
+    let executor = NeverExecutor {
+        executions: executions.clone(),
+    };
+
+    let diagnostics = engine
+        .run(
+            &pure_request("entry", root_interface, []),
+            &TokioRuntime,
+            &AllowAllActions,
+            &executor,
+        )
+        .unwrap()
+        .unwrap_err();
+    let diagnostic = diagnostics.iter().next().unwrap();
+
+    assert_eq!(diagnostic.code, StableCode::engine(205));
+    assert_eq!(executions.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn action_result_type_checked_against_interface() {
+    let mut engine = fixture_engine();
     let action_iface = interface(&[], Type::Bool);
     let pure_iface = interface(&[], Type::Int);
     engine.register_action_rule(action_rule("liar", action_iface), WrongTypeAction);
@@ -490,7 +646,7 @@ fn action_result_type_checked_against_interface() {
 
 #[test]
 fn undeclared_capability_use_is_rejected() {
-    let mut engine = Engine::new();
+    let mut engine = fixture_engine();
     let action_iface = interface(&[Type::Int], Type::Blob);
     let pure_iface = interface(&[], Type::Blob);
     engine.register_action_rule(action_rule("double", action_iface.clone()), DoubleAction);
@@ -517,7 +673,7 @@ fn undeclared_capability_use_is_rejected() {
 
 #[test]
 fn policy_denial_is_recorded_before_execution() {
-    let mut engine = Engine::new();
+    let mut engine = fixture_engine();
     let action_interface = interface(&[Type::Int], Type::Blob);
     let root_interface = interface(&[], Type::Blob);
     engine.register_action_rule(
@@ -570,7 +726,7 @@ fn policy_denial_is_recorded_before_execution() {
 
 #[test]
 fn executor_must_report_the_planned_platform() {
-    let mut engine = Engine::new();
+    let mut engine = fixture_engine();
     let action_interface = interface(&[Type::Int], Type::Blob);
     let root_interface = interface(&[], Type::Blob);
     engine.register_action_rule(
@@ -612,7 +768,7 @@ fn executor_must_report_the_planned_platform() {
 
 #[test]
 fn action_dependencies_are_not_reused_without_a_cache_identity() {
-    let mut engine = Engine::new();
+    let mut engine = fixture_engine();
     let action_interface = interface(&[Type::Int], Type::Blob);
     let root_interface = interface(&[], Type::Blob);
     engine.register_action_rule(
@@ -673,7 +829,7 @@ fn action_dependencies_are_not_reused_without_a_cache_identity() {
 
 #[test]
 fn distinct_parents_do_not_share_action_results() {
-    let mut engine = Engine::new();
+    let mut engine = fixture_engine();
     let action_interface = interface(&[Type::Int], Type::Blob);
     let boolean_parent_interface = interface(&[Type::Bool], Type::Blob);
     let text_parent_interface = interface(&[Type::Text], Type::Blob);
@@ -743,7 +899,7 @@ fn distinct_parents_do_not_share_action_results() {
 
 #[test]
 fn unverified_action_dependencies_are_not_reused() {
-    let mut engine = Engine::new();
+    let mut engine = fixture_engine();
     let action_interface = interface(&[Type::Int], Type::Blob);
     let root_interface = interface(&[], Type::Blob);
     engine.register_action_rule(
@@ -782,7 +938,7 @@ fn unverified_action_dependencies_are_not_reused() {
 
 #[test]
 fn effectful_step_in_pure_only_evaluation_is_rejected() {
-    let mut engine = Engine::new();
+    let mut engine = fixture_engine();
     let blob_id = engine.put_blob(b"x").unwrap();
     engine.register_rule(
         pure_rule("length", interface(&[], Type::Int)),

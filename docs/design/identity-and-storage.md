@@ -41,7 +41,7 @@ links among these five identities are recorded as provenance. the types prevent 
 
 ## immutable storage
 
-the kernel stores blobs, trees, and serializable values by digest. packages, filesystem images, container manifests, release bundles, and compiler outputs are interpretations built by libraries.
+the kernel stores blobs, trees, and serializable values by digest. tree identity includes the artifact semantics needed for faithful materialization, including whether a file is executable and the byte target of a symlink. packages, filesystem images, container manifests, release bundles, and compiler outputs are interpretations built by libraries.
 
 materialization is independent from identity. a graph can refer to remote content without copying it to the local filesystem.
 
@@ -50,4 +50,3 @@ materialization is independent from identity. a graph can refer to remote conten
 the engine records the rule, inputs, transformations, capabilities, trust state, and diagnostics associated with a value while it is derived.
 
 signatures and supply-chain attestations refer to this evidence. a signature over content does not silently imply bit-for-bit reproducibility or trusted dependencies. reproducibility is a distinct claim: content-addressed identity is provided by construction, clean-build equivalence is the engine's invariant under declared inputs, and bit-for-bit reproducibility is a property of the build instructions and environment that the engine verifies by comparison and records, but does not produce.
-

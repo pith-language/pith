@@ -14,13 +14,21 @@ pub use ir::{
 pub use query::EngineQuery;
 
 use indexmap::IndexMap;
-use pith_core::{Action, Pure, Request, Rule, RuleArena, RuleId, Type, Value, select_rule};
+use pith_core::{
+    Action, ActionInputContent, ActionOutputKind, Pure, Request, Rule, RuleArena, RuleId, Type,
+    Value, select_rule,
+};
 use pith_diag::{Diag, DiagnosticSink, PithResult, Severity, Span, StableCode};
 use pith_ids::{ComputationArena, ComputationId, ContentId};
-use pith_store::{ContentStore, MemoryContentStore};
+use pith_store::{ContentStore, MemoryContentStore, Tree, TreeEntry, TreeEntryContent};
 use smallvec::SmallVec;
 
-use crate::action::{ActionExecution, ActionRule, Executor};
+use crate::action::{
+    ActionExecution, ActionInvocation, ActionRule, CapturedActionExecution, CapturedOutput,
+    CapturedOutputContent, CapturedTree, CapturedTreeEntryContent, ExecutionReport, Executor,
+    MaterializedActionInput, MaterializedContent, MaterializedTree, MaterializedTreeEntry,
+    MaterializedTreeEntryContent, ProducedOutput,
+};
 use crate::policy::{ActionAuthorization, ActionPolicy};
 use crate::runtime::Runtime;
 use capabilities::canonical_capabilities;
@@ -438,7 +446,15 @@ impl Engine {
             return Err(diagnostics);
         }
 
-        let execution = match executor.execute(&plan.spec).await {
+        let invocation = self.materialize_action(&plan.spec)?;
+        let captured = match executor.execute(&invocation).await {
+            Ok(execution) => execution,
+            Err(diagnostics) => {
+                self.mark_action_failed(computation, None);
+                return Err(diagnostics);
+            }
+        };
+        let execution = match self.import_execution(captured) {
             Ok(execution) => execution,
             Err(diagnostics) => {
                 self.mark_action_failed(computation, None);
@@ -480,47 +496,158 @@ impl Engine {
         Ok((value, computation))
     }
 
+    fn materialize_action(&self, spec: &pith_core::ActionSpec) -> PithResult<ActionInvocation> {
+        let executable = self.materialize_content_by_id(spec.executable)?;
+        let mut inputs = Vec::with_capacity(spec.inputs.len());
+        for input in &spec.inputs {
+            let content = match input.content {
+                ActionInputContent::Blob(id) => self.materialize_blob(id)?,
+                ActionInputContent::Tree(id) => {
+                    MaterializedContent::Tree(self.materialize_tree(id)?)
+                }
+            };
+            inputs.push(MaterializedActionInput {
+                path: input.path.clone(),
+                content,
+            });
+        }
+        Ok(ActionInvocation {
+            spec: spec.clone(),
+            executable,
+            inputs: inputs.into_boxed_slice(),
+        })
+    }
+
+    fn materialize_content_by_id(&self, id: ContentId) -> PithResult<MaterializedContent> {
+        if let Some(blob) = self.store.get_blob(id).map_err(store_error_diag)? {
+            return Ok(MaterializedContent::Blob {
+                id,
+                bytes: blob.as_bytes().to_vec().into_boxed_slice(),
+            });
+        }
+        if self.store.get_tree(id).map_err(store_error_diag)?.is_some() {
+            return Ok(MaterializedContent::Tree(self.materialize_tree(id)?));
+        }
+        Err(content_unavailable_diag(id))
+    }
+
+    fn materialize_blob(&self, id: ContentId) -> PithResult<MaterializedContent> {
+        match self.store.get_blob(id).map_err(store_error_diag)? {
+            Some(blob) => Ok(MaterializedContent::Blob {
+                id,
+                bytes: blob.as_bytes().to_vec().into_boxed_slice(),
+            }),
+            None => Err(content_unavailable_diag(id)),
+        }
+    }
+
+    fn materialize_tree(&self, id: ContentId) -> PithResult<MaterializedTree> {
+        let tree = match self.store.get_tree(id).map_err(store_error_diag)? {
+            Some(tree) => tree,
+            None => return Err(content_unavailable_diag(id)),
+        };
+        let mut entries = Vec::with_capacity(tree.entries().len());
+        for entry in tree.entries() {
+            let content = match entry.content() {
+                TreeEntryContent::File {
+                    content,
+                    executable,
+                } => {
+                    let MaterializedContent::Blob { bytes, .. } =
+                        self.materialize_blob(*content)?
+                    else {
+                        return Err(internal_diag("tree file content materialized as a tree"));
+                    };
+                    MaterializedTreeEntryContent::File {
+                        content: *content,
+                        executable: *executable,
+                        bytes,
+                    }
+                }
+                TreeEntryContent::Tree(child) => {
+                    MaterializedTreeEntryContent::Tree(self.materialize_tree(*child)?)
+                }
+                TreeEntryContent::Symlink { target } => MaterializedTreeEntryContent::Symlink {
+                    target: target.clone(),
+                },
+            };
+            entries.push(MaterializedTreeEntry {
+                name: entry.name().into(),
+                content,
+            });
+        }
+        Ok(MaterializedTree {
+            id,
+            entries: entries.into_boxed_slice(),
+        })
+    }
+
+    fn import_execution(
+        &mut self,
+        captured: CapturedActionExecution,
+    ) -> PithResult<ActionExecution> {
+        let mut outputs = Vec::with_capacity(captured.report.outputs.len());
+        for output in &captured.report.outputs {
+            outputs.push(ProducedOutput {
+                path: output.path.clone(),
+                kind: output.kind,
+                content: self.import_output(output)?,
+            });
+        }
+        Ok(ActionExecution {
+            report: ExecutionReport {
+                executor: captured.report.executor,
+                platform: captured.report.platform,
+                access: captured.report.access,
+                outputs: outputs.into_boxed_slice(),
+                capabilities_used: captured.report.capabilities_used,
+            },
+        })
+    }
+
+    fn import_output(&mut self, output: &CapturedOutput) -> PithResult<ContentId> {
+        match (&output.kind, &output.content) {
+            (ActionOutputKind::Blob, CapturedOutputContent::Blob(bytes)) => {
+                self.store.put_blob(bytes).map_err(store_error_diag)
+            }
+            (ActionOutputKind::Tree, CapturedOutputContent::Tree(tree)) => self.import_tree(tree),
+            (ActionOutputKind::Blob, CapturedOutputContent::Tree(_))
+            | (ActionOutputKind::Tree, CapturedOutputContent::Blob(_)) => {
+                Err(wrong_output_kind_diag(&output.path))
+            }
+        }
+    }
+
+    fn import_tree(&mut self, tree: &CapturedTree) -> PithResult<ContentId> {
+        let mut entries = Vec::with_capacity(tree.entries.len());
+        for entry in &tree.entries {
+            let content = match &entry.content {
+                CapturedTreeEntryContent::File { bytes, executable } => {
+                    let content = self.store.put_blob(bytes).map_err(store_error_diag)?;
+                    TreeEntryContent::File {
+                        content,
+                        executable: *executable,
+                    }
+                }
+                CapturedTreeEntryContent::Tree(tree) => {
+                    TreeEntryContent::Tree(self.import_tree(tree)?)
+                }
+                CapturedTreeEntryContent::Symlink { target } => TreeEntryContent::Symlink {
+                    target: target.clone(),
+                },
+            };
+            entries.push(TreeEntry::new(entry.name.clone(), content).map_err(store_error_diag)?);
+        }
+        let tree = Tree::new(entries).map_err(store_error_diag)?;
+        self.store.put_tree(tree).map_err(store_error_diag)
+    }
+
     fn validate_execution(
         &self,
         spec: &pith_core::ActionSpec,
         execution: &ActionExecution,
     ) -> PithResult<()> {
-        if execution.report.platform.operating_system.is_empty()
-            || execution.report.platform.architecture.is_empty()
-        {
-            return Err(one_diag(Diag::new(
-                Severity::Error,
-                StableCode::engine(212),
-                Span::none(),
-                "executor did not report a concrete execution platform",
-            )));
-        }
-
-        match (&spec.platform, &execution.report.platform) {
-            (
-                pith_core::PlatformRequirement::Exact {
-                    operating_system,
-                    architecture,
-                },
-                actual,
-            ) if operating_system != &actual.operating_system
-                || architecture != &actual.architecture =>
-            {
-                return Err(one_diag(Diag::new(
-                    Severity::Error,
-                    StableCode::engine(212),
-                    Span::none(),
-                    format!(
-                        "executor selected platform `{}-{}`, expected `{}-{}`",
-                        actual.operating_system,
-                        actual.architecture,
-                        operating_system,
-                        architecture
-                    ),
-                )));
-            }
-            _ => {}
-        }
+        validate_execution_platform(spec, &execution.report.platform)?;
 
         for used in &execution.report.capabilities_used {
             if !spec.capabilities.contains(used) {
@@ -587,6 +714,49 @@ impl Engine {
     }
 }
 
+fn validate_execution_platform(
+    spec: &pith_core::ActionSpec,
+    actual: &crate::ExecutionPlatform,
+) -> PithResult<()> {
+    if actual.operating_system.is_empty() || actual.architecture.is_empty() {
+        return Err(one_diag(Diag::new(
+            Severity::Error,
+            StableCode::engine(212),
+            Span::none(),
+            "executor did not report a concrete execution platform",
+        )));
+    }
+
+    match &spec.platform {
+        pith_core::PlatformRequirement::Exact {
+            operating_system,
+            architecture,
+        } if operating_system != &actual.operating_system
+            || architecture != &actual.architecture =>
+        {
+            Err(one_diag(Diag::new(
+                Severity::Error,
+                StableCode::engine(212),
+                Span::none(),
+                format!(
+                    "executor selected platform `{}-{}`, expected `{}-{}`",
+                    actual.operating_system, actual.architecture, operating_system, architecture
+                ),
+            )))
+        }
+        _ => Ok(()),
+    }
+}
+
+fn wrong_output_kind_diag(path: &str) -> DiagnosticSink {
+    one_diag(Diag::new(
+        Severity::Error,
+        StableCode::engine(209),
+        Span::none(),
+        format!("executor reported output `{path}` with the wrong kind"),
+    ))
+}
+
 fn validate_action_result(
     value: &Value,
     declared_output: &Type,
@@ -650,6 +820,15 @@ fn store_error_diag(error: pith_store::StoreError) -> DiagnosticSink {
         StableCode::engine(207),
         Span::none(),
         format!("content store error: {error}"),
+    ))
+}
+
+fn content_unavailable_diag(id: ContentId) -> DiagnosticSink {
+    one_diag(Diag::new(
+        Severity::Error,
+        StableCode::engine(205),
+        Span::none(),
+        format!("content {id:?} is not available locally"),
     ))
 }
 

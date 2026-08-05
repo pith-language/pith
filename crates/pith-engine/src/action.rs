@@ -26,11 +26,61 @@ pub trait ActionRule: Send + Sync {
 /// Adapter boundary for local, remote, or test action execution.
 #[async_trait]
 pub trait Executor: Send + Sync {
-    /// Execute `spec` and return captured outputs and an execution report.
+    /// Execute `invocation` and return captured output bytes and a report.
     ///
     /// # Errors
     /// Returns structured diagnostics when the action cannot be executed.
-    async fn execute(&self, spec: &ActionSpec) -> PithResult<ActionExecution>;
+    async fn execute(&self, invocation: &ActionInvocation) -> PithResult<CapturedActionExecution>;
+}
+
+/// Least-authority input view passed to an executor for one action.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ActionInvocation {
+    pub spec: ActionSpec,
+    pub executable: MaterializedContent,
+    pub inputs: Box<[MaterializedActionInput]>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MaterializedActionInput {
+    pub path: Box<str>,
+    pub content: MaterializedContent,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MaterializedContent {
+    Blob { id: ContentId, bytes: Box<[u8]> },
+    Tree(MaterializedTree),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MaterializedTree {
+    pub id: ContentId,
+    pub entries: Box<[MaterializedTreeEntry]>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MaterializedTreeEntry {
+    pub name: Box<str>,
+    pub content: MaterializedTreeEntryContent,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MaterializedTreeEntryContent {
+    File {
+        content: ContentId,
+        executable: bool,
+        bytes: Box<[u8]>,
+    },
+    Tree(MaterializedTree),
+    Symlink {
+        target: Box<[u8]>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CapturedActionExecution {
+    pub report: CapturedExecutionReport,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -64,11 +114,51 @@ pub struct ProducedOutput {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CapturedOutput {
+    pub path: Box<str>,
+    pub kind: ActionOutputKind,
+    pub content: CapturedOutputContent,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CapturedOutputContent {
+    Blob(Box<[u8]>),
+    Tree(CapturedTree),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CapturedTree {
+    pub entries: Box<[CapturedTreeEntry]>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CapturedTreeEntry {
+    pub name: Box<str>,
+    pub content: CapturedTreeEntryContent,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CapturedTreeEntryContent {
+    File { bytes: Box<[u8]>, executable: bool },
+    Tree(CapturedTree),
+    Symlink { target: Box<[u8]> },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecutionReport {
     pub executor: Box<str>,
     pub platform: ExecutionPlatform,
     pub access: AccessVerification,
     pub outputs: Box<[ProducedOutput]>,
+    pub capabilities_used: Box<[CapabilityRequirement]>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CapturedExecutionReport {
+    pub executor: Box<str>,
+    pub platform: ExecutionPlatform,
+    pub access: AccessVerification,
+    pub outputs: Box<[CapturedOutput]>,
     pub capabilities_used: Box<[CapabilityRequirement]>,
 }
 
