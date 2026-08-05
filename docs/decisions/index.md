@@ -47,6 +47,10 @@ when an accepted decision changes, a new record supersedes it. the old record st
 - [0018: total pure evaluation by construction, with cycle detection and a backstop limit](0018-termination-and-recursion.md)
 - [0019: five type-level effect categories, with nondeterminism as a tracked dependency](0019-effect-categories-and-nondeterminism.md)
 - [0020: reuse Nix infrastructure as adapters, not as the substrate](0020-nix-as-adapter-not-substrate.md)
+- [0021: a hand-built arena graph with explicit change propagation, not a salsa query DB](0021-arena-graph-engine.md)
+- [0022: a synchronous pure evaluator core with an async scheduler at the effect boundary](0022-sync-core-async-scheduler.md)
 
 note: 0013 amends 0005 to add a fifth identity type. 0005 stands; the amendment is recorded in 0013.
+
+note: 0022 refines 0019 by fixing where each effect category executes (synchronous step machine for `Pure`, async scheduler for the other four). 0019 stands; the refinement is recorded in 0022.
 
