@@ -13,7 +13,7 @@ pub use ir::{
 pub use query::EngineQuery;
 
 use indexmap::IndexMap;
-use pith_core::{Action, Pure, Request, Rule, RuleArena, RuleId, Value, select_rule};
+use pith_core::{Action, Pure, Request, Rule, RuleArena, RuleId, Type, Value, select_rule};
 use pith_diag::{Diag, DiagnosticSink, PithResult, Severity, Span, StableCode};
 use pith_ids::{ComputationArena, ComputationId, ContentId};
 use pith_store::{ContentStore, MemoryContentStore};
@@ -22,7 +22,7 @@ use smallvec::SmallVec;
 use crate::action::{ActionExecution, ActionPlanner, Executor};
 use crate::runtime::Runtime;
 use ir::EvalFrame;
-use reuse::PureComputationIndex;
+use reuse::{ActionComputationIndex, PureComputationIndex};
 
 pub struct Engine {
     pub(crate) rules: RuleArena<Rule<Pure>>,
@@ -31,6 +31,7 @@ pub struct Engine {
     pub(crate) action_planners: IndexMap<RuleId, Box<dyn ActionPlanner>>,
     pub(crate) computations: ComputationArena<ComputationNode>,
     pure_computations: PureComputationIndex,
+    action_computations: ActionComputationIndex,
     pub(crate) store: MemoryContentStore,
 }
 
@@ -43,6 +44,7 @@ impl Engine {
             action_planners: IndexMap::new(),
             computations: ComputationArena::new(),
             pure_computations: IndexMap::new(),
+            action_computations: IndexMap::new(),
             store: MemoryContentStore::default(),
         }
     }
@@ -363,7 +365,12 @@ impl Engine {
             return Err(internal_diag("selected action rule has no planner"));
         };
         let spec = planner.plan(&request.inputs)?;
-        Ok(ActionPlan { rule, spec })
+        let identity = spec.identity();
+        Ok(ActionPlan {
+            rule,
+            identity,
+            spec,
+        })
     }
 
     async fn run_action<E: Executor>(
@@ -381,12 +388,18 @@ impl Engine {
         let rule_span = action_rule.span;
         let rule_label = action_rule.label.clone();
 
+        if let Some((value, computation)) = self.reusable_action_result(plan.identity) {
+            validate_action_result(&value, &declared_output, &rule_label, rule_span)?;
+            return Ok((value, computation));
+        }
+
         let computation = self.computations.push(ComputationNode {
             kind: ComputationKind::Action(request.clone()),
             rule,
             dependencies: SmallVec::new(),
             result: None,
             action: Some(ActionRecord {
+                identity: plan.identity,
                 spec: plan.spec.clone(),
                 evidence: None,
             }),
@@ -396,28 +409,21 @@ impl Engine {
         let execution = executor.execute(&plan.spec).await?;
         self.validate_execution(&plan.spec, &execution)?;
         let value = execution.value;
-
-        let actual = value.value_type();
-        if actual != declared_output {
-            return Err(one_diag(Diag::new(
-                Severity::Error,
-                StableCode::engine(104),
-                rule_span,
-                format!(
-                    "action `{}` returned {}, expected {}",
-                    rule_label, actual, declared_output
-                ),
-            )));
-        }
+        validate_action_result(&value, &declared_output, &rule_label, rule_span)?;
+        let is_reusable = execution.evidence.contract == crate::ContractVerification::Enforced;
 
         let Some(node) = self.computations.get_mut(computation) else {
             return Err(internal_diag("action evaluator lost its computation node"));
         };
         node.result = Some(value.clone());
+        node.is_reusable = is_reusable;
         let Some(action) = node.action.as_mut() else {
             return Err(internal_diag("action evaluator lost its action record"));
         };
         action.evidence = Some(execution.evidence);
+        if is_reusable {
+            self.index_action_computation(plan.identity, computation);
+        }
 
         Ok((value, computation))
     }
@@ -477,6 +483,24 @@ impl Engine {
 
         Ok(())
     }
+}
+
+fn validate_action_result(
+    value: &Value,
+    declared_output: &Type,
+    rule_label: &str,
+    rule_span: Span,
+) -> PithResult<()> {
+    let actual = value.value_type();
+    if actual != *declared_output {
+        return Err(one_diag(Diag::new(
+            Severity::Error,
+            StableCode::engine(104),
+            rule_span,
+            format!("action `{rule_label}` returned {actual}, expected {declared_output}"),
+        )));
+    }
+    Ok(())
 }
 
 impl Default for Engine {

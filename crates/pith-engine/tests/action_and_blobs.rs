@@ -164,6 +164,20 @@ struct CountingExecutor {
     executions: Arc<AtomicUsize>,
 }
 
+struct UnverifiedCountingExecutor {
+    executions: Arc<AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl Executor for UnverifiedCountingExecutor {
+    async fn execute(&self, spec: &ActionSpec) -> PithResult<ActionExecution> {
+        self.executions.fetch_add(1, Ordering::Relaxed);
+        let mut execution = FixtureExecutor.execute(spec).await?;
+        execution.evidence.contract = ContractVerification::Unverified;
+        Ok(execution)
+    }
+}
+
 #[async_trait::async_trait]
 impl Executor for CountingExecutor {
     async fn execute(&self, spec: &ActionSpec) -> PithResult<ActionExecution> {
@@ -284,6 +298,7 @@ fn action_dependency_driven_through_run() {
         ))
         .unwrap();
     assert_eq!(plan.spec.executable, double_executable());
+    assert_eq!(plan.identity, plan.spec.identity());
     assert_eq!(
         plan.spec
             .arguments
@@ -318,6 +333,7 @@ fn action_dependency_driven_through_run() {
         .computation(action_computation)
         .and_then(|node| node.action.as_ref())
         .unwrap();
+    assert_eq!(action.identity, action.spec.identity());
     assert_eq!(action.spec.executable, double_executable());
     assert_eq!(
         action.evidence.as_ref().map(|evidence| evidence.contract),
@@ -378,7 +394,7 @@ fn undeclared_capability_use_is_rejected() {
 }
 
 #[test]
-fn action_dependent_computations_are_not_reused() {
+fn enforced_action_dependencies_are_reused() {
     let mut engine = Engine::new();
     let action_interface = interface(&[Type::Int], Type::Int);
     let root_interface = interface(&[], Type::Int);
@@ -394,6 +410,111 @@ fn action_dependent_computations_are_not_reused() {
     );
     let executions = Arc::new(AtomicUsize::new(0));
     let executor = CountingExecutor {
+        executions: executions.clone(),
+    };
+    let root_request = pure_request("entry", root_interface, []);
+
+    let first_runtime_result = engine.run(&root_request, &TokioRuntime, &executor);
+    assert!(matches!(&first_runtime_result, Ok(Ok(_))));
+    let first_evaluation_result = first_runtime_result.unwrap();
+    let first = first_evaluation_result.unwrap();
+
+    let second_runtime_result = engine.run(&root_request, &TokioRuntime, &executor);
+    assert!(matches!(&second_runtime_result, Ok(Ok(_))));
+    let second_evaluation_result = second_runtime_result.unwrap();
+    let second = second_evaluation_result.unwrap();
+
+    assert_eq!(first.source, EvaluationSource::Computed);
+    assert_eq!(second.source, EvaluationSource::Reused);
+    assert_eq!(first.computation, second.computation);
+    assert_eq!(executions.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn distinct_parents_share_an_enforced_action() {
+    let mut engine = Engine::new();
+    let action_interface = interface(&[Type::Int], Type::Int);
+    let boolean_parent_interface = interface(&[Type::Bool], Type::Int);
+    let text_parent_interface = interface(&[Type::Text], Type::Int);
+    let dependency = action_request("double", action_interface.clone(), [Value::Int(21)]);
+    engine.register_action_rule(action_rule("double", action_interface), DoubleAction);
+    engine.register_rule(
+        pure_rule("boolean parent", boolean_parent_interface.clone()),
+        ActionDepRule {
+            dependency: dependency.clone(),
+        },
+    );
+    engine.register_rule(
+        pure_rule("text parent", text_parent_interface.clone()),
+        ActionDepRule { dependency },
+    );
+    let executions = Arc::new(AtomicUsize::new(0));
+    let executor = CountingExecutor {
+        executions: executions.clone(),
+    };
+
+    let boolean_runtime_result = engine.run(
+        &pure_request(
+            "boolean parent",
+            boolean_parent_interface,
+            [Value::Bool(true)],
+        ),
+        &TokioRuntime,
+        &executor,
+    );
+    assert!(matches!(&boolean_runtime_result, Ok(Ok(_))));
+    let boolean_evaluation_result = boolean_runtime_result.unwrap();
+    let boolean_parent = boolean_evaluation_result.unwrap();
+
+    let text_runtime_result = engine.run(
+        &pure_request(
+            "text parent",
+            text_parent_interface,
+            [Value::Text("input".into())],
+        ),
+        &TokioRuntime,
+        &executor,
+    );
+    assert!(matches!(&text_runtime_result, Ok(Ok(_))));
+    let text_evaluation_result = text_runtime_result.unwrap();
+    let text_parent = text_evaluation_result.unwrap();
+
+    let boolean_action = engine
+        .query()
+        .dependencies_of(boolean_parent.computation)
+        .and_then(|dependencies| dependencies.first())
+        .and_then(pith_engine::DependencyEdge::computation_id)
+        .unwrap();
+    let text_action = engine
+        .query()
+        .dependencies_of(text_parent.computation)
+        .and_then(|dependencies| dependencies.first())
+        .and_then(pith_engine::DependencyEdge::computation_id)
+        .unwrap();
+
+    assert_eq!(boolean_parent.source, EvaluationSource::Computed);
+    assert_eq!(text_parent.source, EvaluationSource::Computed);
+    assert_eq!(boolean_action, text_action);
+    assert_eq!(executions.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn unverified_action_dependencies_are_not_reused() {
+    let mut engine = Engine::new();
+    let action_interface = interface(&[Type::Int], Type::Int);
+    let root_interface = interface(&[], Type::Int);
+    engine.register_action_rule(
+        action_rule("double", action_interface.clone()),
+        DoubleAction,
+    );
+    engine.register_rule(
+        pure_rule("entry", root_interface.clone()),
+        ActionDepRule {
+            dependency: action_request("double", action_interface, [Value::Int(21)]),
+        },
+    );
+    let executions = Arc::new(AtomicUsize::new(0));
+    let executor = UnverifiedCountingExecutor {
         executions: executions.clone(),
     };
     let root_request = pure_request("entry", root_interface, []);
