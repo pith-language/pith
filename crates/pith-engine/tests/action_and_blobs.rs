@@ -94,7 +94,7 @@ impl ActionRule for DoubleAction {
             operating_system: "fixture".into(),
             architecture: "fixture".into(),
         };
-        spec.capabilities = [double_capability()].into();
+        spec.capabilities = declared_double_capabilities().into();
         spec.outputs = [ActionOutput {
             path: "result".into(),
             kind: ActionOutputKind::Blob,
@@ -260,6 +260,21 @@ fn double_capability() -> CapabilityRequirement {
     }
 }
 
+fn double_audit_capability() -> CapabilityRequirement {
+    CapabilityRequirement {
+        name: "fixture.audit".into(),
+        scope: "result".into(),
+    }
+}
+
+fn declared_double_capabilities() -> [CapabilityRequirement; 2] {
+    [double_capability(), double_audit_capability()]
+}
+
+fn effective_double_capabilities() -> [CapabilityRequirement; 2] {
+    [double_audit_capability(), double_capability()]
+}
+
 fn fixture_platform() -> ExecutionPlatform {
     ExecutionPlatform {
         operating_system: "fixture".into(),
@@ -385,7 +400,10 @@ fn action_dependency_driven_through_run() {
         .unwrap();
     assert_eq!(plan.spec.executable, double_executable());
     assert_eq!(plan.spec_digest, plan.spec.digest().unwrap());
-    assert_eq!(plan.spec.capabilities.as_ref(), &[double_capability()]);
+    assert_eq!(
+        plan.spec.capabilities.as_ref(),
+        declared_double_capabilities().as_slice()
+    );
     assert_eq!(
         plan.spec
             .arguments
@@ -435,11 +453,11 @@ fn action_dependency_driven_through_run() {
     );
     assert_eq!(
         engine.query().capabilities_of(action_computation),
-        Some([double_capability()].as_slice())
+        Some(effective_double_capabilities().as_slice())
     );
     assert_eq!(
         engine.query().capabilities_of(evaluation.computation),
-        Some([double_capability()].as_slice())
+        Some(effective_double_capabilities().as_slice())
     );
 }
 
