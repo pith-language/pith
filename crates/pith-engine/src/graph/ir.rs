@@ -3,7 +3,7 @@
 
 use pith_core::{Action, ActionSpec, Interface, Pure, Request, RuleId, Value};
 use pith_diag::PithResult;
-use pith_ids::{ActionDigest, ComputationId, ContentId};
+use pith_ids::{ActionSpecDigest, ComputationId, ContentId};
 use smallvec::SmallVec;
 
 /// One bounded transition made by a pure rule body.
@@ -79,13 +79,13 @@ pub enum ComputationKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActionPlan {
     pub rule: RuleId,
-    pub identity: ActionDigest,
+    pub spec_digest: ActionSpecDigest,
     pub spec: ActionSpec,
 }
 
 /// Declared contract and resulting evidence retained as action provenance.
 pub struct ActionRecord {
-    pub identity: ActionDigest,
+    pub spec_digest: ActionSpecDigest,
     pub spec: ActionSpec,
     pub evidence: Option<crate::ExecutionEvidence>,
 }

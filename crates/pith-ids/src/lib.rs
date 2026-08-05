@@ -98,9 +98,9 @@ impl std::fmt::Debug for ContentId {
 /// This is a persistent specialization of computation identity, not content
 /// identity: equal action contracts have equal digests even before they run.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ActionDigest(ContentDigest);
+pub struct ActionSpecDigest(ContentDigest);
 
-impl ActionDigest {
+impl ActionSpecDigest {
     pub fn of_manifest(manifest: &[u8]) -> Self {
         let mut hasher = blake3::Hasher::new();
         hasher.update(b"pith:action:v1\0");
@@ -113,9 +113,9 @@ impl ActionDigest {
     }
 }
 
-impl std::fmt::Debug for ActionDigest {
+impl std::fmt::Debug for ActionSpecDigest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ActionDigest({:?})", self.0)
+        write!(f, "ActionSpecDigest({:?})", self.0)
     }
 }
 
@@ -184,9 +184,9 @@ mod tests {
 
     #[test]
     fn action_digest_is_domain_separated() {
-        let action = ActionDigest::of_manifest(b"same");
+        let action = ActionSpecDigest::of_manifest(b"same");
 
-        assert_eq!(action, ActionDigest::of_manifest(b"same"));
+        assert_eq!(action, ActionSpecDigest::of_manifest(b"same"));
         assert_ne!(action.digest(), ContentDigest::of_bytes(b"same"));
         assert_ne!(action.digest(), ContentId::of_blob(b"same").digest());
     }

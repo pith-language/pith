@@ -1,6 +1,6 @@
 use indexmap::IndexMap;
 use pith_core::{Interface, Pure, Request, RuleId, Value};
-use pith_ids::{ActionDigest, ComputationId};
+use pith_ids::{ActionSpecDigest, ComputationId};
 
 use super::{DependencyEdge, Engine, Evaluation, EvaluationSource};
 
@@ -53,9 +53,9 @@ impl Engine {
 
     pub(super) fn reusable_action_result(
         &self,
-        identity: ActionDigest,
+        spec_digest: ActionSpecDigest,
     ) -> Option<(Value, ComputationId)> {
-        let computation = *self.action_computations.get(&identity)?;
+        let computation = *self.action_computations.get(&spec_digest)?;
         let node = self.computations.get(computation)?;
         if !node.is_reusable {
             return None;
@@ -66,10 +66,10 @@ impl Engine {
 
     pub(super) fn index_action_computation(
         &mut self,
-        identity: ActionDigest,
+        spec_digest: ActionSpecDigest,
         computation: ComputationId,
     ) {
-        self.action_computations.insert(identity, computation);
+        self.action_computations.insert(spec_digest, computation);
     }
 
     pub(super) fn pure_dependencies_are_reusable(&self, dependencies: &[DependencyEdge]) -> bool {
@@ -85,4 +85,4 @@ impl Engine {
 }
 
 pub(super) type PureComputationIndex = IndexMap<PureApplicationKey, ComputationId>;
-pub(super) type ActionComputationIndex = IndexMap<ActionDigest, ComputationId>;
+pub(super) type ActionComputationIndex = IndexMap<ActionSpecDigest, ComputationId>;

@@ -365,10 +365,10 @@ impl Engine {
             return Err(internal_diag("selected action rule has no planner"));
         };
         let spec = planner.plan(&request.inputs)?;
-        let identity = spec.identity();
+        let spec_digest = spec.digest().map_err(one_diag)?;
         Ok(ActionPlan {
             rule,
-            identity,
+            spec_digest,
             spec,
         })
     }
@@ -388,7 +388,7 @@ impl Engine {
         let rule_span = action_rule.span;
         let rule_label = action_rule.label.clone();
 
-        if let Some((value, computation)) = self.reusable_action_result(plan.identity) {
+        if let Some((value, computation)) = self.reusable_action_result(plan.spec_digest) {
             validate_action_result(&value, &declared_output, &rule_label, rule_span)?;
             return Ok((value, computation));
         }
@@ -399,7 +399,7 @@ impl Engine {
             dependencies: SmallVec::new(),
             result: None,
             action: Some(ActionRecord {
-                identity: plan.identity,
+                spec_digest: plan.spec_digest,
                 spec: plan.spec.clone(),
                 evidence: None,
             }),
@@ -422,7 +422,7 @@ impl Engine {
         };
         action.evidence = Some(execution.evidence);
         if is_reusable {
-            self.index_action_computation(plan.identity, computation);
+            self.index_action_computation(plan.spec_digest, computation);
         }
 
         Ok((value, computation))

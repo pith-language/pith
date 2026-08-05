@@ -3,7 +3,8 @@
 //! An [`ActionSpec`] is inert data. Planning one performs no external work;
 //! executors in `pith-engine` are responsible for enforcing the contract.
 
-use pith_ids::{ActionDigest, ContentId};
+use pith_diag::{Diag, Severity, Span, StableCode};
+use pith_ids::{ActionSpecDigest, ContentId};
 
 /// Immutable content made available to an action at a relative path.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -94,9 +95,125 @@ impl ActionSpec {
         }
     }
 
-    /// Derive persistent computation identity from the complete contract.
-    pub fn identity(&self) -> ActionDigest {
-        ActionDigest::of_manifest(&self.canonical_manifest())
+    /// Validate the complete declared contract.
+    ///
+    /// # Errors
+    /// Returns `E-1105` when a path, argument, environment entry, platform,
+    /// capability, or network host is invalid or ambiguous.
+    pub fn validate(&self) -> Result<(), Diag> {
+        for argument in &self.arguments {
+            if argument.contains('\0') {
+                return Err(invalid_action_spec("action argument contains a NUL byte"));
+            }
+        }
+
+        validate_paths(self.inputs.iter().map(|input| input.path.as_ref()), "input")?;
+        validate_paths(
+            self.outputs.iter().map(|output| output.path.as_ref()),
+            "output",
+        )?;
+        for input in &self.inputs {
+            for output in &self.outputs {
+                if paths_overlap(&input.path, &output.path) {
+                    return Err(invalid_action_spec(format!(
+                        "action input `{}` overlaps output `{}`",
+                        input.path, output.path
+                    )));
+                }
+            }
+        }
+
+        for (position, variable) in self.environment.iter().enumerate() {
+            if variable.name.is_empty()
+                || variable.name.contains('=')
+                || variable.name.contains('\0')
+            {
+                return Err(invalid_action_spec(format!(
+                    "invalid action environment variable name `{}`",
+                    variable.name
+                )));
+            }
+            if variable.value.contains('\0') {
+                return Err(invalid_action_spec(format!(
+                    "action environment variable `{}` contains a NUL byte",
+                    variable.name
+                )));
+            }
+            if self
+                .environment
+                .iter()
+                .take(position)
+                .any(|previous| previous.name == variable.name)
+            {
+                return Err(invalid_action_spec(format!(
+                    "duplicate action environment variable `{}`",
+                    variable.name
+                )));
+            }
+        }
+
+        if let PlatformRequirement::Exact {
+            operating_system,
+            architecture,
+        } = &self.platform
+            && (operating_system.is_empty() || architecture.is_empty())
+        {
+            return Err(invalid_action_spec(
+                "exact action platform requires an operating system and architecture",
+            ));
+        }
+
+        for (position, capability) in self.capabilities.iter().enumerate() {
+            if capability.name.is_empty()
+                || capability.scope.is_empty()
+                || capability.name.contains('\0')
+                || capability.scope.contains('\0')
+            {
+                return Err(invalid_action_spec(
+                    "action capability requires non-empty NUL-free name and scope",
+                ));
+            }
+            if self
+                .capabilities
+                .iter()
+                .take(position)
+                .any(|previous| previous == capability)
+            {
+                return Err(invalid_action_spec(format!(
+                    "duplicate action capability `{}` scoped to `{}`",
+                    capability.name, capability.scope
+                )));
+            }
+        }
+
+        if let NetworkPolicy::AllowHosts(hosts) = &self.network {
+            for (position, host) in hosts.iter().enumerate() {
+                if host.is_empty() || host.contains('\0') {
+                    return Err(invalid_action_spec(
+                        "allowed network host must be non-empty and NUL-free",
+                    ));
+                }
+                if hosts.iter().take(position).any(|previous| previous == host) {
+                    return Err(invalid_action_spec(format!(
+                        "duplicate allowed network host `{host}`"
+                    )));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Derive a stable digest from a valid declared contract.
+    ///
+    /// This digest identifies the specification, not a resolved execution or
+    /// reusable cache entry.
+    ///
+    /// # Errors
+    /// Returns `E-1105` when [`ActionSpec::validate`] rejects the contract.
+    pub fn digest(&self) -> Result<ActionSpecDigest, Diag> {
+        self.validate()?;
+        Ok(ActionSpecDigest::of_manifest(&self.canonical_manifest()))
     }
 
     fn canonical_manifest(&self) -> Vec<u8> {
@@ -194,6 +311,57 @@ impl ActionSpec {
     }
 }
 
+fn validate_paths<'path>(paths: impl Iterator<Item = &'path str>, kind: &str) -> Result<(), Diag> {
+    let paths: Vec<_> = paths.collect();
+    for (position, path) in paths.iter().enumerate() {
+        if !is_valid_action_path(path) {
+            return Err(invalid_action_spec(format!(
+                "invalid action {kind} path `{path}`"
+            )));
+        }
+        if let Some(previous) = paths
+            .iter()
+            .take(position)
+            .find(|previous| paths_overlap(previous, path))
+        {
+            return Err(invalid_action_spec(format!(
+                "action {kind} path `{path}` overlaps `{previous}`"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn is_valid_action_path(path: &str) -> bool {
+    !path.is_empty()
+        && !path.starts_with('/')
+        && !path.ends_with('/')
+        && !path.contains('\\')
+        && !path.contains('\0')
+        && path
+            .split('/')
+            .all(|component| !component.is_empty() && component != "." && component != "..")
+}
+
+fn paths_overlap(left: &str, right: &str) -> bool {
+    left == right
+        || right
+            .strip_prefix(left)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+        || left
+            .strip_prefix(right)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
+fn invalid_action_spec(message: impl Into<Box<str>>) -> Diag {
+    Diag::new(
+        Severity::Error,
+        StableCode::engine(105),
+        Span::none(),
+        message,
+    )
+}
+
 fn action_input_content_tag(content: ActionInputContent) -> u8 {
     match content {
         ActionInputContent::Blob(_) => 0,
@@ -284,7 +452,7 @@ mod tests {
         second.inputs.reverse();
         second.environment.reverse();
 
-        assert_eq!(first.identity(), second.identity());
+        assert_eq!(first.digest().unwrap(), second.digest().unwrap());
     }
 
     #[test]
@@ -373,7 +541,44 @@ mod tests {
         ];
 
         for variant in variants {
-            assert_ne!(baseline.identity(), variant.identity());
+            assert_ne!(baseline.digest().unwrap(), variant.digest().unwrap());
         }
+    }
+
+    #[test]
+    fn invalid_or_ambiguous_paths_are_rejected() {
+        for path in [
+            "",
+            "/absolute",
+            "parent/../child",
+            "trailing/",
+            "back\\slash",
+        ] {
+            let mut spec = ActionSpec::isolated(ContentId::of_blob(b"tool"));
+            spec.inputs = [ActionInput {
+                path: path.into(),
+                content: ActionInputContent::Blob(ContentId::of_blob(b"input")),
+            }]
+            .into();
+
+            assert_eq!(spec.validate().unwrap_err().code, StableCode::engine(105));
+        }
+
+        let mut overlapping = ActionSpec::isolated(ContentId::of_blob(b"tool"));
+        overlapping.inputs = [ActionInput {
+            path: "source".into(),
+            content: ActionInputContent::Tree(ContentId::of_tree(b"source")),
+        }]
+        .into();
+        overlapping.outputs = [ActionOutput {
+            path: "source/generated".into(),
+            kind: ActionOutputKind::Tree,
+        }]
+        .into();
+
+        assert_eq!(
+            overlapping.validate().unwrap_err().code,
+            StableCode::engine(105)
+        );
     }
 }

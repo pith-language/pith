@@ -298,7 +298,7 @@ fn action_dependency_driven_through_run() {
         ))
         .unwrap();
     assert_eq!(plan.spec.executable, double_executable());
-    assert_eq!(plan.identity, plan.spec.identity());
+    assert_eq!(plan.spec_digest, plan.spec.digest().unwrap());
     assert_eq!(
         plan.spec
             .arguments
@@ -333,7 +333,7 @@ fn action_dependency_driven_through_run() {
         .computation(action_computation)
         .and_then(|node| node.action.as_ref())
         .unwrap();
-    assert_eq!(action.identity, action.spec.identity());
+    assert_eq!(action.spec_digest, action.spec.digest().unwrap());
     assert_eq!(action.spec.executable, double_executable());
     assert_eq!(
         action.evidence.as_ref().map(|evidence| evidence.contract),
