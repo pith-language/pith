@@ -4,6 +4,7 @@ members = [
     "crates/pith-diag",
     "crates/pith-output",
     "crates/pith-ids",
+    "crates/pith-store",
     "crates/pith-arena",
     "crates/pith-core",
     "crates/pith-engine",
@@ -32,6 +33,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 blake3 = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros"] }
+# async fn in dyn-dispatch traits (ActionRule is stored as Box<dyn ActionRule>).
+# Native async-fn-in-trait does not support dyn dispatch; async_trait is the
+# standard solution.
+async-trait = "0.1"
 anstream = "0.6"
 anstyle = "1"
 owo-colors = "4"
@@ -43,6 +48,7 @@ insta = { version = "1", features = ["json"] }
 pith-diag = { path = "crates/pith-diag", version = "0.1.0" }
 pith-output = { path = "crates/pith-output", version = "0.1.0" }
 pith-ids = { path = "crates/pith-ids", version = "0.1.0" }
+pith-store = { path = "crates/pith-store", version = "0.1.0" }
 pith-arena = { path = "crates/pith-arena", version = "0.1.0" }
 pith-core = { path = "crates/pith-core", version = "0.1.0" }
 pith-engine = { path = "crates/pith-engine", version = "0.1.0" }

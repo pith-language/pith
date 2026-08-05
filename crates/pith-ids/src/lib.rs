@@ -1,7 +1,7 @@
 //! The five identity types of the pith kernel (decisions 0005, 0013).
 //!
-//! Each is a distinct brand-typed id, so a `ContentId` does not type-check
-//! where a `SemanticId` is wanted.
+//! Each identity is a distinct type, so a `ContentId` does not type-check where
+//! a `SemanticId` is wanted.
 
 use pith_arena::define_arena;
 
@@ -18,13 +18,6 @@ define_arena!(
     ComputationBrand,
     "Computation identity: a rule application plus the relevant inputs. Two computations with \
      the same identity must produce the same result; the cache keys on this (decision 0019)."
-);
-
-define_arena!(
-    ContentId,
-    ContentArena,
-    ContentBrand,
-    "Content identity: immutable bytes or a canonical structured value, by digest."
 );
 
 define_arena!(
@@ -63,6 +56,40 @@ impl std::fmt::Debug for ContentDigest {
             write!(f, "{byte:02x}")?;
         }
         write!(f, ")")
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ContentId(ContentDigest);
+
+impl ContentId {
+    pub const fn from_digest(digest: ContentDigest) -> Self {
+        Self(digest)
+    }
+
+    pub fn of_blob(bytes: &[u8]) -> Self {
+        Self::with_domain(b"pith:blob:v1\0", bytes)
+    }
+
+    pub fn of_tree(manifest: &[u8]) -> Self {
+        Self::with_domain(b"pith:tree:v1\0", manifest)
+    }
+
+    fn with_domain(domain: &[u8], bytes: &[u8]) -> Self {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(domain);
+        hasher.update(bytes);
+        Self(ContentDigest(hasher.finalize().into()))
+    }
+
+    pub fn digest(self) -> ContentDigest {
+        self.0
+    }
+}
+
+impl std::fmt::Debug for ContentId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ContentId({:?})", self.0)
     }
 }
 
@@ -109,5 +136,23 @@ mod tests {
         assert!(s.ends_with(')'));
         let hex = &s["ContentDigest(".len()..s.len() - 1];
         assert_eq!(hex.len(), 64);
+    }
+
+    #[test]
+    fn blob_identity_is_domain_separated() {
+        assert_eq!(ContentId::of_blob(b"same"), ContentId::of_blob(b"same"));
+        assert_ne!(ContentId::of_blob(b"same"), ContentId::of_blob(b"other"));
+        assert_ne!(
+            ContentId::of_blob(b"same").digest(),
+            ContentDigest::of_bytes(b"same")
+        );
+        assert_ne!(ContentId::of_blob(b"same"), ContentId::of_tree(b"same"));
+    }
+
+    #[test]
+    fn content_identity_can_be_reconstructed_from_a_known_digest() {
+        let id = ContentId::of_blob(b"remote");
+
+        assert_eq!(ContentId::from_digest(id.digest()), id);
     }
 }

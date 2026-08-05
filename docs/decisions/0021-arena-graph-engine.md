@@ -46,7 +46,7 @@ a change-propagation pass walks the graph from changed inputs, invalidates consu
 
 ### per-instance arenas with branded indices
 
-each engine instance owns its arenas. indices are brand-token newtypes: `Id<Brand>` carries a sealed `Brand` type per arena category, so a `TypeId` and a `ValueId` are different types even within one engine, and the only way to construct an `Id` is through the arena that owns its brand. this enforces decision 0005's "type system prevents accidental substitution" at the arena level, not only across the five identity types. cross-engine isolation follows from the brand tokens being per-instance.
+each engine instance owns its arenas. indices are `Id<Brand>` newtypes with two parts: a type-level brand for the arena category and a private owner token for the arena instance. a `TypeId` and a `ValueId` are different types and cannot be substituted at compile time. only an arena can construct an id, and lookup rejects an id carrying another arena's owner token. cross-engine isolation is therefore checked at the arena boundary without making the engine's public API lifetime-generative.
 
 ### adapters behind pith-owned traits
 
@@ -102,9 +102,9 @@ rejected. the durable-inputs, verified-correct-invalidation, and cycle-as-struct
 
 the engine is pith-owned code. capability propagation, category-dependent caching, provenance across five identity types, and empty-cache equivalence are all things the engine can reason about and verify because they are in its own graph, not behind a framework abstraction.
 
-the cost is real. a hand-built change-propagation pass is more code than adopting salsa, and it carries its own correctness burden. contributors need to understand the arena-and-edge model, the brand-token discipline, and the propagation pass. this is the standard cost of owning a core mechanism rather than delegating it.
+the cost is real. a hand-built change-propagation pass is more code than adopting salsa, and it carries its own correctness burden. contributors need to understand the arena-and-edge model, category brands, owner checks, and the propagation pass. this is the standard cost of owning a core mechanism rather than delegating it.
 
-the brand-token discipline makes test code go through arena constructors to mint ids, which is occasionally felt as friction. this is a feature: it is what makes the cross-arena and cross-category invariants real. a `test_arena()` helper keeps the friction off the common test path.
+the arena-owner discipline makes test code go through arena constructors to mint ids, which is occasionally felt as friction. this is a feature: it is what makes the cross-arena and cross-category invariants real. a `test_arena()` helper keeps the friction off the common test path.
 
 the adapter discipline (every nontrivial external crate behind a pith-owned trait) means public signatures name pith types, never foreign types. swapping a crate or reimplementing an adapter is a local change. the cost is one indirection per external concern, which is the price of the replaceability the project wants.
 

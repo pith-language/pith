@@ -87,7 +87,6 @@ mod tests {
     fn pretty_summary_reports_errors_when_present() {
         let rec = OutputRecord::summary(1, 0, 0, 3, 9);
         let described = describe_pretty(&rec);
-        // the "errors" word appears when there are errors
         assert!(described.contains("errors"), "{described}");
     }
 

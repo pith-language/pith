@@ -113,6 +113,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 
 [[package]]
+name = "async-trait"
+version = "0.1.91"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae36dc4177970ef04fde5178d3e2429882def40e57a451f919c098f72baa6cec"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.3",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -589,6 +600,7 @@ dependencies = [
 name = "pith-engine"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "indexmap",
  "insta",
  "pith-arena",
@@ -596,6 +608,7 @@ dependencies = [
  "pith-diag",
  "pith-ids",
  "pith-output",
+ "pith-store",
  "proptest",
  "smallvec",
  "tokio",
@@ -620,6 +633,14 @@ dependencies = [
  "owo-colors",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "pith-store"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "pith-ids",
 ]
 
 [[package]]

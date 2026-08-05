@@ -8,6 +8,8 @@ pub enum ValueRepr {
     Bool { b: bool },
     Int { n: i64 },
     Text { s: Box<str> },
+    Bytes { len: u64 },
+    Blob { digest: Box<str> },
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -17,5 +19,7 @@ pub enum TypeRepr {
     Bool,
     Int,
     Text,
+    Bytes,
+    Blob,
     Nominal { name: Box<str> },
 }

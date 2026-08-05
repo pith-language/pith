@@ -16,12 +16,14 @@ pith-ids.workspace = true
 pith-arena.workspace = true
 pith-core.workspace = true
 pith-output.workspace = true
+pith-store.workspace = true
 indexmap.workspace = true
 smallvec.workspace = true
 tracing.workspace = true
 
 # Decisions 0021, 0022: runtime adapter boundary.
 tokio.workspace = true
+async-trait.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

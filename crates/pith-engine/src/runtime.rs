@@ -1,8 +1,5 @@
-//! The async runtime trait (decision 0022).
-//!
-//! tokio sits behind this trait; the engine never names tokio in a public
-//! signature. A host embedding the kernel in a non-tokio runtime implements
-//! this trait instead.
+//! The async runtime trait (decision 0022). tokio sits behind it; the engine
+//! never names tokio in a public signature.
 
 use std::future::Future;
 

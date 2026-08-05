@@ -80,7 +80,6 @@ mod tests {
     fn plain_renderer_writes_a_line() {
         let rec = OutputRecord::phase("build", PhaseStatus::Started);
         let mut buf: Vec<u8> = Vec::new();
-        // write through the actual renderer to confirm the writer path works
         writeln!(buf, "{}", describe_plain(&rec)).unwrap();
         assert_eq!(String::from_utf8(buf).unwrap(), "[phase] build started\n");
     }
