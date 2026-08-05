@@ -5,7 +5,7 @@ use pith_diag::{Diag, Severity, Span, StableCode};
 use smallvec::SmallVec;
 use std::marker::PhantomData;
 
-use crate::{EffectCategory, Pure, Type};
+use crate::{EffectCategory, Pure, Type, Value};
 
 define_arena!(RuleId, RuleArena, RuleBrand);
 
@@ -35,6 +35,7 @@ impl std::fmt::Display for Interface {
 pub struct Request<K: EffectCategory = Pure> {
     pub label: Box<str>,
     pub interface: Interface,
+    pub inputs: Box<[Value]>,
     pub span: Span,
     effect: PhantomData<fn() -> K>,
 }
@@ -48,13 +49,61 @@ pub struct Rule<K: EffectCategory = Pure> {
 }
 
 impl<K: EffectCategory> Request<K> {
-    pub fn new(label: impl Into<Box<str>>, interface: Interface, span: Span) -> Self {
+    pub fn new(
+        label: impl Into<Box<str>>,
+        interface: Interface,
+        inputs: impl Into<Box<[Value]>>,
+        span: Span,
+    ) -> Self {
         Self {
             label: label.into(),
             interface,
+            inputs: inputs.into(),
             span,
             effect: PhantomData,
         }
+    }
+
+    /// # Errors
+    /// `E-1103` when an input is absent or has the wrong type.
+    pub fn validate_inputs(&self) -> Result<(), Diag> {
+        if self.inputs.len() != self.interface.inputs.len() {
+            return Err(Diag::new(
+                Severity::Error,
+                StableCode::engine(103),
+                self.span,
+                format!(
+                    "request `{}` expects {} inputs but received {}",
+                    self.label,
+                    self.interface.inputs.len(),
+                    self.inputs.len()
+                ),
+            ));
+        }
+
+        for (position, (value, expected)) in self
+            .inputs
+            .iter()
+            .zip(self.interface.inputs.iter())
+            .enumerate()
+        {
+            let actual = value.value_type();
+            if actual != *expected {
+                return Err(Diag::new(
+                    Severity::Error,
+                    StableCode::engine(103),
+                    self.span,
+                    format!(
+                        "input {} for request `{}` has type {}, expected {}",
+                        position.saturating_add(1),
+                        self.label,
+                        actual,
+                        expected
+                    ),
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -159,14 +208,14 @@ mod tests {
         Rule::new(label, interface, Span::none())
     }
 
-    fn request(label: &str, interface: Interface) -> Request {
-        Request::new(label, interface, Span::none())
+    fn request(label: &str, interface: Interface, inputs: impl Into<Box<[Value]>>) -> Request {
+        Request::new(label, interface, inputs, Span::none())
     }
 
     #[test]
     fn no_match_produces_error_with_typed_signature() {
         let arena: RuleArena<Rule> = Arena::new();
-        let request = request("answer", interface([], Type::Int));
+        let request = request("answer", interface([], Type::Int), []);
         let err = select_rule(&request, &arena)
             .into_result(&request, &arena)
             .unwrap_err();
@@ -180,7 +229,7 @@ mod tests {
         let mut arena: RuleArena<Rule> = Arena::new();
         let bool_rule = arena.push(rule("same label", interface([], Type::Bool)));
         let int_rule = arena.push(rule("same label", interface([], Type::Int)));
-        let request = request("different label", interface([], Type::Int));
+        let request = request("different label", interface([], Type::Int), []);
 
         let selected = select_rule(&request, &arena)
             .into_result(&request, &arena)
@@ -196,7 +245,7 @@ mod tests {
         let signature = interface([Type::Text], Type::Int);
         arena.push(rule("a", signature.clone()));
         arena.push(rule("b", signature.clone()));
-        let request = request("thing", signature);
+        let request = request("thing", signature, [Value::Text("input".into())]);
 
         let err = select_rule(&request, &arena)
             .into_result(&request, &arena)
@@ -224,7 +273,7 @@ mod tests {
             for label in labels {
                 arena.push(rule(label, signature.clone()));
             }
-            let request = request("answer", signature);
+            let request = request("answer", signature, []);
             select_rule(&request, &arena)
                 .into_result(&request, &arena)
                 .unwrap_err()
@@ -235,5 +284,20 @@ mod tests {
         }
 
         assert_eq!(notes(false), notes(true));
+    }
+
+    #[test]
+    fn request_inputs_must_match_the_declared_interface() {
+        let request = Request::<Pure>::new(
+            "answer",
+            interface([Type::Int], Type::Int),
+            [Value::Bool(true)],
+            Span::none(),
+        );
+
+        let err = request.validate_inputs().unwrap_err();
+
+        assert_eq!(err.code, StableCode::engine(103));
+        assert!(err.message.0.contains("has type Bool, expected Int"));
     }
 }

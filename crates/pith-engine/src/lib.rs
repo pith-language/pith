@@ -12,7 +12,8 @@ pub mod graph;
 pub mod runtime;
 
 pub use graph::{
-    ComputationNode, DependencyEdge, Engine, Evaluation, PureRule, PureRuleFrame, PureStep,
+    ComputationNode, DependencyEdge, Engine, EngineQuery, Evaluation, PureRule, PureRuleFrame,
+    PureStep, RuleSelection,
 };
 pub use runtime::Runtime;
 

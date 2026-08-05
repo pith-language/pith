@@ -81,6 +81,7 @@ fn eval(
             inputs: Box::new([]),
             output: Type::Unit,
         },
+        [],
         Span::none(),
     );
     match engine.evaluate(&req) {

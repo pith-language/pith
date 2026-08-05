@@ -31,7 +31,7 @@ pub trait PureRuleFrame {
 /// The implementation lives in `pith-engine`, leaving `pith-core` as pure IR.
 /// A fresh frame is created for every rule application.
 pub trait PureRule {
-    fn start(&self) -> Box<dyn PureRuleFrame>;
+    fn start(&self, inputs: &[Value]) -> Box<dyn PureRuleFrame>;
 }
 
 /// A dependency recorded while evaluating a computation.
@@ -41,6 +41,14 @@ pub enum DependencyEdge {
         request: Request<Pure>,
         computation: ComputationId,
     },
+}
+
+impl DependencyEdge {
+    pub fn computation(&self) -> ComputationId {
+        match self {
+            Self::Request { computation, .. } => *computation,
+        }
+    }
 }
 
 /// One rule application in the in-memory graph.
@@ -58,6 +66,12 @@ pub struct Evaluation {
     pub computation: ComputationId,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuleSelection {
+    pub rule: RuleId,
+    pub interface: pith_core::Interface,
+}
+
 struct EvalFrame {
     computation: ComputationId,
     rule: RuleId,
@@ -70,6 +84,65 @@ pub struct Engine {
     rules: RuleArena<Rule<Pure>>,
     bodies: IndexMap<RuleId, Box<dyn PureRule>>,
     computations: ComputationArena<ComputationNode>,
+}
+
+pub struct EngineQuery<'engine> {
+    engine: &'engine Engine,
+}
+
+impl<'engine> EngineQuery<'engine> {
+    /// # Errors
+    /// Returns `E-1101`, `E-1102`, or `E-1103` when the request cannot select
+    /// exactly one rule.
+    pub fn select(&self, request: &Request<Pure>) -> Result<RuleSelection, Diag> {
+        request.validate_inputs()?;
+        let rule =
+            select_rule(request, &self.engine.rules).into_result(request, &self.engine.rules)?;
+        Ok(RuleSelection {
+            rule,
+            interface: request.interface.clone(),
+        })
+    }
+
+    pub fn rules(&self) -> impl Iterator<Item = (RuleId, &'engine Rule<Pure>)> + 'engine {
+        self.engine.rules.iter()
+    }
+
+    pub fn rule(&self, id: RuleId) -> Option<&'engine Rule<Pure>> {
+        self.engine.rules.get(id)
+    }
+
+    pub fn computations(
+        &self,
+    ) -> impl Iterator<Item = (ComputationId, &'engine ComputationNode)> + 'engine {
+        self.engine.computations.iter()
+    }
+
+    pub fn computation(&self, id: ComputationId) -> Option<&'engine ComputationNode> {
+        self.engine.computations.get(id)
+    }
+
+    pub fn dependencies_of(&self, id: ComputationId) -> Option<&'engine [DependencyEdge]> {
+        self.engine
+            .computations
+            .get(id)
+            .map(|node| node.dependencies.as_slice())
+    }
+
+    pub fn dependents_of(
+        &self,
+        dependency: ComputationId,
+    ) -> impl Iterator<Item = (ComputationId, &'engine DependencyEdge)> + 'engine {
+        self.engine
+            .computations
+            .iter()
+            .flat_map(move |(computation, node)| {
+                node.dependencies
+                    .iter()
+                    .filter(move |edge| edge.computation() == dependency)
+                    .map(move |edge| (computation, edge))
+            })
+    }
 }
 
 impl Engine {
@@ -91,8 +164,8 @@ impl Engine {
         id
     }
 
-    pub fn rules_iter(&self) -> impl Iterator<Item = (RuleId, &Rule<Pure>)> {
-        self.rules.iter()
+    pub fn query(&self) -> EngineQuery<'_> {
+        EngineQuery { engine: self }
     }
 
     /// Evaluate a request on the synchronous pure step machine.
@@ -100,6 +173,7 @@ impl Engine {
     /// # Errors
     /// Returns a `DiagnosticSink` with stable code `E-1101` when no rule
     /// matches, `E-1102` (naming every candidate) when more than one matches,
+    /// `E-1103` or `E-1104` when values violate the selected interface,
     /// `E-1203` when evaluation detects a dependency cycle, or diagnostics
     /// emitted by a rule body.
     ///
@@ -111,6 +185,7 @@ impl Engine {
     /// let request = Request::<Mutation>::new(
     ///     "write",
     ///     Interface { inputs: Box::new([]), output: Type::Unit },
+    ///     [],
     ///     Span::none(),
     /// );
     /// let mut engine = Engine::new();
@@ -132,6 +207,21 @@ impl Engine {
                     let Some(completed) = stack.pop() else {
                         return Err(internal_diag("pure evaluator completed without a frame"));
                     };
+                    let Some(rule) = self.rules.get(completed.rule) else {
+                        return Err(internal_diag("pure evaluator lost selected rule metadata"));
+                    };
+                    let actual = value.value_type();
+                    if actual != completed.request.interface.output {
+                        return Err(one_diag(Diag::new(
+                            Severity::Error,
+                            StableCode::engine(104),
+                            rule.span,
+                            format!(
+                                "rule `{}` returned {}, expected {}",
+                                rule.label, actual, completed.request.interface.output
+                            ),
+                        )));
+                    }
                     let Some(node) = self.computations.get_mut(completed.computation) else {
                         return Err(internal_diag("pure evaluator lost a computation node"));
                     };
@@ -148,7 +238,11 @@ impl Engine {
                 }
                 PureStep::Need(child_request) => {
                     let child_rule = self.resolve_rule(&child_request)?;
-                    if stack.iter().any(|frame| frame.rule == child_rule) {
+                    if stack.iter().any(|frame| {
+                        frame.rule == child_rule
+                            && frame.request.interface == child_request.interface
+                            && frame.request.inputs == child_request.inputs
+                    }) {
                         let mut chain: Vec<&str> = stack
                             .iter()
                             .map(|frame| frame.request.label.as_ref())
@@ -174,19 +268,8 @@ impl Engine {
         }
     }
 
-    /// Return one computation node from the current in-memory graph.
-    pub fn computation(&self, id: ComputationId) -> Option<&ComputationNode> {
-        self.computations.get(id)
-    }
-
-    /// Return the tracked dependencies of one rule application (K-12).
-    pub fn dependencies_of(&self, id: ComputationId) -> Option<&[DependencyEdge]> {
-        self.computations
-            .get(id)
-            .map(|node| node.dependencies.as_slice())
-    }
-
     fn resolve_rule(&self, request: &Request<Pure>) -> PithResult<RuleId> {
+        request.validate_inputs().map_err(one_diag)?;
         select_rule(request, &self.rules)
             .into_result(request, &self.rules)
             .map_err(one_diag)
@@ -196,7 +279,7 @@ impl Engine {
         let Some(body) = self.bodies.get(&rule) else {
             return Err(internal_diag("selected rule has no executable body"));
         };
-        let body = body.start();
+        let body = body.start(&request.inputs);
         let computation = self.computations.push(ComputationNode {
             request: request.clone(),
             rule,
@@ -251,7 +334,7 @@ mod tests {
     struct UnitRule;
 
     impl PureRule for UnitRule {
-        fn start(&self) -> Box<dyn PureRuleFrame> {
+        fn start(&self, _inputs: &[Value]) -> Box<dyn PureRuleFrame> {
             Box::new(UnitFrame)
         }
     }
@@ -282,6 +365,7 @@ mod tests {
                 inputs: Box::new([]),
                 output: Type::Int,
             },
+            [],
             Span::none(),
         )
     }
@@ -301,5 +385,33 @@ mod tests {
         let diags: Vec<_> = err.iter().collect();
         assert_eq!(diags.len(), 1);
         assert_eq!(diags.first().unwrap().code, StableCode::engine(102));
+    }
+
+    #[test]
+    fn invalid_request_inputs_are_rejected_before_selection() {
+        let mut engine = Engine::new();
+        let request = Request::new(
+            "thing",
+            Interface {
+                inputs: Box::new([Type::Int]),
+                output: Type::Int,
+            },
+            [Value::Bool(true)],
+            Span::none(),
+        );
+
+        let err = engine.evaluate(&request).unwrap_err();
+        let diagnostics: Vec<_> = err.iter().collect();
+        assert_eq!(diagnostics.first().unwrap().code, StableCode::engine(103));
+    }
+
+    #[test]
+    fn result_must_match_the_rule_interface() {
+        let mut engine = Engine::new();
+        engine.register_rule(rule("thing"), UnitRule);
+
+        let err = engine.evaluate(&request("thing")).unwrap_err();
+        let diagnostics: Vec<_> = err.iter().collect();
+        assert_eq!(diagnostics.first().unwrap().code, StableCode::engine(104));
     }
 }

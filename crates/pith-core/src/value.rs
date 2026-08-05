@@ -8,7 +8,7 @@ use pith_output::dto::{TypeRepr, ValueRepr};
 
 define_arena!(ValueId, ValueArena, ValueBrand);
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Value {
     Unit,
     Bool(bool),
@@ -17,6 +17,15 @@ pub enum Value {
 }
 
 impl Value {
+    pub fn value_type(&self) -> Type {
+        match self {
+            Self::Unit => Type::Unit,
+            Self::Bool(_) => Type::Bool,
+            Self::Int(_) => Type::Int,
+            Self::Text(_) => Type::Text,
+        }
+    }
+
     pub fn describe(&self) -> String {
         match self {
             Value::Unit => "()".to_string(),
