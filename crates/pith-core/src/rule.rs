@@ -2,6 +2,7 @@
 
 use pith_arena::define_arena;
 use pith_diag::{Diag, Severity, Span, StableCode};
+use pith_ids::{ProvisionalRuleIdentity, PureComputationDigest};
 use smallvec::SmallVec;
 use std::marker::PhantomData;
 
@@ -46,6 +47,40 @@ pub struct Rule<K: EffectCategory = Pure> {
     pub interface: Interface,
     pub span: Span,
     effect: PhantomData<fn() -> K>,
+}
+
+/// Persistent identity for a pure rule application over the current semantic
+/// IR subset.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct PureComputationKey {
+    /// Derived from the selected rule's label and interface until rules expose
+    /// durable semantic identity.
+    pub provisional_rule_identity: ProvisionalRuleIdentity,
+    /// Digest of the provisional rule identity, request interface, and inputs.
+    pub digest: PureComputationDigest,
+}
+
+impl PureComputationKey {
+    pub fn new(rule: &Rule<Pure>, request: &Request<Pure>) -> Self {
+        let mut rule_manifest = Vec::new();
+        encode_bytes(&mut rule_manifest, rule.label.as_bytes());
+        encode_interface(&mut rule_manifest, &rule.interface);
+        let provisional_rule_identity = ProvisionalRuleIdentity::of_manifest(&rule_manifest);
+
+        let mut computation_manifest = Vec::new();
+        computation_manifest.extend_from_slice(provisional_rule_identity.digest().as_bytes());
+        encode_interface(&mut computation_manifest, &request.interface);
+        encode_length(&mut computation_manifest, request.inputs.len());
+        request
+            .inputs
+            .iter()
+            .for_each(|value| encode_value(&mut computation_manifest, value));
+
+        Self {
+            provisional_rule_identity,
+            digest: PureComputationDigest::of_manifest(&computation_manifest),
+        }
+    }
 }
 
 impl<K: EffectCategory> Request<K> {
@@ -116,6 +151,65 @@ impl<K: EffectCategory> Rule<K> {
             effect: PhantomData,
         }
     }
+}
+
+fn encode_interface(manifest: &mut Vec<u8>, interface: &Interface) {
+    encode_length(manifest, interface.inputs.len());
+    interface
+        .inputs
+        .iter()
+        .for_each(|input| encode_type(manifest, input));
+    encode_type(manifest, &interface.output);
+}
+
+fn encode_type(manifest: &mut Vec<u8>, value_type: &Type) {
+    match value_type {
+        Type::Unit => manifest.push(0),
+        Type::Bool => manifest.push(1),
+        Type::Int => manifest.push(2),
+        Type::Text => manifest.push(3),
+        Type::Bytes => manifest.push(4),
+        Type::Blob => manifest.push(5),
+        Type::Nominal { name } => {
+            manifest.push(6);
+            encode_bytes(manifest, name.as_bytes());
+        }
+    }
+}
+
+fn encode_value(manifest: &mut Vec<u8>, value: &Value) {
+    match value {
+        Value::Unit => manifest.push(0),
+        Value::Bool(value) => {
+            manifest.push(1);
+            manifest.push(u8::from(*value));
+        }
+        Value::Int(value) => {
+            manifest.push(2);
+            manifest.extend_from_slice(&value.to_le_bytes());
+        }
+        Value::Text(value) => {
+            manifest.push(3);
+            encode_bytes(manifest, value.as_bytes());
+        }
+        Value::Bytes(value) => {
+            manifest.push(4);
+            encode_bytes(manifest, value);
+        }
+        Value::Blob(value) => {
+            manifest.push(5);
+            manifest.extend_from_slice(value.digest().as_bytes());
+        }
+    }
+}
+
+fn encode_length(manifest: &mut Vec<u8>, length: usize) {
+    manifest.extend_from_slice(&(length as u64).to_le_bytes());
+}
+
+fn encode_bytes(manifest: &mut Vec<u8>, bytes: &[u8]) {
+    encode_length(manifest, bytes.len());
+    manifest.extend_from_slice(bytes);
 }
 
 /// Zero, one, or multiple matching providers. Ambiguity is never ranked.
@@ -210,6 +304,85 @@ mod tests {
 
     fn request(label: &str, interface: Interface, inputs: impl Into<Box<[Value]>>) -> Request {
         Request::new(label, interface, inputs, Span::none())
+    }
+
+    fn pure_key(rule: &Rule, request: &Request) -> PureComputationKey {
+        PureComputationKey::new(rule, request)
+    }
+
+    #[test]
+    fn pure_computation_key_is_stable_for_same_application() {
+        let signature = interface([Type::Int], Type::Text);
+        let first_rule = rule("provider", signature.clone());
+        let second_rule = rule("provider", signature.clone());
+        let first = request("first request", signature.clone(), [Value::Int(7)]);
+        let second = request("second request", signature, [Value::Int(7)]);
+
+        assert_eq!(
+            pure_key(&first_rule, &first),
+            pure_key(&second_rule, &second)
+        );
+    }
+
+    #[test]
+    fn pure_computation_key_distinguishes_input_values() {
+        let signature = interface([Type::Int], Type::Int);
+        let selected = rule("identity", signature.clone());
+        let seven = request("value", signature.clone(), [Value::Int(7)]);
+        let eight = request("value", signature, [Value::Int(8)]);
+
+        assert_ne!(pure_key(&selected, &seven), pure_key(&selected, &eight));
+    }
+
+    #[test]
+    fn pure_computation_key_distinguishes_selected_rules() {
+        let signature = interface([], Type::Int);
+        let first = rule("first provider", signature.clone());
+        let second = rule("second provider", signature.clone());
+        let requested = request("value", signature, []);
+
+        let first_key = pure_key(&first, &requested);
+        let second_key = pure_key(&second, &requested);
+        assert_ne!(
+            first_key.provisional_rule_identity,
+            second_key.provisional_rule_identity
+        );
+        assert_ne!(first_key, second_key);
+    }
+
+    #[test]
+    fn nominal_types_participate_in_pure_computation_identity() {
+        let first_interface = interface([], Type::Nominal { name: "A".into() });
+        let second_interface = interface([], Type::Nominal { name: "B".into() });
+        let selected = rule("provider", first_interface.clone());
+        let first = request("value", first_interface, []);
+        let second = request("value", second_interface, []);
+
+        assert_ne!(pure_key(&selected, &first), pure_key(&selected, &second));
+    }
+
+    #[test]
+    fn blob_content_identity_participates_in_pure_computation_identity() {
+        let signature = interface([Type::Blob], Type::Int);
+        let selected = rule("blob length", signature.clone());
+        let first = request(
+            "value",
+            signature.clone(),
+            [Value::Blob(pith_ids::ContentId::of_blob(b"first"))],
+        );
+        let same = request(
+            "other label",
+            signature.clone(),
+            [Value::Blob(pith_ids::ContentId::of_blob(b"first"))],
+        );
+        let second = request(
+            "value",
+            signature,
+            [Value::Blob(pith_ids::ContentId::of_blob(b"second"))],
+        );
+
+        assert_eq!(pure_key(&selected, &first), pure_key(&selected, &same));
+        assert_ne!(pure_key(&selected, &first), pure_key(&selected, &second));
     }
 
     #[test]

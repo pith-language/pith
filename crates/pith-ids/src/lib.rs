@@ -119,6 +119,55 @@ impl std::fmt::Debug for ActionSpecDigest {
     }
 }
 
+/// Stable digest of the current provisional identity for a pure rule.
+///
+/// This remains provisional until rules carry semantic identity independent
+/// of their current metadata.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ProvisionalRuleIdentity(ContentDigest);
+
+impl ProvisionalRuleIdentity {
+    pub fn of_manifest(manifest: &[u8]) -> Self {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(b"pith:pure-rule:provisional:v1\0");
+        hasher.update(manifest);
+        Self(ContentDigest(hasher.finalize().into()))
+    }
+
+    pub fn digest(self) -> ContentDigest {
+        self.0
+    }
+}
+
+impl std::fmt::Debug for ProvisionalRuleIdentity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ProvisionalRuleIdentity({:?})", self.0)
+    }
+}
+
+/// Stable digest of a canonical pure rule application.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct PureComputationDigest(ContentDigest);
+
+impl PureComputationDigest {
+    pub fn of_manifest(manifest: &[u8]) -> Self {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(b"pith:pure-computation:v1\0");
+        hasher.update(manifest);
+        Self(ContentDigest(hasher.finalize().into()))
+    }
+
+    pub fn digest(self) -> ContentDigest {
+        self.0
+    }
+}
+
+impl std::fmt::Debug for PureComputationDigest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "PureComputationDigest({:?})", self.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,5 +238,15 @@ mod tests {
         assert_eq!(action, ActionSpecDigest::of_manifest(b"same"));
         assert_ne!(action.digest(), ContentDigest::of_bytes(b"same"));
         assert_ne!(action.digest(), ContentId::of_blob(b"same").digest());
+    }
+
+    #[test]
+    fn pure_identity_digests_are_domain_separated() {
+        let rule = ProvisionalRuleIdentity::of_manifest(b"same");
+        let computation = PureComputationDigest::of_manifest(b"same");
+
+        assert_ne!(rule.digest(), computation.digest());
+        assert_ne!(computation.digest(), ContentDigest::of_bytes(b"same"));
+        assert_ne!(computation.digest(), ContentId::of_blob(b"same").digest());
     }
 }

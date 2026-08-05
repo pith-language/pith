@@ -15,8 +15,8 @@ pub use query::EngineQuery;
 
 use indexmap::IndexMap;
 use pith_core::{
-    Action, ActionInputContent, ActionOutputKind, Pure, Request, Rule, RuleArena, RuleId, Type,
-    Value, select_rule,
+    Action, ActionInputContent, ActionOutputKind, Pure, PureComputationKey, Request, Rule,
+    RuleArena, RuleId, Type, Value, select_rule,
 };
 use pith_diag::{Diag, DiagnosticSink, PithResult, Severity, Span, StableCode};
 use pith_ids::{ComputationArena, ComputationId, ContentId};
@@ -239,6 +239,10 @@ impl Engine {
             return Err(internal_diag("selected rule has no executable body"));
         };
         let body = body.start(&request.inputs);
+        let Some(rule_metadata) = self.rules.get(rule) else {
+            return Err(internal_diag("selected rule has no metadata"));
+        };
+        let key = PureComputationKey::new(rule_metadata, &request);
         let computation = self.computations.push(ComputationNode {
             kind: ComputationKind::Pure(request.clone()),
             rule,
@@ -248,7 +252,7 @@ impl Engine {
             capabilities: Box::new([]),
             reuse: ReuseDecision::Pending,
         });
-        self.index_pure_computation(rule, &request, computation);
+        self.index_pure_computation(key, computation);
         Ok(EvalFrame {
             computation,
             rule,

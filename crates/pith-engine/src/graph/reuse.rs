@@ -1,25 +1,8 @@
 use indexmap::IndexMap;
-use pith_core::{Interface, Pure, Request, RuleId, Value};
+use pith_core::{Pure, PureComputationKey, Request, RuleId};
 use pith_ids::ComputationId;
 
 use super::{DependencyEdge, Engine, Evaluation, EvaluationSource, ReuseDecision, ReuseReason};
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(super) struct PureApplicationKey {
-    rule: RuleId,
-    interface: Interface,
-    inputs: Box<[Value]>,
-}
-
-impl PureApplicationKey {
-    pub(super) fn new(rule: RuleId, request: &Request<Pure>) -> Self {
-        Self {
-            rule,
-            interface: request.interface.clone(),
-            inputs: request.inputs.clone(),
-        }
-    }
-}
 
 impl Engine {
     pub(super) fn reusable_pure_evaluation(
@@ -27,7 +10,7 @@ impl Engine {
         rule: RuleId,
         request: &Request<Pure>,
     ) -> Option<Evaluation> {
-        let key = PureApplicationKey::new(rule, request);
+        let key = PureComputationKey::new(self.rules.get(rule)?, request);
         let computation = *self.pure_computations.get(&key)?;
         let node = self.computations.get(computation)?;
         if node.reuse != ReuseDecision::Reusable {
@@ -43,11 +26,9 @@ impl Engine {
 
     pub(super) fn index_pure_computation(
         &mut self,
-        rule: RuleId,
-        request: &Request<Pure>,
+        key: PureComputationKey,
         computation: ComputationId,
     ) {
-        let key = PureApplicationKey::new(rule, request);
         self.pure_computations.insert(key, computation);
     }
 
@@ -79,4 +60,4 @@ impl Engine {
     }
 }
 
-pub(super) type PureComputationIndex = IndexMap<PureApplicationKey, ComputationId>;
+pub(super) type PureComputationIndex = IndexMap<PureComputationKey, ComputationId>;

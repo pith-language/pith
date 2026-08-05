@@ -14,7 +14,9 @@ pub use action::{
     CapabilityRequirement, EnvironmentVariable, NetworkPolicy, PlatformRequirement,
 };
 pub use effect::{Action, EffectCategory, Mutation, Observation, Opaque, Pure};
-pub use rule::{Interface, Request, Rule, RuleArena, RuleId, SelectOutcome, select_rule};
+pub use rule::{
+    Interface, PureComputationKey, Request, Rule, RuleArena, RuleId, SelectOutcome, select_rule,
+};
 pub use value::{Type, Value, ValueArena, ValueId};
 
 use pith_output::{IntoOutput, OutputRecord};
