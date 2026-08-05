@@ -183,7 +183,7 @@ mod tests {
     }
 
     #[test]
-    fn action_digest_is_domain_separated() {
+    fn action_spec_digest_is_domain_separated() {
         let action = ActionSpecDigest::of_manifest(b"same");
 
         assert_eq!(action, ActionSpecDigest::of_manifest(b"same"));
