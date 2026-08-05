@@ -32,7 +32,7 @@ current evidence: the rust prototype has a typed pure step machine, exact-interf
 
 add content-addressed blobs and trees, sandboxed local actions, caching, and explanations for cache hits and invalidation.
 
-current evidence: blobs and trees are content addressed; pure steps can request deferred blob materialization; and action planning now produces an inspectable contract that an executor runs with structured evidence retained in provenance. a sandboxed local executor, action identity, caching, invalidation explanations, concurrency, and cancellation remain.
+current evidence: blobs and trees are content addressed; pure steps can request deferred blob materialization; and action planning now produces an inspectable contract with stable identity that an executor runs with structured evidence retained in provenance. contract-enforced results are reused inside one engine instance. a sandboxed local executor, persistent caching, invalidation explanations, concurrency, and cancellation remain.
 
 ## M-3: first build library
 

@@ -112,9 +112,11 @@ the adapter discipline (every nontrivial external crate behind a pith-owned trai
 
 ## prototype evidence
 
-the in-memory prototype interns completed pure applications by selected rule, typed interface, and input values. diagnostic labels and spans do not participate in reuse. distinct roots share completed pure dependencies, while any action dependency makes the consuming pure computation non-reusable until action identity and contract-aware caching exist.
+the in-memory prototype interns completed pure applications by selected rule, typed interface, and input values. diagnostic labels and spans do not participate in reuse. distinct roots share completed pure dependencies.
 
-this proves exact reuse inside one engine instance. it does not settle persistent computation identity, invalidation after changed durable inputs, or cache explanations, so the decision remains proposed.
+action contracts have a versioned, domain-separated digest over their complete canonical representation. executions whose executor evidence says the contract was enforced are interned by that digest, and their reusability propagates to pure parents. observed or unverified executions remain non-reusable.
+
+this proves exact pure and action reuse inside one engine instance. it does not settle persistent pure-computation identity, durable cache storage, invalidation after changed durable inputs, or cache explanations, so the decision remains proposed.
 
 ## unresolved
 

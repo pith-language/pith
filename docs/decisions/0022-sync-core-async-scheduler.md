@@ -112,7 +112,7 @@ the cost is the boundary itself. a rule that evaluates purely and then hits an e
 
 the first rust prototype establishes the boundary but does not yet establish the complete scheduler described by this decision.
 
-`Pure` rule bodies run as synchronous frames and yield typed requests. an `Action` rule plans an inert contract containing its executable content identity, arguments, inputs, outputs, environment, platform requirement, capabilities, and network policy. callers can query that plan without executing it. an async executor adapter is the only surface that performs the action, and its contract-verification status, produced content, and capability use are retained on the action computation node.
+`Pure` rule bodies run as synchronous frames and yield typed requests. an `Action` rule plans an inert contract containing its executable content identity, arguments, inputs, outputs, environment, platform requirement, capabilities, and network policy. callers can query that plan and its stable identity without executing it. an async executor adapter is the only surface that performs the action, and its contract-verification status, produced content, and capability use are retained on the action computation node. only contract-enforced executions are reused.
 
 the current driver awaits one action at a time. it does not yet schedule independent work concurrently, cancel superseded requests, or enforce timeouts. the executor interface makes those additions possible without returning ambient async authority to pure rules, but the decision remains proposed until those scheduler properties are prototyped.
 
