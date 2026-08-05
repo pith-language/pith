@@ -155,7 +155,7 @@ fn leaf_rule_returns_its_value() {
     );
 
     let evaluation = engine
-        .evaluate(&request("diagnostic leaf label", leaf, []))
+        .evaluate_pure(&request("diagnostic leaf label", leaf, []))
         .unwrap();
 
     assert!(matches!(evaluation.value, Value::Int(41)));
@@ -193,7 +193,7 @@ fn rule_body_receives_request_inputs() {
     engine.register_rule(rule("identity", signature.clone()), FirstInputRule);
 
     let evaluation = engine
-        .evaluate(&request("seven", signature, [Value::Int(7)]))
+        .evaluate_pure(&request("seven", signature, [Value::Int(7)]))
         .unwrap();
 
     assert_eq!(evaluation.value, Value::Int(7));
@@ -216,7 +216,7 @@ fn parent_resumes_with_child_value_and_records_the_edge() {
     );
 
     let evaluation = engine
-        .evaluate(&request("requested answer", parent, [Value::Int(0)]))
+        .evaluate_pure(&request("requested answer", parent, [Value::Int(0)]))
         .unwrap();
 
     assert!(matches!(evaluation.value, Value::Int(42)));
@@ -235,6 +235,9 @@ fn parent_resumes_with_child_value_and_records_the_edge() {
             let dependents: Vec<_> = query.dependents_of(*computation).collect();
             assert_eq!(dependents.len(), 1);
             assert_eq!(dependents.first().unwrap().0, evaluation.computation);
+        }
+        DependencyEdge::Blob { .. } | DependencyEdge::Action { .. } => {
+            unreachable!("this test exercises pure-rule dependencies only")
         }
     }
 }
@@ -258,7 +261,7 @@ fn dependency_cycle_reports_the_request_chain() {
     );
 
     let err = engine
-        .evaluate(&request("start a", a, [Value::Bool(false)]))
+        .evaluate_pure(&request("start a", a, [Value::Bool(false)]))
         .unwrap_err();
     let diagnostics: Vec<_> = err.iter().collect();
     let diagnostic = diagnostics.first().unwrap();
@@ -281,7 +284,7 @@ fn repeated_rule_with_different_inputs_is_not_a_cycle() {
     );
 
     let evaluation = engine
-        .evaluate(&request("countdown", signature, [Value::Int(3)]))
+        .evaluate_pure(&request("countdown", signature, [Value::Int(3)]))
         .unwrap();
 
     assert_eq!(evaluation.value, Value::Int(0));
@@ -305,10 +308,10 @@ fn independent_evaluations_keep_distinct_computations() {
     );
 
     let first = engine
-        .evaluate(&request("first evaluation", leaf.clone(), []))
+        .evaluate_pure(&request("first evaluation", leaf.clone(), []))
         .unwrap();
     let second = engine
-        .evaluate(&request("second evaluation", leaf, []))
+        .evaluate_pure(&request("second evaluation", leaf, []))
         .unwrap();
 
     assert_ne!(first.computation, second.computation);
@@ -325,7 +328,7 @@ fn computation_ids_do_not_cross_engine_instances() {
         ConstantRule(Value::Int(1)),
     );
     let first_evaluation = first
-        .evaluate(&request("first request", signature.clone(), []))
+        .evaluate_pure(&request("first request", signature.clone(), []))
         .unwrap();
 
     let mut second = Engine::new();
@@ -334,7 +337,7 @@ fn computation_ids_do_not_cross_engine_instances() {
         ConstantRule(Value::Int(2)),
     );
     let second_evaluation = second
-        .evaluate(&request("second request", signature, []))
+        .evaluate_pure(&request("second request", signature, []))
         .unwrap();
 
     assert_ne!(first_evaluation.computation, second_evaluation.computation);

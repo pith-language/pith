@@ -84,7 +84,7 @@ fn eval(
         [],
         Span::none(),
     );
-    match engine.evaluate(&req) {
+    match engine.evaluate_pure(&req) {
         Ok(evaluation) => {
             let _ = sink.emit(&OutputRecord {
                 kind: pith_output::RecordKind::Result,

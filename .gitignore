@@ -11,3 +11,6 @@
 # editor
 /.direnv
 /.devenv
+
+# tooling
+/.zcode

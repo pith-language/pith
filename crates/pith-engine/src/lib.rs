@@ -3,19 +3,17 @@
 //! Owns the arena dependency graph, the synchronous step machine that
 //! evaluates the `Pure` fragment, and the async scheduler that drives
 //! `Action` / `Observation` / `Mutation` / `Opaque` (decisions 0021, 0022).
-//!
-//! M-1 scope: rule registration, interface-match selection (decision 0015),
-//! cycle detection as a structured diagnostic (decision 0018), and an
-//! in-memory query interface (requirement K-12).
 
+pub mod action;
 pub mod graph;
 pub mod runtime;
 
+pub use action::ActionRule;
 pub use graph::{
-    ComputationNode, DependencyEdge, Engine, EngineQuery, Evaluation, PureRule, PureRuleFrame,
-    PureStep, RuleSelection,
+    ComputationKind, ComputationNode, DependencyEdge, Engine, EngineQuery, Evaluation, PureRule,
+    PureRuleFrame, PureStep, RuleSelection,
 };
-pub use runtime::Runtime;
+pub use runtime::{Runtime, RuntimeError, TokioRuntime};
 
 use pith_output::{IntoOutput, OutputRecord, Payload, PhaseStatus};
 

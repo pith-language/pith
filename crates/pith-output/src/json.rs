@@ -16,9 +16,6 @@ impl<W: Write> JsonRenderer<W> {
 
 impl<W: Write> Renderer for JsonRenderer<W> {
     fn emit(&mut self, record: &OutputRecord) -> io::Result<()> {
-        // serde_json::to_writer would write without the trailing newline; we
-        // want one object per line, so serialize to a Value first then writeln.
-        // (to_writer is also slightly cheaper, but the newline matters more.)
         let line = serde_json::to_string(record)?;
         writeln!(self.out, "{line}")
     }

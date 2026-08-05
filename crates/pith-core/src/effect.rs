@@ -20,18 +20,28 @@ pub trait EffectCategory: private::Sealed + 'static {
     const CACHEABLE_AS_RESULT: bool;
 }
 
+/// Computes from immutable values. Terminating by construction (0018); caches
+/// indefinitely under its computation identity.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Pure;
 
+/// Bounded external work with declared inputs, outputs, platform, and
+/// capabilities. Cacheable by content identity when the executor honors the
+/// declared contract (A-6).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Action;
 
+/// Reads external state, recording source, revision, and freshness. Not
+/// cacheable across revisions; carries a revision pin (0012).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Observation;
 
+/// Changes external state. Not cacheable as a result (0019).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Mutation;
 
+/// Unmodeled effectful work: the adoption on-ramp and escape hatch. A
+/// fixed-output boundary whose interior the engine cannot inspect.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Opaque;
 
