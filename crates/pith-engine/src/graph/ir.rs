@@ -2,7 +2,8 @@
 //! evaluator's private frame. Pure data; no engine logic.
 
 use pith_core::{
-    Action, ActionSpec, CapabilityRequirement, Interface, Pure, Request, RuleId, Value,
+    Action, ActionSpec, CapabilityRequirement, Interface, Pure, PureComputationKey, Request,
+    RuleId, Value,
 };
 use pith_diag::PithResult;
 use pith_ids::{ActionSpecDigest, ComputationId, ContentId};
@@ -73,7 +74,10 @@ impl DependencyEdge {
 /// Which kind of rule produced a computation node.
 #[derive(Clone, Debug)]
 pub enum ComputationKind {
-    Pure(Request<Pure>),
+    Pure {
+        request: Request<Pure>,
+        key: PureComputationKey,
+    },
     Action(Request<Action>),
 }
 

@@ -244,7 +244,10 @@ impl Engine {
         };
         let key = PureComputationKey::new(rule_metadata, &request);
         let computation = self.computations.push(ComputationNode {
-            kind: ComputationKind::Pure(request.clone()),
+            kind: ComputationKind::Pure {
+                request: request.clone(),
+                key,
+            },
             rule,
             dependencies: SmallVec::new(),
             result: None,
@@ -840,6 +843,7 @@ fn content_unavailable_diag(id: ContentId) -> DiagnosticSink {
 mod tests {
     use super::*;
     use pith_core::{Interface, Type};
+    use pith_ids::RuleSemanticIdentity;
 
     struct UnitRule;
 
@@ -859,6 +863,7 @@ mod tests {
 
     fn rule(label: &str) -> Rule {
         Rule::new(
+            RuleSemanticIdentity::of_name(label),
             label,
             Interface {
                 inputs: Box::new([]),
