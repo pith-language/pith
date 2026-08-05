@@ -1,6 +1,9 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use pith_core::{Interface, Request, Rule, Type, Value};
 use pith_diag::{PithResult, Span, StableCode};
-use pith_engine::{DependencyEdge, Engine, PureRule, PureRuleFrame, PureStep};
+use pith_engine::{DependencyEdge, Engine, EvaluationSource, PureRule, PureRuleFrame, PureStep};
 
 struct ConstantRule(Value);
 
@@ -15,6 +18,18 @@ struct ConstantFrame(Value);
 impl PureRuleFrame for ConstantFrame {
     fn step(&mut self, _input: Option<Value>) -> PithResult<PureStep> {
         Ok(PureStep::Complete(self.0.clone()))
+    }
+}
+
+struct CountingRule {
+    value: Value,
+    starts: Arc<AtomicUsize>,
+}
+
+impl PureRule for CountingRule {
+    fn start(&self, _inputs: &[Value]) -> Box<dyn PureRuleFrame> {
+        self.starts.fetch_add(1, Ordering::Relaxed);
+        Box::new(ConstantFrame(self.value.clone()))
     }
 }
 
@@ -299,12 +314,16 @@ fn repeated_rule_with_different_inputs_is_not_a_cycle() {
 }
 
 #[test]
-fn independent_evaluations_keep_distinct_computations() {
+fn repeated_evaluations_reuse_the_completed_computation() {
     let mut engine = Engine::new();
     let leaf = interface(&[], Type::Int);
+    let starts = Arc::new(AtomicUsize::new(0));
     engine.register_rule(
         rule("leaf provider", leaf.clone()),
-        ConstantRule(Value::Int(41)),
+        CountingRule {
+            value: Value::Int(41),
+            starts: starts.clone(),
+        },
     );
 
     let first = engine
@@ -314,9 +333,78 @@ fn independent_evaluations_keep_distinct_computations() {
         .evaluate_pure(&request("second evaluation", leaf, []))
         .unwrap();
 
-    assert_ne!(first.computation, second.computation);
+    assert_eq!(first.source, EvaluationSource::Computed);
+    assert_eq!(second.source, EvaluationSource::Reused);
+    assert_eq!(first.computation, second.computation);
+    assert_eq!(starts.load(Ordering::Relaxed), 1);
+    assert_eq!(engine.query().computations().count(), 1);
     assert!(engine.query().computation(first.computation).is_some());
-    assert!(engine.query().computation(second.computation).is_some());
+}
+
+#[test]
+fn different_inputs_create_different_computations() {
+    let mut engine = Engine::new();
+    let signature = interface(&[Type::Int], Type::Int);
+    engine.register_rule(rule("identity", signature.clone()), FirstInputRule);
+
+    let seven = engine
+        .evaluate_pure(&request("seven", signature.clone(), [Value::Int(7)]))
+        .unwrap();
+    let eight = engine
+        .evaluate_pure(&request("eight", signature, [Value::Int(8)]))
+        .unwrap();
+
+    assert_ne!(seven.computation, eight.computation);
+    assert_eq!(seven.value, Value::Int(7));
+    assert_eq!(eight.value, Value::Int(8));
+}
+
+#[test]
+fn distinct_parents_share_a_completed_dependency() {
+    let mut engine = Engine::new();
+    let leaf = interface(&[], Type::Int);
+    let boolean_parent = interface(&[Type::Bool], Type::Int);
+    let text_parent = interface(&[Type::Text], Type::Int);
+    let leaf_starts = Arc::new(AtomicUsize::new(0));
+    engine.register_rule(
+        rule("leaf provider", leaf.clone()),
+        CountingRule {
+            value: Value::Int(41),
+            starts: leaf_starts.clone(),
+        },
+    );
+    engine.register_rule(
+        rule("boolean parent", boolean_parent.clone()),
+        ForwardRule {
+            dependency: request("shared leaf", leaf.clone(), []),
+        },
+    );
+    engine.register_rule(
+        rule("text parent", text_parent.clone()),
+        ForwardRule {
+            dependency: request("shared leaf", leaf, []),
+        },
+    );
+
+    let boolean_result = engine
+        .evaluate_pure(&request(
+            "boolean root",
+            boolean_parent,
+            [Value::Bool(true)],
+        ))
+        .unwrap();
+    let text_result = engine
+        .evaluate_pure(&request(
+            "text root",
+            text_parent,
+            [Value::Text("input".into())],
+        ))
+        .unwrap();
+
+    assert_eq!(boolean_result.value, Value::Int(41));
+    assert_eq!(text_result.value, Value::Int(41));
+    assert_eq!(leaf_starts.load(Ordering::Relaxed), 1);
+    assert_eq!(engine.query().computations().count(), 3);
 }
 
 #[test]
