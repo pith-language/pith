@@ -1,10 +1,16 @@
 use crate::StoreError;
 use pith_ids::ContentId;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum TreeEntryContent {
-    Blob(ContentId),
+    File {
+        content: ContentId,
+        executable: bool,
+    },
     Tree(ContentId),
+    Symlink {
+        target: Box<[u8]>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -15,7 +21,8 @@ pub struct TreeEntry {
 
 impl TreeEntry {
     /// # Errors
-    /// Returns an error when `name` is not one tree path component.
+    /// Returns an error when `name` is not one tree path component or when a
+    /// symlink target is empty or contains a NUL byte.
     pub fn new(name: impl Into<Box<str>>, content: TreeEntryContent) -> Result<Self, StoreError> {
         let name = name.into();
         if name.is_empty()
@@ -26,6 +33,13 @@ impl TreeEntry {
         {
             return Err(StoreError::new(format!("invalid tree entry name `{name}`")));
         }
+        if let TreeEntryContent::Symlink { target } = &content
+            && (target.is_empty() || target.contains(&0))
+        {
+            return Err(StoreError::new(format!(
+                "invalid symlink target for tree entry `{name}`"
+            )));
+        }
         Ok(Self { name, content })
     }
 
@@ -33,8 +47,8 @@ impl TreeEntry {
         &self.name
     }
 
-    pub fn content(&self) -> TreeEntryContent {
-        self.content
+    pub fn content(&self) -> &TreeEntryContent {
+        &self.content
     }
 }
 
@@ -90,14 +104,24 @@ fn canonical_manifest(entries: &[TreeEntry]) -> Result<Vec<u8>, StoreError> {
             .map_err(|_| StoreError::new("tree entry name is too long"))?;
         manifest.extend_from_slice(&name_len.to_le_bytes());
         manifest.extend_from_slice(name);
-        match entry.content {
-            TreeEntryContent::Blob(id) => {
-                manifest.push(0);
+        match &entry.content {
+            TreeEntryContent::Tree(id) => {
+                manifest.push(2);
                 manifest.extend_from_slice(id.digest().as_bytes());
             }
-            TreeEntryContent::Tree(id) => {
-                manifest.push(1);
-                manifest.extend_from_slice(id.digest().as_bytes());
+            TreeEntryContent::File {
+                content,
+                executable,
+            } => {
+                manifest.push(if *executable { 1 } else { 0 });
+                manifest.extend_from_slice(content.digest().as_bytes());
+            }
+            TreeEntryContent::Symlink { target } => {
+                manifest.push(3);
+                let target_len = u64::try_from(target.len())
+                    .map_err(|_| StoreError::new("symlink target is too long"))?;
+                manifest.extend_from_slice(&target_len.to_le_bytes());
+                manifest.extend_from_slice(target);
             }
         }
     }
@@ -109,7 +133,14 @@ mod tests {
     use super::*;
 
     fn blob_entry(name: &str, bytes: &[u8]) -> TreeEntry {
-        TreeEntry::new(name, TreeEntryContent::Blob(ContentId::of_blob(bytes))).unwrap()
+        TreeEntry::new(
+            name,
+            TreeEntryContent::File {
+                content: ContentId::of_blob(bytes),
+                executable: false,
+            },
+        )
+        .unwrap()
     }
 
     #[test]
@@ -132,19 +163,95 @@ mod tests {
     fn names_are_single_components() {
         for name in ["", ".", "..", "a/b", "nul\0name"] {
             assert!(
-                TreeEntry::new(name, TreeEntryContent::Blob(ContentId::of_blob(b"x"))).is_err()
+                TreeEntry::new(
+                    name,
+                    TreeEntryContent::File {
+                        content: ContentId::of_blob(b"x"),
+                        executable: false,
+                    },
+                )
+                .is_err()
             );
         }
     }
 
     #[test]
-    fn blob_and_tree_entries_have_distinct_identities() {
+    fn file_and_tree_entries_have_distinct_identities() {
         let content = ContentId::of_blob(b"same target");
-        let blob =
-            Tree::new([TreeEntry::new("item", TreeEntryContent::Blob(content)).unwrap()]).unwrap();
+        let file = Tree::new([TreeEntry::new(
+            "item",
+            TreeEntryContent::File {
+                content,
+                executable: false,
+            },
+        )
+        .unwrap()])
+        .unwrap();
         let tree =
             Tree::new([TreeEntry::new("item", TreeEntryContent::Tree(content)).unwrap()]).unwrap();
 
-        assert_ne!(blob.id(), tree.id());
+        assert_ne!(file.id(), tree.id());
+    }
+
+    #[test]
+    fn executable_file_identity_is_distinct_from_regular_file() {
+        let content = ContentId::of_blob(b"program");
+        let regular = Tree::new([TreeEntry::new(
+            "tool",
+            TreeEntryContent::File {
+                content,
+                executable: false,
+            },
+        )
+        .unwrap()])
+        .unwrap();
+        let executable = Tree::new([TreeEntry::new(
+            "tool",
+            TreeEntryContent::File {
+                content,
+                executable: true,
+            },
+        )
+        .unwrap()])
+        .unwrap();
+
+        assert_ne!(regular.id(), executable.id());
+    }
+
+    #[test]
+    fn symlink_identity_uses_the_target_bytes() {
+        let first = Tree::new([TreeEntry::new(
+            "link",
+            TreeEntryContent::Symlink {
+                target: b"target".as_slice().into(),
+            },
+        )
+        .unwrap()])
+        .unwrap();
+        let second = Tree::new([TreeEntry::new(
+            "link",
+            TreeEntryContent::Symlink {
+                target: b"other".as_slice().into(),
+            },
+        )
+        .unwrap()])
+        .unwrap();
+
+        assert_ne!(first.id(), second.id());
+    }
+
+    #[test]
+    fn invalid_symlink_targets_are_rejected() {
+        for target in [b"".as_slice(), b"has\0nul".as_slice()] {
+            assert!(
+                TreeEntry::new(
+                    "link",
+                    TreeEntryContent::Symlink {
+                        target: target.into(),
+                    },
+                )
+                .is_err()
+            );
+        }
     }
 }

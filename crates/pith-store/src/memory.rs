@@ -85,7 +85,14 @@ mod tests {
     fn equal_trees_are_stored_once() {
         let mut store = MemoryContentStore::default();
         let blob = store.put_blob(b"payload").unwrap();
-        let entry = TreeEntry::new("file", TreeEntryContent::Blob(blob)).unwrap();
+        let entry = TreeEntry::new(
+            "file",
+            TreeEntryContent::File {
+                content: blob,
+                executable: false,
+            },
+        )
+        .unwrap();
         let tree = Tree::new([entry]).unwrap();
 
         let first = store.put_tree(tree.clone()).unwrap();
