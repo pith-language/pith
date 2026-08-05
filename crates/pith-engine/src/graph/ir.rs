@@ -1,7 +1,7 @@
 //! The data types of the dependency graph: steps, edges, nodes, and the
 //! evaluator's private frame. Pure data; no engine logic.
 
-use pith_core::{Action, Interface, Pure, Request, RuleId, Value};
+use pith_core::{Action, ActionSpec, Interface, Pure, Request, RuleId, Value};
 use pith_diag::PithResult;
 use pith_ids::ComputationId;
 use pith_ids::ContentId;
@@ -15,9 +15,8 @@ pub enum PureStep {
     /// Request the bytes of a content-addressed blob. The engine fetches the
     /// blob from its content store and resumes with `Value::Bytes`.
     NeedBlob(ContentId),
-    /// Request the result of an action rule. The engine selects the action,
-    /// drives its async body via the [`crate::Runtime`], and resumes with the
-    /// result.
+    /// Request the result of an action rule. The engine plans an inspectable
+    /// contract, gives it to an executor, and resumes with the result.
     NeedAction(Request<Action>),
     /// Finish the rule body with a final value.
     Complete(Value),
@@ -35,8 +34,8 @@ pub trait PureRuleFrame: Send {
 }
 
 /// Executable body for a semantic rule. A fresh frame is created for every
-/// rule application. `Send + Sync` to match [`crate::ActionRule`] and keep the
-/// engine usable from a multi-threaded runtime.
+/// rule application. `Send + Sync` keeps the engine usable from a
+/// multi-threaded runtime.
 pub trait PureRule: Send + Sync {
     fn start(&self, inputs: &[Value]) -> Box<dyn PureRuleFrame>;
 }
@@ -77,12 +76,27 @@ pub enum ComputationKind {
     Action(Request<Action>),
 }
 
+/// An action selected and planned without executing it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ActionPlan {
+    pub rule: RuleId,
+    pub spec: ActionSpec,
+}
+
+/// Declared contract and resulting evidence retained as action provenance.
+pub struct ActionRecord {
+    pub spec: ActionSpec,
+    pub evidence: Option<crate::ExecutionEvidence>,
+}
+
 /// One rule application in the in-memory graph.
 pub struct ComputationNode {
     pub kind: ComputationKind,
     pub rule: RuleId,
     pub dependencies: SmallVec<[DependencyEdge; 4]>,
     pub result: Option<Value>,
+    pub action: Option<ActionRecord>,
+    pub is_reusable: bool,
 }
 
 /// A completed evaluation and the graph node that produced it.
@@ -90,6 +104,13 @@ pub struct ComputationNode {
 pub struct Evaluation {
     pub value: Value,
     pub computation: ComputationId,
+    pub source: EvaluationSource,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum EvaluationSource {
+    Computed,
+    Reused,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

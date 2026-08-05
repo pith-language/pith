@@ -1,21 +1,72 @@
-//! The Action effect category execution surface (decisions 0019, 0022).
+//! Planning and execution surfaces for the `Action` effect category.
 //!
-//! Action bodies are async because they perform bounded external work; the
-//! engine drives them through the [`crate::Runtime`] trait. `async_trait` is
-//! used because the engine stores action bodies as `Box<dyn ActionRule>` for
-//! runtime lookup by id, and native `async fn` in traits does not support
-//! dyn dispatch.
+//! Planning is synchronous and produces inert [`pith_core::ActionSpec`] data.
+//! Only an [`Executor`] performs external work. This keeps arbitrary async
+//! callbacks from being mislabeled as declared actions.
 
 use async_trait::async_trait;
-use pith_core::Value;
+use pith_core::{ActionOutputKind, ActionSpec, CapabilityRequirement, Value};
 use pith_diag::PithResult;
+use pith_ids::ContentId;
 
-/// Executable body for an `Action` rule. `execute` is driven by the engine's
-/// async scheduler when a Pure rule yields a `PureStep::NeedAction`.
-///
-/// # Errors
-/// Returns structured diagnostics when the action cannot produce its value.
+/// Deterministically turn typed request inputs into an inspectable contract.
+pub trait ActionPlanner: Send + Sync {
+    /// # Errors
+    /// Returns structured diagnostics when the inputs cannot form a contract.
+    fn plan(&self, inputs: &[Value]) -> PithResult<ActionSpec>;
+}
+
+/// Adapter boundary for local, remote, or test action execution.
 #[async_trait]
-pub trait ActionRule: Send + Sync {
-    async fn execute(&self, inputs: &[Value]) -> PithResult<Value>;
+pub trait Executor: Send + Sync {
+    /// Execute `spec` and return its typed result and execution evidence.
+    ///
+    /// # Errors
+    /// Returns structured diagnostics when the action cannot be executed.
+    async fn execute(&self, spec: &ActionSpec) -> PithResult<ActionExecution>;
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ActionExecution {
+    pub value: Value,
+    pub evidence: ExecutionEvidence,
+}
+
+/// How strongly an executor verified the declared contract.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ContractVerification {
+    /// The executor prevented access outside the declared contract.
+    Enforced,
+    /// The executor observed access and reported whether it matched.
+    Observed,
+    /// The executor could not verify access. This remains visible in provenance.
+    Unverified,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProducedOutput {
+    pub path: Box<str>,
+    pub kind: ActionOutputKind,
+    pub content: ContentId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExecutionEvidence {
+    pub executor: Box<str>,
+    pub contract: ContractVerification,
+    pub outputs: Box<[ProducedOutput]>,
+    pub capabilities_used: Box<[CapabilityRequirement]>,
+}
+
+impl ExecutionEvidence {
+    /// Evidence for adapters that can run work but cannot yet enforce or trace
+    /// the declared contract. The weaker guarantee is explicit in provenance.
+    pub fn unverified(executor: impl Into<Box<str>>) -> Self {
+        Self {
+            executor: executor.into(),
+            contract: ContractVerification::Unverified,
+            outputs: Box::new([]),
+            capabilities_used: Box::new([]),
+        }
+    }
 }

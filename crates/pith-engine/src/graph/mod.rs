@@ -4,10 +4,11 @@
 
 pub mod ir;
 pub mod query;
+mod reuse;
 
 pub use ir::{
-    ComputationKind, ComputationNode, DependencyEdge, Evaluation, PureRule, PureRuleFrame,
-    PureStep, RuleSelection,
+    ActionPlan, ActionRecord, ComputationKind, ComputationNode, DependencyEdge, Evaluation,
+    EvaluationSource, PureRule, PureRuleFrame, PureStep, RuleSelection,
 };
 pub use query::EngineQuery;
 
@@ -18,16 +19,18 @@ use pith_ids::{ComputationArena, ComputationId, ContentId};
 use pith_store::{ContentStore, MemoryContentStore};
 use smallvec::SmallVec;
 
-use crate::action::ActionRule;
+use crate::action::{ActionExecution, ActionPlanner, Executor};
 use crate::runtime::Runtime;
 use ir::EvalFrame;
+use reuse::PureComputationIndex;
 
 pub struct Engine {
     pub(crate) rules: RuleArena<Rule<Pure>>,
     pub(crate) bodies: IndexMap<RuleId, Box<dyn PureRule>>,
     pub(crate) action_rules: RuleArena<Rule<Action>>,
-    pub(crate) action_bodies: IndexMap<RuleId, Box<dyn ActionRule>>,
+    pub(crate) action_planners: IndexMap<RuleId, Box<dyn ActionPlanner>>,
     pub(crate) computations: ComputationArena<ComputationNode>,
+    pure_computations: PureComputationIndex,
     pub(crate) store: MemoryContentStore,
 }
 
@@ -37,8 +40,9 @@ impl Engine {
             rules: RuleArena::new(),
             bodies: IndexMap::new(),
             action_rules: RuleArena::new(),
-            action_bodies: IndexMap::new(),
+            action_planners: IndexMap::new(),
             computations: ComputationArena::new(),
+            pure_computations: IndexMap::new(),
             store: MemoryContentStore::default(),
         }
     }
@@ -53,13 +57,13 @@ impl Engine {
         id
     }
 
-    /// Register an action rule together with its async body.
-    pub fn register_action_rule<B>(&mut self, rule: Rule<Action>, body: B) -> RuleId
+    /// Register an action rule together with its deterministic planner.
+    pub fn register_action_rule<P>(&mut self, rule: Rule<Action>, planner: P) -> RuleId
     where
-        B: ActionRule + 'static,
+        P: ActionPlanner + 'static,
     {
         let id = self.action_rules.push(rule);
-        self.action_bodies.insert(id, Box::new(body));
+        self.action_planners.insert(id, Box::new(planner));
         id
     }
 
@@ -98,6 +102,9 @@ impl Engine {
     /// ```
     pub fn evaluate_pure(&mut self, request: &Request<Pure>) -> PithResult<Evaluation> {
         let rule = self.resolve_pure_rule(request)?;
+        if let Some(evaluation) = self.reusable_pure_evaluation(rule, request) {
+            return Ok(evaluation);
+        }
         let root = self.start_frame(request.clone(), rule)?;
         let mut stack = vec![root];
 
@@ -124,22 +131,33 @@ impl Engine {
 
     /// Evaluate a request, crossing the sync/async boundary as needed: pure
     /// steps run synchronously inside the loop, blob fetches hit the content
-    /// store synchronously, and action steps are driven via `runtime`.
+    /// store synchronously, and declared action contracts are driven through
+    /// `executor` via `runtime`.
     ///
     /// # Errors
     /// `Ok(Ok(_))` on success. `Ok(Err(_))` when evaluation produced
     /// diagnostics (same codes as [`Engine::evaluate_pure`] plus `E-1205`
-    /// blob-not-available). `Err(_)` when the runtime could not be driven.
-    pub fn run<R: Runtime>(
+    /// blob-not-available and `E-1208` through `E-1210` for executor evidence
+    /// outside the declared contract). `Err(_)` when the runtime could not be
+    /// driven.
+    pub fn run<R: Runtime, E: Executor>(
         &mut self,
         request: &Request<Pure>,
         runtime: &R,
+        executor: &E,
     ) -> Result<PithResult<Evaluation>, crate::runtime::RuntimeError> {
-        runtime.block_on(self.run_inner(request))
+        runtime.block_on(self.run_inner(request, executor))
     }
 
-    async fn run_inner(&mut self, request: &Request<Pure>) -> PithResult<Evaluation> {
+    async fn run_inner<E: Executor>(
+        &mut self,
+        request: &Request<Pure>,
+        executor: &E,
+    ) -> PithResult<Evaluation> {
         let rule = self.resolve_pure_rule(request)?;
+        if let Some(evaluation) = self.reusable_pure_evaluation(rule, request) {
+            return Ok(evaluation);
+        }
         let root = self.start_frame(request.clone(), rule)?;
         let mut stack = vec![root];
 
@@ -167,7 +185,8 @@ impl Engine {
                     }
                 }
                 PureStep::NeedAction(action_request) => {
-                    let (value, action_computation) = self.run_action(&action_request).await?;
+                    let (value, action_computation) =
+                        self.run_action(&action_request, executor).await?;
                     let Some(parent) = stack.last() else {
                         return Err(internal_diag("action requested with no frame on the stack"));
                     };
@@ -211,7 +230,10 @@ impl Engine {
             rule,
             dependencies: SmallVec::new(),
             result: None,
+            action: None,
+            is_reusable: false,
         });
+        self.index_pure_computation(rule, &request, computation);
         Ok(EvalFrame {
             computation,
             rule,
@@ -240,13 +262,19 @@ impl Engine {
                 ),
             )));
         }
+        let dependencies_are_reusable = match self.computations.get(completed.computation) {
+            Some(node) => self.pure_dependencies_are_reusable(&node.dependencies),
+            None => return Err(internal_diag("pure evaluator lost a computation node")),
+        };
         let Some(node) = self.computations.get_mut(completed.computation) else {
             return Err(internal_diag("pure evaluator lost a computation node"));
         };
         node.result = Some(value.clone());
+        node.is_reusable = dependencies_are_reusable;
         Ok(Evaluation {
             value,
             computation: completed.computation,
+            source: EvaluationSource::Computed,
         })
     }
 
@@ -269,6 +297,24 @@ impl Engine {
                 .collect();
             chain.push(child_request.label.as_ref());
             return Err(cycle_diag(&chain, child_request.span));
+        }
+
+        if let Some(reused) = self.reusable_pure_evaluation(child_rule, &child_request) {
+            let Some(parent) = stack.last() else {
+                return Err(internal_diag("pure evaluator lost a requesting frame"));
+            };
+            let Some(parent_node) = self.computations.get_mut(parent.computation) else {
+                return Err(internal_diag("pure evaluator lost a parent computation"));
+            };
+            parent_node.dependencies.push(DependencyEdge::Request {
+                computation: reused.computation,
+                request: child_request,
+            });
+            let Some(parent) = stack.last_mut() else {
+                return Err(internal_diag("pure evaluator lost a requesting frame"));
+            };
+            parent.resume_with = Some(reused.value);
+            return Ok(());
         }
 
         let child = self.start_frame(child_request.clone(), child_rule)?;
@@ -308,14 +354,25 @@ impl Engine {
         parent_node.dependencies.push(DependencyEdge::Blob { id });
     }
 
-    async fn run_action(
-        &mut self,
-        request: &Request<Action>,
-    ) -> PithResult<(Value, ComputationId)> {
+    pub(crate) fn plan_action(&self, request: &Request<Action>) -> PithResult<ActionPlan> {
         request.validate_inputs().map_err(one_diag)?;
         let rule = select_rule(request, &self.action_rules)
             .into_result(request, &self.action_rules)
             .map_err(one_diag)?;
+        let Some(planner) = self.action_planners.get(&rule) else {
+            return Err(internal_diag("selected action rule has no planner"));
+        };
+        let spec = planner.plan(&request.inputs)?;
+        Ok(ActionPlan { rule, spec })
+    }
+
+    async fn run_action<E: Executor>(
+        &mut self,
+        request: &Request<Action>,
+        executor: &E,
+    ) -> PithResult<(Value, ComputationId)> {
+        let plan = self.plan_action(request)?;
+        let rule = plan.rule;
 
         let Some(action_rule) = self.action_rules.get(rule) else {
             return Err(internal_diag("selected action rule has no metadata"));
@@ -329,12 +386,16 @@ impl Engine {
             rule,
             dependencies: SmallVec::new(),
             result: None,
+            action: Some(ActionRecord {
+                spec: plan.spec.clone(),
+                evidence: None,
+            }),
+            is_reusable: false,
         });
 
-        let Some(body) = self.action_bodies.get(&rule) else {
-            return Err(internal_diag("selected action rule has no executable body"));
-        };
-        let value = body.execute(&request.inputs).await?;
+        let execution = executor.execute(&plan.spec).await?;
+        self.validate_execution(&plan.spec, &execution)?;
+        let value = execution.value;
 
         let actual = value.value_type();
         if actual != declared_output {
@@ -353,8 +414,68 @@ impl Engine {
             return Err(internal_diag("action evaluator lost its computation node"));
         };
         node.result = Some(value.clone());
+        let Some(action) = node.action.as_mut() else {
+            return Err(internal_diag("action evaluator lost its action record"));
+        };
+        action.evidence = Some(execution.evidence);
 
         Ok((value, computation))
+    }
+
+    fn validate_execution(
+        &self,
+        spec: &pith_core::ActionSpec,
+        execution: &ActionExecution,
+    ) -> PithResult<()> {
+        for used in &execution.evidence.capabilities_used {
+            if !spec.capabilities.contains(used) {
+                return Err(one_diag(Diag::new(
+                    Severity::Error,
+                    StableCode::engine(208),
+                    Span::none(),
+                    format!(
+                        "executor reported undeclared capability `{}` scoped to `{}`",
+                        used.name, used.scope
+                    ),
+                )));
+            }
+        }
+
+        for produced in &execution.evidence.outputs {
+            let declared = spec
+                .outputs
+                .iter()
+                .any(|output| output.path == produced.path && output.kind == produced.kind);
+            if !declared {
+                return Err(one_diag(Diag::new(
+                    Severity::Error,
+                    StableCode::engine(209),
+                    Span::none(),
+                    format!("executor reported undeclared output `{}`", produced.path),
+                )));
+            }
+        }
+
+        for declared in &spec.outputs {
+            let produced = execution
+                .evidence
+                .outputs
+                .iter()
+                .any(|output| output.path == declared.path && output.kind == declared.kind);
+            if !produced {
+                return Err(one_diag(Diag::new(
+                    Severity::Error,
+                    StableCode::engine(210),
+                    Span::none(),
+                    format!(
+                        "executor did not produce declared output `{}`",
+                        declared.path
+                    ),
+                )));
+            }
+        }
+
+        Ok(())
     }
 }
 

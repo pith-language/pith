@@ -1,11 +1,11 @@
 //! The read-only query interface over a built graph (requirement K-12).
 
-use pith_core::{Pure, Request, Rule, RuleId, select_rule};
-use pith_diag::Diag;
+use pith_core::{Action, Pure, Request, Rule, RuleId, select_rule};
+use pith_diag::{Diag, PithResult};
 use pith_ids::ComputationId;
 
 use super::Engine;
-use super::ir::{ComputationNode, DependencyEdge, RuleSelection};
+use super::ir::{ActionPlan, ComputationNode, DependencyEdge, RuleSelection};
 
 pub struct EngineQuery<'engine> {
     engine: &'engine Engine,
@@ -23,6 +23,14 @@ impl<'engine> EngineQuery<'engine> {
             rule,
             interface: request.interface.clone(),
         })
+    }
+
+    /// Select and plan an action without executing external work.
+    ///
+    /// # Errors
+    /// Returns selection, input-validation, or planner diagnostics.
+    pub fn plan_action(&self, request: &Request<Action>) -> PithResult<ActionPlan> {
+        self.engine.plan_action(request)
     }
 
     pub fn rules(&self) -> impl Iterator<Item = (RuleId, &'engine Rule<Pure>)> + 'engine {

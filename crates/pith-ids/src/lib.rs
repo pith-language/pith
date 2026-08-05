@@ -16,8 +16,8 @@ define_arena!(
     ComputationId,
     ComputationArena,
     ComputationBrand,
-    "Computation identity: a rule application plus the relevant inputs. Two computations with \
-     the same identity must produce the same result; the cache keys on this (decision 0019)."
+    "Arena-local computation identity for an interned rule application and its relevant inputs. \
+     Persistent construction across engine instances remains unresolved."
 );
 
 define_arena!(

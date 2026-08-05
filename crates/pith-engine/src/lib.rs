@@ -8,10 +8,13 @@ pub mod action;
 pub mod graph;
 pub mod runtime;
 
-pub use action::ActionRule;
+pub use action::{
+    ActionExecution, ActionPlanner, ContractVerification, ExecutionEvidence, Executor,
+    ProducedOutput,
+};
 pub use graph::{
-    ComputationKind, ComputationNode, DependencyEdge, Engine, EngineQuery, Evaluation, PureRule,
-    PureRuleFrame, PureStep, RuleSelection,
+    ActionPlan, ActionRecord, ComputationKind, ComputationNode, DependencyEdge, Engine,
+    EngineQuery, Evaluation, EvaluationSource, PureRule, PureRuleFrame, PureStep, RuleSelection,
 };
 pub use runtime::{Runtime, RuntimeError, TokioRuntime};
 
