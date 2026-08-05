@@ -76,12 +76,18 @@ impl SourceId {
 pub struct StableCode(pub u32);
 
 impl StableCode {
-    #[allow(clippy::arithmetic_side_effects)]
+    #[allow(
+        clippy::arithmetic_side_effects,
+        reason = "engine diagnostic codes occupy the stable 1000-based namespace"
+    )]
     pub const fn engine(code: u32) -> Self {
         Self(1000 + code)
     }
 
-    #[allow(clippy::arithmetic_side_effects)]
+    #[allow(
+        clippy::arithmetic_side_effects,
+        reason = "composition diagnostic codes occupy the stable 2000-based namespace"
+    )]
     pub const fn compose(code: u32) -> Self {
         Self(2000 + code)
     }

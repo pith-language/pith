@@ -20,8 +20,7 @@ indexmap.workspace = true
 smallvec.workspace = true
 tracing.workspace = true
 
-# tokio appears only in the scheduler module, behind the Runtime trait
-# (decisions 0021, 0022). Not named in any public signature.
+# Decisions 0021, 0022: runtime adapter boundary.
 tokio.workspace = true
 
 [dev-dependencies]

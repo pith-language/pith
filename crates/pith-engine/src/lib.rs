@@ -11,7 +11,9 @@
 pub mod graph;
 pub mod runtime;
 
-pub use graph::Engine;
+pub use graph::{
+    ComputationNode, DependencyEdge, Engine, Evaluation, PureRule, PureRuleFrame, PureStep,
+};
 pub use runtime::Runtime;
 
 use pith_output::{IntoOutput, OutputRecord, Payload, PhaseStatus};

@@ -13,7 +13,6 @@ workspace = true
 [dependencies]
 thiserror.workspace = true
 miette.workspace = true
-# Spans are byte-based and utf-8-correct (decision 0021). These are wrapped
-# behind pith-diag's own Span/SourceFile types and never named publicly.
+# Decision 0021: byte-based, UTF-8-correct spans.
 text-size.workspace = true
 line-index.workspace = true

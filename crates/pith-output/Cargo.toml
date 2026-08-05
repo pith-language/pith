@@ -11,12 +11,9 @@ description = "Typed output records and the renderer trait for pith's Pretty/Pla
 workspace = true
 
 [dependencies]
-# serde appears here and only here (decision 0021). The DTO is the wire format
-# for JSON output; making it serde-derived is the whole point of this crate.
+# Decision 0021: serialization stays in pith-output.
 serde.workspace = true
 serde_json.workspace = true
-# Terminal rendering for the Pretty shape. anstream handles TTY detection,
-# NO_COLOR, CLICOLOR_FORCE, and pipe redirection so we don't have to.
 anstream.workspace = true
 anstyle.workspace = true
 owo-colors.workspace = true

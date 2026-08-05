@@ -67,7 +67,6 @@ fn describe_plain(record: &OutputRecord) -> String {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used)]
     use super::*;
     use crate::{CacheOutcome, OutputRecord, PhaseStatus};
 

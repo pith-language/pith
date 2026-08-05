@@ -68,8 +68,24 @@ impl<B: Brand, T> Arena<B, T> {
             return None;
         }
         let idx = la_arena::Idx::from_raw(la_arena::RawIdx::from(raw));
-        #[allow(clippy::indexing_slicing)]
+        #[allow(
+            clippy::indexing_slicing,
+            reason = "the explicit length check above makes this arena index valid"
+        )]
         Some(&self.inner[idx])
+    }
+
+    pub fn get_mut(&mut self, id: Id<B>) -> Option<&mut T> {
+        let raw: u32 = id.raw;
+        if (raw as usize) >= self.inner.len() {
+            return None;
+        }
+        let idx = la_arena::Idx::from_raw(la_arena::RawIdx::from(raw));
+        #[allow(
+            clippy::indexing_slicing,
+            reason = "the explicit length check above makes this arena index valid"
+        )]
+        Some(&mut self.inner[idx])
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (Id<B>, &T)> {
@@ -142,7 +158,10 @@ macro_rules! define_arena {
 
 #[cfg(test)]
 mod tests {
-    #![allow(dead_code)]
+    #![allow(
+        dead_code,
+        reason = "the second generated arena alias exists only to prove brand separation"
+    )]
     use super::*;
 
     define_arena!(TestId, TestArena, TestBrand);
@@ -159,6 +178,16 @@ mod tests {
     fn out_of_range_get_is_none() {
         let arena: TestArena<u32> = Arena::new();
         assert_eq!(arena.get(TestId::from_raw(99)), None);
+    }
+
+    #[test]
+    fn get_mut_updates_a_stored_value() {
+        let mut arena: TestArena<u32> = Arena::new();
+        let id = arena.push(10u32);
+        if let Some(value) = arena.get_mut(id) {
+            *value = 11;
+        }
+        assert_eq!(arena.get(id), Some(&11));
     }
 
     #[test]

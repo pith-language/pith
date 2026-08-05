@@ -80,12 +80,12 @@ fn eval(
         span: Span::none(),
     };
     match engine.evaluate(&req) {
-        Ok(value) => {
+        Ok(evaluation) => {
             let _ = sink.emit(&OutputRecord {
                 kind: pith_output::RecordKind::Result,
                 code: 0,
                 payload: Payload::Result {
-                    summary: value.describe().into(),
+                    summary: evaluation.value.describe().into(),
                 },
             });
             Ok(())

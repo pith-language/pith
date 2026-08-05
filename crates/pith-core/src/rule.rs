@@ -30,7 +30,6 @@ pub struct Interface {
 
 #[derive(Clone, Debug)]
 pub struct Rule {
-    pub id: RuleId,
     pub interface: Interface,
     pub span: Span,
 }
@@ -84,13 +83,11 @@ impl SelectOutcome {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used)]
     use super::*;
     use pith_arena::Arena;
 
-    fn rule(id: u32, label: &str) -> Rule {
+    fn rule(label: &str) -> Rule {
         Rule {
-            id: RuleId::from_raw(id),
             interface: Interface {
                 label: label.into(),
                 output_kind: "Artifact".into(),
@@ -119,8 +116,8 @@ mod tests {
     #[test]
     fn ambiguous_names_every_candidate_in_notes() {
         let mut arena: RuleArena<Rule> = Arena::new();
-        let r0 = arena.push(rule(0, "a"));
-        let r1 = arena.push(rule(1, "b"));
+        let r0 = arena.push(rule("a"));
+        let r1 = arena.push(rule("b"));
         let err = SelectOutcome::Ambiguous(smallvec::smallvec![r0, r1])
             .into_result(&request("thing"), &arena)
             .unwrap_err();
