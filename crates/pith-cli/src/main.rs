@@ -2,7 +2,7 @@ use std::io::{self, IsTerminal, Write};
 use std::process::ExitCode;
 
 use clap::{Parser, ValueEnum};
-use pith_core::Request;
+use pith_core::{Interface, Request, Type};
 use pith_diag::Span;
 use pith_engine::Engine;
 use pith_output::{OutputRecord, OutputShape, Payload, PhaseStatus, Sink};
@@ -77,6 +77,10 @@ fn eval(
     let mut engine = Engine::new();
     let req = Request {
         label: request.into(),
+        interface: Interface {
+            inputs: Box::new([]),
+            output: Type::Unit,
+        },
         span: Span::none(),
     };
     match engine.evaluate(&req) {

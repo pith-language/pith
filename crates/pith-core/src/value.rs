@@ -38,13 +38,25 @@ impl From<&Value> for ValueRepr {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Type {
     Unit,
     Bool,
     Int,
     Text,
     Nominal { name: Box<str> },
+}
+
+impl std::fmt::Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unit => f.write_str("Unit"),
+            Self::Bool => f.write_str("Bool"),
+            Self::Int => f.write_str("Int"),
+            Self::Text => f.write_str("Text"),
+            Self::Nominal { name } => f.write_str(name),
+        }
+    }
 }
 
 impl From<&Type> for TypeRepr {

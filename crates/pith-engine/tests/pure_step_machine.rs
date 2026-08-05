@@ -1,4 +1,4 @@
-use pith_core::{Interface, Request, Rule, Value};
+use pith_core::{Interface, Request, Rule, Type, Value};
 use pith_diag::{PithResult, Span, StableCode};
 use pith_engine::{DependencyEdge, Engine, PureRule, PureRuleFrame, PureStep};
 
@@ -19,7 +19,7 @@ impl PureRuleFrame for ConstantFrame {
 }
 
 struct IncrementRule {
-    dependency: Box<str>,
+    dependency: Request,
 }
 
 impl PureRule for IncrementRule {
@@ -32,7 +32,7 @@ impl PureRule for IncrementRule {
 }
 
 struct IncrementFrame {
-    dependency: Box<str>,
+    dependency: Request,
     requested: bool,
 }
 
@@ -40,7 +40,7 @@ impl PureRuleFrame for IncrementFrame {
     fn step(&mut self, input: Option<Value>) -> PithResult<PureStep> {
         if !self.requested {
             self.requested = true;
-            return Ok(PureStep::Need(request(&self.dependency)));
+            return Ok(PureStep::Need(self.dependency.clone()));
         }
 
         let value = match input {
@@ -53,7 +53,7 @@ impl PureRuleFrame for IncrementFrame {
 }
 
 struct ForwardRule {
-    dependency: Box<str>,
+    dependency: Request,
 }
 
 impl PureRule for ForwardRule {
@@ -66,7 +66,7 @@ impl PureRule for ForwardRule {
 }
 
 struct ForwardFrame {
-    dependency: Box<str>,
+    dependency: Request,
     requested: bool,
 }
 
@@ -74,25 +74,31 @@ impl PureRuleFrame for ForwardFrame {
     fn step(&mut self, input: Option<Value>) -> PithResult<PureStep> {
         if !self.requested {
             self.requested = true;
-            return Ok(PureStep::Need(request(&self.dependency)));
+            return Ok(PureStep::Need(self.dependency.clone()));
         }
         Ok(PureStep::Complete(input.unwrap_or(Value::Unit)))
     }
 }
 
-fn rule(label: &str) -> Rule {
+fn interface(inputs: &[Type], output: Type) -> Interface {
+    Interface {
+        inputs: inputs.to_vec().into_boxed_slice(),
+        output,
+    }
+}
+
+fn rule(label: &str, interface: Interface) -> Rule {
     Rule {
-        interface: Interface {
-            label: label.into(),
-            output_kind: "Artifact".into(),
-        },
+        label: label.into(),
+        interface,
         span: Span::none(),
     }
 }
 
-fn request(label: &str) -> Request {
+fn request(label: &str, interface: Interface) -> Request {
     Request {
         label: label.into(),
+        interface,
         span: Span::none(),
     }
 }
@@ -100,9 +106,15 @@ fn request(label: &str) -> Request {
 #[test]
 fn leaf_rule_returns_its_value() {
     let mut engine = Engine::new();
-    engine.register_rule(rule("leaf"), ConstantRule(Value::Int(41)));
+    let leaf = interface(&[], Type::Int);
+    engine.register_rule(
+        rule("leaf provider", leaf.clone()),
+        ConstantRule(Value::Int(41)),
+    );
 
-    let evaluation = engine.evaluate(&request("leaf")).unwrap();
+    let evaluation = engine
+        .evaluate(&request("diagnostic leaf label", leaf))
+        .unwrap();
 
     assert!(matches!(evaluation.value, Value::Int(41)));
     let node = engine.computation(evaluation.computation).unwrap();
@@ -112,15 +124,22 @@ fn leaf_rule_returns_its_value() {
 #[test]
 fn parent_resumes_with_child_value_and_records_the_edge() {
     let mut engine = Engine::new();
-    engine.register_rule(rule("leaf"), ConstantRule(Value::Int(41)));
+    let leaf = interface(&[], Type::Int);
+    let parent = interface(&[Type::Int], Type::Int);
     engine.register_rule(
-        rule("parent"),
+        rule("leaf provider", leaf.clone()),
+        ConstantRule(Value::Int(41)),
+    );
+    engine.register_rule(
+        rule("increment provider", parent.clone()),
         IncrementRule {
-            dependency: "leaf".into(),
+            dependency: request("base value", leaf.clone()),
         },
     );
 
-    let evaluation = engine.evaluate(&request("parent")).unwrap();
+    let evaluation = engine
+        .evaluate(&request("requested answer", parent))
+        .unwrap();
 
     assert!(matches!(evaluation.value, Value::Int(42)));
     let dependencies = engine.dependencies_of(evaluation.computation).unwrap();
@@ -130,7 +149,8 @@ fn parent_resumes_with_child_value_and_records_the_edge() {
             request,
             computation,
         } => {
-            assert_eq!(request.label.as_ref(), "leaf");
+            assert_eq!(request.label.as_ref(), "base value");
+            assert_eq!(request.interface, leaf);
             let child = engine.computation(*computation).unwrap();
             assert!(matches!(child.result, Some(Value::Int(41))));
         }
@@ -140,36 +160,46 @@ fn parent_resumes_with_child_value_and_records_the_edge() {
 #[test]
 fn dependency_cycle_reports_the_request_chain() {
     let mut engine = Engine::new();
+    let a = interface(&[Type::Bool], Type::Int);
+    let b = interface(&[Type::Int], Type::Bool);
     engine.register_rule(
-        rule("a"),
+        rule("a provider", a.clone()),
         ForwardRule {
-            dependency: "b".into(),
+            dependency: request("need b", b.clone()),
         },
     );
     engine.register_rule(
-        rule("b"),
+        rule("b provider", b.clone()),
         ForwardRule {
-            dependency: "a".into(),
+            dependency: request("need a", a.clone()),
         },
     );
 
-    let err = engine.evaluate(&request("a")).unwrap_err();
+    let err = engine.evaluate(&request("start a", a)).unwrap_err();
     let diagnostics: Vec<_> = err.iter().collect();
     let diagnostic = diagnostics.first().unwrap();
     assert_eq!(diagnostic.code, StableCode::engine(203));
     assert_eq!(
         diagnostic.message.0.as_ref(),
-        "dependency cycle: a -> b -> a"
+        "dependency cycle: start a -> need b -> need a"
     );
 }
 
 #[test]
 fn independent_evaluations_keep_distinct_computations() {
     let mut engine = Engine::new();
-    engine.register_rule(rule("leaf"), ConstantRule(Value::Int(41)));
+    let leaf = interface(&[], Type::Int);
+    engine.register_rule(
+        rule("leaf provider", leaf.clone()),
+        ConstantRule(Value::Int(41)),
+    );
 
-    let first = engine.evaluate(&request("leaf")).unwrap();
-    let second = engine.evaluate(&request("leaf")).unwrap();
+    let first = engine
+        .evaluate(&request("first evaluation", leaf.clone()))
+        .unwrap();
+    let second = engine
+        .evaluate(&request("second evaluation", leaf))
+        .unwrap();
 
     assert_ne!(first.computation, second.computation);
     assert!(engine.computation(first.computation).is_some());

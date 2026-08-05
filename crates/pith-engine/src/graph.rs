@@ -1,7 +1,7 @@
 //! The arena dependency graph and synchronous pure evaluator (0021, 0022).
 
 use indexmap::IndexMap;
-use pith_core::{Request, Rule, RuleArena, RuleId, Value};
+use pith_core::{Request, Rule, RuleArena, RuleId, Value, select_rule};
 use pith_diag::{Diag, DiagnosticSink, PithResult, Severity, Span, StableCode};
 use pith_ids::{ComputationArena, ComputationId};
 use smallvec::SmallVec;
@@ -98,12 +98,12 @@ impl Engine {
     /// Evaluate a request on the synchronous pure step machine.
     ///
     /// # Errors
-    /// Returns a `DiagnosticSink` with stable code `E-1201` when no rule
-    /// matches, `E-1202` (naming every candidate) when more than one matches,
+    /// Returns a `DiagnosticSink` with stable code `E-1101` when no rule
+    /// matches, `E-1102` (naming every candidate) when more than one matches,
     /// `E-1203` when evaluation detects a dependency cycle, or diagnostics
     /// emitted by a rule body.
     pub fn evaluate(&mut self, request: &Request) -> PithResult<Evaluation> {
-        let rule = self.select_rule(request)?;
+        let rule = self.resolve_rule(request)?;
         let root = self.start_frame(request.clone(), rule)?;
         let mut stack = vec![root];
 
@@ -133,7 +133,7 @@ impl Engine {
                     }
                 }
                 PureStep::Need(child_request) => {
-                    let child_rule = self.select_rule(&child_request)?;
+                    let child_rule = self.resolve_rule(&child_request)?;
                     if stack.iter().any(|frame| frame.rule == child_rule) {
                         let mut chain: Vec<&str> = stack
                             .iter()
@@ -172,17 +172,10 @@ impl Engine {
             .map(|node| node.dependencies.as_slice())
     }
 
-    fn select_rule(&self, request: &Request) -> PithResult<RuleId> {
-        let candidates: Vec<RuleId> = self
-            .rules_iter()
-            .filter(|(_, rule)| rule.interface.label.as_ref() == request.label.as_ref())
-            .map(|(id, _)| id)
-            .collect();
-        match candidates.as_slice() {
-            [] => Err(no_match_diag(request)),
-            [only] => Ok(*only),
-            _ => Err(ambiguous_diag(request, &candidates, &self.rules)),
-        }
+    fn resolve_rule(&self, request: &Request) -> PithResult<RuleId> {
+        select_rule(request, &self.rules)
+            .into_result(request, &self.rules)
+            .map_err(one_diag)
     }
 
     fn start_frame(&mut self, request: Request, rule: RuleId) -> PithResult<EvalFrame> {
@@ -212,34 +205,6 @@ impl Default for Engine {
     }
 }
 
-fn no_match_diag(request: &Request) -> DiagnosticSink {
-    one_diag(Diag::new(
-        Severity::Error,
-        StableCode::engine(201),
-        request.span,
-        format!("no rule satisfies `{}`", request.label),
-    ))
-}
-
-fn ambiguous_diag(
-    request: &Request,
-    candidates: &[RuleId],
-    rules: &RuleArena<Rule>,
-) -> DiagnosticSink {
-    let mut diag = Diag::new(
-        Severity::Error,
-        StableCode::engine(202),
-        request.span,
-        format!("ambiguous rule for `{}`", request.label),
-    );
-    for id in candidates {
-        if let Some(rule) = rules.get(*id) {
-            diag = diag.with_note(rule.span, format!("candidate: {}", rule.interface.label));
-        }
-    }
-    one_diag(diag)
-}
-
 fn cycle_diag(chain: &[&str], span: Span) -> DiagnosticSink {
     one_diag(Diag::new(
         Severity::Error,
@@ -267,7 +232,7 @@ fn one_diag(diag: Diag) -> DiagnosticSink {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pith_core::Interface;
+    use pith_core::{Interface, Type};
 
     struct UnitRule;
 
@@ -287,9 +252,10 @@ mod tests {
 
     fn rule(label: &str) -> Rule {
         Rule {
+            label: label.into(),
             interface: Interface {
-                label: label.into(),
-                output_kind: "Artifact".into(),
+                inputs: Box::new([]),
+                output: Type::Int,
             },
             span: Span::none(),
         }
@@ -298,6 +264,10 @@ mod tests {
     fn request(label: &str) -> Request {
         Request {
             label: label.into(),
+            interface: Interface {
+                inputs: Box::new([]),
+                output: Type::Int,
+            },
             span: Span::none(),
         }
     }
@@ -316,6 +286,6 @@ mod tests {
         let err = engine.evaluate(&request("thing")).unwrap_err();
         let diags: Vec<_> = err.iter().collect();
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags.first().unwrap().code, StableCode::engine(202));
+        assert_eq!(diags.first().unwrap().code, StableCode::engine(102));
     }
 }
