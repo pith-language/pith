@@ -108,6 +108,14 @@ the type-level effect categories (0019) are enforced structurally by where each 
 
 the cost is the boundary itself. a rule that evaluates purely and then hits an effect must yield a `Request` and be resumed, rather than calling the effect directly. this is the standard cost of a structured effect boundary and is accepted for the same reason the effect categories are types rather than tags: the visibility is the point.
 
+## prototype evidence
+
+the first rust prototype establishes the boundary but does not yet establish the complete scheduler described by this decision.
+
+`Pure` rule bodies run as synchronous frames and yield typed requests. an `Action` rule plans an inert contract containing its executable content identity, arguments, inputs, outputs, environment, platform requirement, capabilities, and network policy. callers can query that plan without executing it. an async executor adapter is the only surface that performs the action, and its contract-verification status, produced content, and capability use are retained on the action computation node.
+
+the current driver awaits one action at a time. it does not yet schedule independent work concurrently, cancel superseded requests, or enforce timeouts. the executor interface makes those additions possible without returning ambient async authority to pure rules, but the decision remains proposed until those scheduler properties are prototyped.
+
 ## unresolved
 
 the exact shape of the `Request` value a step yields, and how resumption carries the result and any new graph edges back into the step machine, needs a prototype. the design here fixes the boundary; the message format is open.

@@ -6,7 +6,7 @@ summary: entry point for the design notebook
 kind: index
 status: active
 created: 2026-08-04
-updated: 2026-08-04
+updated: 2026-08-05
 tags:
   - project
   - design
@@ -47,7 +47,7 @@ the proposed design also separates pure computation, bounded actions, observatio
 
 further proposed decisions settle some of the open questions: rule selection matches typed interfaces and refuses ambiguity (0015); the kernel is implemented in rust with arena-and-index graph modeling and no unsafe for structure (0016); types are structural by default and nominal by declaration (0017); pure evaluation is total by construction, with the graph carrying recursion and cycle detection providing the real bound (0018); and the kernel has five type-level effect categories with nondeterminism tracked as a dependency (0019).
 
-the exact constraint model, effect algebra, identity construction, and incremental engine are still open design work, and every proposed decision above stays open until a prototype tests it.
+the exact constraint model, persistent identity construction, and incremental engine are still open design work. the rust prototype now tests exact-interface selection, the five effect-category types, arena-owned graph identity, exact in-memory reuse of completed pure applications, the synchronous pure step machine, and an inspectable action-plan/executor boundary. invalidation, action caching, capability propagation, sandbox enforcement, and concurrent scheduling remain unproved, and proposed decisions stay open until their complete claims have been tested.
 
 ## document status
 

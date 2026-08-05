@@ -110,6 +110,12 @@ the adapter discipline (every nontrivial external crate behind a pith-owned trai
 
 `serde` appears in `pith-output` and nowhere else in public types. `tokio` appears only inside the scheduler module (decision 0022). the leaf-crate property of `pith-output` and `pith-diag` is structural, enforced by the dependency direction.
 
+## prototype evidence
+
+the in-memory prototype interns completed pure applications by selected rule, typed interface, and input values. diagnostic labels and spans do not participate in reuse. distinct roots share completed pure dependencies, while any action dependency makes the consuming pure computation non-reusable until action identity and contract-aware caching exist.
+
+this proves exact reuse inside one engine instance. it does not settle persistent computation identity, invalidation after changed durable inputs, or cache explanations, so the decision remains proposed.
+
 ## unresolved
 
 the exact change-propagation algorithm — eager invalidation, lazy re-derived-on-demand, or a hybrid — needs a prototype. the empty-cache-equivalence invariant (K-9) constrains the choice but does not determine it.

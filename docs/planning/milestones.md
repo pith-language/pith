@@ -26,9 +26,13 @@ this order is provisional. the first implementation should test the kernel throu
 
 define typed values, requests, rules, dependency recording, structured diagnostics, and an in-memory query interface.
 
+current evidence: the rust prototype has a typed pure step machine, exact-interface rule selection, cycle diagnostics, dependency recording, instance-owned graph identities, exact in-memory reuse for completed pure applications, and an in-memory query surface. persistent computation identity, invalidation, and capability propagation still need to prove the incremental contract before this milestone is complete.
+
 ## M-2: action prototype
 
 add content-addressed blobs and trees, sandboxed local actions, caching, and explanations for cache hits and invalidation.
+
+current evidence: blobs and trees are content addressed; pure steps can request deferred blob materialization; and action planning now produces an inspectable contract that an executor runs with structured evidence retained in provenance. a sandboxed local executor, action identity, caching, invalidation explanations, concurrency, and cancellation remain.
 
 ## M-3: first build library
 
@@ -49,4 +53,3 @@ observe one machine, derive a plan, apply it, confirm the result, and return to 
 ## M-7: broader execution
 
 only after the vertical slice works: remote execution, additional operating systems, multi-machine placement, continuous reconciliation, and richer transition protocols.
-
