@@ -40,9 +40,15 @@ fn describe_pretty(record: &OutputRecord) -> String {
             format!("{glyph} {colored}")
         }
         Payload::Cache { outcome } => match outcome {
-            crate::CacheOutcome::Hit => format!("{} {}", "cache".dimmed(), "hit".green()),
-            crate::CacheOutcome::Miss => format!("{} {}", "cache".dimmed(), "miss".yellow()),
-            crate::CacheOutcome::Reuse => format!("{} {}", "cache".dimmed(), "reuse".cyan()),
+            crate::CacheOutcome::Hit => {
+                format!("{} {}", "cache".dimmed(), outcome.as_str().green())
+            }
+            crate::CacheOutcome::Miss => {
+                format!("{} {}", "cache".dimmed(), outcome.as_str().yellow())
+            }
+            crate::CacheOutcome::Reuse => {
+                format!("{} {}", "cache".dimmed(), outcome.as_str().cyan())
+            }
         },
         Payload::Explain { steps } => {
             let mut s = String::from("why:\n");

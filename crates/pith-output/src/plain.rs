@@ -2,7 +2,7 @@
 
 use std::io::{self, Write};
 
-use crate::{OutputRecord, Payload, PhaseStatus, Renderer};
+use crate::{OutputRecord, Payload, Renderer};
 
 /// Render records as plain ASCII lines to a writer.
 pub struct PlainRenderer<W: Write> {
@@ -29,24 +29,12 @@ impl<W: Write> Renderer for PlainRenderer<W> {
 /// Describe one record as a single ASCII line. Kept separate from the renderer
 /// so it is independently testable.
 fn describe_plain(record: &OutputRecord) -> String {
-    let tag = match record.kind {
-        crate::RecordKind::Phase => "phase",
-        crate::RecordKind::Cache => "cache",
-        crate::RecordKind::Explain => "explain",
-        crate::RecordKind::Result => "result",
-        crate::RecordKind::Summary => "summary",
-        crate::RecordKind::Custom => "custom",
-    };
+    let tag = record.kind.as_str();
     let body = match &record.payload {
         Payload::Phase { name, status } => {
-            let s = match status {
-                PhaseStatus::Started => "started",
-                PhaseStatus::Finished => "finished",
-                PhaseStatus::Failed => "failed",
-            };
-            format!("{name} {s}")
+            format!("{name} {}", status.as_str())
         }
-        Payload::Cache { outcome } => format!("{outcome:?}"),
+        Payload::Cache { outcome } => outcome.as_str().to_string(),
         Payload::Explain { steps } => {
             let labels: Vec<&str> = steps.iter().map(|s| s.label.as_ref()).collect();
             labels.join(" -> ")
@@ -85,9 +73,11 @@ mod tests {
     }
 
     #[test]
-    fn plain_cache_is_ascii() {
+    fn plain_cache_matches_serde_snake_case() {
+        // Previously this rendered "Hit" via Debug, diverging from JSON's
+        // serde-derived "hit". Both renderers must agree.
         let rec = OutputRecord::cache(CacheOutcome::Hit);
-        assert_eq!(describe_plain(&rec), "[cache] Hit");
+        assert_eq!(describe_plain(&rec), "[cache] hit");
     }
 
     #[test]

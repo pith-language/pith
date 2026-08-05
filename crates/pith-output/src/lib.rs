@@ -28,6 +28,23 @@ pub enum RecordKind {
     Custom,
 }
 
+impl RecordKind {
+    /// The stable snake_case tag for this kind. This is the single source of
+    /// truth for the string every renderer (plain, pretty, JSON) uses; it must
+    /// match the `#[serde(rename_all = "snake_case")]` derivation, which the
+    /// `record_kind_as_str_matches_serde` test pins.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            RecordKind::Phase => "phase",
+            RecordKind::Cache => "cache",
+            RecordKind::Explain => "explain",
+            RecordKind::Result => "result",
+            RecordKind::Summary => "summary",
+            RecordKind::Custom => "custom",
+        }
+    }
+}
+
 /// Flattened into the parent `OutputRecord` JSON via `serde(flatten)`. Renaming
 /// a variant or field is a breaking change for JSON consumers.
 #[derive(Clone, Debug, serde::Serialize)]
@@ -63,12 +80,34 @@ pub enum PhaseStatus {
     Failed,
 }
 
+impl PhaseStatus {
+    /// Stable snake_case name; single source of truth for renderers.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            PhaseStatus::Started => "started",
+            PhaseStatus::Finished => "finished",
+            PhaseStatus::Failed => "failed",
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CacheOutcome {
     Hit,
     Miss,
     Reuse,
+}
+
+impl CacheOutcome {
+    /// Stable snake_case name; single source of truth for renderers.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            CacheOutcome::Hit => "hit",
+            CacheOutcome::Miss => "miss",
+            CacheOutcome::Reuse => "reuse",
+        }
+    }
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -199,5 +238,47 @@ mod tests {
             json.get("outcome").and_then(serde_json::Value::as_str),
             Some("reuse")
         );
+    }
+
+    /// `as_str` is the single source of truth for renderer strings, but serde
+    /// derives its own snake_case names independently. If they drift, JSON and
+    /// the plain/pretty renderers will disagree. This pins them together.
+    #[test]
+    fn as_str_matches_serde_derivation() {
+        for kind in [
+            RecordKind::Phase,
+            RecordKind::Cache,
+            RecordKind::Explain,
+            RecordKind::Result,
+            RecordKind::Summary,
+            RecordKind::Custom,
+        ] {
+            let json = serde_json::to_value(kind).unwrap();
+            assert_eq!(
+                json.as_str(),
+                Some(kind.as_str()),
+                "RecordKind as_str drifted from serde"
+            );
+        }
+        for status in [
+            PhaseStatus::Started,
+            PhaseStatus::Finished,
+            PhaseStatus::Failed,
+        ] {
+            let json = serde_json::to_value(status).unwrap();
+            assert_eq!(
+                json.as_str(),
+                Some(status.as_str()),
+                "PhaseStatus as_str drifted from serde"
+            );
+        }
+        for outcome in [CacheOutcome::Hit, CacheOutcome::Miss, CacheOutcome::Reuse] {
+            let json = serde_json::to_value(outcome).unwrap();
+            assert_eq!(
+                json.as_str(),
+                Some(outcome.as_str()),
+                "CacheOutcome as_str drifted from serde"
+            );
+        }
     }
 }
