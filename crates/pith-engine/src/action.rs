@@ -26,7 +26,7 @@ pub trait ActionRule: Send + Sync {
 /// Adapter boundary for local, remote, or test action execution.
 #[async_trait]
 pub trait Executor: Send + Sync {
-    /// Execute `spec` and return captured outputs and execution evidence.
+    /// Execute `spec` and return captured outputs and an execution report.
     ///
     /// # Errors
     /// Returns structured diagnostics when the action cannot be executed.
@@ -35,18 +35,25 @@ pub trait Executor: Send + Sync {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActionExecution {
-    pub evidence: ExecutionEvidence,
+    pub report: ExecutionReport,
 }
 
-/// How strongly an executor verified the declared contract.
+/// Access-control mechanism reported by an executor.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum ContractVerification {
-    /// The executor prevented access outside the declared contract.
-    Enforced,
-    /// The executor observed access and reported whether it matched.
+pub enum AccessVerification {
+    /// The executor reports that it prevented access outside the contract.
+    Prevented,
+    /// The executor reports that it observed access and checked the contract.
     Observed,
-    /// The executor could not verify access. This remains visible in provenance.
+    /// The executor did not verify access.
     Unverified,
+}
+
+/// Concrete platform selected by an executor for one execution.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExecutionPlatform {
+    pub operating_system: Box<str>,
+    pub architecture: Box<str>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -57,20 +64,20 @@ pub struct ProducedOutput {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ExecutionEvidence {
+pub struct ExecutionReport {
     pub executor: Box<str>,
-    pub contract: ContractVerification,
+    pub platform: ExecutionPlatform,
+    pub access: AccessVerification,
     pub outputs: Box<[ProducedOutput]>,
     pub capabilities_used: Box<[CapabilityRequirement]>,
 }
 
-impl ExecutionEvidence {
-    /// Evidence for adapters that can run work but cannot yet enforce or trace
-    /// the declared contract. The weaker guarantee is explicit in provenance.
-    pub fn unverified(executor: impl Into<Box<str>>) -> Self {
+impl ExecutionReport {
+    pub fn unverified(executor: impl Into<Box<str>>, platform: ExecutionPlatform) -> Self {
         Self {
             executor: executor.into(),
-            contract: ContractVerification::Unverified,
+            platform,
+            access: AccessVerification::Unverified,
             outputs: Box::new([]),
             capabilities_used: Box::new([]),
         }

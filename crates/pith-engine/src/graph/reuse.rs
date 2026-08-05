@@ -1,8 +1,8 @@
 use indexmap::IndexMap;
 use pith_core::{Interface, Pure, Request, RuleId, Value};
-use pith_ids::{ActionSpecDigest, ComputationId};
+use pith_ids::ComputationId;
 
-use super::{DependencyEdge, Engine, Evaluation, EvaluationSource};
+use super::{DependencyEdge, Engine, Evaluation, EvaluationSource, ReuseDecision, ReuseReason};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct PureApplicationKey {
@@ -30,7 +30,7 @@ impl Engine {
         let key = PureApplicationKey::new(rule, request);
         let computation = *self.pure_computations.get(&key)?;
         let node = self.computations.get(computation)?;
-        if !node.is_reusable {
+        if node.reuse != ReuseDecision::Reusable {
             return None;
         }
         let value = node.result.clone()?;
@@ -51,38 +51,32 @@ impl Engine {
         self.pure_computations.insert(key, computation);
     }
 
-    pub(super) fn reusable_action_result(
-        &self,
-        spec_digest: ActionSpecDigest,
-    ) -> Option<(Value, ComputationId)> {
-        let computation = *self.action_computations.get(&spec_digest)?;
-        let node = self.computations.get(computation)?;
-        if !node.is_reusable {
-            return None;
+    pub(super) fn pure_reuse_decision(&self, dependencies: &[DependencyEdge]) -> ReuseDecision {
+        for dependency in dependencies {
+            let computation = match dependency {
+                DependencyEdge::Blob { .. } => continue,
+                DependencyEdge::Request { computation, .. }
+                | DependencyEdge::Action { computation, .. } => *computation,
+            };
+            let Some(node) = self.computations.get(computation) else {
+                return ReuseDecision::NotReusable(ReuseReason::DependencyMissing { computation });
+            };
+            match node.reuse {
+                ReuseDecision::Reusable => {}
+                ReuseDecision::Pending => {
+                    return ReuseDecision::NotReusable(ReuseReason::DependencyPending {
+                        computation,
+                    });
+                }
+                ReuseDecision::NotReusable(_) => {
+                    return ReuseDecision::NotReusable(ReuseReason::DependencyNotReusable {
+                        computation,
+                    });
+                }
+            }
         }
-        let value = node.result.clone()?;
-        Some((value, computation))
-    }
-
-    pub(super) fn index_action_computation(
-        &mut self,
-        spec_digest: ActionSpecDigest,
-        computation: ComputationId,
-    ) {
-        self.action_computations.insert(spec_digest, computation);
-    }
-
-    pub(super) fn pure_dependencies_are_reusable(&self, dependencies: &[DependencyEdge]) -> bool {
-        dependencies.iter().all(|dependency| match dependency {
-            DependencyEdge::Blob { .. } => true,
-            DependencyEdge::Request { computation, .. }
-            | DependencyEdge::Action { computation, .. } => self
-                .computations
-                .get(*computation)
-                .is_some_and(|node| node.is_reusable),
-        })
+        ReuseDecision::Reusable
     }
 }
 
 pub(super) type PureComputationIndex = IndexMap<PureApplicationKey, ComputationId>;
-pub(super) type ActionComputationIndex = IndexMap<ActionSpecDigest, ComputationId>;

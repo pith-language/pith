@@ -8,7 +8,7 @@ mod reuse;
 
 pub use ir::{
     ActionPlan, ActionRecord, ComputationKind, ComputationNode, DependencyEdge, Evaluation,
-    EvaluationSource, PureRule, PureRuleFrame, PureStep, RuleSelection,
+    EvaluationSource, PureRule, PureRuleFrame, PureStep, ReuseDecision, ReuseReason, RuleSelection,
 };
 pub use query::EngineQuery;
 
@@ -22,7 +22,7 @@ use smallvec::SmallVec;
 use crate::action::{ActionExecution, ActionRule, Executor};
 use crate::runtime::Runtime;
 use ir::EvalFrame;
-use reuse::{ActionComputationIndex, PureComputationIndex};
+use reuse::PureComputationIndex;
 
 pub struct Engine {
     pub(crate) rules: RuleArena<Rule<Pure>>,
@@ -31,7 +31,6 @@ pub struct Engine {
     pub(crate) action_bodies: IndexMap<RuleId, Box<dyn ActionRule>>,
     pub(crate) computations: ComputationArena<ComputationNode>,
     pure_computations: PureComputationIndex,
-    action_computations: ActionComputationIndex,
     pub(crate) store: MemoryContentStore,
 }
 
@@ -44,7 +43,6 @@ impl Engine {
             action_bodies: IndexMap::new(),
             computations: ComputationArena::new(),
             pure_computations: IndexMap::new(),
-            action_computations: IndexMap::new(),
             store: MemoryContentStore::default(),
         }
     }
@@ -233,7 +231,7 @@ impl Engine {
             dependencies: SmallVec::new(),
             result: None,
             action: None,
-            is_reusable: false,
+            reuse: ReuseDecision::Pending,
         });
         self.index_pure_computation(rule, &request, computation);
         Ok(EvalFrame {
@@ -264,15 +262,15 @@ impl Engine {
                 ),
             )));
         }
-        let dependencies_are_reusable = match self.computations.get(completed.computation) {
-            Some(node) => self.pure_dependencies_are_reusable(&node.dependencies),
+        let reuse = match self.computations.get(completed.computation) {
+            Some(node) => self.pure_reuse_decision(&node.dependencies),
             None => return Err(internal_diag("pure evaluator lost a computation node")),
         };
         let Some(node) = self.computations.get_mut(completed.computation) else {
             return Err(internal_diag("pure evaluator lost a computation node"));
         };
         node.result = Some(value.clone());
-        node.is_reusable = dependencies_are_reusable;
+        node.reuse = reuse;
         Ok(Evaluation {
             value,
             computation: completed.computation,
@@ -388,11 +386,6 @@ impl Engine {
         let rule_span = action_rule.span;
         let rule_label = action_rule.label.clone();
 
-        if let Some((value, computation)) = self.reusable_action_result(plan.spec_digest) {
-            validate_action_result(&value, &declared_output, &rule_label, rule_span)?;
-            return Ok((value, computation));
-        }
-
         let computation = self.computations.push(ComputationNode {
             kind: ComputationKind::Action(request.clone()),
             rule,
@@ -401,32 +394,49 @@ impl Engine {
             action: Some(ActionRecord {
                 spec_digest: plan.spec_digest,
                 spec: plan.spec.clone(),
-                evidence: None,
+                report: None,
             }),
-            is_reusable: false,
+            reuse: ReuseDecision::Pending,
         });
 
-        let execution = executor.execute(&plan.spec).await?;
-        self.validate_execution(&plan.spec, &execution)?;
+        let execution = match executor.execute(&plan.spec).await {
+            Ok(execution) => execution,
+            Err(diagnostics) => {
+                self.mark_action_failed(computation, None);
+                return Err(diagnostics);
+            }
+        };
+        if let Err(diagnostics) = self.validate_execution(&plan.spec, &execution) {
+            self.mark_action_failed(computation, Some(execution.report));
+            return Err(diagnostics);
+        }
         let Some(body) = self.action_bodies.get(&rule) else {
+            self.mark_action_failed(computation, Some(execution.report));
             return Err(internal_diag("selected action rule has no body"));
         };
-        let value = body.complete(&request.inputs, &execution)?;
-        validate_action_result(&value, &declared_output, &rule_label, rule_span)?;
-        let is_reusable = execution.evidence.contract == crate::ContractVerification::Enforced;
+        let value = match body.complete(&request.inputs, &execution) {
+            Ok(value) => value,
+            Err(diagnostics) => {
+                self.mark_action_failed(computation, Some(execution.report));
+                return Err(diagnostics);
+            }
+        };
+        if let Err(diagnostics) =
+            validate_action_result(&value, &declared_output, &rule_label, rule_span)
+        {
+            self.mark_action_failed(computation, Some(execution.report));
+            return Err(diagnostics);
+        }
 
         let Some(node) = self.computations.get_mut(computation) else {
             return Err(internal_diag("action evaluator lost its computation node"));
         };
         node.result = Some(value.clone());
-        node.is_reusable = is_reusable;
+        node.reuse = ReuseDecision::NotReusable(ReuseReason::ActionCachingDisabled);
         let Some(action) = node.action.as_mut() else {
             return Err(internal_diag("action evaluator lost its action record"));
         };
-        action.evidence = Some(execution.evidence);
-        if is_reusable {
-            self.index_action_computation(plan.spec_digest, computation);
-        }
+        action.report = Some(execution.report);
 
         Ok((value, computation))
     }
@@ -436,7 +446,44 @@ impl Engine {
         spec: &pith_core::ActionSpec,
         execution: &ActionExecution,
     ) -> PithResult<()> {
-        for used in &execution.evidence.capabilities_used {
+        if execution.report.platform.operating_system.is_empty()
+            || execution.report.platform.architecture.is_empty()
+        {
+            return Err(one_diag(Diag::new(
+                Severity::Error,
+                StableCode::engine(212),
+                Span::none(),
+                "executor did not report a concrete execution platform",
+            )));
+        }
+
+        match (&spec.platform, &execution.report.platform) {
+            (
+                pith_core::PlatformRequirement::Exact {
+                    operating_system,
+                    architecture,
+                },
+                actual,
+            ) if operating_system != &actual.operating_system
+                || architecture != &actual.architecture =>
+            {
+                return Err(one_diag(Diag::new(
+                    Severity::Error,
+                    StableCode::engine(212),
+                    Span::none(),
+                    format!(
+                        "executor selected platform `{}-{}`, expected `{}-{}`",
+                        actual.operating_system,
+                        actual.architecture,
+                        operating_system,
+                        architecture
+                    ),
+                )));
+            }
+            _ => {}
+        }
+
+        for used in &execution.report.capabilities_used {
             if !spec.capabilities.contains(used) {
                 return Err(one_diag(Diag::new(
                     Severity::Error,
@@ -450,7 +497,7 @@ impl Engine {
             }
         }
 
-        for produced in &execution.evidence.outputs {
+        for produced in &execution.report.outputs {
             let declared = spec
                 .outputs
                 .iter()
@@ -467,7 +514,7 @@ impl Engine {
 
         for declared in &spec.outputs {
             let produced = execution
-                .evidence
+                .report
                 .outputs
                 .iter()
                 .any(|output| output.path == declared.path && output.kind == declared.kind);
@@ -485,6 +532,19 @@ impl Engine {
         }
 
         Ok(())
+    }
+
+    fn mark_action_failed(
+        &mut self,
+        computation: ComputationId,
+        report: Option<crate::ExecutionReport>,
+    ) {
+        if let Some(node) = self.computations.get_mut(computation) {
+            node.reuse = ReuseDecision::NotReusable(ReuseReason::FailedExecution);
+            if let Some(action) = node.action.as_mut() {
+                action.report = report;
+            }
+        }
     }
 }
 

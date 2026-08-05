@@ -6,13 +6,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use pith_core::{
-    Action, ActionOutput, ActionOutputKind, ActionSpec, CapabilityRequirement, Interface, Pure,
-    Request, Rule, Type, Value,
+    Action, ActionOutput, ActionOutputKind, ActionSpec, CapabilityRequirement, Interface,
+    PlatformRequirement, Pure, Request, Rule, Type, Value,
 };
 use pith_diag::{Diag, DiagnosticSink, PithResult, Severity, Span, StableCode};
 use pith_engine::{
-    ActionExecution, ActionRule, ContractVerification, Engine, EvaluationSource, ExecutionEvidence,
-    Executor, ProducedOutput, PureRule, PureRuleFrame, PureStep, TokioRuntime,
+    AccessVerification, ActionExecution, ActionRule, Engine, EvaluationSource, ExecutionPlatform,
+    ExecutionReport, Executor, ProducedOutput, PureRule, PureRuleFrame, PureStep, ReuseDecision,
+    ReuseReason, TokioRuntime,
 };
 use pith_ids::ContentId;
 
@@ -89,6 +90,10 @@ impl ActionRule for DoubleAction {
         };
         let mut spec = ActionSpec::isolated(double_executable());
         spec.arguments = [n.to_string().into_boxed_str()].into();
+        spec.platform = PlatformRequirement::Exact {
+            operating_system: "fixture".into(),
+            architecture: "fixture".into(),
+        };
         spec.outputs = [ActionOutput {
             path: "result".into(),
             kind: ActionOutputKind::Blob,
@@ -98,7 +103,7 @@ impl ActionRule for DoubleAction {
     }
 
     fn complete(&self, _inputs: &[Value], execution: &ActionExecution) -> PithResult<Value> {
-        match execution.evidence.outputs.first() {
+        match execution.report.outputs.first() {
             Some(output) => Ok(Value::Blob(output.content)),
             None => Err(fixture_error("double action produced no output")),
         }
@@ -145,9 +150,10 @@ impl Executor for FixtureExecutor {
             return Err(fixture_error("fixture action requires one declared output"));
         };
         Ok(ActionExecution {
-            evidence: ExecutionEvidence {
+            report: ExecutionReport {
                 executor: "fixture".into(),
-                contract: ContractVerification::Enforced,
+                platform: fixture_platform(),
+                access: AccessVerification::Prevented,
                 outputs: [ProducedOutput {
                     path: output.path.clone(),
                     kind: output.kind,
@@ -162,13 +168,16 @@ impl Executor for FixtureExecutor {
 
 struct UndeclaredCapabilityExecutor;
 
+struct WrongPlatformExecutor;
+
 #[async_trait::async_trait]
 impl Executor for UndeclaredCapabilityExecutor {
     async fn execute(&self, _spec: &ActionSpec) -> PithResult<ActionExecution> {
         Ok(ActionExecution {
-            evidence: ExecutionEvidence {
+            report: ExecutionReport {
                 executor: "fixture".into(),
-                contract: ContractVerification::Observed,
+                platform: fixture_platform(),
+                access: AccessVerification::Observed,
                 outputs: Box::new([]),
                 capabilities_used: [CapabilityRequirement {
                     name: "fixture.clock".into(),
@@ -177,6 +186,15 @@ impl Executor for UndeclaredCapabilityExecutor {
                 .into(),
             },
         })
+    }
+}
+
+#[async_trait::async_trait]
+impl Executor for WrongPlatformExecutor {
+    async fn execute(&self, spec: &ActionSpec) -> PithResult<ActionExecution> {
+        let mut execution = FixtureExecutor.execute(spec).await?;
+        execution.report.platform.operating_system = "other".into();
+        Ok(execution)
     }
 }
 
@@ -193,7 +211,7 @@ impl Executor for UnverifiedCountingExecutor {
     async fn execute(&self, spec: &ActionSpec) -> PithResult<ActionExecution> {
         self.executions.fetch_add(1, Ordering::Relaxed);
         let mut execution = FixtureExecutor.execute(spec).await?;
-        execution.evidence.contract = ContractVerification::Unverified;
+        execution.report.access = AccessVerification::Unverified;
         Ok(execution)
     }
 }
@@ -216,6 +234,13 @@ fn wrong_type_executable() -> ContentId {
 
 fn double_result(number: i64) -> ContentId {
     ContentId::of_blob(number.saturating_mul(2).to_string().as_bytes())
+}
+
+fn fixture_platform() -> ExecutionPlatform {
+    ExecutionPlatform {
+        operating_system: "fixture".into(),
+        architecture: "fixture".into(),
+    }
 }
 
 fn fixture_error(message: &str) -> DiagnosticSink {
@@ -371,8 +396,8 @@ fn action_dependency_driven_through_run() {
     assert_eq!(action.spec_digest, action.spec.digest().unwrap());
     assert_eq!(action.spec.executable, double_executable());
     assert_eq!(
-        action.evidence.as_ref().map(|evidence| evidence.contract),
-        Some(ContractVerification::Enforced)
+        action.report.as_ref().map(|report| report.access),
+        Some(AccessVerification::Prevented)
     );
 }
 
@@ -429,7 +454,48 @@ fn undeclared_capability_use_is_rejected() {
 }
 
 #[test]
-fn enforced_action_dependencies_are_reused() {
+fn executor_must_report_the_planned_platform() {
+    let mut engine = Engine::new();
+    let action_interface = interface(&[Type::Int], Type::Blob);
+    let root_interface = interface(&[], Type::Blob);
+    engine.register_action_rule(
+        action_rule("double", action_interface.clone()),
+        DoubleAction,
+    );
+    engine.register_rule(
+        pure_rule("entry", root_interface.clone()),
+        ActionDepRule {
+            dependency: action_request("double", action_interface, [Value::Int(21)]),
+        },
+    );
+
+    let runtime_result = engine
+        .run(
+            &pure_request("entry", root_interface, []),
+            &TokioRuntime,
+            &WrongPlatformExecutor,
+        )
+        .unwrap();
+
+    let diagnostics = runtime_result.unwrap_err();
+    let diagnostic = diagnostics.iter().next().unwrap();
+    assert_eq!(diagnostic.code, StableCode::engine(212));
+    let failed_action = engine
+        .query()
+        .computations()
+        .find_map(|(_, node)| node.action.as_ref())
+        .unwrap();
+    assert_eq!(
+        failed_action
+            .report
+            .as_ref()
+            .map(|report| report.platform.operating_system.as_ref()),
+        Some("other")
+    );
+}
+
+#[test]
+fn action_dependencies_are_not_reused_without_a_cache_identity() {
     let mut engine = Engine::new();
     let action_interface = interface(&[Type::Int], Type::Blob);
     let root_interface = interface(&[], Type::Blob);
@@ -460,13 +526,35 @@ fn enforced_action_dependencies_are_reused() {
     let second = second_evaluation_result.unwrap();
 
     assert_eq!(first.source, EvaluationSource::Computed);
-    assert_eq!(second.source, EvaluationSource::Reused);
-    assert_eq!(first.computation, second.computation);
-    assert_eq!(executions.load(Ordering::Relaxed), 1);
+    assert_eq!(second.source, EvaluationSource::Computed);
+    assert_ne!(first.computation, second.computation);
+    assert_eq!(executions.load(Ordering::Relaxed), 2);
+
+    let action_computation = engine
+        .query()
+        .dependencies_of(first.computation)
+        .and_then(|dependencies| dependencies.first())
+        .and_then(pith_engine::DependencyEdge::computation_id)
+        .unwrap();
+    let action_reuse = &engine
+        .query()
+        .computation(action_computation)
+        .unwrap()
+        .reuse;
+    assert_eq!(
+        action_reuse,
+        &ReuseDecision::NotReusable(ReuseReason::ActionCachingDisabled)
+    );
+    assert_eq!(
+        &engine.query().computation(first.computation).unwrap().reuse,
+        &ReuseDecision::NotReusable(ReuseReason::DependencyNotReusable {
+            computation: action_computation,
+        })
+    );
 }
 
 #[test]
-fn distinct_parents_share_an_enforced_action() {
+fn distinct_parents_do_not_share_action_results() {
     let mut engine = Engine::new();
     let action_interface = interface(&[Type::Int], Type::Blob);
     let boolean_parent_interface = interface(&[Type::Bool], Type::Blob);
@@ -529,8 +617,8 @@ fn distinct_parents_share_an_enforced_action() {
 
     assert_eq!(boolean_parent.source, EvaluationSource::Computed);
     assert_eq!(text_parent.source, EvaluationSource::Computed);
-    assert_eq!(boolean_action, text_action);
-    assert_eq!(executions.load(Ordering::Relaxed), 1);
+    assert_ne!(boolean_action, text_action);
+    assert_eq!(executions.load(Ordering::Relaxed), 2);
 }
 
 #[test]

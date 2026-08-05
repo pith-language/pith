@@ -9,11 +9,13 @@ pub mod graph;
 pub mod runtime;
 
 pub use action::{
-    ActionExecution, ActionRule, ContractVerification, ExecutionEvidence, Executor, ProducedOutput,
+    AccessVerification, ActionExecution, ActionRule, ExecutionPlatform, ExecutionReport, Executor,
+    ProducedOutput,
 };
 pub use graph::{
     ActionPlan, ActionRecord, ComputationKind, ComputationNode, DependencyEdge, Engine,
-    EngineQuery, Evaluation, EvaluationSource, PureRule, PureRuleFrame, PureStep, RuleSelection,
+    EngineQuery, Evaluation, EvaluationSource, PureRule, PureRuleFrame, PureStep, ReuseDecision,
+    ReuseReason, RuleSelection,
 };
 pub use runtime::{Runtime, RuntimeError, TokioRuntime};
 

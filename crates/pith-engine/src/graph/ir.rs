@@ -83,11 +83,27 @@ pub struct ActionPlan {
     pub spec: ActionSpec,
 }
 
-/// Declared contract and resulting evidence retained as action provenance.
+/// Declared contract and executor report retained as action provenance.
 pub struct ActionRecord {
     pub spec_digest: ActionSpecDigest,
     pub spec: ActionSpec,
-    pub evidence: Option<crate::ExecutionEvidence>,
+    pub report: Option<crate::ExecutionReport>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReuseDecision {
+    Pending,
+    Reusable,
+    NotReusable(ReuseReason),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReuseReason {
+    ActionCachingDisabled,
+    DependencyPending { computation: ComputationId },
+    DependencyNotReusable { computation: ComputationId },
+    DependencyMissing { computation: ComputationId },
+    FailedExecution,
 }
 
 /// One rule application in the in-memory graph.
@@ -97,7 +113,7 @@ pub struct ComputationNode {
     pub dependencies: SmallVec<[DependencyEdge; 4]>,
     pub result: Option<Value>,
     pub action: Option<ActionRecord>,
-    pub is_reusable: bool,
+    pub reuse: ReuseDecision,
 }
 
 /// A completed evaluation and the graph node that produced it.
