@@ -2,7 +2,7 @@
 
 use pith_arena::define_arena;
 use pith_diag::{Diag, Severity, Span, StableCode};
-use pith_ids::{ProvisionalRuleIdentity, PureComputationDigest};
+use pith_ids::{PureComputationDigest, RuleIdentity, RuleRevision};
 use smallvec::SmallVec;
 use std::marker::PhantomData;
 
@@ -43,6 +43,8 @@ pub struct Request<K: EffectCategory = Pure> {
 
 #[derive(Clone, Debug)]
 pub struct Rule<K: EffectCategory = Pure> {
+    pub identity: RuleIdentity,
+    pub revision: RuleRevision,
     pub label: Box<str>,
     pub interface: Interface,
     pub span: Span,
@@ -53,22 +55,17 @@ pub struct Rule<K: EffectCategory = Pure> {
 /// IR subset.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PureComputationKey {
-    /// Derived from the selected rule's label and interface until rules expose
-    /// durable semantic identity.
-    pub provisional_rule_identity: ProvisionalRuleIdentity,
-    /// Digest of the provisional rule identity, request interface, and inputs.
+    pub rule_identity: RuleIdentity,
+    pub rule_revision: RuleRevision,
+    /// Digest of the rule identity, revision, request interface, and inputs.
     pub digest: PureComputationDigest,
 }
 
 impl PureComputationKey {
     pub fn new(rule: &Rule<Pure>, request: &Request<Pure>) -> Self {
-        let mut rule_manifest = Vec::new();
-        encode_bytes(&mut rule_manifest, rule.label.as_bytes());
-        encode_interface(&mut rule_manifest, &rule.interface);
-        let provisional_rule_identity = ProvisionalRuleIdentity::of_manifest(&rule_manifest);
-
         let mut computation_manifest = Vec::new();
-        computation_manifest.extend_from_slice(provisional_rule_identity.digest().as_bytes());
+        computation_manifest.extend_from_slice(rule.identity.digest().as_bytes());
+        computation_manifest.extend_from_slice(rule.revision.digest().as_bytes());
         encode_interface(&mut computation_manifest, &request.interface);
         encode_length(&mut computation_manifest, request.inputs.len());
         request
@@ -77,7 +74,8 @@ impl PureComputationKey {
             .for_each(|value| encode_value(&mut computation_manifest, value));
 
         Self {
-            provisional_rule_identity,
+            rule_identity: rule.identity,
+            rule_revision: rule.revision,
             digest: PureComputationDigest::of_manifest(&computation_manifest),
         }
     }
@@ -143,8 +141,15 @@ impl<K: EffectCategory> Request<K> {
 }
 
 impl<K: EffectCategory> Rule<K> {
-    pub fn new(label: impl Into<Box<str>>, interface: Interface, span: Span) -> Self {
+    pub fn new(
+        revision: RuleRevision,
+        label: impl Into<Box<str>>,
+        interface: Interface,
+        span: Span,
+    ) -> Self {
         Self {
+            identity: revision.rule_identity(),
+            revision,
             label: label.into(),
             interface,
             span,
@@ -299,7 +304,9 @@ mod tests {
     }
 
     fn rule(label: &str, interface: Interface) -> Rule {
-        Rule::new(label, interface, Span::none())
+        let identity = RuleIdentity::of_module_declaration("pith-core.rule-tests", label);
+        let revision = RuleRevision::of_manifest(identity, b"rule-tests-provider-v1");
+        Rule::new(revision, label, interface, Span::none())
     }
 
     fn request(label: &str, interface: Interface, inputs: impl Into<Box<[Value]>>) -> Request {
@@ -313,8 +320,20 @@ mod tests {
     #[test]
     fn pure_computation_key_is_stable_for_same_application() {
         let signature = interface([Type::Int], Type::Text);
-        let first_rule = rule("provider", signature.clone());
-        let second_rule = rule("provider", signature.clone());
+        let identity = RuleIdentity::of_module_declaration("example.module", "provider");
+        let revision = RuleRevision::of_manifest(identity, b"provider-v1");
+        let first_rule = Rule::new(
+            revision,
+            "first diagnostic label",
+            signature.clone(),
+            Span::none(),
+        );
+        let second_rule = Rule::new(
+            revision,
+            "second diagnostic label",
+            signature.clone(),
+            Span::none(),
+        );
         let first = request("first request", signature.clone(), [Value::Int(7)]);
         let second = request("second request", signature, [Value::Int(7)]);
 
@@ -343,10 +362,32 @@ mod tests {
 
         let first_key = pure_key(&first, &requested);
         let second_key = pure_key(&second, &requested);
-        assert_ne!(
-            first_key.provisional_rule_identity,
-            second_key.provisional_rule_identity
+        assert_ne!(first_key.rule_identity, second_key.rule_identity);
+        assert_ne!(first_key, second_key);
+    }
+
+    #[test]
+    fn pure_computation_key_distinguishes_rule_revisions() {
+        let signature = interface([], Type::Int);
+        let identity = RuleIdentity::of_module_declaration("example.module", "provider");
+        let first = Rule::new(
+            RuleRevision::of_manifest(identity, b"provider-v1"),
+            "provider",
+            signature.clone(),
+            Span::none(),
         );
+        let second = Rule::new(
+            RuleRevision::of_manifest(identity, b"provider-v2"),
+            "provider",
+            signature.clone(),
+            Span::none(),
+        );
+        let requested = request("value", signature, []);
+
+        let first_key = pure_key(&first, &requested);
+        let second_key = pure_key(&second, &requested);
+        assert_eq!(first_key.rule_identity, second_key.rule_identity);
+        assert_ne!(first_key.rule_revision, second_key.rule_revision);
         assert_ne!(first_key, second_key);
     }
 

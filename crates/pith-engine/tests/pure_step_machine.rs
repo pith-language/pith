@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use pith_core::{Interface, Request, Rule, Type, Value};
+use pith_core::{Interface, Request, Rule, RuleIdentity, RuleRevision, Type, Value};
 use pith_diag::{PithResult, Span, StableCode};
 use pith_engine::{DependencyEdge, Engine, EvaluationSource, PureRule, PureRuleFrame, PureStep};
 
@@ -153,7 +153,9 @@ fn interface(inputs: &[Type], output: Type) -> Interface {
 }
 
 fn rule(label: &str, interface: Interface) -> Rule {
-    Rule::new(label, interface, Span::none())
+    let identity = RuleIdentity::of_module_declaration("pure-step-machine-tests", label);
+    let revision = RuleRevision::of_manifest(identity, b"pure-step-machine-tests-v1");
+    Rule::new(revision, label, interface, Span::none())
 }
 
 fn request(label: &str, interface: Interface, inputs: impl Into<Box<[Value]>>) -> Request {

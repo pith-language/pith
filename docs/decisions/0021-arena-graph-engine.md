@@ -112,7 +112,7 @@ the adapter discipline (every nontrivial external crate behind a pith-owned trai
 
 ## prototype evidence
 
-the in-memory prototype interns completed pure applications by a versioned, domain-separated key over provisional selected-rule identity, the request interface, and input values. the provisional rule identity is currently derived from the rule label and interface because executable rust rule bodies do not expose durable semantic revisions. request labels and spans do not participate in reuse. distinct roots share completed pure dependencies.
+the in-memory prototype interns completed pure applications by a versioned, domain-separated key over stable rule identity, cache-invalidating rule revision, the request interface, and input values (0023). rust-hosted rules supply conservative explicit revision data until their providing artifact can derive it. request labels and spans do not participate in reuse. distinct roots share completed pure dependencies.
 
 action contracts are validated before receiving a versioned, domain-separated digest over their complete canonical representation. this digest identifies the declared contract, not a reusable computation: it does not include the selected rule's completion semantics, the resolved execution platform, or policy decisions. action computations therefore remain non-reusable, and that decision propagates to pure parents.
 

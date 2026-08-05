@@ -848,7 +848,7 @@ fn content_unavailable_diag(id: ContentId) -> DiagnosticSink {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pith_core::{Interface, Type};
+    use pith_core::{Interface, RuleIdentity, RuleRevision, Type};
 
     struct UnitRule;
 
@@ -867,7 +867,10 @@ mod tests {
     }
 
     fn rule(label: &str) -> Rule {
+        let identity = RuleIdentity::of_module_declaration("engine-graph-tests", label);
+        let revision = RuleRevision::of_manifest(identity, b"engine-graph-tests-v1");
         Rule::new(
+            revision,
             label,
             Interface {
                 inputs: Box::new([]),

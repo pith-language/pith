@@ -119,18 +119,16 @@ impl std::fmt::Debug for ActionSpecDigest {
     }
 }
 
-/// Stable digest of the current provisional identity for a pure rule.
-///
-/// This remains provisional until rules carry semantic identity independent
-/// of their current metadata.
+/// Stable identity of a semantic rule declaration (decision 0023).
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ProvisionalRuleIdentity(ContentDigest);
+pub struct RuleIdentity(ContentDigest);
 
-impl ProvisionalRuleIdentity {
-    pub fn of_manifest(manifest: &[u8]) -> Self {
+impl RuleIdentity {
+    pub fn of_module_declaration(module_identity: &str, declaration_identity: &str) -> Self {
         let mut hasher = blake3::Hasher::new();
-        hasher.update(b"pith:pure-rule:provisional:v1\0");
-        hasher.update(manifest);
+        hasher.update(b"pith:rule-identity:v1\0");
+        hash_bytes(&mut hasher, module_identity.as_bytes());
+        hash_bytes(&mut hasher, declaration_identity.as_bytes());
         Self(ContentDigest(hasher.finalize().into()))
     }
 
@@ -139,10 +137,49 @@ impl ProvisionalRuleIdentity {
     }
 }
 
-impl std::fmt::Debug for ProvisionalRuleIdentity {
+impl std::fmt::Debug for RuleIdentity {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ProvisionalRuleIdentity({:?})", self.0)
+        write!(f, "RuleIdentity({:?})", self.0)
     }
+}
+
+/// Cache-invalidating revision of a rule's executable semantics (decision 0023).
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct RuleRevision {
+    rule_identity: RuleIdentity,
+    digest: ContentDigest,
+}
+
+impl RuleRevision {
+    pub fn of_manifest(rule_identity: RuleIdentity, revision_manifest: &[u8]) -> Self {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(b"pith:rule-revision:v1\0");
+        hasher.update(rule_identity.digest().as_bytes());
+        hash_bytes(&mut hasher, revision_manifest);
+        Self {
+            rule_identity,
+            digest: ContentDigest(hasher.finalize().into()),
+        }
+    }
+
+    pub fn rule_identity(self) -> RuleIdentity {
+        self.rule_identity
+    }
+
+    pub fn digest(self) -> ContentDigest {
+        self.digest
+    }
+}
+
+impl std::fmt::Debug for RuleRevision {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "RuleRevision({:?})", self.digest)
+    }
+}
+
+fn hash_bytes(hasher: &mut blake3::Hasher, bytes: &[u8]) {
+    hasher.update(&(bytes.len() as u64).to_le_bytes());
+    hasher.update(bytes);
 }
 
 /// Stable digest of a canonical pure rule application.
@@ -241,12 +278,50 @@ mod tests {
     }
 
     #[test]
-    fn pure_identity_digests_are_domain_separated() {
-        let rule = ProvisionalRuleIdentity::of_manifest(b"same");
+    fn rule_and_pure_computation_digests_are_domain_separated() {
+        let identity = RuleIdentity::of_module_declaration("same", "same");
+        let revision = RuleRevision::of_manifest(identity, b"same");
         let computation = PureComputationDigest::of_manifest(b"same");
 
-        assert_ne!(rule.digest(), computation.digest());
+        assert_ne!(identity.digest(), revision.digest());
+        assert_ne!(identity.digest(), computation.digest());
+        assert_ne!(revision.digest(), computation.digest());
         assert_ne!(computation.digest(), ContentDigest::of_bytes(b"same"));
         assert_ne!(computation.digest(), ContentId::of_blob(b"same").digest());
+    }
+
+    #[test]
+    fn rule_identity_encodes_module_and_declaration_boundaries() {
+        assert_eq!(
+            RuleIdentity::of_module_declaration("module", "rule"),
+            RuleIdentity::of_module_declaration("module", "rule")
+        );
+        assert_ne!(
+            RuleIdentity::of_module_declaration("ab", "c"),
+            RuleIdentity::of_module_declaration("a", "bc")
+        );
+    }
+
+    #[test]
+    fn rule_revision_is_bound_to_identity_and_manifest() {
+        let first_identity = RuleIdentity::of_module_declaration("module", "first");
+        let second_identity = RuleIdentity::of_module_declaration("module", "second");
+
+        assert_eq!(
+            RuleRevision::of_manifest(first_identity, b"provider-v1"),
+            RuleRevision::of_manifest(first_identity, b"provider-v1")
+        );
+        assert_ne!(
+            RuleRevision::of_manifest(first_identity, b"provider-v1"),
+            RuleRevision::of_manifest(first_identity, b"provider-v2")
+        );
+        assert_ne!(
+            RuleRevision::of_manifest(first_identity, b"provider-v1"),
+            RuleRevision::of_manifest(second_identity, b"provider-v1")
+        );
+        assert_eq!(
+            RuleRevision::of_manifest(first_identity, b"provider-v1").rule_identity(),
+            first_identity
+        );
     }
 }

@@ -7,7 +7,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use pith_core::{
     Action, ActionInput, ActionInputContent, ActionOutput, ActionOutputKind, ActionSpec,
-    CapabilityRequirement, Interface, PlatformRequirement, Pure, Request, Rule, Type, Value,
+    CapabilityRequirement, Interface, PlatformRequirement, Pure, Request, Rule, RuleIdentity,
+    RuleRevision, Type, Value,
 };
 use pith_diag::{Diag, DiagnosticSink, PithResult, Severity, Span, StableCode};
 use pith_engine::{
@@ -386,7 +387,9 @@ fn interface(inputs: &[Type], output: Type) -> Interface {
 }
 
 fn pure_rule(label: &str, interface: Interface) -> Rule<Pure> {
-    Rule::<Pure>::new(label, interface, Span::none())
+    let identity = RuleIdentity::of_module_declaration("action-and-blob-tests", label);
+    let revision = RuleRevision::of_manifest(identity, b"action-and-blob-tests-v1");
+    Rule::<Pure>::new(revision, label, interface, Span::none())
 }
 
 fn pure_request(
@@ -398,7 +401,9 @@ fn pure_request(
 }
 
 fn action_rule(label: &str, interface: Interface) -> Rule<Action> {
-    Rule::<Action>::new(label, interface, Span::none())
+    let identity = RuleIdentity::of_module_declaration("action-and-blob-tests", label);
+    let revision = RuleRevision::of_manifest(identity, b"action-and-blob-tests-v1");
+    Rule::<Action>::new(revision, label, interface, Span::none())
 }
 
 fn action_request(
