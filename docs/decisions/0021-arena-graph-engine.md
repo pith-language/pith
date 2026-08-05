@@ -116,6 +116,8 @@ the in-memory prototype interns completed pure applications by selected rule, ty
 
 action contracts are validated before receiving a versioned, domain-separated digest over their complete canonical representation. this digest identifies the declared contract, not a reusable computation: it does not include the selected rule's completion semantics, the resolved execution platform, or policy decisions. action computations therefore remain non-reusable, and that decision propagates to pure parents.
 
+action computations record their canonical declared capability requirements. completed pure computations derive the canonical union of their dependency requirements, and the query interface exposes that effective set. this proves propagation through the implemented `Pure` and `Action` composition path; the other effect categories and per-use capability edges remain open.
+
 the graph records a structured reuse decision instead of a boolean, so queries can distinguish reusable pure computations from actions whose caching is disabled and parents with non-reusable dependencies. this proves exact pure reuse inside one engine instance. it does not settle action cache identity, persistent pure-computation identity, durable cache storage, invalidation after changed durable inputs, or cache explanations, so the decision remains proposed.
 
 ## unresolved

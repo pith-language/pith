@@ -26,13 +26,13 @@ this order is provisional. the first implementation should test the kernel throu
 
 define typed values, requests, rules, dependency recording, structured diagnostics, and an in-memory query interface.
 
-current evidence: the rust prototype has a typed pure step machine, exact-interface rule selection, cycle diagnostics, dependency recording, instance-owned graph identities, exact in-memory reuse for completed pure applications, and an in-memory query surface. persistent computation identity, invalidation, and capability propagation still need to prove the incremental contract before this milestone is complete.
+current evidence: the rust prototype has a typed pure step machine, exact-interface rule selection, cycle diagnostics, dependency recording, instance-owned graph identities, exact in-memory reuse for completed pure applications, and an in-memory query surface. action capability requirements propagate canonically through completed pure dependencies and are queryable from computation provenance. persistent computation identity, invalidation, capability-use edges, and propagation for the remaining effect categories still need to prove the incremental contract before this milestone is complete.
 
 ## M-2: action prototype
 
 add content-addressed blobs and trees, sandboxed local actions, caching, and explanations for cache hits and invalidation.
 
-current evidence: blobs and trees are content addressed; pure steps can request deferred blob materialization; and action planning now produces a validated, inspectable contract with a stable digest. executors return captured outputs and structured reports, action rules derive typed results, and the engine retains successful and rejected reports in provenance. action caching is disabled until its identity includes rule semantics, the resolved platform, and policy. a sandboxed local executor, persistent caching, invalidation explanations, concurrency, and cancellation remain.
+current evidence: blobs and trees are content addressed; pure steps can request deferred blob materialization; and action planning now produces a validated, inspectable contract with a stable digest. every scheduler run supplies an action policy, named allow and deny decisions are retained in provenance, and denial prevents executor invocation. executors return captured outputs and structured reports, action rules derive typed results, and the engine retains successful and rejected reports in provenance. action caching is disabled until its identity includes rule semantics, the resolved platform, and policy. a sandboxed local executor, persistent caching, invalidation explanations, concurrency, and cancellation remain.
 
 ## M-3: first build library
 
