@@ -1,5 +1,5 @@
 use crate::StoreError;
-use pith_ids::{ContentDigest, ContentId};
+use pith_ids::{ContentDigest, ContentId, DIGEST_LEN};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum TreeEntryContent {
@@ -168,8 +168,8 @@ impl<'manifest> ManifestReader<'manifest> {
     }
 
     fn read_content_id(&mut self) -> Result<ContentId, StoreError> {
-        let bytes = self.take(size_of::<[u8; 32]>())?;
-        let mut digest = [0; 32];
+        let bytes = self.take(DIGEST_LEN)?;
+        let mut digest = [0u8; DIGEST_LEN];
         digest.copy_from_slice(bytes);
         Ok(ContentId::from_digest(ContentDigest::from_bytes(digest)))
     }

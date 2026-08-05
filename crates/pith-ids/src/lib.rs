@@ -36,11 +36,16 @@ define_arena!(
      observations and platform re-creation (decision 0013)."
 );
 
+/// Length in bytes of every blake3-derived digest in the kernel. The single
+/// source of truth for the `[u8; DIGEST_LEN]` width used by `ContentDigest`,
+/// the store's manifest reader, and tests.
+pub const DIGEST_LEN: usize = 32;
+
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ContentDigest([u8; 32]);
+pub struct ContentDigest([u8; DIGEST_LEN]);
 
 impl ContentDigest {
-    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
+    pub const fn from_bytes(bytes: [u8; DIGEST_LEN]) -> Self {
         Self(bytes)
     }
 
@@ -48,7 +53,7 @@ impl ContentDigest {
         Self(blake3::hash(bytes).into())
     }
 
-    pub fn as_bytes(&self) -> &[u8; 32] {
+    pub fn as_bytes(&self) -> &[u8; DIGEST_LEN] {
         &self.0
     }
 }
@@ -81,22 +86,25 @@ impl ContentId {
     }
 
     pub fn of_blob(bytes: &[u8]) -> Self {
-        Self::with_domain(b"pith:blob:v1\0", bytes)
+        Self::from_digest(Self::with_domain(domain::CONTENT_BLOB, bytes))
     }
 
     pub fn of_tree(manifest: &[u8]) -> Self {
-        Self::with_domain(b"pith:tree:v1\0", manifest)
-    }
-
-    fn with_domain(domain: &[u8], bytes: &[u8]) -> Self {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(domain);
-        hasher.update(bytes);
-        Self(ContentDigest(hasher.finalize().into()))
+        Self::from_digest(Self::with_domain(domain::CONTENT_TREE, manifest))
     }
 
     pub fn digest(self) -> ContentDigest {
         self.0
+    }
+
+    /// Hash `bytes` under a NUL-terminated domain-separation prefix. The prefix
+    /// is self-delimiting, so no length separator is needed between it and the
+    /// payload. Shared by every digest kind in this crate.
+    pub(crate) fn with_domain(prefix: &[u8], bytes: &[u8]) -> ContentDigest {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(prefix);
+        hasher.update(bytes);
+        ContentDigest(hasher.finalize().into())
     }
 }
 
@@ -115,10 +123,7 @@ pub struct ActionSpecDigest(ContentDigest);
 
 impl ActionSpecDigest {
     pub fn of_manifest(manifest: &[u8]) -> Self {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(b"pith:action:v1\0");
-        hasher.update(manifest);
-        Self(ContentDigest(hasher.finalize().into()))
+        Self(ContentId::with_domain(domain::ACTION_SPEC, manifest))
     }
 
     pub fn digest(self) -> ContentDigest {
@@ -139,7 +144,7 @@ pub struct RuleIdentity(ContentDigest);
 impl RuleIdentity {
     pub fn of_module_declaration(module_identity: &str, declaration_identity: &str) -> Self {
         let mut hasher = blake3::Hasher::new();
-        hasher.update(b"pith:rule-identity:v1\0");
+        hasher.update(domain::RULE_IDENTITY);
         hash_bytes(&mut hasher, module_identity.as_bytes());
         hash_bytes(&mut hasher, declaration_identity.as_bytes());
         Self(ContentDigest(hasher.finalize().into()))
@@ -166,7 +171,7 @@ pub struct RuleRevision {
 impl RuleRevision {
     pub fn of_manifest(rule_identity: RuleIdentity, revision_manifest: &[u8]) -> Self {
         let mut hasher = blake3::Hasher::new();
-        hasher.update(b"pith:rule-revision:v1\0");
+        hasher.update(domain::RULE_REVISION);
         hasher.update(rule_identity.digest().as_bytes());
         hash_bytes(&mut hasher, revision_manifest);
         Self {
@@ -201,10 +206,7 @@ pub struct PureComputationDigest(ContentDigest);
 
 impl PureComputationDigest {
     pub fn of_manifest(manifest: &[u8]) -> Self {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(b"pith:pure-computation:v1\0");
-        hasher.update(manifest);
-        Self(ContentDigest(hasher.finalize().into()))
+        Self(ContentId::with_domain(domain::PURE_COMPUTATION, manifest))
     }
 
     pub fn digest(self) -> ContentDigest {
@@ -216,6 +218,24 @@ impl std::fmt::Debug for PureComputationDigest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "PureComputationDigest({:?})", self.0)
     }
+}
+
+/// Domain-separation prefixes for blake3 hashing. Each prefix is a NUL-terminated
+/// byte literal of the form `pith:<kind>:<version>\0`, where every prefix shares
+/// the same `<version>` segment (`v1` today).
+///
+/// These are the single source of truth for which bytes identify each digest
+/// kind: adding a digest kind means adding one prefix here and one call site,
+/// and a prefix must never be rederived inline at a hashing site. The
+/// `prefixes_follow_the_version_template` test refuses to compile/run if the
+/// version segments drift apart.
+mod domain {
+    pub const CONTENT_BLOB: &[u8] = b"pith:blob:v1\0";
+    pub const CONTENT_TREE: &[u8] = b"pith:tree:v1\0";
+    pub const ACTION_SPEC: &[u8] = b"pith:action:v1\0";
+    pub const RULE_IDENTITY: &[u8] = b"pith:rule-identity:v1\0";
+    pub const RULE_REVISION: &[u8] = b"pith:rule-revision:v1\0";
+    pub const PURE_COMPUTATION: &[u8] = b"pith:pure-computation:v1\0";
 }
 
 #[cfg(test)]
@@ -337,5 +357,78 @@ mod tests {
             RuleRevision::of_manifest(first_identity, b"provider-v1").rule_identity(),
             first_identity
         );
+    }
+
+    #[test]
+    fn digest_length_is_32_bytes() {
+        // The width is a public contract: the store's manifest reader and any
+        // persistent encoding depend on it.
+        assert_eq!(DIGEST_LEN, 32);
+        assert_eq!(std::mem::size_of::<ContentDigest>(), DIGEST_LEN);
+        assert_eq!(
+            ContentDigest::from_bytes([0u8; DIGEST_LEN])
+                .as_bytes()
+                .len(),
+            DIGEST_LEN
+        );
+    }
+
+    #[test]
+    fn domain_prefixes_are_distinct() {
+        // A collision here would mean two digest kinds hash into the same
+        // namespace, silently breaking domain separation.
+        let prefixes: &[&[u8]] = &[
+            domain::CONTENT_BLOB,
+            domain::CONTENT_TREE,
+            domain::ACTION_SPEC,
+            domain::RULE_IDENTITY,
+            domain::RULE_REVISION,
+            domain::PURE_COMPUTATION,
+        ];
+        for (i, a) in prefixes.iter().enumerate() {
+            for b in prefixes.iter().skip(i + 1) {
+                assert_ne!(a, b, "two domain prefixes collide");
+            }
+        }
+    }
+
+    #[test]
+    fn prefixes_follow_the_version_template() {
+        // Every prefix must be `pith:<kind>:<version>\0` with the SAME version
+        // segment. Extract that segment (the tail between the final ':' and the
+        // NUL) from each prefix and assert they agree. A drift here would mean
+        // one digest kind silently left the shared version behind.
+        let prefixes: [&[u8]; 6] = [
+            domain::CONTENT_BLOB,
+            domain::CONTENT_TREE,
+            domain::ACTION_SPEC,
+            domain::RULE_IDENTITY,
+            domain::RULE_REVISION,
+            domain::PURE_COMPUTATION,
+        ];
+
+        let version_of = |prefix: &[u8]| -> String {
+            let s = std::str::from_utf8(prefix).expect("prefixes are ASCII + NUL");
+            assert!(s.starts_with("pith:"), "{s:?}: missing pith: header");
+            assert!(s.ends_with('\0'), "{s:?}: missing NUL terminator");
+            let body = &s["pith:".len()..s.len() - 1]; // strip header and NUL
+            let (_, version) = body
+                .rsplit_once(':')
+                .expect("prefix body has a `<kind>:<version>` shape");
+            version.to_string()
+        };
+
+        let first = version_of(prefixes[0]);
+        assert_eq!(
+            first, "v1",
+            "version segment is no longer v1; update this test deliberately"
+        );
+        for prefix in &prefixes[1..] {
+            assert_eq!(
+                version_of(prefix),
+                first,
+                "a prefix carries a different version segment"
+            );
+        }
     }
 }
