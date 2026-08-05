@@ -2,7 +2,7 @@
 
 use pith_arena::define_arena;
 use pith_diag::{Diag, Severity, Span, StableCode};
-use pith_ids::{PureComputationDigest, RuleSemanticIdentity};
+use pith_ids::{ProvisionalRuleIdentity, PureComputationDigest};
 use smallvec::SmallVec;
 use std::marker::PhantomData;
 
@@ -43,9 +43,6 @@ pub struct Request<K: EffectCategory = Pure> {
 
 #[derive(Clone, Debug)]
 pub struct Rule<K: EffectCategory = Pure> {
-    /// Caller-controlled identity that survives label and implementation changes
-    /// which preserve the rule's meaning.
-    pub semantic_identity: RuleSemanticIdentity,
     pub label: Box<str>,
     pub interface: Interface,
     pub span: Span,
@@ -56,15 +53,22 @@ pub struct Rule<K: EffectCategory = Pure> {
 /// IR subset.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PureComputationKey {
-    pub rule_identity: RuleSemanticIdentity,
-    /// Digest of the rule identity, request interface, and inputs.
+    /// Derived from the selected rule's label and interface until rules expose
+    /// durable semantic identity.
+    pub provisional_rule_identity: ProvisionalRuleIdentity,
+    /// Digest of the provisional rule identity, request interface, and inputs.
     pub digest: PureComputationDigest,
 }
 
 impl PureComputationKey {
     pub fn new(rule: &Rule<Pure>, request: &Request<Pure>) -> Self {
+        let mut rule_manifest = Vec::new();
+        encode_bytes(&mut rule_manifest, rule.label.as_bytes());
+        encode_interface(&mut rule_manifest, &rule.interface);
+        let provisional_rule_identity = ProvisionalRuleIdentity::of_manifest(&rule_manifest);
+
         let mut computation_manifest = Vec::new();
-        computation_manifest.extend_from_slice(rule.semantic_identity.digest().as_bytes());
+        computation_manifest.extend_from_slice(provisional_rule_identity.digest().as_bytes());
         encode_interface(&mut computation_manifest, &request.interface);
         encode_length(&mut computation_manifest, request.inputs.len());
         request
@@ -73,7 +77,7 @@ impl PureComputationKey {
             .for_each(|value| encode_value(&mut computation_manifest, value));
 
         Self {
-            rule_identity: rule.semantic_identity,
+            provisional_rule_identity,
             digest: PureComputationDigest::of_manifest(&computation_manifest),
         }
     }
@@ -139,15 +143,8 @@ impl<K: EffectCategory> Request<K> {
 }
 
 impl<K: EffectCategory> Rule<K> {
-    /// Create a rule with explicit semantic identity and diagnostic metadata.
-    pub fn new(
-        semantic_identity: RuleSemanticIdentity,
-        label: impl Into<Box<str>>,
-        interface: Interface,
-        span: Span,
-    ) -> Self {
+    pub fn new(label: impl Into<Box<str>>, interface: Interface, span: Span) -> Self {
         Self {
-            semantic_identity,
             label: label.into(),
             interface,
             span,
@@ -302,12 +299,7 @@ mod tests {
     }
 
     fn rule(label: &str, interface: Interface) -> Rule {
-        Rule::new(
-            RuleSemanticIdentity::of_name(label),
-            label,
-            interface,
-            Span::none(),
-        )
+        Rule::new(label, interface, Span::none())
     }
 
     fn request(label: &str, interface: Interface, inputs: impl Into<Box<[Value]>>) -> Request {
@@ -321,19 +313,8 @@ mod tests {
     #[test]
     fn pure_computation_key_is_stable_for_same_application() {
         let signature = interface([Type::Int], Type::Text);
-        let identity = RuleSemanticIdentity::of_name("example.identity");
-        let first_rule = Rule::new(
-            identity,
-            "first provider label",
-            signature.clone(),
-            Span::none(),
-        );
-        let second_rule = Rule::new(
-            identity,
-            "second provider label",
-            signature.clone(),
-            Span::none(),
-        );
+        let first_rule = rule("provider", signature.clone());
+        let second_rule = rule("provider", signature.clone());
         let first = request("first request", signature.clone(), [Value::Int(7)]);
         let second = request("second request", signature, [Value::Int(7)]);
 
@@ -362,7 +343,10 @@ mod tests {
 
         let first_key = pure_key(&first, &requested);
         let second_key = pure_key(&second, &requested);
-        assert_ne!(first_key.rule_identity, second_key.rule_identity);
+        assert_ne!(
+            first_key.provisional_rule_identity,
+            second_key.provisional_rule_identity
+        );
         assert_ne!(first_key, second_key);
     }
 

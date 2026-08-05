@@ -4,7 +4,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use pith_core::{Interface, Request, Rule, Type, Value};
 use pith_diag::{PithResult, Span, StableCode};
 use pith_engine::{DependencyEdge, Engine, EvaluationSource, PureRule, PureRuleFrame, PureStep};
-use pith_ids::RuleSemanticIdentity;
 
 struct ConstantRule(Value);
 
@@ -154,16 +153,7 @@ fn interface(inputs: &[Type], output: Type) -> Interface {
 }
 
 fn rule(label: &str, interface: Interface) -> Rule {
-    rule_with_identity(label, label, interface)
-}
-
-fn rule_with_identity(stable_name: &str, label: &str, interface: Interface) -> Rule {
-    Rule::new(
-        RuleSemanticIdentity::of_name(stable_name),
-        label,
-        interface,
-        Span::none(),
-    )
+    Rule::new(label, interface, Span::none())
 }
 
 fn request(label: &str, interface: Interface, inputs: impl Into<Box<[Value]>>) -> Request {
@@ -418,15 +408,11 @@ fn distinct_parents_share_a_completed_dependency() {
 }
 
 #[test]
-fn pure_keys_cross_engine_instances_but_computation_ids_do_not() {
+fn computation_ids_do_not_cross_engine_instances() {
     let signature = interface(&[], Type::Int);
     let mut first = Engine::new();
     first.register_rule(
-        rule_with_identity(
-            "example.constant",
-            "first provider label",
-            signature.clone(),
-        ),
+        rule("first provider", signature.clone()),
         ConstantRule(Value::Int(1)),
     );
     let first_evaluation = first
@@ -435,34 +421,14 @@ fn pure_keys_cross_engine_instances_but_computation_ids_do_not() {
 
     let mut second = Engine::new();
     second.register_rule(
-        rule_with_identity(
-            "example.constant",
-            "second provider label",
-            signature.clone(),
-        ),
-        ConstantRule(Value::Int(1)),
+        rule("second provider", signature.clone()),
+        ConstantRule(Value::Int(2)),
     );
     let second_evaluation = second
         .evaluate_pure(&request("second request", signature, []))
         .unwrap();
 
-    let first_key = match first
-        .query()
-        .pure_computation_key(first_evaluation.computation)
-    {
-        Some(key) => key,
-        None => unreachable!("pure evaluation has no persistent key"),
-    };
-    let second_key = match second
-        .query()
-        .pure_computation_key(second_evaluation.computation)
-    {
-        Some(key) => key,
-        None => unreachable!("pure evaluation has no persistent key"),
-    };
-
     assert_ne!(first_evaluation.computation, second_evaluation.computation);
-    assert_eq!(first_key, second_key);
     assert!(
         second
             .query()

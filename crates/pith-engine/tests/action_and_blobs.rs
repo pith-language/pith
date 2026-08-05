@@ -17,7 +17,7 @@ use pith_engine::{
     MaterializedContent, PureRule, PureRuleFrame, PureStep, ReuseDecision, ReuseReason,
     TokioRuntime,
 };
-use pith_ids::{ContentId, RuleSemanticIdentity};
+use pith_ids::ContentId;
 
 struct BlobLenRule {
     blob: ContentId,
@@ -374,12 +374,7 @@ fn interface(inputs: &[Type], output: Type) -> Interface {
 }
 
 fn pure_rule(label: &str, interface: Interface) -> Rule<Pure> {
-    Rule::<Pure>::new(
-        RuleSemanticIdentity::of_name(label),
-        label,
-        interface,
-        Span::none(),
-    )
+    Rule::<Pure>::new(label, interface, Span::none())
 }
 
 fn pure_request(
@@ -391,12 +386,7 @@ fn pure_request(
 }
 
 fn action_rule(label: &str, interface: Interface) -> Rule<Action> {
-    Rule::<Action>::new(
-        RuleSemanticIdentity::of_name(label),
-        label,
-        interface,
-        Span::none(),
-    )
+    Rule::<Action>::new(label, interface, Span::none())
 }
 
 fn action_request(

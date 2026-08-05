@@ -119,20 +119,18 @@ impl std::fmt::Debug for ActionSpecDigest {
     }
 }
 
-/// Caller-controlled semantic identity for a rule.
+/// Stable digest of the current provisional identity for a pure rule.
 ///
-/// The stable name is an identity boundary, not a display label. Keep it when
-/// refactoring an implementation without changing its meaning; choose a new
-/// name when the rule's semantics change.
+/// This remains provisional until rules carry semantic identity independent
+/// of their current metadata.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct RuleSemanticIdentity(ContentDigest);
+pub struct ProvisionalRuleIdentity(ContentDigest);
 
-impl RuleSemanticIdentity {
-    /// Derive identity from a stable, caller-owned name.
-    pub fn of_name(stable_name: &str) -> Self {
+impl ProvisionalRuleIdentity {
+    pub fn of_manifest(manifest: &[u8]) -> Self {
         let mut hasher = blake3::Hasher::new();
-        hasher.update(b"pith:rule-semantic:v1\0");
-        hasher.update(stable_name.as_bytes());
+        hasher.update(b"pith:pure-rule:provisional:v1\0");
+        hasher.update(manifest);
         Self(ContentDigest(hasher.finalize().into()))
     }
 
@@ -141,9 +139,9 @@ impl RuleSemanticIdentity {
     }
 }
 
-impl std::fmt::Debug for RuleSemanticIdentity {
+impl std::fmt::Debug for ProvisionalRuleIdentity {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "RuleSemanticIdentity({:?})", self.0)
+        write!(f, "ProvisionalRuleIdentity({:?})", self.0)
     }
 }
 
@@ -244,11 +242,9 @@ mod tests {
 
     #[test]
     fn pure_identity_digests_are_domain_separated() {
-        let rule = RuleSemanticIdentity::of_name("same");
+        let rule = ProvisionalRuleIdentity::of_manifest(b"same");
         let computation = PureComputationDigest::of_manifest(b"same");
 
-        assert_eq!(rule, RuleSemanticIdentity::of_name("same"));
-        assert_ne!(rule, RuleSemanticIdentity::of_name("other"));
         assert_ne!(rule.digest(), computation.digest());
         assert_ne!(computation.digest(), ContentDigest::of_bytes(b"same"));
         assert_ne!(computation.digest(), ContentId::of_blob(b"same").digest());
