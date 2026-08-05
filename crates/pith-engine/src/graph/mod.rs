@@ -137,9 +137,9 @@ impl Engine {
     /// # Errors
     /// `Ok(Ok(_))` on success. `Ok(Err(_))` when evaluation produced
     /// diagnostics (same codes as [`Engine::evaluate_pure`] plus `E-1205`
-    /// blob-not-available and `E-1208` through `E-1210` for executor evidence
-    /// outside the declared contract). `Err(_)` when the runtime could not be
-    /// driven.
+    /// blob-not-available, `E-1208` through `E-1210` for executor reports
+    /// outside the declared contract, and `E-1212` for a missing or mismatched
+    /// execution platform). `Err(_)` when the runtime could not be driven.
     pub fn run<R: Runtime, E: Executor>(
         &mut self,
         request: &Request<Pure>,

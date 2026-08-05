@@ -114,9 +114,9 @@ the adapter discipline (every nontrivial external crate behind a pith-owned trai
 
 the in-memory prototype interns completed pure applications by selected rule, typed interface, and input values. diagnostic labels and spans do not participate in reuse. distinct roots share completed pure dependencies.
 
-action contracts have a versioned, domain-separated digest over their complete canonical representation. executions whose executor evidence says the contract was enforced are interned by that digest, and their reusability propagates to pure parents. observed or unverified executions remain non-reusable.
+action contracts are validated before receiving a versioned, domain-separated digest over their complete canonical representation. this digest identifies the declared contract, not a reusable computation: it does not include the selected rule's completion semantics, the resolved execution platform, or policy decisions. action computations therefore remain non-reusable, and that decision propagates to pure parents.
 
-this proves exact pure and action reuse inside one engine instance. it does not settle persistent pure-computation identity, durable cache storage, invalidation after changed durable inputs, or cache explanations, so the decision remains proposed.
+the graph records a structured reuse decision instead of a boolean, so queries can distinguish reusable pure computations from actions whose caching is disabled and parents with non-reusable dependencies. this proves exact pure reuse inside one engine instance. it does not settle action cache identity, persistent pure-computation identity, durable cache storage, invalidation after changed durable inputs, or cache explanations, so the decision remains proposed.
 
 ## unresolved
 
