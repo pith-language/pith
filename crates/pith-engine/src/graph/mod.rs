@@ -50,11 +50,15 @@ pub struct Engine {
     pub(crate) action_bodies: IndexMap<RuleId, Box<dyn ActionRule>>,
     pub(crate) computations: ComputationArena<ComputationNode>,
     pure_computations: PureComputationIndex,
-    pub(crate) store: MemoryContentStore,
+    pub(crate) store: Box<dyn ContentStore>,
 }
 
 impl Engine {
     pub fn new() -> Self {
+        Self::with_content_store(MemoryContentStore::default())
+    }
+
+    pub fn with_content_store(store: impl ContentStore + 'static) -> Self {
         Self {
             rules: RuleArena::new(),
             bodies: IndexMap::new(),
@@ -62,7 +66,7 @@ impl Engine {
             action_bodies: IndexMap::new(),
             computations: ComputationArena::new(),
             pure_computations: IndexMap::new(),
-            store: MemoryContentStore::default(),
+            store: Box::new(store),
         }
     }
 

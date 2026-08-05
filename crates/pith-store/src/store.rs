@@ -22,7 +22,7 @@ impl std::fmt::Display for StoreError {
 
 impl std::error::Error for StoreError {}
 
-pub trait ContentStore {
+pub trait ContentStore: Send + Sync {
     /// # Errors
     /// Returns an adapter error when the bytes cannot be stored.
     fn put_blob(&mut self, bytes: &[u8]) -> Result<ContentId, StoreError>;

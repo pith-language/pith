@@ -50,6 +50,7 @@ when an accepted decision changes, a new record supersedes it. the old record st
 - [0021: a hand-built arena graph with explicit change propagation, not a salsa query DB](0021-arena-graph-engine.md)
 - [0022: a synchronous pure evaluator core with an async scheduler at the effect boundary](0022-sync-core-async-scheduler.md)
 - [0023: separate stable rule identity from cache-invalidating rule revision](0023-rule-and-cache-identity.md)
+- [0024: persist content in a filesystem cas and engine state in sqlite](0024-persistent-engine-state.md)
 
 note: 0013 amends 0005 to add a fifth identity type. 0005 stands; the amendment is recorded in 0013.
 

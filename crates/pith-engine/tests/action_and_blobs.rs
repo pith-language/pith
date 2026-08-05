@@ -19,6 +19,7 @@ use pith_engine::{
     ReuseDecision, ReuseReason, TokioRuntime,
 };
 use pith_ids::ContentId;
+use pith_store::MemoryContentStore;
 
 struct BlobLenRule {
     blob: ContentId,
@@ -356,7 +357,7 @@ fn fixture_error(message: &str) -> DiagnosticSink {
 }
 
 fn fixture_engine() -> Engine {
-    let mut engine = Engine::new();
+    let mut engine = Engine::with_content_store(MemoryContentStore::default());
     assert_eq!(
         put_fixture_blob(&mut engine, b"fixture:double"),
         double_executable()
