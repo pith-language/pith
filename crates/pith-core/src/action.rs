@@ -3,7 +3,7 @@
 //! An [`ActionSpec`] is inert data. Planning one performs no external work;
 //! executors in `pith-engine` are responsible for enforcing the contract.
 
-use pith_diag::{Diag, Severity, Span, StableCode};
+use pith_diag::{Diag, EngineCode, Span};
 use pith_ids::{ActionSpecDigest, ContentId};
 
 /// Immutable content made available to an action at a relative path.
@@ -354,12 +354,7 @@ fn paths_overlap(left: &str, right: &str) -> bool {
 }
 
 fn invalid_action_spec(message: impl Into<Box<str>>) -> Diag {
-    Diag::new(
-        Severity::Error,
-        StableCode::engine(105),
-        Span::none(),
-        message,
-    )
+    Diag::engine(EngineCode::InvalidActionSpec, Span::none(), message)
 }
 
 fn action_input_content_tag(content: ActionInputContent) -> u8 {
@@ -561,7 +556,10 @@ mod tests {
             }]
             .into();
 
-            assert_eq!(spec.validate().unwrap_err().code, StableCode::engine(105));
+            assert_eq!(
+                spec.validate().unwrap_err().code,
+                EngineCode::InvalidActionSpec.into()
+            );
         }
 
         let mut overlapping = ActionSpec::isolated(ContentId::of_blob(b"tool"));
@@ -578,7 +576,7 @@ mod tests {
 
         assert_eq!(
             overlapping.validate().unwrap_err().code,
-            StableCode::engine(105)
+            EngineCode::InvalidActionSpec.into()
         );
     }
 }

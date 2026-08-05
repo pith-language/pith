@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use pith_core::{Interface, Request, Rule, RuleIdentity, RuleRevision, Type, Value};
-use pith_diag::{PithResult, Span, StableCode};
+use pith_diag::{EngineCode, PithResult, Span, StableCode};
 use pith_engine::{DependencyEdge, Engine, EvaluationSource, PureRule, PureRuleFrame, PureStep};
 
 struct ConstantRule(Value);
@@ -284,7 +284,10 @@ fn dependency_cycle_reports_the_request_chain() {
         .unwrap_err();
     let diagnostics: Vec<_> = err.iter().collect();
     let diagnostic = diagnostics.first().unwrap();
-    assert_eq!(diagnostic.code, StableCode::engine(203));
+    assert_eq!(
+        diagnostic.code,
+        StableCode::from(EngineCode::DependencyCycle)
+    );
     assert_eq!(
         diagnostic.message.0.as_ref(),
         "dependency cycle: start a -> need b -> need a"

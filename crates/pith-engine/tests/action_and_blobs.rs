@@ -10,7 +10,7 @@ use pith_core::{
     CapabilityRequirement, Interface, PlatformRequirement, Pure, Request, Rule, RuleIdentity,
     RuleRevision, Type, Value,
 };
-use pith_diag::{Diag, DiagnosticSink, PithResult, Severity, Span, StableCode};
+use pith_diag::{Diag, DiagnosticSink, EngineCode, PithResult, Severity, Span, StableCode};
 use pith_engine::{
     AccessVerification, ActionAuthorization, ActionExecution, ActionInvocation, ActionPlan,
     ActionPolicy, ActionRule, AllowAllActions, CapturedActionExecution, CapturedExecutionReport,
@@ -345,11 +345,14 @@ fn fixture_platform() -> ExecutionPlatform {
     }
 }
 
+/// A synthetic executor-emitted diagnostic. The code is deliberately not a
+/// named `EngineCode`: it stands in for an opaque code supplied by an executor
+/// adapter, which the engine must pass through unchanged.
 fn fixture_error(message: &str) -> DiagnosticSink {
     let mut diagnostics = DiagnosticSink::new();
     diagnostics.push(Diag::new(
         Severity::Error,
-        StableCode::engine(211),
+        StableCode(1211),
         Span::none(),
         message,
     ));
@@ -465,7 +468,7 @@ fn missing_blob_reports_clean_diagnostic() {
 
     let err = result.unwrap_err();
     let diag = err.iter().next().unwrap();
-    assert_eq!(diag.code, StableCode::engine(205));
+    assert_eq!(diag.code, StableCode::from(EngineCode::ContentUnavailable));
 }
 
 #[test]
@@ -679,7 +682,10 @@ fn missing_action_input_is_rejected_before_executor_call() {
         .unwrap_err();
     let diagnostic = diagnostics.iter().next().unwrap();
 
-    assert_eq!(diagnostic.code, StableCode::engine(205));
+    assert_eq!(
+        diagnostic.code,
+        StableCode::from(EngineCode::ContentUnavailable)
+    );
     assert_eq!(executions.load(Ordering::Relaxed), 0);
 }
 
@@ -707,7 +713,7 @@ fn action_result_type_checked_against_interface() {
 
     let err = result.unwrap_err();
     let diag = err.iter().next().unwrap();
-    assert_eq!(diag.code, StableCode::engine(104));
+    assert_eq!(diag.code, StableCode::from(EngineCode::ResultTypeMismatch));
 }
 
 #[test]
@@ -734,7 +740,10 @@ fn undeclared_capability_use_is_rejected() {
 
     let err = result.unwrap_err();
     let diag = err.iter().next().unwrap();
-    assert_eq!(diag.code, StableCode::engine(208));
+    assert_eq!(
+        diag.code,
+        StableCode::from(EngineCode::UndeclaredCapabilityUse)
+    );
 
     let query = engine.query();
     let Some((computation, node)) = query.computations().find(|(_, node)| node.action.is_some())
@@ -790,7 +799,7 @@ fn policy_denial_is_recorded_before_execution() {
 
     let diagnostics = runtime_result.unwrap_err();
     let diagnostic = diagnostics.iter().next().unwrap();
-    assert_eq!(diagnostic.code, StableCode::engine(213));
+    assert_eq!(diagnostic.code, StableCode::from(EngineCode::PolicyDenied));
     assert_eq!(executions.load(Ordering::Relaxed), 0);
 
     let query = engine.query();
@@ -855,7 +864,10 @@ fn executor_must_report_the_planned_platform() {
 
     let diagnostics = runtime_result.unwrap_err();
     let diagnostic = diagnostics.iter().next().unwrap();
-    assert_eq!(diagnostic.code, StableCode::engine(212));
+    assert_eq!(
+        diagnostic.code,
+        StableCode::from(EngineCode::PlatformMismatch)
+    );
     let query = engine.query();
     let (failed_computation, failed_action) = query
         .computations()
@@ -1065,5 +1077,5 @@ fn effectful_step_in_pure_only_evaluation_is_rejected() {
         .evaluate_pure(&pure_request("length", interface(&[], Type::Int), []))
         .unwrap_err();
     let diag = err.iter().next().unwrap();
-    assert_eq!(diag.code, StableCode::engine(206));
+    assert_eq!(diag.code, StableCode::from(EngineCode::EffectfulStepInPure));
 }

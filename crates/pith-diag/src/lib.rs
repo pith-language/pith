@@ -76,20 +76,74 @@ impl SourceId {
 pub struct StableCode(pub u32);
 
 impl StableCode {
+    #[doc(hidden)]
     #[allow(
         clippy::arithmetic_side_effects,
         reason = "engine diagnostic codes occupy the stable 1000-based namespace"
     )]
-    pub const fn engine(code: u32) -> Self {
-        Self(1000 + code)
+    pub const fn from_engine_code(code: EngineCode) -> Self {
+        Self(1000 + code as u32)
     }
 
+    /// Reserve a code in the stable 2000-based composition namespace. Unused
+    /// today; kept so composition diagnostics can claim codes without touching
+    /// the engine namespace later.
+    #[doc(hidden)]
     #[allow(
         clippy::arithmetic_side_effects,
         reason = "composition diagnostic codes occupy the stable 2000-based namespace"
     )]
     pub const fn compose(code: u32) -> Self {
         Self(2000 + code)
+    }
+}
+
+/// Named engine diagnostic codes. The discriminant is the stable `n` in
+/// `P{1000 + n}`; never renumber, only append (requirement K-11).
+///
+/// This is the single source of truth for engine codes: every diagnostic the
+/// kernel emits names its variant here, so the code, its number, and a label
+/// for the variant live together.
+#[repr(u32)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum EngineCode {
+    /// `E-1101` — no rule provides the requested interface.
+    NoRuleForInterface = 101,
+    /// `E-1102` — more than one rule provides the interface; ambiguity is never ranked.
+    AmbiguousRule = 102,
+    /// `E-1103` — a request's inputs do not match its declared interface.
+    RequestInputsMismatch = 103,
+    /// `E-1104` — a rule or action returned a value of the wrong type.
+    ResultTypeMismatch = 104,
+    /// `E-1105` — a declared action contract is invalid.
+    InvalidActionSpec = 105,
+    /// `E-1203` — the dependency graph contains a cycle.
+    DependencyCycle = 203,
+    /// `E-1204` — an engine-internal invariant was violated.
+    InternalInvariant = 204,
+    /// `E-1205` — requested content is not available in the local store.
+    ContentUnavailable = 205,
+    /// `E-1206` — an effectful step appeared in a pure-only evaluation.
+    EffectfulStepInPure = 206,
+    /// `E-1207` — the content store returned an error.
+    StoreError = 207,
+    /// `E-1208` — the executor reported use of an undeclared capability.
+    UndeclaredCapabilityUse = 208,
+    /// `E-1209` — the executor reported an output outside the declared contract
+    /// or with the wrong kind.
+    UndeclaredOutput = 209,
+    /// `E-1210` — the executor did not produce a declared output.
+    MissingDeclaredOutput = 210,
+    /// `E-1212` — the executor did not report a concrete platform, or reported
+    /// one outside the declared requirement.
+    PlatformMismatch = 212,
+    /// `E-1213` — the action policy denied the planned action.
+    PolicyDenied = 213,
+}
+
+impl From<EngineCode> for StableCode {
+    fn from(code: EngineCode) -> Self {
+        Self::from_engine_code(code)
     }
 }
 
@@ -141,6 +195,12 @@ impl Diag {
             message: Text::new(message),
             notes: Box::new([]),
         }
+    }
+
+    /// Build an engine error diagnostic from its named code. Every kernel
+    /// diagnostic today is an error, so this is the usual construction path.
+    pub fn engine(code: EngineCode, span: Span, message: impl Into<Box<str>>) -> Self {
+        Self::new(Severity::Error, code.into(), span, message)
     }
 
     pub fn with_note(mut self, span: Span, message: impl Into<Box<str>>) -> Self {
@@ -233,18 +293,47 @@ mod tests {
         let mut sink = DiagnosticSink::new();
         sink.push(Diag::new(
             Severity::Warning,
-            StableCode::engine(1),
+            StableCode::compose(1),
             Span::none(),
             "minor",
         ));
         assert!(!sink.has_errors());
-        sink.push(Diag::new(
-            Severity::Error,
-            StableCode::engine(2),
+        sink.push(Diag::engine(
+            EngineCode::ResultTypeMismatch,
             Span::none(),
             "bad",
         ));
         assert!(sink.has_errors());
         assert_eq!(sink.warnings().count(), 1);
+    }
+
+    #[test]
+    fn engine_code_discriminants_are_stable() {
+        // K-11 stability: these numbers are the public contract.
+        assert_eq!(StableCode::from(EngineCode::NoRuleForInterface).0, 1101);
+        assert_eq!(StableCode::from(EngineCode::AmbiguousRule).0, 1102);
+        assert_eq!(StableCode::from(EngineCode::RequestInputsMismatch).0, 1103);
+        assert_eq!(StableCode::from(EngineCode::ResultTypeMismatch).0, 1104);
+        assert_eq!(StableCode::from(EngineCode::InvalidActionSpec).0, 1105);
+        assert_eq!(StableCode::from(EngineCode::DependencyCycle).0, 1203);
+        assert_eq!(StableCode::from(EngineCode::InternalInvariant).0, 1204);
+        assert_eq!(StableCode::from(EngineCode::ContentUnavailable).0, 1205);
+        assert_eq!(StableCode::from(EngineCode::EffectfulStepInPure).0, 1206);
+        assert_eq!(StableCode::from(EngineCode::StoreError).0, 1207);
+        assert_eq!(
+            StableCode::from(EngineCode::UndeclaredCapabilityUse).0,
+            1208
+        );
+        assert_eq!(StableCode::from(EngineCode::UndeclaredOutput).0, 1209);
+        assert_eq!(StableCode::from(EngineCode::MissingDeclaredOutput).0, 1210);
+        assert_eq!(StableCode::from(EngineCode::PlatformMismatch).0, 1212);
+        assert_eq!(StableCode::from(EngineCode::PolicyDenied).0, 1213);
+    }
+
+    #[test]
+    fn engine_diag_is_an_error_with_named_code() {
+        let diag = Diag::engine(EngineCode::DependencyCycle, Span::none(), "cyclical");
+        assert_eq!(diag.severity, Severity::Error);
+        assert_eq!(diag.code, EngineCode::DependencyCycle.into());
     }
 }

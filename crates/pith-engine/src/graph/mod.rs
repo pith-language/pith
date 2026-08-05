@@ -18,7 +18,7 @@ use pith_core::{
     Action, ActionInputContent, ActionOutputKind, Pure, PureComputationKey, Request, Rule,
     RuleArena, RuleId, Type, Value, select_rule,
 };
-use pith_diag::{Diag, DiagnosticSink, PithResult, Severity, Span, StableCode};
+use pith_diag::{Diag, DiagnosticSink, EngineCode, PithResult, Span};
 use pith_ids::{ComputationArena, ComputationId, ContentId};
 use pith_store::{ContentStore, MemoryContentStore, Tree, TreeEntry, TreeEntryContent};
 use smallvec::SmallVec;
@@ -290,9 +290,8 @@ impl Engine {
         };
         let actual = value.value_type();
         if actual != completed.request.interface.output {
-            return Err(one_diag(Diag::new(
-                Severity::Error,
-                StableCode::engine(104),
+            return Err(one_diag(Diag::engine(
+                EngineCode::ResultTypeMismatch,
                 rule.span,
                 format!(
                     "rule `{}` returned {}, expected {}",
@@ -382,12 +381,7 @@ impl Engine {
     fn fetch_blob(&self, id: ContentId) -> PithResult<Box<[u8]>> {
         match self.store.get_blob(id).map_err(store_error_diag)? {
             Some(blob) => Ok(blob.as_bytes().to_vec().into_boxed_slice()),
-            None => Err(one_diag(Diag::new(
-                Severity::Error,
-                StableCode::engine(205),
-                Span::none(),
-                format!("content {id:?} is not available locally"),
-            ))),
+            None => Err(content_unavailable_diag(id)),
         }
     }
 
@@ -432,9 +426,8 @@ impl Engine {
         let authorization = policy.authorize(&plan);
         let denial = match &authorization {
             ActionAuthorization::Allowed { .. } => None,
-            ActionAuthorization::Denied { policy, reason } => Some(one_diag(Diag::new(
-                Severity::Error,
-                StableCode::engine(213),
+            ActionAuthorization::Denied { policy, reason } => Some(one_diag(Diag::engine(
+                EngineCode::PolicyDenied,
                 request.span,
                 format!("action denied by policy `{policy}`: {reason}"),
             ))),
@@ -696,9 +689,8 @@ impl Engine {
 
         for used in &execution.report.capabilities_used {
             if !spec.capabilities.contains(used) {
-                return Err(one_diag(Diag::new(
-                    Severity::Error,
-                    StableCode::engine(208),
+                return Err(one_diag(Diag::engine(
+                    EngineCode::UndeclaredCapabilityUse,
                     Span::none(),
                     format!(
                         "executor reported undeclared capability `{}` scoped to `{}`",
@@ -714,9 +706,8 @@ impl Engine {
                 .iter()
                 .any(|output| output.path == produced.path && output.kind == produced.kind);
             if !declared {
-                return Err(one_diag(Diag::new(
-                    Severity::Error,
-                    StableCode::engine(209),
+                return Err(one_diag(Diag::engine(
+                    EngineCode::UndeclaredOutput,
                     Span::none(),
                     format!("executor reported undeclared output `{}`", produced.path),
                 )));
@@ -730,9 +721,8 @@ impl Engine {
                 .iter()
                 .any(|output| output.path == declared.path && output.kind == declared.kind);
             if !produced {
-                return Err(one_diag(Diag::new(
-                    Severity::Error,
-                    StableCode::engine(210),
+                return Err(one_diag(Diag::engine(
+                    EngineCode::MissingDeclaredOutput,
                     Span::none(),
                     format!(
                         "executor did not produce declared output `{}`",
@@ -764,9 +754,8 @@ fn validate_execution_platform(
     actual: &crate::ExecutionPlatform,
 ) -> PithResult<()> {
     if actual.operating_system.is_empty() || actual.architecture.is_empty() {
-        return Err(one_diag(Diag::new(
-            Severity::Error,
-            StableCode::engine(212),
+        return Err(one_diag(Diag::engine(
+            EngineCode::PlatformMismatch,
             Span::none(),
             "executor did not report a concrete execution platform",
         )));
@@ -779,9 +768,8 @@ fn validate_execution_platform(
         } if operating_system != &actual.operating_system
             || architecture != &actual.architecture =>
         {
-            Err(one_diag(Diag::new(
-                Severity::Error,
-                StableCode::engine(212),
+            Err(one_diag(Diag::engine(
+                EngineCode::PlatformMismatch,
                 Span::none(),
                 format!(
                     "executor selected platform `{}-{}`, expected `{}-{}`",
@@ -794,9 +782,8 @@ fn validate_execution_platform(
 }
 
 fn wrong_output_kind_diag(path: &str) -> DiagnosticSink {
-    one_diag(Diag::new(
-        Severity::Error,
-        StableCode::engine(209),
+    one_diag(Diag::engine(
+        EngineCode::UndeclaredOutput,
         Span::none(),
         format!("executor reported output `{path}` with the wrong kind"),
     ))
@@ -810,9 +797,8 @@ fn validate_action_result(
 ) -> PithResult<()> {
     let actual = value.value_type();
     if actual != *declared_output {
-        return Err(one_diag(Diag::new(
-            Severity::Error,
-            StableCode::engine(104),
+        return Err(one_diag(Diag::engine(
+            EngineCode::ResultTypeMismatch,
             rule_span,
             format!("action `{rule_label}` returned {actual}, expected {declared_output}"),
         )));
@@ -827,27 +813,24 @@ impl Default for Engine {
 }
 
 fn cycle_diag(chain: &[&str], span: Span) -> DiagnosticSink {
-    one_diag(Diag::new(
-        Severity::Error,
-        StableCode::engine(203),
+    one_diag(Diag::engine(
+        EngineCode::DependencyCycle,
         span,
         format!("dependency cycle: {}", chain.join(" -> ")),
     ))
 }
 
 fn internal_diag(message: &str) -> DiagnosticSink {
-    one_diag(Diag::new(
-        Severity::Error,
-        StableCode::engine(204),
+    one_diag(Diag::engine(
+        EngineCode::InternalInvariant,
         Span::none(),
         message,
     ))
 }
 
 fn effectful_in_pure_diag() -> DiagnosticSink {
-    one_diag(Diag::new(
-        Severity::Error,
-        StableCode::engine(206),
+    one_diag(Diag::engine(
+        EngineCode::EffectfulStepInPure,
         Span::none(),
         "effectful step (NeedBlob/NeedAction) in a pure-only evaluation; use Engine::run",
     ))
@@ -860,18 +843,16 @@ fn one_diag(diag: Diag) -> DiagnosticSink {
 }
 
 fn store_error_diag(error: pith_store::StoreError) -> DiagnosticSink {
-    one_diag(Diag::new(
-        Severity::Error,
-        StableCode::engine(207),
+    one_diag(Diag::engine(
+        EngineCode::StoreError,
         Span::none(),
         format!("content store error: {error}"),
     ))
 }
 
 fn content_unavailable_diag(id: ContentId) -> DiagnosticSink {
-    one_diag(Diag::new(
-        Severity::Error,
-        StableCode::engine(205),
+    one_diag(Diag::engine(
+        EngineCode::ContentUnavailable,
         Span::none(),
         format!("content {id:?} is not available locally"),
     ))
@@ -938,7 +919,10 @@ mod tests {
         let err = engine.evaluate_pure(&request("thing")).unwrap_err();
         let diags: Vec<_> = err.iter().collect();
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags.first().unwrap().code, StableCode::engine(102));
+        assert_eq!(
+            diags.first().unwrap().code,
+            pith_diag::StableCode::from(EngineCode::AmbiguousRule)
+        );
     }
 
     #[test]
@@ -956,7 +940,10 @@ mod tests {
 
         let err = engine.evaluate_pure(&request).unwrap_err();
         let diagnostics: Vec<_> = err.iter().collect();
-        assert_eq!(diagnostics.first().unwrap().code, StableCode::engine(103));
+        assert_eq!(
+            diagnostics.first().unwrap().code,
+            pith_diag::StableCode::from(EngineCode::RequestInputsMismatch)
+        );
     }
 
     #[test]
@@ -966,6 +953,9 @@ mod tests {
 
         let err = engine.evaluate_pure(&request("thing")).unwrap_err();
         let diagnostics: Vec<_> = err.iter().collect();
-        assert_eq!(diagnostics.first().unwrap().code, StableCode::engine(104));
+        assert_eq!(
+            diagnostics.first().unwrap().code,
+            pith_diag::StableCode::from(EngineCode::ResultTypeMismatch)
+        );
     }
 }

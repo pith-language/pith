@@ -1,7 +1,7 @@
 //! Rules, typed interfaces, requests, and deterministic selection.
 
 use pith_arena::define_arena;
-use pith_diag::{Diag, Severity, Span, StableCode};
+use pith_diag::{Diag, EngineCode, Span};
 use pith_ids::{PureComputationDigest, RuleIdentity, RuleRevision};
 use smallvec::SmallVec;
 use std::marker::PhantomData;
@@ -101,9 +101,8 @@ impl<K: EffectCategory> Request<K> {
     /// `E-1103` when an input is absent or has the wrong type.
     pub fn validate_inputs(&self) -> Result<(), Diag> {
         if self.inputs.len() != self.interface.inputs.len() {
-            return Err(Diag::new(
-                Severity::Error,
-                StableCode::engine(103),
+            return Err(Diag::engine(
+                EngineCode::RequestInputsMismatch,
                 self.span,
                 format!(
                     "request `{}` expects {} inputs but received {}",
@@ -122,9 +121,8 @@ impl<K: EffectCategory> Request<K> {
         {
             let actual = value.value_type();
             if actual != *expected {
-                return Err(Diag::new(
-                    Severity::Error,
-                    StableCode::engine(103),
+                return Err(Diag::engine(
+                    EngineCode::RequestInputsMismatch,
                     self.span,
                     format!(
                         "input {} for request `{}` has type {}, expected {}",
@@ -258,9 +256,8 @@ impl SelectOutcome {
     ) -> Result<RuleId, Diag> {
         match self {
             Self::One(id) => Ok(id),
-            Self::NoMatch => Err(Diag::new(
-                Severity::Error,
-                StableCode::engine(101),
+            Self::NoMatch => Err(Diag::engine(
+                EngineCode::NoRuleForInterface,
                 request.span,
                 format!(
                     "no rule satisfies `{}` ({})",
@@ -268,9 +265,8 @@ impl SelectOutcome {
                 ),
             )),
             Self::Ambiguous(candidates) => {
-                let mut diag = Diag::new(
-                    Severity::Error,
-                    StableCode::engine(102),
+                let mut diag = Diag::engine(
+                    EngineCode::AmbiguousRule,
                     request.span,
                     format!(
                         "ambiguous rule for `{}` ({})",
@@ -433,8 +429,8 @@ mod tests {
         let err = select_rule(&request, &arena)
             .into_result(&request, &arena)
             .unwrap_err();
-        assert_eq!(err.code, StableCode::engine(101));
-        assert_eq!(err.severity, Severity::Error);
+        assert_eq!(err.code, EngineCode::NoRuleForInterface.into());
+        assert_eq!(err.severity, pith_diag::Severity::Error);
         assert!(err.message.0.contains("() -> Int"));
     }
 
@@ -465,7 +461,7 @@ mod tests {
             .into_result(&request, &arena)
             .unwrap_err();
 
-        assert_eq!(err.code, StableCode::engine(102));
+        assert_eq!(err.code, EngineCode::AmbiguousRule.into());
         assert_eq!(err.notes.len(), 2);
         assert!(
             err.notes
@@ -511,7 +507,7 @@ mod tests {
 
         let err = request.validate_inputs().unwrap_err();
 
-        assert_eq!(err.code, StableCode::engine(103));
+        assert_eq!(err.code, EngineCode::RequestInputsMismatch.into());
         assert!(err.message.0.contains("has type Bool, expected Int"));
     }
 }
