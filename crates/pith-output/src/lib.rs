@@ -17,7 +17,7 @@ pub struct OutputRecord {
 }
 
 /// Stable string tag on every record. Never renumber, only add (K-11).
-#[derive(Copy, Clone, Debug, serde::Serialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecordKind {
     Phase,
@@ -72,6 +72,22 @@ pub enum Payload {
     },
 }
 
+impl Payload {
+    /// The [`RecordKind`] that classifies this payload. This is the single
+    /// source of truth for the kind/payload pairing: an `OutputRecord`'s `kind`
+    /// field is derived from its payload, never hand-paired at a construction
+    /// site. The `kind_matches_payload_in_every_constructor` test pins this.
+    pub const fn record_kind(&self) -> RecordKind {
+        match self {
+            Payload::Phase { .. } => RecordKind::Phase,
+            Payload::Cache { .. } => RecordKind::Cache,
+            Payload::Explain { .. } => RecordKind::Explain,
+            Payload::Result { .. } => RecordKind::Result,
+            Payload::Summary { .. } => RecordKind::Summary,
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PhaseStatus {
@@ -117,47 +133,48 @@ pub struct ExplainStep {
 }
 
 impl OutputRecord {
-    pub fn phase(name: impl Into<Box<str>>, status: PhaseStatus) -> Self {
+    fn from_payload(payload: Payload) -> Self {
         Self {
-            kind: RecordKind::Phase,
+            kind: payload.record_kind(),
             code: 0,
-            payload: Payload::Phase {
-                name: name.into(),
-                status,
-            },
+            payload,
         }
+    }
+
+    pub fn phase(name: impl Into<Box<str>>, status: PhaseStatus) -> Self {
+        Self::from_payload(Payload::Phase {
+            name: name.into(),
+            status,
+        })
     }
 
     pub fn cache(outcome: CacheOutcome) -> Self {
-        Self {
-            kind: RecordKind::Cache,
-            code: 0,
-            payload: Payload::Cache { outcome },
-        }
+        Self::from_payload(Payload::Cache { outcome })
     }
 
     pub fn explain(steps: impl Into<Box<[ExplainStep]>>) -> Self {
-        Self {
-            kind: RecordKind::Explain,
-            code: 0,
-            payload: Payload::Explain {
-                steps: steps.into(),
-            },
-        }
+        Self::from_payload(Payload::Explain {
+            steps: steps.into(),
+        })
+    }
+
+    /// Build a result record carrying a human-readable summary. Rich types that
+    /// produce a summary implement [`IntoOutput`] rather than calling this
+    /// directly.
+    pub fn result(summary: impl Into<Box<str>>) -> Self {
+        Self::from_payload(Payload::Result {
+            summary: summary.into(),
+        })
     }
 
     pub fn summary(hits: u64, misses: u64, reuses: u64, errors: u64, wall_ms: u64) -> Self {
-        Self {
-            kind: RecordKind::Summary,
-            code: 0,
-            payload: Payload::Summary {
-                hits,
-                misses,
-                reuses,
-                errors,
-                wall_ms,
-            },
-        }
+        Self::from_payload(Payload::Summary {
+            hits,
+            misses,
+            reuses,
+            errors,
+            wall_ms,
+        })
     }
 }
 
@@ -278,6 +295,30 @@ mod tests {
                 json.as_str(),
                 Some(outcome.as_str()),
                 "CacheOutcome as_str drifted from serde"
+            );
+        }
+    }
+
+    /// Every constructor must pair its `kind` with the matching `Payload`
+    /// variant. Because `kind` is now derived from the payload, this also
+    /// guards that the `kind` field never drifts from `payload.record_kind()`.
+    #[test]
+    fn kind_matches_payload_in_every_constructor() {
+        let records = [
+            OutputRecord::phase("build", PhaseStatus::Started),
+            OutputRecord::cache(CacheOutcome::Hit),
+            OutputRecord::explain([ExplainStep {
+                label: "x".into(),
+                detail: "y".into(),
+            }]),
+            OutputRecord::result("done"),
+            OutputRecord::summary(0, 0, 0, 0, 0),
+        ];
+        for rec in records {
+            assert_eq!(
+                rec.kind,
+                rec.payload.record_kind(),
+                "constructor paired kind with the wrong payload variant"
             );
         }
     }

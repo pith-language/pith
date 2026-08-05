@@ -25,12 +25,6 @@ use pith_output::{IntoOutput, OutputRecord};
 
 impl IntoOutput for Value {
     fn to_record(&self) -> OutputRecord {
-        OutputRecord {
-            kind: pith_output::RecordKind::Result,
-            code: 0,
-            payload: pith_output::Payload::Result {
-                summary: self.describe().into(),
-            },
-        }
+        OutputRecord::result(self.describe())
     }
 }

@@ -5,7 +5,7 @@ use clap::{Parser, ValueEnum};
 use pith_core::{Interface, Request, Type};
 use pith_diag::Span;
 use pith_engine::Engine;
-use pith_output::{OutputRecord, OutputShape, Payload, PhaseStatus, Sink};
+use pith_output::{IntoOutput, OutputRecord, OutputShape, PhaseStatus, Sink};
 
 #[derive(Parser)]
 #[command(name = "pith", version, about = "the pith kernel")]
@@ -32,6 +32,16 @@ enum Command {
     Eval { request: String },
 }
 
+impl Command {
+    /// The phase label this command reports under. Single source for the
+    /// string emitted in phase records, instead of three retyped literals.
+    const fn phase_label(&self) -> &'static str {
+        match self {
+            Command::Eval { .. } => "eval",
+        }
+    }
+}
+
 fn main() -> ExitCode {
     init_tracing();
     let cli = Cli::parse();
@@ -47,7 +57,8 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli, renderer: impl pith_output::Renderer) -> ExitCode {
     let mut sink = Sink::new(renderer);
-    let _ = sink.emit(&OutputRecord::phase("eval", PhaseStatus::Started));
+    let label = cli.command.phase_label();
+    let _ = sink.emit(&OutputRecord::phase(label, PhaseStatus::Started));
 
     let result = match cli.command {
         Command::Eval { request } => eval(&mut sink, &request),
@@ -55,12 +66,12 @@ fn run(cli: Cli, renderer: impl pith_output::Renderer) -> ExitCode {
 
     match result {
         Ok(()) => {
-            let _ = sink.emit(&OutputRecord::phase("eval", PhaseStatus::Finished));
+            let _ = sink.emit(&OutputRecord::phase(label, PhaseStatus::Finished));
             let _ = sink.finish();
             ExitCode::SUCCESS
         }
         Err(diags) => {
-            let _ = sink.emit(&OutputRecord::phase("eval", PhaseStatus::Failed));
+            let _ = sink.emit(&OutputRecord::phase(label, PhaseStatus::Failed));
             for diag in diags.iter() {
                 render_diag(diag);
             }
@@ -86,13 +97,7 @@ fn eval(
     );
     match engine.evaluate_pure(&req) {
         Ok(evaluation) => {
-            let _ = sink.emit(&OutputRecord {
-                kind: pith_output::RecordKind::Result,
-                code: 0,
-                payload: Payload::Result {
-                    summary: evaluation.value.describe().into(),
-                },
-            });
+            let _ = sink.emit(&evaluation.value.to_record());
             Ok(())
         }
         Err(diags) => Err(diags),
