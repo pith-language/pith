@@ -4,10 +4,15 @@
 //! lets a future alternate engine, test harness, or doc generator reuse this
 //! IR without pulling in the scheduler.
 
+pub mod action;
 pub mod effect;
 pub mod rule;
 pub mod value;
 
+pub use action::{
+    ActionInput, ActionInputContent, ActionOutput, ActionOutputKind, ActionSpec,
+    CapabilityRequirement, EnvironmentVariable, NetworkPolicy, PlatformRequirement,
+};
 pub use effect::{Action, EffectCategory, Mutation, Observation, Opaque, Pure};
 pub use rule::{Interface, Request, Rule, RuleArena, RuleId, SelectOutcome, select_rule};
 pub use value::{Type, Value, ValueArena, ValueId};
