@@ -28,8 +28,8 @@ use crate::action::{
 };
 use crate::graph::capabilities::canonical_capabilities;
 use crate::graph::diagnostics::{
-    content_unavailable_diag, internal_diag, one_diag, store_error_diag, validate_action_result,
-    validate_execution_platform, wrong_output_kind_diag,
+    InternalInvariant, content_unavailable_diag, internal_diag, one_diag, store_error_diag,
+    validate_action_result, validate_execution_platform, wrong_output_kind_diag,
 };
 use crate::policy::{ActionAuthorization, ActionPolicy};
 
@@ -49,7 +49,9 @@ impl Engine {
             .into_result(request, &self.action_rules)
             .map_err(one_diag)?;
         let Some(body) = self.action_bodies.get(&rule) else {
-            return Err(internal_diag("selected action rule has no body"));
+            return Err(internal_diag(
+                InternalInvariant::SelectedActionRuleHasNoBody,
+            ));
         };
         let spec = body.plan(&request.inputs)?;
         let spec_digest = spec.digest().map_err(one_diag)?;
@@ -83,7 +85,7 @@ impl Engine {
 
         let Some(action_rule) = self.action_rules.get(rule) else {
             return ActionRunOutcome::PlanningFailed(internal_diag(
-                "selected action rule has no metadata",
+                InternalInvariant::SelectedActionRuleHasNoMetadata,
             ));
         };
         let rule_meta = ActionRuleMeta {
@@ -157,7 +159,7 @@ impl Engine {
         // From here every failure retains the execution report.
         let capabilities_used = canonical_capabilities(&execution.report.capabilities_used);
         let Some(node) = self.computations.get_mut(computation) else {
-            return Err(internal_diag("action evaluator lost its computation node"));
+            return Err(internal_diag(InternalInvariant::ActionLostComputationNode));
         };
         node.dependencies.extend(
             capabilities_used
@@ -171,7 +173,7 @@ impl Engine {
             return Err(self.fail_action(
                 computation,
                 Some(execution.report),
-                internal_diag("selected action rule has no body"),
+                internal_diag(InternalInvariant::SelectedActionRuleHasNoBody),
             ));
         };
         let value = match body.complete(&request.inputs, &execution) {
@@ -190,12 +192,12 @@ impl Engine {
         }
 
         let Some(node) = self.computations.get_mut(computation) else {
-            return Err(internal_diag("action evaluator lost its computation node"));
+            return Err(internal_diag(InternalInvariant::ActionLostComputationNode));
         };
         node.result = Some(value.clone());
         node.reuse = ReuseDecision::NotReusable(ReuseReason::ActionCachingDisabled);
         let Some(action) = node.action.as_mut() else {
-            return Err(internal_diag("action evaluator lost its action record"));
+            return Err(internal_diag(InternalInvariant::ActionLostActionRecord));
         };
         action.report = Some(execution.report);
 
@@ -281,7 +283,7 @@ impl Engine {
                     let MaterializedContent::Blob { bytes, .. } =
                         self.materialize_blob(*content)?
                     else {
-                        return Err(internal_diag("tree file content materialized as a tree"));
+                        return Err(internal_diag(InternalInvariant::TreeFileMaterializedAsTree));
                     };
                     MaterializedTreeEntryContent::File {
                         content: *content,

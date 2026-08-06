@@ -27,13 +27,101 @@ pub(super) fn cycle_diag(chain: &[&str], span: Span) -> DiagnosticSink {
     ))
 }
 
-/// An engine-internal invariant was violated. These should be unreachable by
-/// construction; the message identifies which invariant.
-pub(super) fn internal_diag(message: &str) -> DiagnosticSink {
+/// An engine-internal invariant that should be unreachable by construction.
+/// Enumerating them makes the set of "impossible" states inspectable and
+/// compile-checked: adding or removing one is a visible event, and a typo in a
+/// free-text message cannot silently change which invariant fired.
+pub(super) enum InternalInvariant {
+    /// A pure step requested a blob/action but the evaluation stack was empty.
+    EffectfulStepWithNoFrame(&'static str),
+    /// The parent frame of a dependency request was missing from the stack.
+    PureLostRequestingFrame,
+    /// The parent computation of a dependency request was missing from the arena.
+    PureLostParentComputation,
+    /// A completed computation's node was missing from the arena.
+    PureLostComputationNode,
+    /// The metadata of a selected pure rule was missing.
+    PureLostSelectedRuleMetadata,
+    /// The step machine had no frame to step.
+    PureLostRootFrame,
+    /// A frame completed but the stack was empty.
+    PureCompletedWithoutFrame,
+    /// A capability-bearing dependency's computation was missing.
+    PureLostCapabilityComputation,
+    /// The body of a selected pure rule was missing.
+    SelectedRuleHasNoBody,
+    /// The metadata of a selected rule was missing.
+    SelectedRuleHasNoMetadata,
+    /// The body of a selected action rule was missing.
+    SelectedActionRuleHasNoBody,
+    /// The metadata of a selected action rule was missing.
+    SelectedActionRuleHasNoMetadata,
+    /// The computation node of an in-flight action was missing.
+    ActionLostComputationNode,
+    /// The action record on an in-flight action computation was missing.
+    ActionLostActionRecord,
+    /// A tree file entry materialized as a tree instead of a blob.
+    TreeFileMaterializedAsTree,
+}
+
+impl InternalInvariant {
+    fn message(&self) -> String {
+        match self {
+            InternalInvariant::EffectfulStepWithNoFrame(step) => {
+                format!("{step} requested with no frame on the stack")
+            }
+            InternalInvariant::PureLostRequestingFrame => {
+                "pure evaluator lost a requesting frame".to_string()
+            }
+            InternalInvariant::PureLostParentComputation => {
+                "pure evaluator lost a parent computation".to_string()
+            }
+            InternalInvariant::PureLostComputationNode => {
+                "pure evaluator lost a computation node".to_string()
+            }
+            InternalInvariant::PureLostSelectedRuleMetadata => {
+                "pure evaluator lost selected rule metadata".to_string()
+            }
+            InternalInvariant::PureLostRootFrame => {
+                "pure evaluator lost its root frame".to_string()
+            }
+            InternalInvariant::PureCompletedWithoutFrame => {
+                "pure evaluator completed without a frame".to_string()
+            }
+            InternalInvariant::PureLostCapabilityComputation => {
+                "pure evaluator lost a capability dependency computation".to_string()
+            }
+            InternalInvariant::SelectedRuleHasNoBody => {
+                "selected rule has no executable body".to_string()
+            }
+            InternalInvariant::SelectedRuleHasNoMetadata => {
+                "selected rule has no metadata".to_string()
+            }
+            InternalInvariant::SelectedActionRuleHasNoBody => {
+                "selected action rule has no body".to_string()
+            }
+            InternalInvariant::SelectedActionRuleHasNoMetadata => {
+                "selected action rule has no metadata".to_string()
+            }
+            InternalInvariant::ActionLostComputationNode => {
+                "action evaluator lost its computation node".to_string()
+            }
+            InternalInvariant::ActionLostActionRecord => {
+                "action evaluator lost its action record".to_string()
+            }
+            InternalInvariant::TreeFileMaterializedAsTree => {
+                "tree file content materialized as a tree".to_string()
+            }
+        }
+    }
+}
+
+/// Build the diagnostic for a violated [`InternalInvariant`].
+pub(super) fn internal_diag(invariant: InternalInvariant) -> DiagnosticSink {
     one_diag(Diag::engine(
         EngineCode::InternalInvariant,
         Span::none(),
-        message,
+        invariant.message(),
     ))
 }
 

@@ -28,8 +28,8 @@ use crate::action::{ActionRule, Executor};
 use crate::policy::ActionPolicy;
 use crate::runtime::Runtime;
 use diagnostics::{
-    content_unavailable_diag, cycle_diag, effectful_in_pure_diag, internal_diag, one_diag,
-    store_error_diag,
+    InternalInvariant, content_unavailable_diag, cycle_diag, effectful_in_pure_diag, internal_diag,
+    one_diag, store_error_diag,
 };
 use ir::EvalFrame;
 use reuse::PureComputationIndex;
@@ -206,7 +206,9 @@ impl Engine {
                     if let Some(parent) = stack.last_mut() {
                         parent.resume_with = Some(Value::Bytes(bytes));
                     } else {
-                        return Err(internal_diag("blob requested with no frame on the stack"));
+                        return Err(internal_diag(InternalInvariant::EffectfulStepWithNoFrame(
+                            "blob",
+                        )));
                     }
                 }
                 PureStep::NeedAction(action_request) => {
@@ -219,10 +221,12 @@ impl Engine {
                         } => (computation, result),
                     };
                     let Some(parent) = stack.last() else {
-                        return Err(internal_diag("action requested with no frame on the stack"));
+                        return Err(internal_diag(InternalInvariant::EffectfulStepWithNoFrame(
+                            "action",
+                        )));
                     };
                     let Some(parent_node) = self.computations.get_mut(parent.computation) else {
-                        return Err(internal_diag("pure evaluator lost a parent computation"));
+                        return Err(internal_diag(InternalInvariant::PureLostParentComputation));
                     };
                     parent_node.dependencies.push(DependencyEdge::Action {
                         computation: action_computation,
@@ -230,7 +234,9 @@ impl Engine {
                     });
                     let value = result?;
                     let Some(parent) = stack.last_mut() else {
-                        return Err(internal_diag("action requested with no frame on the stack"));
+                        return Err(internal_diag(InternalInvariant::EffectfulStepWithNoFrame(
+                            "action",
+                        )));
                     };
                     parent.resume_with = Some(value);
                 }
@@ -241,7 +247,7 @@ impl Engine {
     fn step_top_frame(&self, stack: &mut [EvalFrame]) -> PithResult<PureStep> {
         match stack.last_mut() {
             Some(frame) => frame.body.step(frame.resume_with.take()),
-            None => Err(internal_diag("pure evaluator lost its root frame")),
+            None => Err(internal_diag(InternalInvariant::PureLostRootFrame)),
         }
     }
 
@@ -254,11 +260,11 @@ impl Engine {
 
     fn start_frame(&mut self, request: Request<Pure>, rule: RuleId) -> PithResult<EvalFrame> {
         let Some(body) = self.bodies.get(&rule) else {
-            return Err(internal_diag("selected rule has no executable body"));
+            return Err(internal_diag(InternalInvariant::SelectedRuleHasNoBody));
         };
         let body = body.start(&request.inputs);
         let Some(rule_metadata) = self.rules.get(rule) else {
-            return Err(internal_diag("selected rule has no metadata"));
+            return Err(internal_diag(InternalInvariant::SelectedRuleHasNoMetadata));
         };
         let key = PureComputationKey::new(rule_metadata, &request);
         let computation = self.computations.push(ComputationNode {
@@ -282,10 +288,12 @@ impl Engine {
 
     fn finish_frame(&mut self, stack: &mut Vec<EvalFrame>, value: Value) -> PithResult<Evaluation> {
         let Some(completed) = stack.pop() else {
-            return Err(internal_diag("pure evaluator completed without a frame"));
+            return Err(internal_diag(InternalInvariant::PureCompletedWithoutFrame));
         };
         let Some(rule) = self.rules.get(completed.rule) else {
-            return Err(internal_diag("pure evaluator lost selected rule metadata"));
+            return Err(internal_diag(
+                InternalInvariant::PureLostSelectedRuleMetadata,
+            ));
         };
         let actual = value.value_type();
         if actual != completed.request.interface.output {
@@ -303,15 +311,15 @@ impl Engine {
                 self.pure_reuse_decision(&node.dependencies),
                 self.effective_capabilities(&node.dependencies),
             ),
-            None => return Err(internal_diag("pure evaluator lost a computation node")),
+            None => return Err(internal_diag(InternalInvariant::PureLostComputationNode)),
         };
         let Some(capabilities) = capabilities else {
             return Err(internal_diag(
-                "pure evaluator lost a capability dependency computation",
+                InternalInvariant::PureLostCapabilityComputation,
             ));
         };
         let Some(node) = self.computations.get_mut(completed.computation) else {
-            return Err(internal_diag("pure evaluator lost a computation node"));
+            return Err(internal_diag(InternalInvariant::PureLostComputationNode));
         };
         node.result = Some(value.clone());
         node.capabilities = capabilities;
@@ -346,17 +354,17 @@ impl Engine {
 
         if let Some(reused) = self.reusable_pure_evaluation(child_rule, &child_request) {
             let Some(parent) = stack.last() else {
-                return Err(internal_diag("pure evaluator lost a requesting frame"));
+                return Err(internal_diag(InternalInvariant::PureLostRequestingFrame));
             };
             let Some(parent_node) = self.computations.get_mut(parent.computation) else {
-                return Err(internal_diag("pure evaluator lost a parent computation"));
+                return Err(internal_diag(InternalInvariant::PureLostParentComputation));
             };
             parent_node.dependencies.push(DependencyEdge::Request {
                 computation: reused.computation,
                 request: child_request,
             });
             let Some(parent) = stack.last_mut() else {
-                return Err(internal_diag("pure evaluator lost a requesting frame"));
+                return Err(internal_diag(InternalInvariant::PureLostRequestingFrame));
             };
             parent.resume_with = Some(reused.value);
             return Ok(());
@@ -364,10 +372,10 @@ impl Engine {
 
         let child = self.start_frame(child_request.clone(), child_rule)?;
         let Some(parent) = stack.last() else {
-            return Err(internal_diag("pure evaluator lost a requesting frame"));
+            return Err(internal_diag(InternalInvariant::PureLostRequestingFrame));
         };
         let Some(parent_node) = self.computations.get_mut(parent.computation) else {
-            return Err(internal_diag("pure evaluator lost a parent computation"));
+            return Err(internal_diag(InternalInvariant::PureLostParentComputation));
         };
         parent_node.dependencies.push(DependencyEdge::Request {
             computation: child.computation,
