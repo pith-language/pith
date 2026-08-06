@@ -59,10 +59,19 @@ milestone M-1 used decisions 0015 and 0019 as prototype hypotheses and is comple
 ## actions and effects
 
 - are `Action`, `Observation`, and `Mutation` separate primitives or handlers of one effect calculus? (decision 0019 proposes five type-level categories — `Pure`, `Action`, `Observation`, `Mutation`, `Opaque` — with nondeterminism tracked as a dependency)
+- should the synchronous pure step machine be unable to even name effectful steps at the type level? today `PureStep` carries `NeedBlob`/`NeedAction` variants that `evaluate_pure` rejects at runtime (`E-1206`); a separate pure-only step type would make that a compile property, which is what decision 0022's "structurally pure core" already claims
 - which action properties can be enforced and which can only be claimed by an adapter? (decision 0014 addresses the reproducibility subcase; the general enforcement question is open)
 - how is secret taint tracked through values and diagnostics?
 - how should retry safety and compensation be represented for mutations? (decision 0012 names the validity scope; retry-safety representation is open)
 - can observations participate in incremental computation without making pure results time-dependent? (decision 0012 pins observation revisions; the incremental-purity interaction is open)
+
+## kernel type system and content model
+
+- should the declared/materialized/captured content enums be one generic `Content<Blob, Tree>` instantiated per phase, instead of three parallel `TreeEntryContent` / `MaterializedTreeEntryContent` / `CapturedTreeEntryContent` hierarchies that differ only in whether the file payload is a `ContentId`, bytes, or both? the duplication is real but the three phases carry genuine lifecycle information, so the unification is a design call
+- does `CapturedOutput` need both an `ActionOutputKind` tag and a `CapturedOutputContent` payload that encode the same Blob/Tree distinction? today the engine hand-matches the two and rejects mismatches at runtime; folding the kind into the content enum would make the mismatch unrepresentable
+- is the `K` phantom type parameter on `Request<K>` / `Rule<K>` exploited enough? it prevents type confusion but the engine then re-derives pure-vs-action via runtime matches; leaning in further (distinct step types, distinct rule-id brands per effect) would move more checks to compile time
+- should `RuleId` carry a per-effect brand so a pure `RuleId` cannot index the action body map? the brands exist (`define_arena!`) but `RuleId` is shared across both arenas today
+- should `EvalFrame`'s `resume_with: Option<Value>` be a typed state (`Initial` vs `Resuming(Value)`) so "forgot to set the resume value" is unrepresentable?
 
 ## identity and state
 
