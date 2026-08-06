@@ -9,6 +9,7 @@ pub mod effect;
 mod manifest;
 pub mod rule;
 pub mod value;
+mod value_codec;
 
 pub use action::{
     ActionInput, ActionInputContent, ActionOutput, ActionSpec, CapabilityRequirement, Content,
