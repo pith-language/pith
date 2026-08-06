@@ -4,12 +4,15 @@
 //! handles never cross this boundary.
 
 use pith_core::{
-    ActionSpec, CanonicalDecodeError, CapabilityRequirement, PureComputationKey, Value,
+    ActionSpec, CanonicalDecodeError, CapabilityRequirement, OutputKind, PureComputationKey, Value,
 };
 use pith_diag::{Diag, Severity, Span, StableCode};
 use pith_ids::{ActionSpecDigest, ContentId, RuleIdentity, RuleRevision};
 
-use crate::{ActionAuthorization, CapturedExecutionReport, ExecutionReport};
+use crate::{
+    AccessVerification, ActionAuthorization, CapturedExecutionReport, ExecutionPlatform,
+    ExecutionReport,
+};
 
 pub const CURRENT_ENGINE_STATE_VERSIONS: EngineStateVersions = EngineStateVersions {
     schema: SchemaVersion::new(1),
@@ -207,13 +210,56 @@ pub enum DurableActionProvenance {
     NotExecuted,
     /// The executor returned captured output, but the engine did not import it.
     Captured {
-        executor_report: CapturedExecutionReport,
+        executor_report: DurableCapturedExecutionReport,
     },
-    /// The engine imported the captured output and retained both observations.
-    Imported {
-        executor_report: CapturedExecutionReport,
-        imported_report: ExecutionReport,
-    },
+    /// The engine imported captured output into content-addressed storage.
+    Imported { imported_report: ExecutionReport },
+}
+
+/// Executor metadata retained when captured artifacts could not be imported.
+/// Artifact bytes remain outside engine-state metadata.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DurableCapturedExecutionReport {
+    pub executor: Box<str>,
+    pub platform: ExecutionPlatform,
+    pub access: AccessVerification,
+    pub outputs: Box<[DurableCapturedOutput]>,
+    pub capabilities_used: Box<[CapabilityRequirement]>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DurableCapturedOutput {
+    pub path: Box<str>,
+    pub kind: OutputKind,
+}
+
+impl From<&CapturedExecutionReport> for DurableCapturedExecutionReport {
+    fn from(report: &CapturedExecutionReport) -> Self {
+        Self {
+            executor: report.executor.clone(),
+            platform: report.platform.clone(),
+            access: report.access,
+            outputs: report
+                .outputs
+                .iter()
+                .map(|output| DurableCapturedOutput {
+                    path: output.path.clone(),
+                    kind: output.content.kind(),
+                })
+                .collect(),
+            capabilities_used: report.capabilities_used.clone(),
+        }
+    }
+}
+
+impl DurableActionProvenance {
+    pub(super) fn capabilities_used(&self) -> &[CapabilityRequirement] {
+        match self {
+            Self::NotExecuted => &[],
+            Self::Captured { executor_report } => &executor_report.capabilities_used,
+            Self::Imported { imported_report } => &imported_report.capabilities_used,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

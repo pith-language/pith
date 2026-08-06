@@ -7,10 +7,11 @@ use pith_core::{
 use pith_diag::{Diag, EngineCode, Span};
 use pith_engine::state::{
     CURRENT_ENGINE_STATE_VERSIONS, CompletedAttempt, DurableActionPlan, DurableActionProvenance,
-    DurableAttemptId, DurableAttemptState, DurableAttemptStatus, DurableComputation,
-    DurableDependency, DurableDiagnostic, DurableProvenance, DurableReuseDecision,
-    DurableReuseReason, DurableRule, EncodedValue, EngineStateError, EngineStateStore,
-    FailedAttempt, InvalidActionLifecycleReason, InvalidDependencyReason, MemoryEngineStateStore,
+    DurableAttemptId, DurableAttemptState, DurableAttemptStatus, DurableCapturedExecutionReport,
+    DurableCapturedOutput, DurableComputation, DurableDependency, DurableDiagnostic,
+    DurableProvenance, DurableReuseDecision, DurableReuseReason, DurableRule, EncodedValue,
+    EngineStateError, EngineStateStore, ExpectedReuseDecision, FailedAttempt,
+    InvalidActionLifecycleReason, InvalidDependencyReason, MemoryEngineStateStore,
 };
 use pith_engine::{
     AccessVerification, ActionAuthorization, CapturedExecutionReport, CapturedOutput,
@@ -47,7 +48,15 @@ fn action_plan(declaration: &str) -> Result<DurableActionPlan, Diag> {
         path: "result".into(),
         kind: OutputKind::Blob,
     }]);
+    spec.capabilities = Box::new([network_capability()]);
     DurableActionPlan::new(DurableRule::new(revision), spec)
+}
+
+fn network_capability() -> CapabilityRequirement {
+    CapabilityRequirement {
+        name: "network".into(),
+        scope: "example.test:443".into(),
+    }
 }
 
 fn execution_platform() -> ExecutionPlatform {
@@ -57,7 +66,7 @@ fn execution_platform() -> ExecutionPlatform {
     }
 }
 
-fn captured_report(capability: CapabilityRequirement) -> CapturedExecutionReport {
+fn captured_report() -> CapturedExecutionReport {
     CapturedExecutionReport {
         executor: "fixture-executor".into(),
         platform: execution_platform(),
@@ -66,11 +75,11 @@ fn captured_report(capability: CapabilityRequirement) -> CapturedExecutionReport
             path: "result".into(),
             content: Content::Blob(b"output".to_vec().into_boxed_slice()),
         }]),
-        capabilities_used: Box::new([capability]),
+        capabilities_used: Box::new([network_capability()]),
     }
 }
 
-fn imported_report(output: ContentId, capability: CapabilityRequirement) -> ExecutionReport {
+fn imported_report(output: ContentId) -> ExecutionReport {
     ExecutionReport {
         executor: "fixture-executor".into(),
         platform: execution_platform(),
@@ -79,7 +88,7 @@ fn imported_report(output: ContentId, capability: CapabilityRequirement) -> Exec
             path: "result".into(),
             content: Content::Blob(output),
         }]),
-        capabilities_used: Box::new([capability]),
+        capabilities_used: Box::new([network_capability()]),
     }
 }
 
@@ -139,9 +148,7 @@ fn conformance_suite(store: &mut dyn EngineStateStore) -> Result<(), Box<dyn std
                 computation: dependency_key,
                 attempt: dependency_attempt,
             }]),
-            DurableReuseDecision::NotReusable(DurableReuseReason::DependencyNotReusable {
-                attempt: dependency_attempt,
-            }),
+            DurableReuseDecision::Reusable,
         ),
     )?;
 
@@ -193,7 +200,7 @@ fn conformance_suite(store: &mut dyn EngineStateStore) -> Result<(), Box<dyn std
         store
             .latest_completed_reusable_attempt(root_key)?
             .map(|attempt| attempt.id),
-        Some(first_root)
+        Some(second_root)
     );
     assert!(store.pending_attempts()?.is_empty());
 
@@ -262,12 +269,8 @@ fn pending_action_retains_durable_plan_authorization_and_observed_report()
     assert_eq!(plan.spec_digest(), plan.spec().digest()?);
 
     let output = ContentId::of_blob(b"output");
-    let capability = CapabilityRequirement {
-        name: "network".into(),
-        scope: "example.test:443".into(),
-    };
-    let captured_report = captured_report(capability.clone());
-    let imported_report = imported_report(output, capability.clone());
+    let capability = network_capability();
+    let imported_report = imported_report(output);
     let missing_report_completion = store.publish_complete(
         attempt,
         CompletedAttempt {
@@ -288,10 +291,11 @@ fn pending_action_retains_durable_plan_authorization_and_observed_report()
     let invalid_completion = store.publish_complete(
         attempt,
         CompletedAttempt {
-            dependencies: Box::new([]),
+            dependencies: Box::new([DurableDependency::CapabilityUse {
+                capability: capability.clone(),
+            }]),
             result: EncodedValue::from_value(&Value::Blob(output)),
             provenance: DurableProvenance::Action(DurableActionProvenance::Imported {
-                executor_report: captured_report.clone(),
                 imported_report: imported_report.clone(),
             }),
             reuse: DurableReuseDecision::Reusable,
@@ -299,9 +303,9 @@ fn pending_action_retains_durable_plan_authorization_and_observed_report()
     );
     assert_eq!(
         invalid_completion,
-        Err(EngineStateError::InvalidActionLifecycle {
+        Err(EngineStateError::InvalidReuseDecision {
             attempt,
-            reason: InvalidActionLifecycleReason::ActionMarkedReusable,
+            expected: ExpectedReuseDecision::ActionCachingDisabled,
         })
     );
 
@@ -311,7 +315,6 @@ fn pending_action_retains_durable_plan_authorization_and_observed_report()
             dependencies: Box::new([DurableDependency::CapabilityUse { capability }]),
             result: EncodedValue::from_value(&Value::Blob(output)),
             provenance: DurableProvenance::Action(DurableActionProvenance::Imported {
-                executor_report: captured_report.clone(),
                 imported_report: imported_report.clone(),
             }),
             reuse: DurableReuseDecision::NotReusable(DurableReuseReason::ActionCachingDisabled),
@@ -329,10 +332,7 @@ fn pending_action_retains_durable_plan_authorization_and_observed_report()
     };
     assert_eq!(
         completion.provenance,
-        DurableProvenance::Action(DurableActionProvenance::Imported {
-            executor_report: captured_report,
-            imported_report,
-        })
+        DurableProvenance::Action(DurableActionProvenance::Imported { imported_report })
     );
     let Some(second_read) = store.attempt(attempt)? else {
         return Err(EngineStateError::AttemptNotFound { attempt }.into());
@@ -497,6 +497,78 @@ fn invalid_dependency_edges_do_not_publish() -> Result<(), Box<dyn std::error::E
 }
 
 #[test]
+fn pure_reuse_is_derived_from_ordered_dependencies() -> Result<(), Box<dyn std::error::Error>> {
+    let mut store = MemoryEngineStateStore::default();
+    let action_attempt = store.create_pending_attempt(DurableComputation::Action {
+        plan: action_plan("reuse-dependency")?,
+        authorization: ActionAuthorization::Allowed {
+            policy: "fixture-policy".into(),
+        },
+    })?;
+    let output = ContentId::of_blob(b"output");
+    store.publish_complete(
+        action_attempt,
+        CompletedAttempt {
+            dependencies: Box::new([DurableDependency::CapabilityUse {
+                capability: network_capability(),
+            }]),
+            result: EncodedValue::from_value(&Value::Blob(output)),
+            provenance: DurableProvenance::Action(DurableActionProvenance::Imported {
+                imported_report: imported_report(output),
+            }),
+            reuse: DurableReuseDecision::NotReusable(DurableReuseReason::ActionCachingDisabled),
+        },
+    )?;
+
+    let pure_key = pure_computation("action-parent", 1);
+    let pure_attempt = store.create_pending_attempt(DurableComputation::Pure(pure_key))?;
+    let expected_reuse =
+        DurableReuseDecision::NotReusable(DurableReuseReason::DependencyNotReusable {
+            attempt: action_attempt,
+        });
+    let invalid_decisions = [
+        DurableReuseDecision::Reusable,
+        DurableReuseDecision::NotReusable(DurableReuseReason::DependencyNotReusable {
+            attempt: DurableAttemptId::from_raw(u64::MAX),
+        }),
+    ];
+    for reuse in invalid_decisions {
+        let result = store.publish_complete(
+            pure_attempt,
+            pure_completion(
+                Value::Int(1),
+                Box::new([DurableDependency::Action {
+                    attempt: action_attempt,
+                }]),
+                reuse,
+            ),
+        );
+        assert_eq!(
+            result,
+            Err(EngineStateError::InvalidReuseDecision {
+                attempt: pure_attempt,
+                expected: ExpectedReuseDecision::DependencyNotReusable {
+                    attempt: action_attempt,
+                },
+            })
+        );
+    }
+
+    store.publish_complete(
+        pure_attempt,
+        pure_completion(
+            Value::Int(1),
+            Box::new([DurableDependency::Action {
+                attempt: action_attempt,
+            }]),
+            expected_reuse,
+        ),
+    )?;
+    assert!(store.latest_completed_reusable_attempt(pure_key)?.is_none());
+    Ok(())
+}
+
+#[test]
 fn denied_actions_cannot_complete_or_retain_execution_reports()
 -> Result<(), Box<dyn std::error::Error>> {
     let mut store = MemoryEngineStateStore::default();
@@ -507,13 +579,8 @@ fn denied_actions_cannot_complete_or_retain_execution_reports()
             reason: "fixture denial".into(),
         },
     })?;
-    let capability = CapabilityRequirement {
-        name: "network".into(),
-        scope: "example.test:443".into(),
-    };
     let output = ContentId::of_blob(b"output");
-    let captured_report = captured_report(capability.clone());
-    let imported_report = imported_report(output, capability);
+    let imported_report = imported_report(output);
 
     let completion_result = store.publish_complete(
         attempt,
@@ -521,7 +588,6 @@ fn denied_actions_cannot_complete_or_retain_execution_reports()
             dependencies: Box::new([]),
             result: EncodedValue::from_value(&Value::Blob(output)),
             provenance: DurableProvenance::Action(DurableActionProvenance::Imported {
-                executor_report: captured_report.clone(),
                 imported_report: imported_report.clone(),
             }),
             reuse: DurableReuseDecision::NotReusable(DurableReuseReason::ActionCachingDisabled),
@@ -541,7 +607,6 @@ fn denied_actions_cannot_complete_or_retain_execution_reports()
             dependencies: Box::new([]),
             diagnostics: Box::new([]),
             provenance: DurableProvenance::Action(DurableActionProvenance::Imported {
-                executor_report: captured_report,
                 imported_report,
             }),
         },
@@ -566,7 +631,8 @@ fn denied_actions_cannot_complete_or_retain_execution_reports()
 }
 
 #[test]
-fn captured_report_survives_output_import_failure() -> Result<(), Box<dyn std::error::Error>> {
+fn captured_report_metadata_survives_output_import_failure()
+-> Result<(), Box<dyn std::error::Error>> {
     let mut store = MemoryEngineStateStore::default();
     let attempt = store.create_pending_attempt(DurableComputation::Action {
         plan: action_plan("failed-import")?,
@@ -574,19 +640,39 @@ fn captured_report_survives_output_import_failure() -> Result<(), Box<dyn std::e
             policy: "fixture-policy".into(),
         },
     })?;
-    let captured_report = captured_report(CapabilityRequirement {
-        name: "network".into(),
-        scope: "example.test:443".into(),
-    });
+    let capability = network_capability();
+    let captured_report = DurableCapturedExecutionReport::from(&captured_report());
+    assert_eq!(
+        captured_report.outputs.as_ref(),
+        [DurableCapturedOutput {
+            path: "result".into(),
+            kind: OutputKind::Blob,
+        }]
+    );
     let diagnostic = Diag::engine(
         EngineCode::ContentUnavailable,
         Span::none(),
         "output import failed",
     );
-    store.publish_failed(
+    let missing_capability_edge = store.publish_failed(
         attempt,
         FailedAttempt {
             dependencies: Box::new([]),
+            diagnostics: Box::new([DurableDiagnostic::from(&diagnostic)]),
+            provenance: DurableProvenance::Action(DurableActionProvenance::Captured {
+                executor_report: captured_report.clone(),
+            }),
+        },
+    );
+    assert_eq!(
+        missing_capability_edge,
+        Err(EngineStateError::CapabilityDependenciesMismatch { attempt })
+    );
+
+    store.publish_failed(
+        attempt,
+        FailedAttempt {
+            dependencies: Box::new([DurableDependency::CapabilityUse { capability }]),
             diagnostics: Box::new([DurableDiagnostic::from(&diagnostic)]),
             provenance: DurableProvenance::Action(DurableActionProvenance::Captured {
                 executor_report: captured_report.clone(),

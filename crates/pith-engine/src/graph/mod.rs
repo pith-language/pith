@@ -9,6 +9,7 @@ pub mod ir;
 pub mod query;
 mod reuse;
 
+pub(crate) use capabilities::canonical_capabilities;
 pub use ir::{
     ActionPlan, ActionRecord, AttemptState, ComputationKind, ComputationNode, DependencyEdge,
     Evaluation, EvaluationSource, PureRule, PureRuleFrame, PureStep, ReuseDecision, ReuseReason,

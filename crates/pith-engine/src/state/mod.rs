@@ -9,5 +9,6 @@ mod store;
 pub use memory::MemoryEngineStateStore;
 pub use records::*;
 pub use store::{
-    EngineStateError, EngineStateStore, InvalidActionLifecycleReason, InvalidDependencyReason,
+    EngineStateError, EngineStateStore, ExpectedReuseDecision, InvalidActionLifecycleReason,
+    InvalidDependencyReason,
 };

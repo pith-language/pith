@@ -26,6 +26,13 @@ pub enum EngineStateError {
         attempt: DurableAttemptId,
         reason: InvalidActionLifecycleReason,
     },
+    InvalidReuseDecision {
+        attempt: DurableAttemptId,
+        expected: ExpectedReuseDecision,
+    },
+    CapabilityDependenciesMismatch {
+        attempt: DurableAttemptId,
+    },
     ProvenanceCategoryMismatch {
         attempt: DurableAttemptId,
     },
@@ -62,6 +69,14 @@ impl std::fmt::Display for EngineStateError {
                 formatter,
                 "engine-state action attempt {attempt} has an invalid lifecycle: {}",
                 reason.description()
+            ),
+            Self::InvalidReuseDecision { attempt, expected } => write!(
+                formatter,
+                "engine-state attempt {attempt} has a reuse decision inconsistent with its dependencies; expected {expected}"
+            ),
+            Self::CapabilityDependenciesMismatch { attempt } => write!(
+                formatter,
+                "engine-state action attempt {attempt} has capability-use edges inconsistent with its executor report"
             ),
             Self::ProvenanceCategoryMismatch { attempt } => write!(
                 formatter,
@@ -105,17 +120,36 @@ impl InvalidDependencyReason {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum InvalidActionLifecycleReason {
-    ActionMarkedReusable,
     DeniedActionCompleted,
     DeniedActionHasExecutorReport,
     CompletedActionMissingExecutorReport,
     CompletedActionMissingImportedReport,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ExpectedReuseDecision {
+    Reusable,
+    ActionCachingDisabled,
+    DependencyNotReusable { attempt: DurableAttemptId },
+}
+
+impl std::fmt::Display for ExpectedReuseDecision {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Reusable => formatter.write_str("Reusable"),
+            Self::ActionCachingDisabled => {
+                formatter.write_str("NotReusable(ActionCachingDisabled)")
+            }
+            Self::DependencyNotReusable { attempt } => {
+                write!(formatter, "NotReusable(DependencyNotReusable({attempt}))")
+            }
+        }
+    }
+}
+
 impl InvalidActionLifecycleReason {
     const fn description(self) -> &'static str {
         match self {
-            Self::ActionMarkedReusable => "action caching is disabled",
             Self::DeniedActionCompleted => "a denied action cannot complete",
             Self::DeniedActionHasExecutorReport => {
                 "a denied action cannot retain a report because execution is forbidden"
