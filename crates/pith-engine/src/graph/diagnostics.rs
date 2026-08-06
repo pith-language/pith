@@ -164,8 +164,8 @@ pub(super) fn validate_action_result(
     rule_label: &str,
     rule_span: Span,
 ) -> PithResult<()> {
-    let actual = value.value_type();
-    if actual != *declared_output {
+    if !value.is_type(declared_output) {
+        let actual = value.value_type();
         return Err(one_diag(Diag::engine(
             EngineCode::ResultTypeMismatch,
             rule_span,

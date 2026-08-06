@@ -35,6 +35,27 @@ impl Value {
         }
     }
 
+    /// Whether this value inhabits `expected`. Equivalent to
+    /// `self.value_type() == *expected` but avoids allocating the intermediate
+    /// `Type`; use it at result-type checks where only the comparison matters.
+    #[must_use]
+    pub fn is_type(&self, expected: &Type) -> bool {
+        match (self, expected) {
+            (Self::Unit, Type::Unit)
+            | (Self::Bool(_), Type::Bool)
+            | (Self::Int(_), Type::Int)
+            | (Self::Text(_), Type::Text)
+            | (Self::Bytes(_), Type::Bytes)
+            | (Self::Blob(_), Type::Blob) => true,
+            (Self::Unit, _)
+            | (Self::Bool(_), _)
+            | (Self::Int(_), _)
+            | (Self::Text(_), _)
+            | (Self::Bytes(_), _)
+            | (Self::Blob(_), _) => false,
+        }
+    }
+
     pub fn describe(&self) -> String {
         match self {
             Value::Unit => "()".to_string(),
@@ -162,6 +183,39 @@ mod tests {
         match repr {
             ValueRepr::Blob { digest } => assert_eq!(digest.len(), 64),
             _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn is_type_agrees_with_value_type() {
+        // is_type must accept exactly the type value_type would return, and
+        // reject every other type. Cover every variant pairing.
+        let values = [
+            (Value::Unit, Type::Unit),
+            (Value::Bool(true), Type::Bool),
+            (Value::Int(7), Type::Int),
+            (Value::Text("x".into()), Type::Text),
+            (Value::Bytes(b"y".to_vec().into_boxed_slice()), Type::Bytes),
+            (Value::Blob(ContentId::of_blob(b"z")), Type::Blob),
+        ];
+        let all_types = [
+            Type::Unit,
+            Type::Bool,
+            Type::Int,
+            Type::Text,
+            Type::Bytes,
+            Type::Blob,
+        ];
+        for (value, own_type) in &values {
+            for candidate in &all_types {
+                assert_eq!(
+                    value.is_type(candidate),
+                    *own_type == *candidate,
+                    "{:?}.is_type({:?}) disagreed with value_type",
+                    value,
+                    candidate,
+                );
+            }
         }
     }
 }

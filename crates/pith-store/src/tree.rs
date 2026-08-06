@@ -1,6 +1,15 @@
 use crate::StoreError;
 use pith_ids::{ContentDigest, ContentId, DIGEST_LEN};
 
+/// Entry-kind tags in the canonical tree manifest. These are a stable
+/// content-addressing wire format: changing a value changes every tree's
+/// identity. The writer (`canonical_manifest`) and reader (`from_manifest`)
+/// both reference these constants so the two halves cannot drift.
+const TAG_FILE: u8 = 0;
+const TAG_EXECUTABLE_FILE: u8 = 1;
+const TAG_TREE: u8 = 2;
+const TAG_SYMLINK: u8 = 3;
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum TreeEntryContent {
     File {
@@ -103,16 +112,16 @@ impl Tree {
             let name = reader.read_text()?;
             let tag = reader.read_byte()?;
             let content = match tag {
-                0 => TreeEntryContent::File {
+                TAG_FILE => TreeEntryContent::File {
                     content: reader.read_content_id()?,
                     executable: false,
                 },
-                1 => TreeEntryContent::File {
+                TAG_EXECUTABLE_FILE => TreeEntryContent::File {
                     content: reader.read_content_id()?,
                     executable: true,
                 },
-                2 => TreeEntryContent::Tree(reader.read_content_id()?),
-                3 => TreeEntryContent::Symlink {
+                TAG_TREE => TreeEntryContent::Tree(reader.read_content_id()?),
+                TAG_SYMLINK => TreeEntryContent::Symlink {
                     target: reader.read_bytes()?.into(),
                 },
                 _ => return Err(StoreError::new("tree manifest has an unknown entry tag")),
@@ -202,18 +211,22 @@ fn canonical_manifest(entries: &[TreeEntry]) -> Result<Vec<u8>, StoreError> {
         manifest.extend_from_slice(name);
         match &entry.content {
             TreeEntryContent::Tree(id) => {
-                manifest.push(2);
+                manifest.push(TAG_TREE);
                 manifest.extend_from_slice(id.digest().as_bytes());
             }
             TreeEntryContent::File {
                 content,
                 executable,
             } => {
-                manifest.push(if *executable { 1 } else { 0 });
+                manifest.push(if *executable {
+                    TAG_EXECUTABLE_FILE
+                } else {
+                    TAG_FILE
+                });
                 manifest.extend_from_slice(content.digest().as_bytes());
             }
             TreeEntryContent::Symlink { target } => {
-                manifest.push(3);
+                manifest.push(TAG_SYMLINK);
                 let target_len = u64::try_from(target.len())
                     .map_err(|_| StoreError::new("symlink target is too long"))?;
                 manifest.extend_from_slice(&target_len.to_le_bytes());

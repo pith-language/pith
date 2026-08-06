@@ -168,16 +168,29 @@ fn encode_interface(manifest: &mut Vec<u8>, interface: &Interface) {
     encode_type(manifest, &interface.output);
 }
 
+/// Discriminant tags for `Type`/`Value` variants in the pure-computation
+/// manifest. `Type` and `Value` deliberately share numbering for their
+/// overlapping variants so a value and its type encode under the same tag;
+/// `Nominal` is `Type`-only. These are a stable digest format: renumbering
+/// invalidates every persisted pure-computation key.
+const TAG_UNIT: u8 = 0;
+const TAG_BOOL: u8 = 1;
+const TAG_INT: u8 = 2;
+const TAG_TEXT: u8 = 3;
+const TAG_BYTES: u8 = 4;
+const TAG_BLOB: u8 = 5;
+const TAG_NOMINAL: u8 = 6;
+
 fn encode_type(manifest: &mut Vec<u8>, value_type: &Type) {
     match value_type {
-        Type::Unit => manifest.push(0),
-        Type::Bool => manifest.push(1),
-        Type::Int => manifest.push(2),
-        Type::Text => manifest.push(3),
-        Type::Bytes => manifest.push(4),
-        Type::Blob => manifest.push(5),
+        Type::Unit => manifest.push(TAG_UNIT),
+        Type::Bool => manifest.push(TAG_BOOL),
+        Type::Int => manifest.push(TAG_INT),
+        Type::Text => manifest.push(TAG_TEXT),
+        Type::Bytes => manifest.push(TAG_BYTES),
+        Type::Blob => manifest.push(TAG_BLOB),
         Type::Nominal { name } => {
-            manifest.push(6);
+            manifest.push(TAG_NOMINAL);
             encode_str(manifest, name);
         }
     }
@@ -185,25 +198,25 @@ fn encode_type(manifest: &mut Vec<u8>, value_type: &Type) {
 
 fn encode_value(manifest: &mut Vec<u8>, value: &Value) {
     match value {
-        Value::Unit => manifest.push(0),
+        Value::Unit => manifest.push(TAG_UNIT),
         Value::Bool(value) => {
-            manifest.push(1);
+            manifest.push(TAG_BOOL);
             manifest.push(u8::from(*value));
         }
         Value::Int(value) => {
-            manifest.push(2);
+            manifest.push(TAG_INT);
             manifest.extend_from_slice(&value.to_le_bytes());
         }
         Value::Text(value) => {
-            manifest.push(3);
+            manifest.push(TAG_TEXT);
             encode_str(manifest, value);
         }
         Value::Bytes(value) => {
-            manifest.push(4);
+            manifest.push(TAG_BYTES);
             encode_bytes(manifest, value);
         }
         Value::Blob(value) => {
-            manifest.push(5);
+            manifest.push(TAG_BLOB);
             manifest.extend_from_slice(value.digest().as_bytes());
         }
     }

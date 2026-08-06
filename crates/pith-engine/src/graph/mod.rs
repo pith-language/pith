@@ -295,8 +295,8 @@ impl Engine {
                 InternalInvariant::PureLostSelectedRuleMetadata,
             ));
         };
-        let actual = value.value_type();
-        if actual != completed.request.interface.output {
+        if !value.is_type(&completed.request.interface.output) {
+            let actual = value.value_type();
             return Err(one_diag(Diag::engine(
                 EngineCode::ResultTypeMismatch,
                 rule.span,
