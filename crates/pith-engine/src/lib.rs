@@ -8,6 +8,7 @@ pub mod action;
 pub mod graph;
 pub mod policy;
 pub mod runtime;
+pub mod state;
 
 pub use action::{
     AccessVerification, ActionExecution, ActionInvocation, ActionRule, CapturedActionExecution,
@@ -24,6 +25,7 @@ pub use graph::{
 };
 pub use policy::{ActionAuthorization, ActionPolicy, AllowAllActions};
 pub use runtime::{Runtime, RuntimeError, TokioRuntime};
+pub use state::{EngineStateStore, MemoryEngineStateStore};
 
 use pith_output::{IntoOutput, OutputRecord, Payload, PhaseStatus};
 
