@@ -21,6 +21,7 @@ pub use rule::{
     Interface, PureComputationKey, Request, Rule, RuleArena, RuleId, SelectOutcome, select_rule,
 };
 pub use value::{Type, Value, ValueArena, ValueId};
+pub use value_codec::CanonicalDecodeError;
 
 use pith_output::{IntoOutput, OutputRecord};
 
