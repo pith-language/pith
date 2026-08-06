@@ -48,7 +48,7 @@ impl ContentStore for MemoryContentStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{TreeEntry, TreeEntryContent};
+    use crate::{FileContent, TreeEntry, TreeEntryContent};
 
     #[test]
     fn equal_blobs_are_stored_once() {
@@ -87,10 +87,10 @@ mod tests {
         let blob = store.put_blob(b"payload").unwrap();
         let entry = TreeEntry::new(
             "file",
-            TreeEntryContent::File {
+            TreeEntryContent::File(FileContent {
                 content: blob,
                 executable: false,
-            },
+            }),
         )
         .unwrap();
         let tree = Tree::new([entry]).unwrap();

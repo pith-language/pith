@@ -17,6 +17,39 @@ const TAG_NETWORK_DENY: u8 = 0;
 const TAG_NETWORK_ALLOW_HOSTS: u8 = 1;
 const TAG_NETWORK_ALLOW_ALL: u8 = 2;
 
+/// The Blob/Tree discriminator on its own. Used where a phase names the kind
+/// without yet carrying payload (a declared action output), and as the return
+/// of [`Content::kind`]. This is the single source of truth for the two
+/// top-level content variants.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum OutputKind {
+    Blob,
+    Tree,
+}
+
+/// Top-level content: a blob or a tree. The discriminator is the single source
+/// of truth for "is this a Blob or a Tree"; each phase specializes `Blob` and
+/// `Tree` to the payload it carries (a `ContentId`, materialized bytes, a
+/// captured tree, …). Two phases never re-spell the Blob/Tree distinction.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Content<Blob, Tree> {
+    Blob(Blob),
+    Tree(Tree),
+}
+
+impl<Blob, Tree> Content<Blob, Tree> {
+    /// The discriminant, discarding the payload. Lets a caller compare a
+    /// content-carrying value against a declared [`OutputKind`] without the
+    /// kind being stored redundantly alongside the content.
+    #[must_use]
+    pub const fn kind(&self) -> OutputKind {
+        match self {
+            Content::Blob(_) => OutputKind::Blob,
+            Content::Tree(_) => OutputKind::Tree,
+        }
+    }
+}
+
 /// Immutable content made available to an action at a relative path.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ActionInput {
@@ -24,23 +57,16 @@ pub struct ActionInput {
     pub content: ActionInputContent,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub enum ActionInputContent {
-    Blob(ContentId),
-    Tree(ContentId),
-}
+/// Declared action input content: a blob or tree identified by content
+/// identity. A specialization of [`Content`] where both variants carry a
+/// [`ContentId`].
+pub type ActionInputContent = Content<ContentId, ContentId>;
 
 /// One path the executor must capture after successful execution.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ActionOutput {
     pub path: Box<str>,
-    pub kind: ActionOutputKind,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub enum ActionOutputKind {
-    Blob,
-    Tree,
+    pub kind: OutputKind,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -241,31 +267,27 @@ impl ActionSpec {
             left.path
                 .cmp(&right.path)
                 .then_with(|| {
-                    action_input_content_tag(left.content)
-                        .cmp(&action_input_content_tag(right.content))
+                    output_kind_tag(left.content.kind()).cmp(&output_kind_tag(right.content.kind()))
                 })
-                .then_with(|| {
-                    action_input_content_id(left.content)
-                        .cmp(&action_input_content_id(right.content))
-                })
+                .then_with(|| content_id(&left.content).cmp(&content_id(&right.content)))
         });
         encode_length(&mut manifest, inputs.len());
         for input in inputs {
             encode_str(&mut manifest, &input.path);
-            manifest.push(action_input_content_tag(input.content));
-            manifest.extend_from_slice(action_input_content_id(input.content).digest().as_bytes());
+            manifest.push(output_kind_tag(input.content.kind()));
+            manifest.extend_from_slice(content_id(&input.content).digest().as_bytes());
         }
 
         let mut outputs: Vec<_> = self.outputs.iter().collect();
         outputs.sort_by(|left, right| {
-            left.path.cmp(&right.path).then_with(|| {
-                action_output_kind_tag(left.kind).cmp(&action_output_kind_tag(right.kind))
-            })
+            left.path
+                .cmp(&right.path)
+                .then_with(|| output_kind_tag(left.kind).cmp(&output_kind_tag(right.kind)))
         });
         encode_length(&mut manifest, outputs.len());
         for output in outputs {
             encode_str(&mut manifest, &output.path);
-            manifest.push(action_output_kind_tag(output.kind));
+            manifest.push(output_kind_tag(output.kind));
         }
 
         let mut environment: Vec<_> = self.environment.iter().collect();
@@ -368,23 +390,21 @@ fn invalid_action_spec(message: impl Into<Box<str>>) -> Diag {
     Diag::engine(EngineCode::InvalidActionSpec, Span::none(), message)
 }
 
-fn action_input_content_tag(content: ActionInputContent) -> u8 {
-    match content {
-        ActionInputContent::Blob(_) => 0,
-        ActionInputContent::Tree(_) => 1,
-    }
-}
-
-fn action_input_content_id(content: ActionInputContent) -> ContentId {
-    match content {
-        ActionInputContent::Blob(identity) | ActionInputContent::Tree(identity) => identity,
-    }
-}
-
-fn action_output_kind_tag(kind: ActionOutputKind) -> u8 {
+/// The canonical-manifest tag for an [`OutputKind`]. Blob/Tree inputs and
+/// outputs share this single encoding: the discriminator is one value, not
+/// two parallel tag functions that must agree.
+fn output_kind_tag(kind: OutputKind) -> u8 {
     match kind {
-        ActionOutputKind::Blob => 0,
-        ActionOutputKind::Tree => 1,
+        OutputKind::Blob => 0,
+        OutputKind::Tree => 1,
+    }
+}
+
+/// The content identity carried by a declared action input, regardless of
+/// whether it is a blob or a tree.
+fn content_id(content: &ActionInputContent) -> ContentId {
+    match content {
+        Content::Blob(identity) | Content::Tree(identity) => *identity,
     }
 }
 
@@ -402,12 +422,24 @@ mod tests {
     }
 
     #[test]
+    fn content_kind_reports_the_discriminant_not_the_payload() {
+        // The discriminator is the single source of truth for Blob-vs-Tree
+        // across every phase. Whatever the payload, kind() must report the
+        // variant — this is what lets validate_execution compare a produced
+        // Content against a declared OutputKind without a redundant kind field.
+        let blob: ActionInputContent = Content::Blob(ContentId::of_blob(b"x"));
+        let tree: ActionInputContent = Content::Tree(ContentId::of_tree(b"manifest"));
+        assert_eq!(blob.kind(), OutputKind::Blob);
+        assert_eq!(tree.kind(), OutputKind::Tree);
+    }
+
+    #[test]
     fn action_contract_is_structural_data() {
         let mut spec = ActionSpec::isolated(ContentId::of_blob(b"compiler"));
         spec.arguments = ["source.c".into(), "-o".into(), "source.o".into()].into();
         spec.outputs = [ActionOutput {
             path: "source.o".into(),
-            kind: ActionOutputKind::Blob,
+            kind: OutputKind::Blob,
         }]
         .into();
 
@@ -426,11 +458,11 @@ mod tests {
         first.inputs = [
             ActionInput {
                 path: "b".into(),
-                content: ActionInputContent::Blob(second_blob),
+                content: Content::Blob(second_blob),
             },
             ActionInput {
                 path: "a".into(),
-                content: ActionInputContent::Blob(first_blob),
+                content: Content::Blob(first_blob),
             },
         ]
         .into();
@@ -459,12 +491,12 @@ mod tests {
         baseline.arguments = ["argument".into()].into();
         baseline.inputs = [ActionInput {
             path: "input".into(),
-            content: ActionInputContent::Blob(ContentId::of_blob(b"input")),
+            content: Content::Blob(ContentId::of_blob(b"input")),
         }]
         .into();
         baseline.outputs = [ActionOutput {
             path: "output".into(),
-            kind: ActionOutputKind::Blob,
+            kind: OutputKind::Blob,
         }]
         .into();
         baseline.environment = [EnvironmentVariable {
@@ -495,7 +527,7 @@ mod tests {
             ActionSpec {
                 inputs: [ActionInput {
                     path: "other input".into(),
-                    content: ActionInputContent::Blob(ContentId::of_blob(b"input")),
+                    content: Content::Blob(ContentId::of_blob(b"input")),
                 }]
                 .into(),
                 ..baseline.clone()
@@ -503,7 +535,7 @@ mod tests {
             ActionSpec {
                 outputs: [ActionOutput {
                     path: "other output".into(),
-                    kind: ActionOutputKind::Blob,
+                    kind: OutputKind::Blob,
                 }]
                 .into(),
                 ..baseline.clone()
@@ -554,7 +586,7 @@ mod tests {
             let mut spec = ActionSpec::isolated(ContentId::of_blob(b"tool"));
             spec.inputs = [ActionInput {
                 path: path.into(),
-                content: ActionInputContent::Blob(ContentId::of_blob(b"input")),
+                content: Content::Blob(ContentId::of_blob(b"input")),
             }]
             .into();
 
@@ -567,12 +599,12 @@ mod tests {
         let mut overlapping = ActionSpec::isolated(ContentId::of_blob(b"tool"));
         overlapping.inputs = [ActionInput {
             path: "source".into(),
-            content: ActionInputContent::Tree(ContentId::of_tree(b"source")),
+            content: Content::Tree(ContentId::of_tree(b"source")),
         }]
         .into();
         overlapping.outputs = [ActionOutput {
             path: "source/generated".into(),
-            kind: ActionOutputKind::Tree,
+            kind: OutputKind::Tree,
         }]
         .into();
 

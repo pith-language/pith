@@ -67,8 +67,6 @@ milestone M-1 used decisions 0015 and 0019 as prototype hypotheses and is comple
 
 ## kernel type system and content model
 
-- should the declared/materialized/captured content enums be one generic `Content<Blob, Tree>` instantiated per phase, instead of three parallel `TreeEntryContent` / `MaterializedTreeEntryContent` / `CapturedTreeEntryContent` hierarchies that differ only in whether the file payload is a `ContentId`, bytes, or both? the duplication is real but the three phases carry genuine lifecycle information, so the unification is a design call
-- does `CapturedOutput` need both an `ActionOutputKind` tag and a `CapturedOutputContent` payload that encode the same Blob/Tree distinction? today the engine hand-matches the two and rejects mismatches at runtime; folding the kind into the content enum would make the mismatch unrepresentable
 - is the `K` phantom type parameter on `Request<K>` / `Rule<K>` exploited enough? it prevents type confusion but the engine then re-derives pure-vs-action via runtime matches; leaning in further (distinct step types, distinct rule-id brands per effect) would move more checks to compile time
 - should `RuleId` carry a per-effect brand so a pure `RuleId` cannot index the action body map? the brands exist (`define_arena!`) but `RuleId` is shared across both arenas today
 - should `EvalFrame`'s `resume_with: Option<Value>` be a typed state (`Initial` vs `Resuming(Value)`) so "forgot to set the resume value" is unrepresentable?

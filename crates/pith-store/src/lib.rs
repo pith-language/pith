@@ -10,4 +10,4 @@ pub use blob::Blob;
 pub use filesystem::FilesystemContentStore;
 pub use memory::MemoryContentStore;
 pub use store::{ContentStore, StoreError};
-pub use tree::{Tree, TreeEntry, TreeEntryContent};
+pub use tree::{FileContent, Tree, TreeEntry, TreeEntryContent};

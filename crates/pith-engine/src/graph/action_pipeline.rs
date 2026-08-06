@@ -6,10 +6,7 @@
 //! call (decision 0022): planning, materialization, import, and validation are
 //! synchronous; only `executor.execute` is awaited.
 
-use pith_core::{
-    Action, ActionInputContent, ActionOutputKind, ActionSpec, Request, RuleId, Type, Value,
-    select_rule,
-};
+use pith_core::{Action, ActionSpec, Content, Request, RuleId, Type, Value, select_rule};
 use pith_diag::{Diag, DiagnosticSink, EngineCode, PithResult, Span};
 use pith_ids::{ComputationId, ContentId};
 use pith_store::{Tree, TreeEntry, TreeEntryContent};
@@ -21,15 +18,15 @@ use super::ir::{
 };
 use super::{ActionRunOutcome, Engine};
 use crate::action::{
-    ActionExecution, ActionInvocation, CapturedActionExecution, CapturedOutput,
-    CapturedOutputContent, CapturedTree, CapturedTreeEntryContent, ExecutionReport, Executor,
-    MaterializedActionInput, MaterializedContent, MaterializedTree, MaterializedTreeEntry,
-    MaterializedTreeEntryContent, ProducedOutput,
+    ActionExecution, ActionInvocation, CapturedActionExecution, CapturedFileContent,
+    CapturedOutputContent, CapturedTreeEntryContent, ExecutionReport, Executor,
+    MaterializedActionInput, MaterializedBlob, MaterializedContent, MaterializedFileContent,
+    MaterializedTree, MaterializedTreeEntryContent, ProducedOutput,
 };
 use crate::graph::capabilities::canonical_capabilities;
 use crate::graph::diagnostics::{
     InternalInvariant, content_unavailable_diag, internal_diag, one_diag, store_error_diag,
-    validate_action_result, validate_execution_platform, wrong_output_kind_diag,
+    validate_action_result, validate_execution_platform,
 };
 use crate::policy::{ActionAuthorization, ActionPolicy};
 
@@ -227,11 +224,9 @@ impl Engine {
         let executable = self.materialize_content_by_id(spec.executable)?;
         let mut inputs = Vec::with_capacity(spec.inputs.len());
         for input in &spec.inputs {
-            let content = match input.content {
-                ActionInputContent::Blob(id) => self.materialize_blob(id)?,
-                ActionInputContent::Tree(id) => {
-                    MaterializedContent::Tree(self.materialize_tree(id)?)
-                }
+            let content = match &input.content {
+                Content::Blob(id) => self.materialize_blob(*id)?,
+                Content::Tree(id) => MaterializedContent::Tree(self.materialize_tree(*id)?),
             };
             inputs.push(MaterializedActionInput {
                 path: input.path.clone(),
@@ -247,10 +242,10 @@ impl Engine {
 
     fn materialize_content_by_id(&self, id: ContentId) -> PithResult<MaterializedContent> {
         if let Some(blob) = self.store.get_blob(id).map_err(store_error_diag)? {
-            return Ok(MaterializedContent::Blob {
+            return Ok(MaterializedContent::Blob(MaterializedBlob {
                 id,
                 bytes: blob.as_bytes().to_vec().into_boxed_slice(),
-            });
+            }));
         }
         if self.store.get_tree(id).map_err(store_error_diag)?.is_some() {
             return Ok(MaterializedContent::Tree(self.materialize_tree(id)?));
@@ -260,10 +255,10 @@ impl Engine {
 
     fn materialize_blob(&self, id: ContentId) -> PithResult<MaterializedContent> {
         match self.store.get_blob(id).map_err(store_error_diag)? {
-            Some(blob) => Ok(MaterializedContent::Blob {
+            Some(blob) => Ok(MaterializedContent::Blob(MaterializedBlob {
                 id,
                 bytes: blob.as_bytes().to_vec().into_boxed_slice(),
-            }),
+            })),
             None => Err(content_unavailable_diag(id)),
         }
     }
@@ -276,20 +271,20 @@ impl Engine {
         let mut entries = Vec::with_capacity(tree.entries().len());
         for entry in tree.entries() {
             let content = match entry.content() {
-                TreeEntryContent::File {
+                TreeEntryContent::File(pith_store::FileContent {
                     content,
                     executable,
-                } => {
-                    let MaterializedContent::Blob { bytes, .. } =
+                }) => {
+                    let MaterializedContent::Blob(materialized) =
                         self.materialize_blob(*content)?
                     else {
                         return Err(internal_diag(InternalInvariant::TreeFileMaterializedAsTree));
                     };
-                    MaterializedTreeEntryContent::File {
+                    MaterializedTreeEntryContent::File(MaterializedFileContent {
                         content: *content,
                         executable: *executable,
-                        bytes,
-                    }
+                        bytes: materialized.bytes,
+                    })
                 }
                 TreeEntryContent::Tree(child) => {
                     MaterializedTreeEntryContent::Tree(self.materialize_tree(*child)?)
@@ -298,10 +293,10 @@ impl Engine {
                     target: target.clone(),
                 },
             };
-            entries.push(MaterializedTreeEntry {
-                name: entry.name().into(),
-                content,
-            });
+            entries.push(
+                TreeEntry::new(entry.name(), content)
+                    .map_err(|_| internal_diag(InternalInvariant::TreeFileMaterializedAsTree))?,
+            );
         }
         Ok(MaterializedTree {
             id,
@@ -315,10 +310,10 @@ impl Engine {
     ) -> PithResult<ActionExecution> {
         let mut outputs = Vec::with_capacity(captured.report.outputs.len());
         for output in &captured.report.outputs {
+            let content = self.import_output(&output.content)?;
             outputs.push(ProducedOutput {
                 path: output.path.clone(),
-                kind: output.kind,
-                content: self.import_output(output)?,
+                content,
             });
         }
         Ok(ActionExecution {
@@ -332,29 +327,32 @@ impl Engine {
         })
     }
 
-    fn import_output(&mut self, output: &CapturedOutput) -> PithResult<ContentId> {
-        match (&output.kind, &output.content) {
-            (ActionOutputKind::Blob, CapturedOutputContent::Blob(bytes)) => {
-                self.store.put_blob(bytes).map_err(store_error_diag)
-            }
-            (ActionOutputKind::Tree, CapturedOutputContent::Tree(tree)) => self.import_tree(tree),
-            (ActionOutputKind::Blob, CapturedOutputContent::Tree(_))
-            | (ActionOutputKind::Tree, CapturedOutputContent::Blob(_)) => {
-                Err(wrong_output_kind_diag(&output.path))
-            }
+    /// Content-address a captured output into the store, returning the typed
+    /// content the engine retains. The Blob/Tree discriminator travels in the
+    /// `Content` payload, so there is no separate `kind` to disagree with it:
+    /// the previous 2×2 mismatch match and its diagnostic are gone.
+    fn import_output(
+        &mut self,
+        content: &CapturedOutputContent,
+    ) -> PithResult<Content<ContentId, ContentId>> {
+        match content {
+            Content::Blob(bytes) => Ok(Content::Blob(
+                self.store.put_blob(bytes).map_err(store_error_diag)?,
+            )),
+            Content::Tree(tree) => Ok(Content::Tree(self.import_tree(tree)?)),
         }
     }
 
-    fn import_tree(&mut self, tree: &CapturedTree) -> PithResult<ContentId> {
+    fn import_tree(&mut self, tree: &crate::action::CapturedTree) -> PithResult<ContentId> {
         let mut entries = Vec::with_capacity(tree.entries.len());
-        for entry in &tree.entries {
-            let content = match &entry.content {
-                CapturedTreeEntryContent::File { bytes, executable } => {
+        for entry in tree.entries.iter() {
+            let content = match entry.content() {
+                CapturedTreeEntryContent::File(CapturedFileContent { bytes, executable }) => {
                     let content = self.store.put_blob(bytes).map_err(store_error_diag)?;
-                    TreeEntryContent::File {
+                    TreeEntryContent::File(pith_store::FileContent {
                         content,
                         executable: *executable,
-                    }
+                    })
                 }
                 CapturedTreeEntryContent::Tree(tree) => {
                     TreeEntryContent::Tree(self.import_tree(tree)?)
@@ -363,7 +361,10 @@ impl Engine {
                     target: target.clone(),
                 },
             };
-            entries.push(TreeEntry::new(entry.name.clone(), content).map_err(store_error_diag)?);
+            entries.push(
+                TreeEntry::new(entry.name(), content)
+                    .map_err(|_| internal_diag(InternalInvariant::TreeFileMaterializedAsTree))?,
+            );
         }
         let tree = Tree::new(entries).map_err(store_error_diag)?;
         self.store.put_tree(tree).map_err(store_error_diag)
@@ -386,10 +387,9 @@ impl Engine {
         }
 
         for produced in &execution.report.outputs {
-            let declared = spec
-                .outputs
-                .iter()
-                .any(|output| output.path == produced.path && output.kind == produced.kind);
+            let declared = spec.outputs.iter().any(|output| {
+                output.path == produced.path && output.kind == produced.content.kind()
+            });
             if !declared {
                 return Err(one_diag(Diag::engine(
                     EngineCode::UndeclaredOutput,
@@ -400,11 +400,9 @@ impl Engine {
         }
 
         for declared in &spec.outputs {
-            let produced = execution
-                .report
-                .outputs
-                .iter()
-                .any(|output| output.path == declared.path && output.kind == declared.kind);
+            let produced = execution.report.outputs.iter().any(|output| {
+                output.path == declared.path && output.content.kind() == declared.kind
+            });
             if !produced {
                 return Err(one_diag(Diag::engine(
                     EngineCode::MissingDeclaredOutput,

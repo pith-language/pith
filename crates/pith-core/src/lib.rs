@@ -11,8 +11,8 @@ pub mod rule;
 pub mod value;
 
 pub use action::{
-    ActionInput, ActionInputContent, ActionOutput, ActionOutputKind, ActionSpec,
-    CapabilityRequirement, EnvironmentVariable, NetworkPolicy, PlatformRequirement,
+    ActionInput, ActionInputContent, ActionOutput, ActionSpec, CapabilityRequirement, Content,
+    EnvironmentVariable, NetworkPolicy, OutputKind, PlatformRequirement,
 };
 pub use effect::{Action, EffectCategory, Mutation, Observation, Opaque, Pure};
 pub use pith_ids::{RuleIdentity, RuleRevision};

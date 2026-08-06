@@ -5,9 +5,10 @@
 //! callbacks from being mislabeled as declared actions.
 
 use async_trait::async_trait;
-use pith_core::{ActionOutputKind, ActionSpec, CapabilityRequirement, Value};
+use pith_core::{ActionSpec, CapabilityRequirement, Content, Value};
 use pith_diag::PithResult;
 use pith_ids::ContentId;
+use pith_store::TreeEntry;
 
 /// Deterministically turn typed request inputs into an inspectable contract.
 pub trait ActionRule: Send + Sync {
@@ -47,11 +48,18 @@ pub struct MaterializedActionInput {
     pub content: MaterializedContent,
 }
 
+/// A materialized blob: its content identity and the local bytes that identity
+/// resolves to. The payload of [`MaterializedContent::Blob`].
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum MaterializedContent {
-    Blob { id: ContentId, bytes: Box<[u8]> },
-    Tree(MaterializedTree),
+pub struct MaterializedBlob {
+    pub id: ContentId,
+    pub bytes: Box<[u8]>,
 }
+
+/// Top-level materialized content: a blob (id + bytes) or a materialized tree.
+/// A specialization of [`pith_core::Content`]; the Blob/Tree discriminator is
+/// the single source of truth shared with every other phase.
+pub type MaterializedContent = Content<MaterializedBlob, MaterializedTree>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MaterializedTree {
@@ -59,24 +67,26 @@ pub struct MaterializedTree {
     pub entries: Box<[MaterializedTreeEntry]>,
 }
 
+/// A materialized tree entry. An instantiation of the store's generic
+/// [`pith_store::TreeEntry`] over the materialized file payload and the
+/// materialized tree recursion.
+pub type MaterializedTreeEntry = TreeEntry<MaterializedFileContent, MaterializedTree>;
+
+/// A materialized file: its content identity, executability, and local bytes.
+/// Carries everything the canonical store form does, plus the bytes a blob
+/// materializes to.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MaterializedTreeEntry {
-    pub name: Box<str>,
-    pub content: MaterializedTreeEntryContent,
+pub struct MaterializedFileContent {
+    pub content: ContentId,
+    pub executable: bool,
+    pub bytes: Box<[u8]>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum MaterializedTreeEntryContent {
-    File {
-        content: ContentId,
-        executable: bool,
-        bytes: Box<[u8]>,
-    },
-    Tree(MaterializedTree),
-    Symlink {
-        target: Box<[u8]>,
-    },
-}
+/// Materialized tree-entry content. An instantiation of the store's generic
+/// [`pith_store::TreeEntryContent`]; `Symlink` is inherited unchanged from the
+/// canonical form.
+pub type MaterializedTreeEntryContent =
+    pith_store::TreeEntryContent<MaterializedFileContent, MaterializedTree>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CapturedActionExecution {
@@ -106,43 +116,49 @@ pub struct ExecutionPlatform {
     pub architecture: Box<str>,
 }
 
+/// One output the engine imported from the executor's report. The Blob/Tree
+/// discriminator lives in the [`Content`] payload; there is no separate `kind`
+/// field to drift out of agreement with it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProducedOutput {
     pub path: Box<str>,
-    pub kind: ActionOutputKind,
-    pub content: ContentId,
+    pub content: Content<ContentId, ContentId>,
 }
 
+/// One output an executor reports capturing. The Blob/Tree discriminator lives
+/// in the [`CapturedOutputContent`] payload; the engine no longer hand-matches
+/// a separate kind against it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CapturedOutput {
     pub path: Box<str>,
-    pub kind: ActionOutputKind,
     pub content: CapturedOutputContent,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CapturedOutputContent {
-    Blob(Box<[u8]>),
-    Tree(CapturedTree),
-}
+/// Top-level captured content: raw blob bytes or a captured tree. A
+/// specialization of [`pith_core::Content`].
+pub type CapturedOutputContent = Content<Box<[u8]>, CapturedTree>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CapturedTree {
     pub entries: Box<[CapturedTreeEntry]>,
 }
 
+/// A captured tree entry. An instantiation of the store's generic
+/// [`pith_store::TreeEntry`] over the captured file payload and the captured
+/// tree recursion.
+pub type CapturedTreeEntry = TreeEntry<CapturedFileContent, CapturedTree>;
+
+/// A captured file: its bytes and executability, before the engine has
+/// content-addressed it. Carries no `ContentId`; that is assigned on import.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CapturedTreeEntry {
-    pub name: Box<str>,
-    pub content: CapturedTreeEntryContent,
+pub struct CapturedFileContent {
+    pub bytes: Box<[u8]>,
+    pub executable: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CapturedTreeEntryContent {
-    File { bytes: Box<[u8]>, executable: bool },
-    Tree(CapturedTree),
-    Symlink { target: Box<[u8]> },
-}
+/// Captured tree-entry content. An instantiation of the store's generic
+/// [`pith_store::TreeEntryContent`]; `Symlink` is inherited unchanged.
+pub type CapturedTreeEntryContent = pith_store::TreeEntryContent<CapturedFileContent, CapturedTree>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecutionReport {

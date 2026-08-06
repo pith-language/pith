@@ -149,14 +149,6 @@ pub(super) fn content_unavailable_diag(id: ContentId) -> DiagnosticSink {
     ))
 }
 
-pub(super) fn wrong_output_kind_diag(path: &str) -> DiagnosticSink {
-    one_diag(Diag::engine(
-        EngineCode::UndeclaredOutput,
-        Span::none(),
-        format!("executor reported output `{path}` with the wrong kind"),
-    ))
-}
-
 /// Check a rule or action result against its declared output type.
 pub(super) fn validate_action_result(
     value: &Value,

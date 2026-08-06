@@ -6,9 +6,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use pith_core::{
-    Action, ActionInput, ActionInputContent, ActionOutput, ActionOutputKind, ActionSpec,
-    CapabilityRequirement, Interface, PlatformRequirement, Pure, Request, Rule, RuleIdentity,
-    RuleRevision, Type, Value,
+    Action, ActionInput, ActionOutput, ActionSpec, CapabilityRequirement, Content, Interface,
+    OutputKind, PlatformRequirement, Pure, Request, Rule, RuleIdentity, RuleRevision, Type, Value,
 };
 use pith_diag::{Diag, DiagnosticSink, EngineCode, PithResult, Severity, Span, StableCode};
 use pith_engine::{
@@ -100,13 +99,13 @@ impl ActionRule for DoubleAction {
         };
         spec.inputs = [ActionInput {
             path: "operand".into(),
-            content: ActionInputContent::Blob(double_input()),
+            content: Content::Blob(double_input()),
         }]
         .into();
         spec.capabilities = declared_double_capabilities().into();
         spec.outputs = [ActionOutput {
             path: "result".into(),
-            kind: ActionOutputKind::Blob,
+            kind: OutputKind::Blob,
         }]
         .into();
         Ok(spec)
@@ -114,7 +113,10 @@ impl ActionRule for DoubleAction {
 
     fn complete(&self, _inputs: &[Value], execution: &ActionExecution) -> PithResult<Value> {
         match execution.report.outputs.first() {
-            Some(output) => Ok(Value::Blob(output.content)),
+            Some(output) => match &output.content {
+                Content::Blob(id) => Ok(Value::Blob(*id)),
+                Content::Tree(_) => Err(fixture_error("double action produced a tree, not a blob")),
+            },
             None => Err(fixture_error("double action produced no output")),
         }
     }
@@ -127,7 +129,7 @@ impl ActionRule for WrongTypeAction {
         let mut spec = ActionSpec::isolated(wrong_type_executable());
         spec.outputs = [ActionOutput {
             path: "result".into(),
-            kind: ActionOutputKind::Blob,
+            kind: OutputKind::Blob,
         }]
         .into();
         Ok(spec)
@@ -154,8 +156,8 @@ impl Executor for FixtureExecutor {
                 ));
             }
             match &input.content {
-                MaterializedContent::Blob { id, bytes }
-                    if *id == double_input() && bytes.as_ref() == b"fixture input" => {}
+                MaterializedContent::Blob(blob)
+                    if blob.id == double_input() && blob.bytes.as_ref() == b"fixture input" => {}
                 _ => {
                     return Err(fixture_error(
                         "double action fixture received the wrong input content",
@@ -184,7 +186,6 @@ impl Executor for FixtureExecutor {
                 access: AccessVerification::Prevented,
                 outputs: [CapturedOutput {
                     path: output.path.clone(),
-                    kind: output.kind,
                     content,
                 }]
                 .into(),

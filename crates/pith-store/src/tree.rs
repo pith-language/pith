@@ -10,29 +10,48 @@ const TAG_EXECUTABLE_FILE: u8 = 1;
 const TAG_TREE: u8 = 2;
 const TAG_SYMLINK: u8 = 3;
 
+/// A tree entry's content, generic over the file payload `F` and the recursive
+/// tree payload `T`. The three variants — `File`, `Tree`, `Symlink` — are the
+/// single source of truth for the entry shape; the canonical store form, the
+/// engine's materialized form, and the engine's captured form are all
+/// instantiations of this enum, differing only in what `File` carries and what
+/// `Tree` recurses on. `Symlink` is identical across all phases.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum TreeEntryContent {
-    File {
-        content: ContentId,
-        executable: bool,
-    },
-    Tree(ContentId),
-    Symlink {
-        target: Box<[u8]>,
-    },
+pub enum TreeEntryContent<F, T> {
+    File(F),
+    Tree(T),
+    Symlink { target: Box<[u8]> },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TreeEntry {
+/// Canonical file payload stored by the content store: a content identity plus
+/// the executability bit that tree identity must preserve.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct FileContent {
+    pub content: ContentId,
+    pub executable: bool,
+}
+
+/// The canonical store instantiation: files carry [`FileContent`], subtrees
+/// carry their content identity. Used by tests that need to name the full type
+/// at a construction site where inference alone cannot.
+#[cfg(test)]
+pub(crate) type StoreTreeEntryContent = TreeEntryContent<FileContent, ContentId>;
+
+/// One named entry in a tree, generic over the same parameters as its content.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct TreeEntry<F, T> {
     name: Box<str>,
-    content: TreeEntryContent,
+    content: TreeEntryContent<F, T>,
 }
 
-impl TreeEntry {
+impl<F, T> TreeEntry<F, T> {
     /// # Errors
     /// Returns an error when `name` is not one tree path component or when a
     /// symlink target is empty or contains a NUL byte.
-    pub fn new(name: impl Into<Box<str>>, content: TreeEntryContent) -> Result<Self, StoreError> {
+    pub fn new(
+        name: impl Into<Box<str>>,
+        content: TreeEntryContent<F, T>,
+    ) -> Result<Self, StoreError> {
         let name = name.into();
         if name.is_empty()
             || name.as_ref() == "."
@@ -56,21 +75,26 @@ impl TreeEntry {
         &self.name
     }
 
-    pub fn content(&self) -> &TreeEntryContent {
+    pub fn content(&self) -> &TreeEntryContent<F, T> {
         &self.content
     }
 }
 
+/// A content-addressed directory tree. Concrete over the canonical store form
+/// (`FileContent` files, `ContentId` subtrees); the engine's materialized and
+/// captured tree representations reuse the generic [`TreeEntryContent`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tree {
     id: ContentId,
-    entries: Box<[TreeEntry]>,
+    entries: Box<[TreeEntry<FileContent, ContentId>]>,
 }
 
 impl Tree {
     /// # Errors
     /// Returns an error for duplicate names or an unrepresentable manifest.
-    pub fn new(entries: impl IntoIterator<Item = TreeEntry>) -> Result<Self, StoreError> {
+    pub fn new(
+        entries: impl IntoIterator<Item = TreeEntry<FileContent, ContentId>>,
+    ) -> Result<Self, StoreError> {
         let mut entries: Vec<_> = entries.into_iter().collect();
         entries.sort_by(|left, right| left.name.cmp(&right.name));
 
@@ -96,7 +120,7 @@ impl Tree {
         self.id
     }
 
-    pub fn entries(&self) -> &[TreeEntry] {
+    pub fn entries(&self) -> &[TreeEntry<FileContent, ContentId>] {
         &self.entries
     }
 
@@ -112,14 +136,14 @@ impl Tree {
             let name = reader.read_text()?;
             let tag = reader.read_byte()?;
             let content = match tag {
-                TAG_FILE => TreeEntryContent::File {
+                TAG_FILE => TreeEntryContent::File(FileContent {
                     content: reader.read_content_id()?,
                     executable: false,
-                },
-                TAG_EXECUTABLE_FILE => TreeEntryContent::File {
+                }),
+                TAG_EXECUTABLE_FILE => TreeEntryContent::File(FileContent {
                     content: reader.read_content_id()?,
                     executable: true,
-                },
+                }),
                 TAG_TREE => TreeEntryContent::Tree(reader.read_content_id()?),
                 TAG_SYMLINK => TreeEntryContent::Symlink {
                     target: reader.read_bytes()?.into(),
@@ -197,7 +221,9 @@ impl<'manifest> ManifestReader<'manifest> {
     }
 }
 
-fn canonical_manifest(entries: &[TreeEntry]) -> Result<Vec<u8>, StoreError> {
+fn canonical_manifest(
+    entries: &[TreeEntry<FileContent, ContentId>],
+) -> Result<Vec<u8>, StoreError> {
     let count =
         u64::try_from(entries.len()).map_err(|_| StoreError::new("tree has too many entries"))?;
     let mut manifest = Vec::new();
@@ -214,10 +240,10 @@ fn canonical_manifest(entries: &[TreeEntry]) -> Result<Vec<u8>, StoreError> {
                 manifest.push(TAG_TREE);
                 manifest.extend_from_slice(id.digest().as_bytes());
             }
-            TreeEntryContent::File {
+            TreeEntryContent::File(FileContent {
                 content,
                 executable,
-            } => {
+            }) => {
                 manifest.push(if *executable {
                     TAG_EXECUTABLE_FILE
                 } else {
@@ -252,13 +278,13 @@ mod tests {
         assert_eq!(TAG_SYMLINK, 3);
     }
 
-    fn blob_entry(name: &str, bytes: &[u8]) -> TreeEntry {
+    fn blob_entry(name: &str, bytes: &[u8]) -> TreeEntry<FileContent, ContentId> {
         TreeEntry::new(
             name,
-            TreeEntryContent::File {
+            TreeEntryContent::File(FileContent {
                 content: ContentId::of_blob(bytes),
                 executable: false,
-            },
+            }),
         )
         .unwrap()
     }
@@ -285,10 +311,10 @@ mod tests {
             assert!(
                 TreeEntry::new(
                     name,
-                    TreeEntryContent::File {
+                    StoreTreeEntryContent::File(FileContent {
                         content: ContentId::of_blob(b"x"),
                         executable: false,
-                    },
+                    }),
                 )
                 .is_err()
             );
@@ -300,10 +326,10 @@ mod tests {
         let content = ContentId::of_blob(b"same target");
         let file = Tree::new([TreeEntry::new(
             "item",
-            TreeEntryContent::File {
+            TreeEntryContent::File(FileContent {
                 content,
                 executable: false,
-            },
+            }),
         )
         .unwrap()])
         .unwrap();
@@ -318,19 +344,19 @@ mod tests {
         let content = ContentId::of_blob(b"program");
         let regular = Tree::new([TreeEntry::new(
             "tool",
-            TreeEntryContent::File {
+            TreeEntryContent::File(FileContent {
                 content,
                 executable: false,
-            },
+            }),
         )
         .unwrap()])
         .unwrap();
         let executable = Tree::new([TreeEntry::new(
             "tool",
-            TreeEntryContent::File {
+            TreeEntryContent::File(FileContent {
                 content,
                 executable: true,
-            },
+            }),
         )
         .unwrap()])
         .unwrap();
@@ -364,7 +390,7 @@ mod tests {
     fn invalid_symlink_targets_are_rejected() {
         for target in [b"".as_slice(), b"has\0nul".as_slice()] {
             assert!(
-                TreeEntry::new(
+                TreeEntry::<FileContent, ContentId>::new(
                     "link",
                     TreeEntryContent::Symlink {
                         target: target.into(),

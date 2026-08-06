@@ -11,10 +11,11 @@ pub mod runtime;
 
 pub use action::{
     AccessVerification, ActionExecution, ActionInvocation, ActionRule, CapturedActionExecution,
-    CapturedExecutionReport, CapturedOutput, CapturedOutputContent, CapturedTree,
-    CapturedTreeEntry, CapturedTreeEntryContent, ExecutionPlatform, ExecutionReport, Executor,
-    MaterializedActionInput, MaterializedContent, MaterializedTree, MaterializedTreeEntry,
-    MaterializedTreeEntryContent, ProducedOutput,
+    CapturedExecutionReport, CapturedFileContent, CapturedOutput, CapturedOutputContent,
+    CapturedTree, CapturedTreeEntry, CapturedTreeEntryContent, ExecutionPlatform, ExecutionReport,
+    Executor, MaterializedActionInput, MaterializedBlob, MaterializedContent,
+    MaterializedFileContent, MaterializedTree, MaterializedTreeEntry, MaterializedTreeEntryContent,
+    ProducedOutput,
 };
 pub use graph::{
     ActionPlan, ActionRecord, ComputationKind, ComputationNode, DependencyEdge, Engine,

@@ -174,7 +174,7 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::*;
-    use crate::{TreeEntry, TreeEntryContent};
+    use crate::{FileContent, TreeEntry, TreeEntryContent};
 
     static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
@@ -228,28 +228,28 @@ mod tests {
         let executable = ContentId::of_blob(b"executable");
         let child = Tree::new([TreeEntry::new(
             "child-file",
-            TreeEntryContent::File {
+            TreeEntryContent::File(FileContent {
                 content: regular,
                 executable: false,
-            },
+            }),
         )
         .unwrap()])
         .unwrap();
         let tree = Tree::new([
             TreeEntry::new(
                 "regular",
-                TreeEntryContent::File {
+                TreeEntryContent::File(FileContent {
                     content: regular,
                     executable: false,
-                },
+                }),
             )
             .unwrap(),
             TreeEntry::new(
                 "executable",
-                TreeEntryContent::File {
+                TreeEntryContent::File(FileContent {
                     content: executable,
                     executable: true,
-                },
+                }),
             )
             .unwrap(),
             TreeEntry::new("directory", TreeEntryContent::Tree(child.id())).unwrap(),
@@ -290,10 +290,10 @@ mod tests {
         let directory = TemporaryDirectory::new().unwrap();
         let tree = Tree::new([TreeEntry::new(
             "file",
-            TreeEntryContent::File {
+            TreeEntryContent::File(FileContent {
                 content: ContentId::of_blob(b"content"),
                 executable: false,
-            },
+            }),
         )
         .unwrap()])
         .unwrap();
