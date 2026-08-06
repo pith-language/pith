@@ -241,6 +241,17 @@ fn canonical_manifest(entries: &[TreeEntry]) -> Result<Vec<u8>, StoreError> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn entry_kind_tags_are_a_stable_wire_format() {
+        // These bytes are part of content identity: changing a value changes
+        // every tree's ContentId. Pin them so a renumber is a deliberate,
+        // visible test failure rather than a silent identity shift.
+        assert_eq!(TAG_FILE, 0);
+        assert_eq!(TAG_EXECUTABLE_FILE, 1);
+        assert_eq!(TAG_TREE, 2);
+        assert_eq!(TAG_SYMLINK, 3);
+    }
+
     fn blob_entry(name: &str, bytes: &[u8]) -> TreeEntry {
         TreeEntry::new(
             name,

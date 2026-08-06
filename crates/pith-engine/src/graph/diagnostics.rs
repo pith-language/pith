@@ -207,3 +207,47 @@ pub(super) fn validate_execution_platform(
         _ => Ok(()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every internal-invariant diagnostic must carry the InternalInvariant
+    /// code and a non-empty message. The exhaustive match already forces a
+    /// message arm per variant at compile time; this guards that the arm is
+    /// not accidentally emptied and that the code routing stays correct.
+    #[test]
+    fn every_internal_invariant_carries_the_right_code_and_message() {
+        let invariants = [
+            InternalInvariant::EffectfulStepWithNoFrame("blob"),
+            InternalInvariant::PureLostRequestingFrame,
+            InternalInvariant::PureLostParentComputation,
+            InternalInvariant::PureLostComputationNode,
+            InternalInvariant::PureLostSelectedRuleMetadata,
+            InternalInvariant::PureLostRootFrame,
+            InternalInvariant::PureCompletedWithoutFrame,
+            InternalInvariant::PureLostCapabilityComputation,
+            InternalInvariant::SelectedRuleHasNoBody,
+            InternalInvariant::SelectedRuleHasNoMetadata,
+            InternalInvariant::SelectedActionRuleHasNoBody,
+            InternalInvariant::SelectedActionRuleHasNoMetadata,
+            InternalInvariant::ActionLostComputationNode,
+            InternalInvariant::ActionLostActionRecord,
+            InternalInvariant::TreeFileMaterializedAsTree,
+        ];
+        for invariant in invariants {
+            let sink = internal_diag(invariant);
+            let diag = sink.into_inner().first().cloned();
+            let diag = diag.expect("internal_diag always emits one diagnostic");
+            assert_eq!(
+                diag.code,
+                EngineCode::InternalInvariant.into(),
+                "internal invariant did not route to EngineCode::InternalInvariant"
+            );
+            assert!(
+                !diag.message.0.is_empty(),
+                "internal invariant produced an empty message"
+            );
+        }
+    }
+}

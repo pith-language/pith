@@ -299,6 +299,50 @@ mod tests {
     use super::*;
     use pith_arena::Arena;
 
+    #[test]
+    fn type_and_value_tags_are_distinct_and_share_numbering() {
+        // The pure-computation manifest format is provisional, so this does not
+        // pin exact tag numbers. It pins the two invariants that matter: every
+        // variant encodes under a distinct tag (no collision), and each Value
+        // variant shares its tag with the matching Type variant.
+        let types = [
+            (Type::Unit, TAG_UNIT),
+            (Type::Bool, TAG_BOOL),
+            (Type::Int, TAG_INT),
+            (Type::Text, TAG_TEXT),
+            (Type::Bytes, TAG_BYTES),
+            (Type::Blob, TAG_BLOB),
+            (Type::Nominal { name: "n".into() }, TAG_NOMINAL),
+        ];
+        for (i, (_, tag_i)) in types.iter().enumerate() {
+            for (_, tag_j) in types.iter().skip(i + 1) {
+                assert_ne!(tag_i, tag_j, "two Type variants share a manifest tag");
+            }
+        }
+        let values = [
+            (Value::Unit, TAG_UNIT),
+            (Value::Bool(false), TAG_BOOL),
+            (Value::Int(0), TAG_INT),
+            (Value::Text("".into()), TAG_TEXT),
+            (Value::Bytes(Box::new([])), TAG_BYTES),
+            (
+                Value::Blob(pith_ids::ContentId::from_digest(
+                    pith_ids::ContentDigest::from_bytes([0; pith_ids::DIGEST_LEN]),
+                )),
+                TAG_BLOB,
+            ),
+        ];
+        for (value, expected) in &values {
+            let mut manifest = Vec::new();
+            encode_value(&mut manifest, value);
+            assert_eq!(
+                manifest.first(),
+                Some(expected),
+                "a Value variant did not encode under its Type-shared tag"
+            );
+        }
+    }
+
     fn interface(inputs: impl Into<Box<[Type]>>, output: Type) -> Interface {
         Interface {
             inputs: inputs.into(),
