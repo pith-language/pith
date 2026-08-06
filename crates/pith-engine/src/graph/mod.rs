@@ -131,11 +131,19 @@ impl Engine {
         let root = self.start_frame(request.clone(), rule)?;
         let mut stack = vec![root];
 
+        let result = self.drive_pure(&mut stack);
+        if let Err(diagnostics) = &result {
+            self.fail_pending_frames(&stack, diagnostics);
+        }
+        result
+    }
+
+    fn drive_pure(&mut self, stack: &mut Vec<EvalFrame>) -> PithResult<Evaluation> {
         loop {
-            let step = self.step_top_frame(&mut stack)?;
+            let step = self.step_top_frame(stack)?;
             match step {
                 PureStep::Complete(value) => {
-                    let completed = self.finish_frame(&mut stack, value)?;
+                    let completed = self.finish_frame(stack, value)?;
                     if let Some(parent) = stack.last_mut() {
                         parent.resume_with = Some(completed.value.clone());
                     } else {
@@ -143,7 +151,7 @@ impl Engine {
                     }
                 }
                 PureStep::Need(child_request) => {
-                    self.handle_pure_need(&mut stack, child_request)?;
+                    self.handle_pure_need(stack, child_request)?;
                 }
                 PureStep::NeedBlob(_) | PureStep::NeedAction(_) => {
                     return Err(effectful_in_pure_diag());
@@ -187,11 +195,24 @@ impl Engine {
         let root = self.start_frame(request.clone(), rule)?;
         let mut stack = vec![root];
 
+        let result = self.drive_run(&mut stack, policy, executor).await;
+        if let Err(diagnostics) = &result {
+            self.fail_pending_frames(&stack, diagnostics);
+        }
+        result
+    }
+
+    async fn drive_run<P: ActionPolicy, E: Executor>(
+        &mut self,
+        stack: &mut Vec<EvalFrame>,
+        policy: &P,
+        executor: &E,
+    ) -> PithResult<Evaluation> {
         loop {
-            let step = self.step_top_frame(&mut stack)?;
+            let step = self.step_top_frame(stack)?;
             match step {
                 PureStep::Complete(value) => {
-                    let completed = self.finish_frame(&mut stack, value)?;
+                    let completed = self.finish_frame(stack, value)?;
                     if let Some(parent) = stack.last_mut() {
                         parent.resume_with = Some(completed.value.clone());
                     } else {
@@ -199,11 +220,11 @@ impl Engine {
                     }
                 }
                 PureStep::Need(child_request) => {
-                    self.handle_pure_need(&mut stack, child_request)?;
+                    self.handle_pure_need(stack, child_request)?;
                 }
                 PureStep::NeedBlob(id) => {
                     let bytes = self.fetch_blob(id)?;
-                    self.record_blob_edge(&stack, id);
+                    self.record_blob_edge(stack, id);
                     if let Some(parent) = stack.last_mut() {
                         parent.resume_with = Some(Value::Bytes(bytes));
                     } else {
@@ -287,7 +308,7 @@ impl Engine {
     }
 
     fn finish_frame(&mut self, stack: &mut Vec<EvalFrame>, value: Value) -> PithResult<Evaluation> {
-        let Some(completed) = stack.pop() else {
+        let Some(completed) = stack.last() else {
             return Err(internal_diag(InternalInvariant::PureCompletedWithoutFrame));
         };
         let Some(rule) = self.rules.get(completed.rule) else {
@@ -326,11 +347,26 @@ impl Engine {
             reuse,
         };
         node.capabilities = capabilities;
+        let computation = completed.computation;
+        stack.pop();
         Ok(Evaluation {
             value,
-            computation: completed.computation,
+            computation,
             source: EvaluationSource::Computed,
         })
+    }
+
+    fn fail_pending_frames(&mut self, stack: &[EvalFrame], diagnostics: &DiagnosticSink) {
+        for frame in stack {
+            let Some(node) = self.computations.get_mut(frame.computation) else {
+                continue;
+            };
+            if matches!(node.state, AttemptState::Pending) {
+                node.state = AttemptState::Failed {
+                    diagnostics: diagnostics.iter().cloned().collect(),
+                };
+            }
+        }
     }
 
     /// Handle a `PureStep::Need`: select the child rule, cycle-check, allocate

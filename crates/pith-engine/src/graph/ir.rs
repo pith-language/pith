@@ -88,12 +88,15 @@ pub struct ActionPlan {
     pub spec: ActionSpec,
 }
 
-/// Declared contract, authorization, and executor report retained as action provenance.
+/// Declared contract, authorization, and executor reports retained as action provenance.
 pub struct ActionRecord {
     pub spec_digest: ActionSpecDigest,
     pub spec: ActionSpec,
     pub authorization: crate::ActionAuthorization,
-    pub report: Option<crate::ExecutionReport>,
+    /// The executor's observation, retained before the engine imports outputs.
+    pub executor_report: Option<crate::CapturedExecutionReport>,
+    /// The same report after captured outputs have engine-owned content identities.
+    pub imported_report: Option<crate::ExecutionReport>,
 }
 
 /// Lifecycle of one allocated computation attempt.

@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use pith_core::{Interface, Request, Rule, RuleIdentity, RuleRevision, Type, Value};
-use pith_diag::{EngineCode, PithResult, Span, StableCode};
+use pith_diag::{Diag, DiagnosticSink, EngineCode, PithResult, Severity, Span, StableCode};
 use pith_engine::{
     AttemptState, DependencyEdge, Engine, EvaluationSource, PureRule, PureRuleFrame, PureStep,
 };
@@ -20,6 +20,29 @@ struct ConstantFrame(Value);
 impl PureRuleFrame for ConstantFrame {
     fn step(&mut self, _input: Option<Value>) -> PithResult<PureStep> {
         Ok(PureStep::Complete(self.0.clone()))
+    }
+}
+
+struct FailingRule;
+
+impl PureRule for FailingRule {
+    fn start(&self, _inputs: &[Value]) -> Box<dyn PureRuleFrame> {
+        Box::new(FailingFrame)
+    }
+}
+
+struct FailingFrame;
+
+impl PureRuleFrame for FailingFrame {
+    fn step(&mut self, _input: Option<Value>) -> PithResult<PureStep> {
+        let mut diagnostics = DiagnosticSink::new();
+        diagnostics.push(Diag::new(
+            Severity::Error,
+            StableCode(1299),
+            Span::none(),
+            "fixture pure failure",
+        ));
+        Err(diagnostics)
     }
 }
 
@@ -164,6 +187,15 @@ fn request(label: &str, interface: Interface, inputs: impl Into<Box<[Value]>>) -
     Request::new(label, interface, inputs, Span::none())
 }
 
+fn assert_no_pending_attempts(engine: &Engine) {
+    assert!(
+        engine
+            .query()
+            .computations()
+            .all(|(_, node)| !matches!(node.state, AttemptState::Pending))
+    );
+}
+
 #[test]
 fn leaf_rule_returns_its_value() {
     let mut engine = Engine::new();
@@ -306,6 +338,71 @@ fn dependency_cycle_reports_the_request_chain() {
         diagnostic.message.0.as_ref(),
         "dependency cycle: start a -> need b -> need a"
     );
+    assert_no_pending_attempts(&engine);
+    assert!(engine.query().computations().all(|(_, node)| matches!(
+        node.state,
+        AttemptState::Failed { ref diagnostics }
+            if diagnostics.first().map(|diagnostic| diagnostic.code)
+                == Some(StableCode::from(EngineCode::DependencyCycle))
+    )));
+}
+
+#[test]
+fn child_failure_finalizes_the_child_and_its_ancestors() {
+    let mut engine = Engine::new();
+    let child = interface(&[], Type::Bool);
+    let parent = interface(&[], Type::Int);
+    engine.register_rule(rule("failing child", child.clone()), FailingRule);
+    engine.register_rule(
+        rule("parent", parent.clone()),
+        ForwardRule {
+            dependency: request("child", child, []),
+        },
+    );
+
+    let diagnostics = engine
+        .evaluate_pure(&request("root", parent, []))
+        .unwrap_err();
+
+    assert_eq!(
+        diagnostics.iter().next().map(|diagnostic| diagnostic.code),
+        Some(StableCode(1299))
+    );
+    assert_no_pending_attempts(&engine);
+    assert_eq!(
+        engine
+            .query()
+            .computations()
+            .filter(|(_, node)| matches!(node.state, AttemptState::Failed { .. }))
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn result_type_failure_finalizes_the_attempt() {
+    let mut engine = Engine::new();
+    let signature = interface(&[], Type::Int);
+    engine.register_rule(
+        rule("wrong result", signature.clone()),
+        ConstantRule(Value::Unit),
+    );
+
+    let diagnostics = engine
+        .evaluate_pure(&request("wrong result", signature, []))
+        .unwrap_err();
+
+    assert_eq!(
+        diagnostics.iter().next().map(|diagnostic| diagnostic.code),
+        Some(StableCode::from(EngineCode::ResultTypeMismatch))
+    );
+    assert_no_pending_attempts(&engine);
+    assert!(engine.query().computations().all(|(_, node)| matches!(
+        node.state,
+        AttemptState::Failed { ref diagnostics }
+            if diagnostics.first().map(|diagnostic| diagnostic.code)
+                == Some(StableCode::from(EngineCode::ResultTypeMismatch))
+    )));
 }
 
 #[test]
