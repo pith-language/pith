@@ -8,6 +8,15 @@ use pith_ids::{ActionSpecDigest, ContentId};
 
 use crate::manifest::{encode_length, encode_str};
 
+/// Discriminant tags for `PlatformRequirement` and `NetworkPolicy` in the
+/// action-spec manifest. Stable digest format: renumbering invalidates every
+/// persisted `ActionSpecDigest`.
+const TAG_PLATFORM_ANY: u8 = 0;
+const TAG_PLATFORM_EXACT: u8 = 1;
+const TAG_NETWORK_DENY: u8 = 0;
+const TAG_NETWORK_ALLOW_HOSTS: u8 = 1;
+const TAG_NETWORK_ALLOW_ALL: u8 = 2;
+
 /// Immutable content made available to an action at a relative path.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ActionInput {
@@ -272,12 +281,12 @@ impl ActionSpec {
         }
 
         match &self.platform {
-            PlatformRequirement::Any => manifest.push(0),
+            PlatformRequirement::Any => manifest.push(TAG_PLATFORM_ANY),
             PlatformRequirement::Exact {
                 operating_system,
                 architecture,
             } => {
-                manifest.push(1);
+                manifest.push(TAG_PLATFORM_EXACT);
                 encode_str(&mut manifest, operating_system);
                 encode_str(&mut manifest, architecture);
             }
@@ -296,9 +305,9 @@ impl ActionSpec {
         }
 
         match &self.network {
-            NetworkPolicy::Deny => manifest.push(0),
+            NetworkPolicy::Deny => manifest.push(TAG_NETWORK_DENY),
             NetworkPolicy::AllowHosts(hosts) => {
-                manifest.push(1);
+                manifest.push(TAG_NETWORK_ALLOW_HOSTS);
                 let mut hosts: Vec<_> = hosts.iter().collect();
                 hosts.sort();
                 encode_length(&mut manifest, hosts.len());
@@ -306,7 +315,7 @@ impl ActionSpec {
                     encode_str(&mut manifest, host);
                 }
             }
-            NetworkPolicy::AllowAll => manifest.push(2),
+            NetworkPolicy::AllowAll => manifest.push(TAG_NETWORK_ALLOW_ALL),
         }
 
         manifest
