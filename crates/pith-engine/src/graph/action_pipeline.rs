@@ -13,8 +13,8 @@ use pith_store::{Tree, TreeEntry, TreeEntryContent};
 use smallvec::SmallVec;
 
 use super::ir::{
-    ActionPlan, ActionRecord, ComputationKind, ComputationNode, DependencyEdge, ReuseDecision,
-    ReuseReason,
+    ActionPlan, ActionRecord, AttemptState, ComputationKind, ComputationNode, DependencyEdge,
+    ReuseDecision, ReuseReason,
 };
 use super::{ActionRunOutcome, Engine};
 use crate::action::{
@@ -96,7 +96,7 @@ impl Engine {
             kind: ComputationKind::Action(request.clone()),
             rule,
             dependencies: SmallVec::new(),
-            result: None,
+            state: AttemptState::Pending,
             action: Some(ActionRecord {
                 spec_digest: plan.spec_digest,
                 spec: plan.spec.clone(),
@@ -104,7 +104,6 @@ impl Engine {
                 report: None,
             }),
             capabilities: canonical_capabilities(&plan.spec.capabilities),
-            reuse: ReuseDecision::Pending,
         });
 
         let result = self
@@ -139,8 +138,7 @@ impl Engine {
     ) -> PithResult<Value> {
         // Up to and including execution: no report exists on failure yet.
         if let Some(diagnostics) = denial {
-            self.set_action_reuse(computation, ReuseReason::PolicyDenied);
-            return Err(diagnostics);
+            return Err(self.fail_action(computation, None, diagnostics));
         }
 
         let invocation = self.materialize_action(spec)?;
@@ -191,8 +189,10 @@ impl Engine {
         let Some(node) = self.computations.get_mut(computation) else {
             return Err(internal_diag(InternalInvariant::ActionLostComputationNode));
         };
-        node.result = Some(value.clone());
-        node.reuse = ReuseDecision::NotReusable(ReuseReason::ActionCachingDisabled);
+        node.state = AttemptState::Complete {
+            result: value.clone(),
+            reuse: ReuseDecision::NotReusable(ReuseReason::ActionCachingDisabled),
+        };
         let Some(action) = node.action.as_mut() else {
             return Err(internal_diag(InternalInvariant::ActionLostActionRecord));
         };
@@ -210,14 +210,8 @@ impl Engine {
         report: Option<ExecutionReport>,
         diagnostics: DiagnosticSink,
     ) -> DiagnosticSink {
-        self.mark_action_failed(computation, report);
+        self.mark_action_failed(computation, report, &diagnostics);
         diagnostics
-    }
-
-    fn set_action_reuse(&mut self, computation: ComputationId, reason: ReuseReason) {
-        if let Some(node) = self.computations.get_mut(computation) {
-            node.reuse = ReuseDecision::NotReusable(reason);
-        }
     }
 
     fn materialize_action(&self, spec: &ActionSpec) -> PithResult<ActionInvocation> {
@@ -422,9 +416,12 @@ impl Engine {
         &mut self,
         computation: ComputationId,
         report: Option<crate::ExecutionReport>,
+        diagnostics: &DiagnosticSink,
     ) {
         if let Some(node) = self.computations.get_mut(computation) {
-            node.reuse = ReuseDecision::NotReusable(ReuseReason::FailedExecution);
+            node.state = AttemptState::Failed {
+                diagnostics: diagnostics.iter().cloned().collect(),
+            };
             if let Some(action) = node.action.as_mut() {
                 action.report = report;
             }

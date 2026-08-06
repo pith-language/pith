@@ -3,7 +3,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use pith_core::{Interface, Request, Rule, RuleIdentity, RuleRevision, Type, Value};
 use pith_diag::{EngineCode, PithResult, Span, StableCode};
-use pith_engine::{DependencyEdge, Engine, EvaluationSource, PureRule, PureRuleFrame, PureStep};
+use pith_engine::{
+    AttemptState, DependencyEdge, Engine, EvaluationSource, PureRule, PureRuleFrame, PureStep,
+};
 
 struct ConstantRule(Value);
 
@@ -177,7 +179,13 @@ fn leaf_rule_returns_its_value() {
 
     assert!(matches!(evaluation.value, Value::Int(41)));
     let node = engine.query().computation(evaluation.computation).unwrap();
-    assert!(matches!(node.result, Some(Value::Int(41))));
+    assert!(matches!(
+        node.state,
+        AttemptState::Complete {
+            result: Value::Int(41),
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -248,7 +256,13 @@ fn parent_resumes_with_child_value_and_records_the_edge() {
             assert_eq!(request.label.as_ref(), "base value");
             assert_eq!(request.interface, leaf);
             let child = query.computation(*computation).unwrap();
-            assert!(matches!(child.result, Some(Value::Int(41))));
+            assert!(matches!(
+                child.state,
+                AttemptState::Complete {
+                    result: Value::Int(41),
+                    ..
+                }
+            ));
             let dependents: Vec<_> = query.dependents_of(*computation).collect();
             assert_eq!(dependents.len(), 1);
             assert_eq!(dependents.first().unwrap().0, evaluation.computation);

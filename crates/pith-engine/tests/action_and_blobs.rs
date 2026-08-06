@@ -12,10 +12,10 @@ use pith_core::{
 use pith_diag::{Diag, DiagnosticSink, EngineCode, PithResult, Severity, Span, StableCode};
 use pith_engine::{
     AccessVerification, ActionAuthorization, ActionExecution, ActionInvocation, ActionPlan,
-    ActionPolicy, ActionRule, AllowAllActions, CapturedActionExecution, CapturedExecutionReport,
-    CapturedOutput, CapturedOutputContent, ComputationKind, Engine, EvaluationSource,
-    ExecutionPlatform, Executor, MaterializedContent, PureRule, PureRuleFrame, PureStep,
-    ReuseDecision, ReuseReason, TokioRuntime,
+    ActionPolicy, ActionRule, AllowAllActions, AttemptState, CapturedActionExecution,
+    CapturedExecutionReport, CapturedOutput, CapturedOutputContent, ComputationKind, Engine,
+    EvaluationSource, ExecutionPlatform, Executor, MaterializedContent, PureRule, PureRuleFrame,
+    PureStep, ReuseDecision, ReuseReason, TokioRuntime,
 };
 use pith_ids::ContentId;
 use pith_store::MemoryContentStore;
@@ -820,10 +820,7 @@ fn policy_denial_is_recorded_before_execution() {
         }
     );
     assert!(denied_action.report.is_none());
-    assert_eq!(
-        denied_node.reuse,
-        ReuseDecision::NotReusable(ReuseReason::PolicyDenied)
-    );
+    assert!(matches!(denied_node.state, AttemptState::Failed { .. }));
     let denied_parent = query
         .computations()
         .find(|(_, node)| matches!(node.kind, ComputationKind::Pure(_)))
@@ -939,21 +936,27 @@ fn action_dependencies_are_not_reused_without_a_cache_identity() {
         .and_then(|dependencies| dependencies.first())
         .and_then(pith_engine::DependencyEdge::computation_id)
         .unwrap();
-    let action_reuse = &engine
+    let action_state = &engine
         .query()
         .computation(action_computation)
         .unwrap()
-        .reuse;
-    assert_eq!(
-        action_reuse,
-        &ReuseDecision::NotReusable(ReuseReason::ActionCachingDisabled)
-    );
-    assert_eq!(
-        &engine.query().computation(first.computation).unwrap().reuse,
-        &ReuseDecision::NotReusable(ReuseReason::DependencyNotReusable {
-            computation: action_computation,
-        })
-    );
+        .state;
+    assert!(matches!(
+        action_state,
+        AttemptState::Complete {
+            reuse: ReuseDecision::NotReusable(ReuseReason::ActionCachingDisabled),
+            ..
+        }
+    ));
+    assert!(matches!(
+        &engine.query().computation(first.computation).unwrap().state,
+        AttemptState::Complete {
+            reuse: ReuseDecision::NotReusable(ReuseReason::DependencyNotReusable {
+                computation,
+            }),
+            ..
+        } if *computation == action_computation
+    ));
 }
 
 #[test]

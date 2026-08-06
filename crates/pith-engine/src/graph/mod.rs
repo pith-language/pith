@@ -10,8 +10,9 @@ pub mod query;
 mod reuse;
 
 pub use ir::{
-    ActionPlan, ActionRecord, ComputationKind, ComputationNode, DependencyEdge, Evaluation,
-    EvaluationSource, PureRule, PureRuleFrame, PureStep, ReuseDecision, ReuseReason, RuleSelection,
+    ActionPlan, ActionRecord, AttemptState, ComputationKind, ComputationNode, DependencyEdge,
+    Evaluation, EvaluationSource, PureRule, PureRuleFrame, PureStep, ReuseDecision, ReuseReason,
+    RuleSelection,
 };
 pub use query::EngineQuery;
 
@@ -271,10 +272,9 @@ impl Engine {
             kind: ComputationKind::Pure(request.clone()),
             rule,
             dependencies: SmallVec::new(),
-            result: None,
+            state: AttemptState::Pending,
             action: None,
             capabilities: Box::new([]),
-            reuse: ReuseDecision::Pending,
         });
         self.index_pure_computation(key, computation);
         Ok(EvalFrame {
@@ -321,9 +321,11 @@ impl Engine {
         let Some(node) = self.computations.get_mut(completed.computation) else {
             return Err(internal_diag(InternalInvariant::PureLostComputationNode));
         };
-        node.result = Some(value.clone());
+        node.state = AttemptState::Complete {
+            result: value.clone(),
+            reuse,
+        };
         node.capabilities = capabilities;
-        node.reuse = reuse;
         Ok(Evaluation {
             value,
             computation: completed.computation,

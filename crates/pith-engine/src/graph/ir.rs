@@ -4,7 +4,7 @@
 use pith_core::{
     Action, ActionSpec, CapabilityRequirement, Interface, Pure, Request, RuleId, Value,
 };
-use pith_diag::PithResult;
+use pith_diag::{Diag, PithResult};
 use pith_ids::{ActionSpecDigest, ComputationId, ContentId};
 use smallvec::SmallVec;
 
@@ -96,9 +96,19 @@ pub struct ActionRecord {
     pub report: Option<crate::ExecutionReport>,
 }
 
+/// Lifecycle of one allocated computation attempt.
+///
+/// Cancellation will become a distinct terminal state when the scheduler can
+/// actually cancel work. Ordinary evaluation failures must not stand in for it.
+#[derive(Clone, Debug)]
+pub enum AttemptState {
+    Pending,
+    Complete { result: Value, reuse: ReuseDecision },
+    Failed { diagnostics: Box<[Diag]> },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReuseDecision {
-    Pending,
     Reusable,
     NotReusable(ReuseReason),
 }
@@ -106,11 +116,9 @@ pub enum ReuseDecision {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReuseReason {
     ActionCachingDisabled,
-    PolicyDenied,
     DependencyPending { computation: ComputationId },
     DependencyNotReusable { computation: ComputationId },
     DependencyMissing { computation: ComputationId },
-    FailedExecution,
 }
 
 /// One rule application in the in-memory graph.
@@ -118,10 +126,9 @@ pub struct ComputationNode {
     pub kind: ComputationKind,
     pub rule: RuleId,
     pub dependencies: SmallVec<[DependencyEdge; 4]>,
-    pub result: Option<Value>,
+    pub state: AttemptState,
     pub action: Option<ActionRecord>,
     pub capabilities: Box<[CapabilityRequirement]>,
-    pub reuse: ReuseDecision,
 }
 
 /// A completed evaluation and the graph node that produced it.

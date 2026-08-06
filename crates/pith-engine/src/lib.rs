@@ -18,9 +18,9 @@ pub use action::{
     ProducedOutput,
 };
 pub use graph::{
-    ActionPlan, ActionRecord, ComputationKind, ComputationNode, DependencyEdge, Engine,
-    EngineQuery, Evaluation, EvaluationSource, PureRule, PureRuleFrame, PureStep, ReuseDecision,
-    ReuseReason, RuleSelection,
+    ActionPlan, ActionRecord, AttemptState, ComputationKind, ComputationNode, DependencyEdge,
+    Engine, EngineQuery, Evaluation, EvaluationSource, PureRule, PureRuleFrame, PureStep,
+    ReuseDecision, ReuseReason, RuleSelection,
 };
 pub use policy::{ActionAuthorization, ActionPolicy, AllowAllActions};
 pub use runtime::{Runtime, RuntimeError, TokioRuntime};
