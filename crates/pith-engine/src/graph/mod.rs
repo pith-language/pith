@@ -8,6 +8,7 @@ mod diagnostics;
 pub mod ir;
 pub mod query;
 mod reuse;
+mod state_publish;
 
 pub(crate) use capabilities::canonical_capabilities;
 pub use ir::{
@@ -24,17 +25,18 @@ use pith_core::{
 use pith_diag::{Diag, DiagnosticSink, EngineCode, PithResult};
 use pith_ids::{ComputationArena, ComputationId, ContentId};
 use pith_store::{ContentStore, MemoryContentStore};
-use smallvec::SmallVec;
 
 use crate::action::{ActionRule, Executor};
 use crate::policy::ActionPolicy;
 use crate::runtime::Runtime;
+use crate::state::{DurableAttemptId, EngineStateStore, MemoryEngineStateStore};
 use diagnostics::{
     InternalInvariant, content_unavailable_diag, cycle_diag, effectful_in_pure_diag, internal_diag,
     one_diag, store_error_diag,
 };
 use ir::EvalFrame;
 use reuse::PureComputationIndex;
+use smallvec::SmallVec;
 
 pub(super) enum ActionRunOutcome {
     PlanningFailed(DiagnosticSink),
@@ -52,6 +54,12 @@ pub struct Engine {
     pub(crate) computations: ComputationArena<ComputationNode>,
     pure_computations: PureComputationIndex,
     pub(crate) store: Box<dyn ContentStore>,
+    /// Durable engine metadata. Arena handles never cross this boundary; the
+    /// process-local [`durable_attempts`] side-table maps computation nodes to
+    /// their durable attempt identifiers. Store calls happen only at engine
+    /// scheduling boundaries (decision 0024, "adapter boundaries").
+    pub(crate) state_store: Box<dyn EngineStateStore>,
+    pub(crate) durable_attempts: IndexMap<ComputationId, DurableAttemptId>,
 }
 
 impl Engine {
@@ -60,6 +68,16 @@ impl Engine {
     }
 
     pub fn with_content_store(store: impl ContentStore + 'static) -> Self {
+        Self::with_state_store(store, MemoryEngineStateStore::default())
+    }
+
+    /// Build an engine with explicit content and engine-state adapters. The
+    /// state store is shared, not moved, so callers (typically tests) can read
+    /// the durable records the engine publishes.
+    pub fn with_state_store(
+        store: impl ContentStore + 'static,
+        state_store: impl EngineStateStore + 'static,
+    ) -> Self {
         Self {
             rules: RuleArena::new(),
             bodies: IndexMap::new(),
@@ -68,7 +86,29 @@ impl Engine {
             computations: ComputationArena::new(),
             pure_computations: IndexMap::new(),
             store: Box::new(store),
+            state_store: Box::new(state_store),
+            durable_attempts: IndexMap::new(),
         }
+    }
+
+    /// Read-only access to the durable engine-state adapter (decision 0024).
+    pub fn state_store(&self) -> &dyn EngineStateStore {
+        self.state_store.as_ref()
+    }
+
+    /// Mutable access to the durable engine-state adapter. The engine-internal
+    /// adapter-boundary discipline (no store calls inside a rule step) still
+    /// applies to the engine's own scheduling paths; this accessor is for hosts
+    /// and tests that need to inspect or seed durable state at scheduling gaps.
+    pub fn state_store_mut(&mut self) -> &mut dyn EngineStateStore {
+        self.state_store.as_mut()
+    }
+
+    /// The durable attempt identifier the engine published for `computation`,
+    /// if any. `None` for computations that never left `Pending` or that this
+    /// engine instance did not allocate.
+    pub fn durable_attempt_for(&self, computation: ComputationId) -> Option<DurableAttemptId> {
+        self.durable_attempts.get(&computation).copied()
     }
 
     /// Register a pure rule together with its executable body.
@@ -299,6 +339,7 @@ impl Engine {
             capabilities: Box::new([]),
         });
         self.index_pure_computation(key, computation);
+        self.create_pending_pure_attempt(computation, key)?;
         Ok(EvalFrame {
             computation,
             rule,
@@ -349,6 +390,10 @@ impl Engine {
         };
         node.capabilities = capabilities;
         let computation = completed.computation;
+        // The arena node is terminal; publish the durable record at this
+        // scheduling boundary (decision 0024). `pop` after publishing so the
+        // frame's computation id stays valid for the store call.
+        self.publish_pure_completion(computation)?;
         stack.pop();
         Ok(Evaluation {
             value,
@@ -366,6 +411,11 @@ impl Engine {
                 node.state = AttemptState::Failed {
                     diagnostics: diagnostics.iter().cloned().collect(),
                 };
+                // Scheduling boundary: publish the durable failure for this
+                // pure attempt. The store call is best-effort with respect to
+                // the returned diagnostics — failure publication must not mask
+                // the diagnostics that caused it.
+                let _ = self.publish_pure_failure(frame.computation);
             }
         }
     }

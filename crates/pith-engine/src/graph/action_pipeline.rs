@@ -100,12 +100,31 @@ impl Engine {
             action: Some(ActionRecord {
                 spec_digest: plan.spec_digest,
                 spec: plan.spec.clone(),
-                authorization,
+                authorization: authorization.clone(),
                 executor_report: None,
                 imported_report: None,
             }),
             capabilities: canonical_capabilities(&plan.spec.capabilities),
         });
+
+        let durable_plan = match self.durable_action_plan(rule, &plan.spec) {
+            Ok(plan) => plan,
+            Err(diagnostics) => {
+                self.mark_action_failed(computation, &diagnostics);
+                return ActionRunOutcome::PlanningFailed(diagnostics);
+            }
+        };
+        let durable_computation = crate::state::DurableComputation::Action {
+            plan: durable_plan,
+            authorization,
+        };
+        if let Err(diagnostics) =
+            self.create_pending_action_attempt(computation, durable_computation)
+        {
+            self.mark_action_failed(computation, &diagnostics);
+            let _ = self.publish_action_failure(computation, &diagnostics);
+            return ActionRunOutcome::PlanningFailed(diagnostics);
+        }
 
         let result = self
             .run_action_body(
@@ -194,6 +213,9 @@ impl Engine {
             result: value.clone(),
             reuse: ReuseDecision::NotReusable(ReuseReason::ActionCachingDisabled),
         };
+        // Scheduling boundary: publish the durable action completion. The
+        // arena node is terminal, so the publish reads its final state.
+        self.publish_action_completion(computation)?;
 
         Ok(value)
     }
@@ -207,6 +229,10 @@ impl Engine {
         diagnostics: DiagnosticSink,
     ) -> DiagnosticSink {
         self.mark_action_failed(computation, &diagnostics);
+        // Scheduling boundary: publish the durable action failure. Best-effort
+        // with respect to the returned diagnostics — failure publication must
+        // not mask the diagnostics that caused it.
+        let _ = self.publish_action_failure(computation, &diagnostics);
         diagnostics
     }
 

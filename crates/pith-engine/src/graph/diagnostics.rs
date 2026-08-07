@@ -62,6 +62,20 @@ pub(super) enum InternalInvariant {
     ActionLostActionRecord,
     /// A tree file entry materialized as a tree instead of a blob.
     TreeFileMaterializedAsTree,
+    /// A durable publication was requested for an attempt that is not Complete.
+    DurablePublicationForNonCompleteAttempt,
+    /// A durable publication was requested for an attempt that is not Failed.
+    DurablePublicationForNonFailedAttempt,
+    /// A completed action's durable provenance needs an imported report.
+    CompletedActionMissingImportedReport,
+    /// A computation has no durable attempt id recorded for it.
+    DurableAttemptMissingForComputation,
+    /// A pure durable dependency edge targeted a non-pure computation.
+    DurablePureEdgeTargetNotPure,
+    /// The engine-state adapter rejected a publication (adapter validation or
+    /// commit failure). The store's validation is a safety net; reaching this
+    /// means the engine's mapping fed it inconsistent data.
+    EngineStateStoreError(crate::state::EngineStateError),
 }
 
 impl InternalInvariant {
@@ -111,6 +125,24 @@ impl InternalInvariant {
             }
             InternalInvariant::TreeFileMaterializedAsTree => {
                 "tree file content materialized as a tree".to_string()
+            }
+            InternalInvariant::DurablePublicationForNonCompleteAttempt => {
+                "durable publication requested for a non-complete attempt".to_string()
+            }
+            InternalInvariant::DurablePublicationForNonFailedAttempt => {
+                "durable publication requested for a non-failed attempt".to_string()
+            }
+            InternalInvariant::CompletedActionMissingImportedReport => {
+                "completed action missing the imported executor report".to_string()
+            }
+            InternalInvariant::DurableAttemptMissingForComputation => {
+                "computation has no durable attempt recorded".to_string()
+            }
+            InternalInvariant::DurablePureEdgeTargetNotPure => {
+                "a pure durable dependency edge targets a non-pure computation".to_string()
+            }
+            InternalInvariant::EngineStateStoreError(error) => {
+                format!("engine-state adapter rejected a publication: {error}")
             }
         }
     }
@@ -226,6 +258,14 @@ mod tests {
             InternalInvariant::ActionLostComputationNode,
             InternalInvariant::ActionLostActionRecord,
             InternalInvariant::TreeFileMaterializedAsTree,
+            InternalInvariant::DurablePublicationForNonCompleteAttempt,
+            InternalInvariant::DurablePublicationForNonFailedAttempt,
+            InternalInvariant::CompletedActionMissingImportedReport,
+            InternalInvariant::DurableAttemptMissingForComputation,
+            InternalInvariant::DurablePureEdgeTargetNotPure,
+            InternalInvariant::EngineStateStoreError(crate::state::EngineStateError::Adapter {
+                message: "fixture".into(),
+            }),
         ];
         for invariant in invariants {
             let sink = internal_diag(invariant);
