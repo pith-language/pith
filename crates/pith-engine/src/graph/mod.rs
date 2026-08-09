@@ -339,7 +339,15 @@ impl Engine {
             capabilities: Box::new([]),
         });
         self.index_pure_computation(key, computation);
-        self.create_pending_pure_attempt(computation, key)?;
+        if let Err(diagnostics) = self.create_pending_pure_attempt(computation, key) {
+            // The durable attempt could not be created (only a failing adapter
+            // reaches this; the memory adapter is infallible). Mirror the action
+            // path's error hygiene: fail the orphaned arena node so it is not
+            // left Pending. No durable failure is published because no durable
+            // attempt exists; the diagnostics propagate to the caller.
+            self.fail_pure_orphan(computation, &diagnostics);
+            return Err(diagnostics);
+        }
         Ok(EvalFrame {
             computation,
             rule,
@@ -417,6 +425,17 @@ impl Engine {
                 // the diagnostics that caused it.
                 let _ = self.publish_pure_failure(frame.computation);
             }
+        }
+    }
+
+    /// Reconcile an orphaned pure computation whose durable attempt could not be
+    /// created: mark it `Failed` in the arena so no `Pending` node remains. No
+    /// durable failure is published because no durable attempt exists.
+    fn fail_pure_orphan(&mut self, computation: ComputationId, diagnostics: &DiagnosticSink) {
+        if let Some(node) = self.computations.get_mut(computation) {
+            node.state = AttemptState::Failed {
+                diagnostics: diagnostics.iter().cloned().collect(),
+            };
         }
     }
 

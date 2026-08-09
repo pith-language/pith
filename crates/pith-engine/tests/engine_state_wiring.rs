@@ -11,18 +11,20 @@ use pith_core::{
 };
 use pith_diag::{DiagnosticSink, PithResult, Severity, Span, StableCode};
 use pith_engine::state::{
-    CompletedAttempt, DurableActionProvenance, DurableAttemptId, DurableAttemptState,
-    DurableComputation, DurableDependency, DurableProvenance, DurableReuseDecision,
-    DurableReuseReason, EncodedValue, EngineStateStore, MemoryEngineStateStore,
+    CompletedAttempt, DurableActionProvenance, DurableAttempt, DurableAttemptId,
+    DurableAttemptState, DurableComputation, DurableDependency, DurableProvenance,
+    DurableReuseDecision, DurableReuseReason, EncodedValue, EngineStateError, EngineStateStore,
+    EngineStateVersions, FailedAttempt, MemoryEngineStateStore,
 };
 use pith_engine::{
     AccessVerification, ActionAuthorization, ActionExecution, ActionInvocation, ActionRule,
-    AllowAllActions, CapturedActionExecution, CapturedExecutionReport, CapturedOutput,
-    CapturedOutputContent, ComputationKind, Engine, EvaluationSource, ExecutionPlatform, Executor,
-    PureRule, PureRuleFrame, PureStep,
+    AllowAllActions, AttemptState, CapturedActionExecution, CapturedExecutionReport,
+    CapturedOutput, CapturedOutputContent, ComputationKind, Engine, EvaluationSource,
+    ExecutionPlatform, Executor, PureRule, PureRuleFrame, PureStep,
 };
 use pith_ids::ContentId;
 use pith_store::{ContentStore, MemoryContentStore};
+use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
 // Pure-rule fixtures
@@ -439,6 +441,75 @@ fn leaf_dependency_of(engine: &Engine, parent: pith_ids::ComputationId) -> pith_
         .unwrap_or_else(|| unreachable!("parent {parent:?} has no pure dependency edge"))
 }
 
+/// A store adapter whose `create_pending_attempt` always fails. Used to
+/// exercise the error-hygiene path where the live engine cannot create a
+/// durable attempt: the arena must not be left with an orphaned `Pending` node.
+struct CreateFailingStore {
+    inner: MemoryEngineStateStore,
+}
+
+impl CreateFailingStore {
+    fn failure() -> EngineStateError {
+        EngineStateError::Adapter {
+            message: "fixture: create_pending_attempt disabled".into(),
+        }
+    }
+}
+
+impl EngineStateStore for CreateFailingStore {
+    fn versions(&self) -> EngineStateVersions {
+        self.inner.versions()
+    }
+
+    fn create_pending_attempt(
+        &mut self,
+        _computation: DurableComputation,
+    ) -> Result<DurableAttemptId, EngineStateError> {
+        Err(Self::failure())
+    }
+
+    fn publish_complete(
+        &mut self,
+        attempt: DurableAttemptId,
+        completion: CompletedAttempt,
+    ) -> Result<(), EngineStateError> {
+        self.inner.publish_complete(attempt, completion)
+    }
+
+    fn publish_failed(
+        &mut self,
+        attempt: DurableAttemptId,
+        failure: FailedAttempt,
+    ) -> Result<(), EngineStateError> {
+        self.inner.publish_failed(attempt, failure)
+    }
+
+    fn attempt(
+        &self,
+        attempt: DurableAttemptId,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        self.inner.attempt(attempt)
+    }
+
+    fn attempt_history(
+        &self,
+        computation: PureComputationKey,
+    ) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
+        self.inner.attempt_history(computation)
+    }
+
+    fn latest_completed_reusable_attempt(
+        &self,
+        computation: PureComputationKey,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        self.inner.latest_completed_reusable_attempt(computation)
+    }
+
+    fn pending_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
+        self.inner.pending_attempts()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Publish path: pure computations
 // ---------------------------------------------------------------------------
@@ -531,6 +602,50 @@ fn failed_pure_evaluation_publishes_a_failed_attempt_with_diagnostics() {
         Some("fixture pure failure")
     );
     assert_eq!(diagnostics.iter().count(), failure.diagnostics.len());
+}
+
+#[test]
+fn pure_create_failure_reconciles_the_orphaned_arena_node() {
+    // When the store cannot create a durable attempt (only a failing adapter
+    // reaches this; the memory adapter is infallible), the pure path must not
+    // leave an orphaned `Pending` arena node behind. It mirrors the action
+    // path's error hygiene by failing the node in the arena. No durable record
+    // is published because no durable attempt exists.
+    let mut engine = Engine::with_state_store(
+        MemoryContentStore::default(),
+        CreateFailingStore {
+            inner: MemoryEngineStateStore::default(),
+        },
+    );
+    let signature = interface(&[], Type::Int);
+    engine.register_rule(
+        pure_rule("constant", signature.clone()),
+        ConstantRule(Value::Int(7)),
+    );
+
+    let diagnostics = engine
+        .evaluate_pure(&pure_request("constant", signature, []))
+        .err()
+        .unwrap();
+
+    // The adapter failure surfaces as an internal-invariant diagnostic.
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diag| diag.code == pith_diag::EngineCode::InternalInvariant.into())
+    );
+    // The orphaned arena node was reconciled to a terminal state: no
+    // `Pending` computation remains.
+    assert!(
+        engine
+            .query()
+            .computations()
+            .all(|(_, node)| !matches!(node.state, AttemptState::Pending))
+    );
+    let (computation, node) = sole_pure_computation(&engine);
+    assert!(matches!(node.state, AttemptState::Failed { .. }));
+    // No durable attempt was recorded for the orphan.
+    assert!(engine.durable_attempt_for(computation).is_none());
 }
 
 // ---------------------------------------------------------------------------
