@@ -144,8 +144,16 @@ pub struct Evaluation {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum EvaluationSource {
+    /// The rule body ran in this engine instance.
     Computed,
+    /// A completed computation already in this engine's arena was reused.
     Reused,
+    /// A completed attempt recorded by a previous engine instance was
+    /// revalidated and loaded from engine state (decision 0024). The rule body
+    /// did not run here, and this instance's arena holds no subgraph for it:
+    /// its recorded dependency set lives on the durable attempt, reachable
+    /// through [`crate::EngineQuery::durable_attempt_of`].
+    Hydrated,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

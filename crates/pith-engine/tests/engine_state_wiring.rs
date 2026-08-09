@@ -318,12 +318,19 @@ fn action_request(
 }
 
 fn engine_with_fixtures() -> Engine {
+    engine_with_state(MemoryEngineStateStore::default())
+}
+
+/// An engine with the fixture content already stored, over an explicit
+/// engine-state adapter. Hydration is only observable across engine instances,
+/// so those tests build several engines over one shared adapter.
+fn engine_with_state(state: impl EngineStateStore + 'static) -> Engine {
     let mut content = MemoryContentStore::default();
     let executable = put_fixture_blob(&mut content, b"fixture:action-executable");
     assert_eq!(executable, action_executable());
     let input = put_fixture_blob(&mut content, b"fixture input");
     assert_eq!(input, action_input());
-    Engine::with_state_store(content, MemoryEngineStateStore::default())
+    Engine::with_state_store(content, state)
 }
 
 fn put_fixture_blob(store: &mut MemoryContentStore, bytes: &[u8]) -> ContentId {
@@ -510,6 +517,199 @@ impl EngineStateStore for CreateFailingStore {
     }
 }
 
+/// A store adapter whose reusable-index read always fails. Decision 0024 treats
+/// adapter failure as an error rather than a cache miss, so a broken adapter
+/// must surface diagnostics instead of silently degrading into "recompute".
+#[derive(Default)]
+struct ReadFailingStore {
+    inner: MemoryEngineStateStore,
+}
+
+impl ReadFailingStore {
+    fn failure() -> EngineStateError {
+        EngineStateError::Adapter {
+            message: "fixture: reusable index unreadable".into(),
+        }
+    }
+}
+
+impl EngineStateStore for ReadFailingStore {
+    fn versions(&self) -> EngineStateVersions {
+        self.inner.versions()
+    }
+
+    fn create_pending_attempt(
+        &mut self,
+        computation: DurableComputation,
+    ) -> Result<DurableAttemptId, EngineStateError> {
+        self.inner.create_pending_attempt(computation)
+    }
+
+    fn publish_complete(
+        &mut self,
+        attempt: DurableAttemptId,
+        completion: CompletedAttempt,
+    ) -> Result<(), EngineStateError> {
+        self.inner.publish_complete(attempt, completion)
+    }
+
+    fn publish_failed(
+        &mut self,
+        attempt: DurableAttemptId,
+        failure: FailedAttempt,
+    ) -> Result<(), EngineStateError> {
+        self.inner.publish_failed(attempt, failure)
+    }
+
+    fn attempt(
+        &self,
+        attempt: DurableAttemptId,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        self.inner.attempt(attempt)
+    }
+
+    fn attempt_history(
+        &self,
+        computation: PureComputationKey,
+    ) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
+        self.inner.attempt_history(computation)
+    }
+
+    fn latest_completed_reusable_attempt(
+        &self,
+        _computation: PureComputationKey,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        Err(Self::failure())
+    }
+
+    fn pending_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
+        self.inner.pending_attempts()
+    }
+}
+
+/// One durable substrate behind several [`Engine`] instances, which is how
+/// decision 0024 describes a single process owning the writable engine
+/// database. Hydration is not observable within one instance — the arena index
+/// answers first — so these tests need a store that outlives an engine.
+#[derive(Clone, Default)]
+struct SharedEngineStateStore(Arc<std::sync::Mutex<MemoryEngineStateStore>>);
+
+impl SharedEngineStateStore {
+    fn read<T>(
+        &self,
+        read: impl FnOnce(&MemoryEngineStateStore) -> Result<T, EngineStateError>,
+    ) -> Result<T, EngineStateError> {
+        match self.0.lock() {
+            Ok(store) => read(&store),
+            Err(_) => Err(lock_poisoned()),
+        }
+    }
+
+    fn write<T>(
+        &self,
+        write: impl FnOnce(&mut MemoryEngineStateStore) -> Result<T, EngineStateError>,
+    ) -> Result<T, EngineStateError> {
+        match self.0.lock() {
+            Ok(mut store) => write(&mut store),
+            Err(_) => Err(lock_poisoned()),
+        }
+    }
+}
+
+fn lock_poisoned() -> EngineStateError {
+    EngineStateError::Adapter {
+        message: "fixture: shared engine state lock was poisoned".into(),
+    }
+}
+
+impl EngineStateStore for SharedEngineStateStore {
+    fn versions(&self) -> EngineStateVersions {
+        match self.0.lock() {
+            Ok(store) => store.versions(),
+            Err(_) => pith_engine::state::CURRENT_ENGINE_STATE_VERSIONS,
+        }
+    }
+
+    fn create_pending_attempt(
+        &mut self,
+        computation: DurableComputation,
+    ) -> Result<DurableAttemptId, EngineStateError> {
+        self.write(|store| store.create_pending_attempt(computation))
+    }
+
+    fn publish_complete(
+        &mut self,
+        attempt: DurableAttemptId,
+        completion: CompletedAttempt,
+    ) -> Result<(), EngineStateError> {
+        self.write(|store| store.publish_complete(attempt, completion))
+    }
+
+    fn publish_failed(
+        &mut self,
+        attempt: DurableAttemptId,
+        failure: FailedAttempt,
+    ) -> Result<(), EngineStateError> {
+        self.write(|store| store.publish_failed(attempt, failure))
+    }
+
+    fn attempt(
+        &self,
+        attempt: DurableAttemptId,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        self.read(|store| store.attempt(attempt))
+    }
+
+    fn attempt_history(
+        &self,
+        computation: PureComputationKey,
+    ) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
+        self.read(|store| store.attempt_history(computation))
+    }
+
+    fn latest_completed_reusable_attempt(
+        &self,
+        computation: PureComputationKey,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        self.read(|store| store.latest_completed_reusable_attempt(computation))
+    }
+
+    fn pending_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
+        self.read(|store| store.pending_attempts())
+    }
+}
+
+/// Publish a completed, reusable attempt for `computation` directly through the
+/// store, standing in for a recomputation performed by another engine instance.
+fn publish_reusable_attempt(
+    state: &SharedEngineStateStore,
+    computation: PureComputationKey,
+    result: &Value,
+) -> DurableAttemptId {
+    let mut state = state.clone();
+    let attempt = match state.create_pending_attempt(DurableComputation::Pure(computation)) {
+        Ok(attempt) => attempt,
+        Err(error) => unreachable!("shared engine state rejected a pending attempt: {error}"),
+    };
+    let completion = CompletedAttempt {
+        dependencies: Box::new([]),
+        result: EncodedValue::from_value(result),
+        provenance: DurableProvenance::Pure,
+        reuse: DurableReuseDecision::Reusable,
+    };
+    if let Err(error) = state.publish_complete(attempt, completion) {
+        unreachable!("shared engine state rejected attempt {attempt}: {error}");
+    }
+    attempt
+}
+
+fn attempt_history_len(state: &SharedEngineStateStore, computation: PureComputationKey) -> usize {
+    match state.attempt_history(computation) {
+        Ok(history) => history.len(),
+        Err(error) => unreachable!("shared engine state history is unreadable: {error}"),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Publish path: pure computations
 // ---------------------------------------------------------------------------
@@ -643,6 +843,7 @@ fn pure_create_failure_reconciles_the_orphaned_arena_node() {
             .all(|(_, node)| !matches!(node.state, AttemptState::Pending))
     );
     let (computation, node) = sole_pure_computation(&engine);
+    let _ = computation;
     assert!(matches!(node.state, AttemptState::Failed { .. }));
     // No durable attempt was recorded for the orphan.
     assert!(engine.durable_attempt_for(computation).is_none());
@@ -785,7 +986,11 @@ fn durable_reuse_is_valid_until_a_dependency_result_identity_changes() {
         .unwrap();
 
     // After computing both, root's durable reuse is valid.
-    assert!(engine.durable_reuse_is_valid(root_evaluation.computation));
+    assert!(
+        engine
+            .durable_reuse_is_valid(root_evaluation.computation)
+            .unwrap()
+    );
 
     // Simulate `leaf` being recomputed under a new attempt whose durable result
     // identity changed (e.g. a new revision produced different bytes). Publish a
@@ -814,7 +1019,11 @@ fn durable_reuse_is_valid_until_a_dependency_result_identity_changes() {
     // The leaf's latest reusable attempt is now a different attempt with a
     // different result: root's durable reuse is dirty.
     assert_ne!(changed_leaf, original_leaf_attempt);
-    assert!(!engine.durable_reuse_is_valid(root_evaluation.computation));
+    assert!(
+        !engine
+            .durable_reuse_is_valid(root_evaluation.computation)
+            .unwrap()
+    );
 }
 
 #[test]
@@ -833,7 +1042,11 @@ fn durable_reuse_remains_valid_when_a_dependency_result_is_canonically_equal() {
     let root_evaluation = engine
         .evaluate_pure(&pure_request("root", root, [Value::Bool(false)]))
         .unwrap();
-    assert!(engine.durable_reuse_is_valid(root_evaluation.computation));
+    assert!(
+        engine
+            .durable_reuse_is_valid(root_evaluation.computation)
+            .unwrap()
+    );
 
     // Publish a second leaf attempt under a new id but with an equal result.
     // Decision 0024: downstream propagation stops even though a new attempt
@@ -857,7 +1070,11 @@ fn durable_reuse_remains_valid_when_a_dependency_result_is_canonically_equal() {
         )
         .unwrap();
 
-    assert!(engine.durable_reuse_is_valid(root_evaluation.computation));
+    assert!(
+        engine
+            .durable_reuse_is_valid(root_evaluation.computation)
+            .unwrap()
+    );
 }
 
 #[test]
@@ -886,4 +1103,225 @@ fn durable_reuse_observed_through_engine_reuses_unchanged_computations() {
     assert_eq!(first.source, EvaluationSource::Computed);
     assert_eq!(second.source, EvaluationSource::Reused);
     assert_eq!(first.computation, second.computation);
+}
+
+// ---------------------------------------------------------------------------
+// Hydration: durable reuse across engine instances (decision 0024)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn hydrates_a_completed_pure_result_into_a_fresh_engine() {
+    let state = SharedEngineStateStore::default();
+    let leaf = interface(&[], Type::Int);
+
+    let mut first = engine_with_state(state.clone());
+    first.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::Int(7)));
+    let computed = first
+        .evaluate_pure(&pure_request("leaf", leaf.clone(), []))
+        .unwrap();
+    assert_eq!(computed.source, EvaluationSource::Computed);
+    let original_attempt = durable_id(&first, computed.computation);
+    let key = pure_key_of(&first, computed.computation);
+    assert_eq!(attempt_history_len(&state, key), 1);
+
+    // A fresh engine over the same durable substrate: new arena, no in-process
+    // reuse available. The rule is registered with a body that fails if it runs,
+    // so reaching a value at all proves the result came from engine state.
+    let mut second = engine_with_state(state.clone());
+    second.register_rule(pure_rule("leaf", leaf.clone()), FailingRule);
+    let hydrated = second
+        .evaluate_pure(&pure_request("leaf", leaf, []))
+        .unwrap();
+
+    assert_eq!(hydrated.source, EvaluationSource::Hydrated);
+    assert_eq!(hydrated.value, Value::Int(7));
+    // Hydration maps the fresh arena node onto the attempt it loaded, and
+    // records no new attempt: loading a result is not an evaluation of it.
+    assert_eq!(durable_id(&second, hydrated.computation), original_attempt);
+    assert_eq!(attempt_history_len(&state, key), 1);
+    // The hydrated node is terminal and reusable in the new arena, so a third
+    // request inside the same instance takes the in-process path.
+    assert!(second.durable_reuse_is_valid(hydrated.computation).unwrap());
+}
+
+#[test]
+fn a_hydrated_computation_serves_as_a_dependency_of_a_new_computation() {
+    // The load-bearing case: a hydrated node must carry its durable identity,
+    // not just its value, so a computation built on top of it publishes an edge
+    // naming the original attempt rather than a duplicate.
+    let state = SharedEngineStateStore::default();
+    let leaf = interface(&[], Type::Int);
+    let root = interface(&[Type::Bool], Type::Int);
+
+    let mut first = engine_with_state(state.clone());
+    first.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::Int(1)));
+    let leaf_evaluation = first
+        .evaluate_pure(&pure_request("leaf", leaf.clone(), []))
+        .unwrap();
+    let leaf_attempt = durable_id(&first, leaf_evaluation.computation);
+    let leaf_key = pure_key_of(&first, leaf_evaluation.computation);
+
+    // The second engine has never evaluated the leaf, and its leaf body fails
+    // if it runs: the root can only complete by hydrating its dependency.
+    let mut second = engine_with_state(state.clone());
+    second.register_rule(pure_rule("leaf", leaf.clone()), FailingRule);
+    second.register_rule(
+        pure_rule("root", root.clone()),
+        IncrementRule {
+            dependency: pure_request("leaf", leaf, []),
+        },
+    );
+    let root_evaluation = second
+        .evaluate_pure(&pure_request("root", root, [Value::Bool(false)]))
+        .unwrap();
+
+    assert_eq!(root_evaluation.source, EvaluationSource::Computed);
+    assert_eq!(root_evaluation.value, Value::Int(2));
+
+    // The root's published edge names the leaf's original durable attempt, and
+    // the root is itself reusable because that dependency is.
+    let root_record = completed_record(&state, durable_id(&second, root_evaluation.computation));
+    assert_eq!(root_record.reuse, DurableReuseDecision::Reusable);
+    assert_eq!(
+        root_record.dependencies.as_ref(),
+        [DurableDependency::Pure {
+            computation: leaf_key,
+            attempt: leaf_attempt,
+        }]
+    );
+    // Still one attempt for the leaf: hydration did not re-record it.
+    assert_eq!(attempt_history_len(&state, leaf_key), 1);
+}
+
+#[test]
+fn hydration_is_refused_when_a_recorded_dependency_changed() {
+    let state = SharedEngineStateStore::default();
+    let leaf = interface(&[], Type::Int);
+    let root = interface(&[Type::Bool], Type::Int);
+
+    let mut first = engine_with_state(state.clone());
+    first.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::Int(1)));
+    first.register_rule(
+        pure_rule("root", root.clone()),
+        ForwardRule {
+            dependency: pure_request("leaf", leaf.clone(), []),
+        },
+    );
+    let first_root = first
+        .evaluate_pure(&pure_request("root", root.clone(), [Value::Bool(false)]))
+        .unwrap();
+    let leaf_key = pure_key_of(&first, leaf_dependency_of(&first, first_root.computation));
+
+    // Another engine recomputed the leaf to a different result, so the root's
+    // recorded dependency set no longer describes the current graph.
+    publish_reusable_attempt(&state, leaf_key, &Value::Int(99));
+
+    let mut second = engine_with_state(state.clone());
+    second.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::Int(1)));
+    second.register_rule(
+        pure_rule("root", root.clone()),
+        ForwardRule {
+            dependency: pure_request("leaf", leaf, []),
+        },
+    );
+    let second_root = second
+        .evaluate_pure(&pure_request("root", root, [Value::Bool(false)]))
+        .unwrap();
+
+    // The root was dirty, so it re-evaluated. Its leaf dependency hydrated from
+    // the newer attempt, so the recomputed root observes the changed value.
+    assert_eq!(second_root.source, EvaluationSource::Computed);
+    assert_eq!(second_root.value, Value::Int(99));
+}
+
+#[test]
+fn hydration_survives_a_dependency_recomputed_to_an_equal_result() {
+    let state = SharedEngineStateStore::default();
+    let leaf = interface(&[], Type::Int);
+    let root = interface(&[Type::Bool], Type::Int);
+
+    let mut first = engine_with_state(state.clone());
+    first.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::Int(1)));
+    first.register_rule(
+        pure_rule("root", root.clone()),
+        ForwardRule {
+            dependency: pure_request("leaf", leaf.clone(), []),
+        },
+    );
+    let first_root = first
+        .evaluate_pure(&pure_request("root", root.clone(), [Value::Bool(false)]))
+        .unwrap();
+    let root_attempt = durable_id(&first, first_root.computation);
+    let leaf_key = pure_key_of(&first, leaf_dependency_of(&first, first_root.computation));
+
+    // A new leaf attempt with a canonically equal result. Decision 0024: the
+    // consumer is not dirty, so downstream propagation stops here.
+    let equal_leaf = publish_reusable_attempt(&state, leaf_key, &Value::Int(1));
+
+    let mut second = engine_with_state(state.clone());
+    second.register_rule(pure_rule("leaf", leaf.clone()), FailingRule);
+    second.register_rule(
+        pure_rule("root", root.clone()),
+        ForwardRule {
+            dependency: pure_request("leaf", leaf, []),
+        },
+    );
+    let second_root = second
+        .evaluate_pure(&pure_request("root", root, [Value::Bool(false)]))
+        .unwrap();
+
+    assert_eq!(second_root.source, EvaluationSource::Hydrated);
+    assert_eq!(second_root.value, Value::Int(1));
+    assert_eq!(durable_id(&second, second_root.computation), root_attempt);
+
+    // A hydrated node has no arena subgraph; its recorded dependency set stays
+    // authoritative on the durable attempt and is reachable through the query
+    // interface. The edge still names the attempt the root was published with,
+    // not the equal-result attempt that superseded it.
+    assert_eq!(
+        second
+            .query()
+            .dependencies_of(second_root.computation)
+            .map(<[_]>::len),
+        Some(0)
+    );
+    let recorded = second
+        .query()
+        .durable_attempt_of(second_root.computation)
+        .unwrap()
+        .unwrap();
+    let DurableAttemptState::Complete(recorded) = &recorded.state else {
+        unreachable!("the hydrated attempt is complete")
+    };
+    assert_eq!(
+        recorded.dependencies.as_ref(),
+        [DurableDependency::Pure {
+            computation: leaf_key,
+            attempt: durable_id(&first, leaf_dependency_of(&first, first_root.computation)),
+        }]
+    );
+    assert_ne!(
+        equal_leaf,
+        durable_id(&first, leaf_dependency_of(&first, first_root.computation))
+    );
+}
+
+#[test]
+fn hydration_reports_an_engine_state_read_failure() {
+    // A broken adapter must not read as "nothing cached": decision 0024 makes
+    // corruption an adapter error, never a cache miss.
+    let mut engine = engine_with_state(ReadFailingStore::default());
+    let leaf = interface(&[], Type::Int);
+    engine.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::Int(7)));
+
+    let diagnostics = engine
+        .evaluate_pure(&pure_request("leaf", leaf, []))
+        .err()
+        .unwrap();
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diag| diag.code == pith_diag::EngineCode::InternalInvariant.into())
+    );
 }

@@ -76,6 +76,33 @@ pub(super) enum InternalInvariant {
     /// commit failure). The store's validation is a safety net; reaching this
     /// means the engine's mapping fed it inconsistent data.
     EngineStateStoreError(crate::state::EngineStateError),
+    /// An engine-state read failed. Decision 0024 treats adapter failure as an
+    /// error, never a cache miss: a broken database must not silently degrade
+    /// into "recompute everything".
+    EngineStateReadFailed(crate::state::EngineStateError),
+    /// The reusable index returned an attempt that is not `Complete`. Only
+    /// completed attempts may enter the index (decision 0024).
+    ReusableIndexEntryNotComplete,
+    /// The reusable index returned an attempt belonging to another computation.
+    ReusableIndexEntryKeyMismatch,
+    /// The reusable index returned a completed attempt whose reuse decision is
+    /// not `Reusable`.
+    ReusableIndexEntryNotReusable,
+    /// A reusable pure attempt carries an action or capability-use dependency.
+    /// Action attempts are never reusable, so a pure attempt that depends on
+    /// one cannot be reusable either; the store validates this on publication.
+    ReusableAttemptHasEffectfulDependency,
+    /// A completed attempt's recorded dependency resolved to an attempt that is
+    /// not itself complete. The store rejects such publications.
+    DurableDependencyAttemptNotComplete,
+    /// A retained durable result could not be decoded. Its bytes were validated
+    /// when they entered the store, so this means the retained encoding is
+    /// unreadable under the current semantic encoding version.
+    HydratedResultUndecodable(pith_core::CanonicalDecodeError),
+    /// A hydrated result does not inhabit the requested interface's output
+    /// type. The computation key covers the interface, so a decoded value of
+    /// another type contradicts the key it was indexed under.
+    HydratedResultTypeMismatch { expected: Type, actual: Type },
 }
 
 impl InternalInvariant {
@@ -143,6 +170,30 @@ impl InternalInvariant {
             }
             InternalInvariant::EngineStateStoreError(error) => {
                 format!("engine-state adapter rejected a publication: {error}")
+            }
+            InternalInvariant::EngineStateReadFailed(error) => {
+                format!("engine-state adapter read failed: {error}")
+            }
+            InternalInvariant::ReusableIndexEntryNotComplete => {
+                "the reusable index references a non-complete attempt".to_string()
+            }
+            InternalInvariant::ReusableIndexEntryKeyMismatch => {
+                "the reusable index returned an attempt for another computation".to_string()
+            }
+            InternalInvariant::ReusableIndexEntryNotReusable => {
+                "the reusable index references an attempt that is not reusable".to_string()
+            }
+            InternalInvariant::ReusableAttemptHasEffectfulDependency => {
+                "a reusable pure attempt depends on an action or capability use".to_string()
+            }
+            InternalInvariant::DurableDependencyAttemptNotComplete => {
+                "a completed attempt depends on a non-complete attempt".to_string()
+            }
+            InternalInvariant::HydratedResultUndecodable(error) => {
+                format!("a retained durable result could not be decoded: {error}")
+            }
+            InternalInvariant::HydratedResultTypeMismatch { expected, actual } => {
+                format!("a hydrated result is {actual}, expected {expected}")
             }
         }
     }
@@ -266,6 +317,21 @@ mod tests {
             InternalInvariant::EngineStateStoreError(crate::state::EngineStateError::Adapter {
                 message: "fixture".into(),
             }),
+            InternalInvariant::EngineStateReadFailed(crate::state::EngineStateError::Adapter {
+                message: "fixture".into(),
+            }),
+            InternalInvariant::ReusableIndexEntryNotComplete,
+            InternalInvariant::ReusableIndexEntryKeyMismatch,
+            InternalInvariant::ReusableIndexEntryNotReusable,
+            InternalInvariant::ReusableAttemptHasEffectfulDependency,
+            InternalInvariant::DurableDependencyAttemptNotComplete,
+            InternalInvariant::HydratedResultUndecodable(
+                pith_core::CanonicalDecodeError::Truncated,
+            ),
+            InternalInvariant::HydratedResultTypeMismatch {
+                expected: Type::Int,
+                actual: Type::Bool,
+            },
         ];
         for invariant in invariants {
             let sink = internal_diag(invariant);

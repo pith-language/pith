@@ -125,7 +125,11 @@ initial schema incompatibility trades cache loss for correctness and implementat
 
 the engine accepts any content adapter through the pith-owned `ContentStore` interface and defaults to the in-memory implementation. the filesystem adapter stores blobs and canonical tree manifests under content digests, publishes same-directory temporary files after flushing them, verifies raced existing objects, and rejects stored data whose content does not reproduce the requested identity. file executability, subtree identity, and symlink target bytes survive a store reopen through the canonical tree manifest.
 
-sqlite engine metadata, durable graph hydration, attempt lifecycle persistence, dependency revalidation, and cross-process cache reuse remain unimplemented.
+the engine publishes every computation that leaves `Pending` through a pith-owned engine-state interface with an in-memory adapter, and resolves a request from durable state before running a rule body. a request that misses this instance's arena consults the reusable index, revalidates the recorded dependency set, and loads the completed attempt into a fresh arena node. the hydrated node is mapped onto the attempt it was loaded from rather than recording a new one, so a computation built on it publishes an edge naming the original attempt. a dependency whose latest reusable attempt changed makes the consumer dirty; an equal result under canonical equality stops propagation. adapter failure and records that contradict the reusable index's own contract are engine errors, never cache misses.
+
+a hydrated node has no arena subgraph: a durable pure edge records a computation key, not the request a child node would need. its recorded dependency set therefore stays authoritative on the durable attempt and is read through the query interface rather than reconstructed as arena edges.
+
+sqlite engine metadata, crash recovery for interrupted `Pending` attempts, and cross-process reuse remain unimplemented. hydration is proved across engine instances sharing one in-memory adapter, which exercises the durable semantics without yet proving durability across a process boundary.
 
 ## unresolved
 

@@ -166,7 +166,7 @@ impl Engine {
     /// ```
     pub fn evaluate_pure(&mut self, request: &Request<Pure>) -> PithResult<Evaluation> {
         let rule = self.resolve_pure_rule(request)?;
-        if let Some(evaluation) = self.reusable_pure_evaluation(rule, request) {
+        if let Some(evaluation) = self.reusable_pure_evaluation(rule, request)? {
             return Ok(evaluation);
         }
         let root = self.start_frame(request.clone(), rule)?;
@@ -230,7 +230,7 @@ impl Engine {
         executor: &E,
     ) -> PithResult<Evaluation> {
         let rule = self.resolve_pure_rule(request)?;
-        if let Some(evaluation) = self.reusable_pure_evaluation(rule, request) {
+        if let Some(evaluation) = self.reusable_pure_evaluation(rule, request)? {
             return Ok(evaluation);
         }
         let root = self.start_frame(request.clone(), rule)?;
@@ -460,7 +460,7 @@ impl Engine {
             return Err(cycle_diag(&chain, child_request.span));
         }
 
-        if let Some(reused) = self.reusable_pure_evaluation(child_rule, &child_request) {
+        if let Some(reused) = self.reusable_pure_evaluation(child_rule, &child_request)? {
             let Some(parent) = stack.last() else {
                 return Err(internal_diag(InternalInvariant::PureLostRequestingFrame));
             };
