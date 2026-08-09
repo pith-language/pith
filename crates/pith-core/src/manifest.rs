@@ -7,18 +7,18 @@
 //! [`crate::rule`] and [`crate::action`] manifests are built from it.
 
 /// Append a little-endian `u64` length to `manifest`.
-pub(crate) fn encode_length(manifest: &mut Vec<u8>, length: usize) {
+pub fn encode_length(manifest: &mut Vec<u8>, length: usize) {
     manifest.extend_from_slice(&(length as u64).to_le_bytes());
 }
 
 /// Append a length-prefixed byte blob: `u64` length, then the raw bytes.
-pub(crate) fn encode_bytes(manifest: &mut Vec<u8>, bytes: &[u8]) {
+pub fn encode_bytes(manifest: &mut Vec<u8>, bytes: &[u8]) {
     encode_length(manifest, bytes.len());
     manifest.extend_from_slice(bytes);
 }
 
 /// Append a length-prefixed UTF-8 string. Convenience over [`encode_bytes`].
-pub(crate) fn encode_str(manifest: &mut Vec<u8>, text: &str) {
+pub fn encode_str(manifest: &mut Vec<u8>, text: &str) {
     encode_bytes(manifest, text.as_bytes());
 }
 

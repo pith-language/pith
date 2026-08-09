@@ -126,6 +126,16 @@ impl ActionSpecDigest {
         Self(ContentId::with_domain(domain::ACTION_SPEC, manifest))
     }
 
+    /// Restore a digest read back from a persistence adapter.
+    ///
+    /// Derivation is the only way to *establish* this identity; restoration
+    /// asserts one that was already derived and then stored. Adapters
+    /// implementing durable engine state (decision 0024) need it because a
+    /// stored record holds the digest, not the manifest that produced it.
+    pub const fn from_digest(digest: ContentDigest) -> Self {
+        Self(digest)
+    }
+
     pub fn digest(self) -> ContentDigest {
         self.0
     }
@@ -148,6 +158,13 @@ impl RuleIdentity {
         hash_bytes(&mut hasher, module_identity.as_bytes());
         hash_bytes(&mut hasher, declaration_identity.as_bytes());
         Self(ContentDigest(hasher.finalize().into()))
+    }
+
+    /// Restore an identity read back from a persistence adapter. See
+    /// [`ActionSpecDigest::from_digest`] for why restoration is distinct from
+    /// derivation.
+    pub const fn from_digest(digest: ContentDigest) -> Self {
+        Self(digest)
     }
 
     pub fn digest(self) -> ContentDigest {
@@ -180,6 +197,17 @@ impl RuleRevision {
         }
     }
 
+    /// Restore a revision read back from a persistence adapter. Both halves are
+    /// stored, because the revision digest commits to the rule identity but
+    /// cannot be inverted to recover it. See [`ActionSpecDigest::from_digest`]
+    /// for why restoration is distinct from derivation.
+    pub const fn from_parts(rule_identity: RuleIdentity, digest: ContentDigest) -> Self {
+        Self {
+            rule_identity,
+            digest,
+        }
+    }
+
     pub fn rule_identity(self) -> RuleIdentity {
         self.rule_identity
     }
@@ -207,6 +235,13 @@ pub struct PureComputationDigest(ContentDigest);
 impl PureComputationDigest {
     pub fn of_manifest(manifest: &[u8]) -> Self {
         Self(ContentId::with_domain(domain::PURE_COMPUTATION, manifest))
+    }
+
+    /// Restore a digest read back from a persistence adapter. See
+    /// [`ActionSpecDigest::from_digest`] for why restoration is distinct from
+    /// derivation.
+    pub const fn from_digest(digest: ContentDigest) -> Self {
+        Self(digest)
     }
 
     pub fn digest(self) -> ContentDigest {

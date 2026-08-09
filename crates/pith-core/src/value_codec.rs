@@ -1,12 +1,9 @@
 //! Canonical payload encoding for the currently implemented [`Type`] and
 //! [`Value`] variants.
 
-use std::mem::size_of;
-
-use pith_ids::{ContentDigest, ContentId, DIGEST_LEN};
-
 use crate::{
     Type, Value,
+    codec::CanonicalReader,
     manifest::{encode_bytes, encode_str},
 };
 
@@ -125,8 +122,8 @@ impl Type {
     /// or trailing data, invalid UTF-8, and lengths not representable on the
     /// current platform.
     pub fn decode_canonical(encoded: &[u8]) -> Result<Self, CanonicalDecodeError> {
-        let mut decoder = Decoder::new(encoded);
-        decoder.read_version()?;
+        let mut decoder = CanonicalReader::new(encoded);
+        decoder.read_version(ENCODING_VERSION)?;
         let value_type = match decoder.read_byte()? {
             TAG_UNIT => Self::Unit,
             TAG_BOOL => Self::Bool,
@@ -160,15 +157,11 @@ impl Value {
     /// booleans, truncated or trailing data, invalid UTF-8, and lengths not
     /// representable on the current platform.
     pub fn decode_canonical(encoded: &[u8]) -> Result<Self, CanonicalDecodeError> {
-        let mut decoder = Decoder::new(encoded);
-        decoder.read_version()?;
+        let mut decoder = CanonicalReader::new(encoded);
+        decoder.read_version(ENCODING_VERSION)?;
         let value = match decoder.read_byte()? {
             TAG_UNIT => Self::Unit,
-            TAG_BOOL => match decoder.read_byte()? {
-                0 => Self::Bool(false),
-                1 => Self::Bool(true),
-                byte => return Err(CanonicalDecodeError::InvalidBoolean { byte }),
-            },
+            TAG_BOOL => Self::Bool(decoder.read_bool()?),
             TAG_INT => Self::Int(decoder.read_int()?),
             TAG_TEXT => Self::Text(decoder.read_text()?.into()),
             TAG_BYTES => Self::Bytes(decoder.read_bytes()?.into()),
@@ -180,83 +173,10 @@ impl Value {
     }
 }
 
-struct Decoder<'encoded> {
-    remaining: &'encoded [u8],
-}
-
-impl<'encoded> Decoder<'encoded> {
-    fn new(encoded: &'encoded [u8]) -> Self {
-        Self { remaining: encoded }
-    }
-
-    fn read_version(&mut self) -> Result<(), CanonicalDecodeError> {
-        let version = self.read_byte()?;
-        if version != ENCODING_VERSION {
-            return Err(CanonicalDecodeError::UnsupportedVersion { version });
-        }
-        Ok(())
-    }
-
-    fn read_byte(&mut self) -> Result<u8, CanonicalDecodeError> {
-        let Some((byte, remaining)) = self.remaining.split_first() else {
-            return Err(CanonicalDecodeError::Truncated);
-        };
-        self.remaining = remaining;
-        Ok(*byte)
-    }
-
-    fn read_int(&mut self) -> Result<i64, CanonicalDecodeError> {
-        let bytes = self.take(size_of::<i64>())?;
-        let mut encoded = [0; size_of::<i64>()];
-        encoded.copy_from_slice(bytes);
-        Ok(i64::from_le_bytes(encoded))
-    }
-
-    fn read_length(&mut self) -> Result<usize, CanonicalDecodeError> {
-        let bytes = self.take(size_of::<u64>())?;
-        let mut encoded = [0; size_of::<u64>()];
-        encoded.copy_from_slice(bytes);
-        let length = u64::from_le_bytes(encoded);
-        usize::try_from(length).map_err(|_| CanonicalDecodeError::LengthOutOfRange { length })
-    }
-
-    fn read_bytes(&mut self) -> Result<&'encoded [u8], CanonicalDecodeError> {
-        let length = self.read_length()?;
-        self.take(length)
-    }
-
-    fn read_text(&mut self) -> Result<&'encoded str, CanonicalDecodeError> {
-        std::str::from_utf8(self.read_bytes()?).map_err(|_| CanonicalDecodeError::InvalidUtf8)
-    }
-
-    fn read_content_id(&mut self) -> Result<ContentId, CanonicalDecodeError> {
-        let bytes = self.take(DIGEST_LEN)?;
-        let mut digest = [0; DIGEST_LEN];
-        digest.copy_from_slice(bytes);
-        Ok(ContentId::from_digest(ContentDigest::from_bytes(digest)))
-    }
-
-    fn take(&mut self, length: usize) -> Result<&'encoded [u8], CanonicalDecodeError> {
-        if self.remaining.len() < length {
-            return Err(CanonicalDecodeError::Truncated);
-        }
-        let (value, remaining) = self.remaining.split_at(length);
-        self.remaining = remaining;
-        Ok(value)
-    }
-
-    fn finish(self) -> Result<(), CanonicalDecodeError> {
-        if self.remaining.is_empty() {
-            Ok(())
-        } else {
-            Err(CanonicalDecodeError::TrailingBytes)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pith_ids::{ContentDigest, ContentId};
 
     fn fixture_content_id() -> ContentId {
         ContentId::from_digest(ContentDigest::from_bytes([

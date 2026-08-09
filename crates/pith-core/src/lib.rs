@@ -5,6 +5,8 @@
 //! IR without pulling in the scheduler.
 
 pub mod action;
+mod action_codec;
+pub mod codec;
 pub mod effect;
 mod manifest;
 pub mod rule;
