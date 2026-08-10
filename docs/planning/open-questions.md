@@ -35,8 +35,8 @@ milestone M-1 used decisions 0015 and 0019 as prototype hypotheses and is comple
 
 ## language and types
 
-- should the language use structural or nominal types at module boundaries? (decision 0017 proposes structural default with opt-in nominal)
-- how much refinement typing can stay fast enough for editors?
+- should the language use structural or nominal types at module boundaries? (decision 0017 proposed structural default with opt-in nominal; superseded by [0026](../decisions/0026-generic-typed-calculus.md), which carries that mechanism into a full closed calculus with records, declared sums, generics, effect types, and uncertainty types)
+- how much refinement typing can stay fast enough for editors? (settled by [0026](../decisions/0026-generic-typed-calculus.md): no predicate types in the language; validation is pure rules; the `Unchecked<T>`/`T` distinction is structural)
 - should evaluation be total by construction, or can termination be checked with an explicit unsafe boundary? (decision 0018 proposes total by construction with cycle detection and a backstop limit)
 - what is the smallest effect syntax that keeps capability use visible?
 - how do typed values cross repository and version boundaries without freezing the type system too early?
@@ -47,7 +47,7 @@ milestone M-1 used decisions 0015 and 0019 as prototype hypotheses and is comple
 - how are multiple valid providers ranked without introducing invisible policy? (decision 0015 proposes refusing rather than ranking)
 - what equality is used for change pruning when values contain opaque or external references?
 - how much dynamic graph structure can be allowed while keeping queries useful before execution?
-- which parts of the graph persist between daemon versions?
+- which parts of the graph persist between daemon versions? ([0024](../decisions/0024-persistent-engine-state.md) persists attempts, edges, provenance, and the reusable index; [0027](../decisions/0027-retention-and-gc.md) frames what is retained and for how long)
 
 ## constraints
 
@@ -77,7 +77,7 @@ milestone M-1 used decisions 0015 and 0019 as prototype hypotheses and is comple
 - when is an external object adopted, replaced, or treated as unrelated? (decision 0013)
 - where does the binding between semantic and external identity live? (decision 0013)
 - how are ownership transfers made safe? (decision 0013 names the primitive; transfer safety is open)
-- what is the retention and migration model for historical observations and plans?
+- what is the retention and migration model for historical observations and plans? ([decision 0027](../decisions/0027-retention-and-gc.md) frames the problem: roots, policy axes, cross-store ordering. the default numeric parameters wait on workload evidence)
 
 ## first-party domains
 

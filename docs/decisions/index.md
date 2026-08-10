@@ -43,7 +43,7 @@ when an accepted decision changes, a new record supersedes it. the old record st
 - [0014: separate the reproducibility properties](0014-reproducibility-properties.md)
 - [0015: select rules by interface match and refuse ambiguity](0015-interface-rule-selection.md)
 - [0016: implement the kernel in rust, graph by arena and index](0016-implementation-language.md)
-- [0017: structural types by default, nominal by declaration](0017-structural-with-nominal.md)
+- [0017: structural types by default, nominal by declaration](0017-structural-with-nominal.md) (superseded by [0026](0026-generic-typed-calculus.md))
 - [0018: total pure evaluation by construction, with cycle detection and a backstop limit](0018-termination-and-recursion.md)
 - [0019: five type-level effect categories, with nondeterminism as a tracked dependency](0019-effect-categories-and-nondeterminism.md)
 - [0020: reuse Nix infrastructure as adapters, not as the substrate](0020-nix-as-adapter-not-substrate.md)
@@ -52,9 +52,15 @@ when an accepted decision changes, a new record supersedes it. the old record st
 - [0023: separate stable rule identity from cache-invalidating rule revision](0023-rule-and-cache-identity.md)
 - [0024: persist content in a filesystem cas and engine state in sqlite](0024-persistent-engine-state.md)
 - [0025: store engine state as normalized relations, not as canonical record blobs](0025-relational-engine-state.md)
+- [0026: a generic structural type calculus, with nominal identity, generic uncertainty, and no predicate types](0026-generic-typed-calculus.md)
+- [0027: frame retention and garbage collection as roots, two stores, and composable policy axes](0027-retention-and-gc.md)
 
 note: 0013 amends 0005 to add a fifth identity type. 0005 stands; the amendment is recorded in 0013.
 
 note: 0022 refines 0019 by fixing where each effect category executes (synchronous step machine for `Pure`, async scheduler for the other four). 0019 stands; the refinement is recorded in 0022.
 
 note: 0025 refines 0024 by fixing how an adapter represents the records 0024 defines. 0024's choice of storage substrates stands; the representation within them is recorded in 0025.
+
+note: 0026 supersedes 0017 (its structural-default and nominal-by-declaration mechanism becomes one section of the larger calculus) and amends 0010 (settling the calculus questions among 0010's unresolved list). 0017 stays in the repository with a pointer; 0010 stands.
+
+note: 0027 complements 0024 by framing the retention and GC problem 0024 left open. it does not implement GC; it defines the design space (roots, policy axes, cross-store ordering) a later workload-evidence record lands in.
