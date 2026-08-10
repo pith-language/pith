@@ -132,6 +132,7 @@ stored_enum!(StoredStatus, DurableAttemptStatus, {
     DurableAttemptStatus::Pending => 0,
     DurableAttemptStatus::Complete => 1,
     DurableAttemptStatus::Failed => 2,
+    DurableAttemptStatus::Cancelled => 3,
 });
 
 stored_enum!(StoredSeverity, Severity, {

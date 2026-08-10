@@ -16,11 +16,13 @@ use pith_diag::{DiagnosticSink, PithResult};
 use pith_ids::ComputationId;
 
 use super::Engine;
-use super::ir::{AttemptState, ComputationKind, DependencyEdge, ReuseDecision, ReuseReason};
+use super::ir::{
+    AttemptState, ComputationKind, DependencyEdge, ReuseDecision, ReuseReason, StopReason,
+};
 use crate::graph::diagnostics::{InternalInvariant, internal_diag};
 use crate::state::{
     CompletedAttempt, DurableAttemptId, DurableDependency, DurableDiagnostic, DurableProvenance,
-    DurableReuseDecision, DurableReuseReason, EncodedValue, FailedAttempt,
+    DurableReuseDecision, DurableReuseReason, EncodedValue, StoppedAttempt,
 };
 
 impl Engine {
@@ -80,30 +82,54 @@ impl Engine {
             .map_err(engine_state_diag)
     }
 
-    pub(super) fn publish_pure_failure(&mut self, computation: ComputationId) -> PithResult<()> {
-        let (dependencies, diagnostics) = match self.computations.get(computation) {
-            Some(node) => match &node.state {
-                AttemptState::Failed { diagnostics } => {
-                    let deps = self.translate_dependencies(&node.dependencies)?;
-                    (deps, diagnostics.clone())
-                }
-                _ => {
-                    return Err(internal_diag(
-                        InternalInvariant::DurablePublicationForNonFailedAttempt,
-                    ));
-                }
-            },
+    /// Publish the terminal record for a pure attempt that stopped without a
+    /// result. Which terminal state is published comes from the arena node, so
+    /// the durable record cannot disagree with the graph about whether the
+    /// computation failed or was cancelled.
+    pub(super) fn publish_pure_stop(&mut self, computation: ComputationId) -> PithResult<()> {
+        let (dependencies, diagnostics, reason) = match self.computations.get(computation) {
+            Some(node) => {
+                let (diagnostics, reason) = match &node.state {
+                    AttemptState::Failed { diagnostics } => {
+                        (diagnostics.clone(), StopReason::Failed)
+                    }
+                    AttemptState::Cancelled { diagnostics } => {
+                        (diagnostics.clone(), StopReason::Cancelled)
+                    }
+                    _ => {
+                        return Err(internal_diag(
+                            InternalInvariant::DurablePublicationForNonFailedAttempt,
+                        ));
+                    }
+                };
+                let dependencies = self.translate_dependencies(&node.dependencies)?;
+                (dependencies, diagnostics, reason)
+            }
             None => return Err(internal_diag(InternalInvariant::PureLostComputationNode)),
         };
-        let failure = FailedAttempt {
+        let stopped = StoppedAttempt {
             dependencies,
             diagnostics: diagnostics.iter().map(DurableDiagnostic::from).collect(),
             provenance: DurableProvenance::Pure,
         };
         let attempt = self.require_durable_attempt(computation)?;
-        self.state_store
-            .publish_failed(attempt, failure)
-            .map_err(engine_state_diag)
+        self.publish_stopped(attempt, stopped, reason)
+    }
+
+    /// Hand a stopped record to the adapter under the terminal state `reason`
+    /// names. The two publications differ only here, so the record they carry
+    /// cannot drift apart.
+    fn publish_stopped(
+        &self,
+        attempt: DurableAttemptId,
+        stopped: StoppedAttempt,
+        reason: StopReason,
+    ) -> PithResult<()> {
+        match reason {
+            StopReason::Failed => self.state_store.publish_failed(attempt, stopped),
+            StopReason::Cancelled => self.state_store.publish_cancelled(attempt, stopped),
+        }
+        .map_err(engine_state_diag)
     }
 
     /// Publish a completed action attempt. Provenance comes from the action
@@ -150,25 +176,24 @@ impl Engine {
     /// lifecycle reached: `NotExecuted` when the executor was never called
     /// (denial, materialization failure), `Captured` when the executor
     /// returned but the engine failed to import outputs.
-    pub(super) fn publish_action_failure(
+    pub(super) fn publish_action_stop(
         &mut self,
         computation: ComputationId,
         diagnostics: &DiagnosticSink,
+        reason: StopReason,
     ) -> PithResult<()> {
         let dependencies = match self.computations.get(computation) {
             Some(node) => self.translate_dependencies(&node.dependencies)?,
             None => return Err(internal_diag(InternalInvariant::ActionLostComputationNode)),
         };
         let provenance = self.action_failure_provenance(computation);
-        let failure = FailedAttempt {
+        let stopped = StoppedAttempt {
             dependencies,
             diagnostics: diagnostics.iter().map(DurableDiagnostic::from).collect(),
             provenance,
         };
         let attempt = self.require_durable_attempt(computation)?;
-        self.state_store
-            .publish_failed(attempt, failure)
-            .map_err(engine_state_diag)
+        self.publish_stopped(attempt, stopped, reason)
     }
 
     fn action_failure_provenance(&self, computation: ComputationId) -> DurableProvenance {

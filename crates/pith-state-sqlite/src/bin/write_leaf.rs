@@ -12,7 +12,7 @@ use std::process::ExitCode;
 
 use pith_core::{Interface, Pure, Request, Rule, RuleIdentity, RuleRevision, Type, Value};
 use pith_diag::{PithResult, Span};
-use pith_engine::{Engine, EvaluationSource, PureRule, PureRuleFrame, PureStep};
+use pith_engine::{Engine, EvaluationSource, PureRule, PureRuleFrame, PureStep, Resumption};
 use pith_state_sqlite::SqliteEngineStateStore;
 
 fn main() -> ExitCode {
@@ -88,7 +88,7 @@ impl PureRule for ConstantRule {
 struct ConstantFrame(Value);
 
 impl PureRuleFrame for ConstantFrame {
-    fn step(&mut self, _input: Option<Value>) -> PithResult<PureStep> {
+    fn step(&mut self, _input: Option<Resumption>) -> PithResult<PureStep> {
         Ok(PureStep::Complete(self.0.clone()))
     }
 }

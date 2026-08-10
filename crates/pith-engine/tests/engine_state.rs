@@ -10,8 +10,8 @@ use pith_engine::state::{
     DurableAttemptId, DurableAttemptState, DurableAttemptStatus, DurableCapturedExecutionReport,
     DurableCapturedOutput, DurableComputation, DurableDependency, DurableDiagnostic,
     DurableProvenance, DurableReuseDecision, DurableReuseReason, DurableRule, EncodedValue,
-    EngineStateError, EngineStateStore, ExpectedReuseDecision, FailedAttempt,
-    InvalidActionLifecycleReason, InvalidDependencyReason, MemoryEngineStateStore,
+    EngineStateError, EngineStateStore, ExpectedReuseDecision, InvalidActionLifecycleReason,
+    InvalidDependencyReason, MemoryEngineStateStore, StoppedAttempt,
 };
 use pith_engine::{
     AccessVerification, ActionAuthorization, CapturedExecutionReport, CapturedOutput,
@@ -160,7 +160,7 @@ fn conformance_suite(store: &mut dyn EngineStateStore) -> Result<(), Box<dyn std
     );
     store.publish_failed(
         failed_root,
-        FailedAttempt {
+        StoppedAttempt {
             dependencies: Box::new([DurableDependency::Blob { content }]),
             diagnostics: Box::new([DurableDiagnostic::from(&diagnostic)]),
             provenance: DurableProvenance::Pure,
@@ -206,7 +206,7 @@ fn conformance_suite(store: &mut dyn EngineStateStore) -> Result<(), Box<dyn std
 
     let republish = store.publish_failed(
         first_root,
-        FailedAttempt {
+        StoppedAttempt {
             dependencies: Box::new([]),
             diagnostics: Box::new([]),
             provenance: DurableProvenance::Pure,
@@ -411,7 +411,7 @@ fn invalid_dependency_edges_do_not_publish() -> Result<(), Box<dyn std::error::E
         store.create_pending_attempt(DurableComputation::Pure(failed_dependency_key))?;
     store.publish_failed(
         failed_dependency,
-        FailedAttempt {
+        StoppedAttempt {
             dependencies: Box::new([]),
             diagnostics: Box::new([]),
             provenance: DurableProvenance::Pure,
@@ -603,7 +603,7 @@ fn denied_actions_cannot_complete_or_retain_execution_reports()
 
     let failure_result = store.publish_failed(
         attempt,
-        FailedAttempt {
+        StoppedAttempt {
             dependencies: Box::new([]),
             diagnostics: Box::new([]),
             provenance: DurableProvenance::Action(DurableActionProvenance::Imported {
@@ -621,7 +621,7 @@ fn denied_actions_cannot_complete_or_retain_execution_reports()
 
     store.publish_failed(
         attempt,
-        FailedAttempt {
+        StoppedAttempt {
             dependencies: Box::new([]),
             diagnostics: Box::new([]),
             provenance: DurableProvenance::Action(DurableActionProvenance::NotExecuted),
@@ -656,7 +656,7 @@ fn captured_report_metadata_survives_output_import_failure()
     );
     let missing_capability_edge = store.publish_failed(
         attempt,
-        FailedAttempt {
+        StoppedAttempt {
             dependencies: Box::new([]),
             diagnostics: Box::new([DurableDiagnostic::from(&diagnostic)]),
             provenance: DurableProvenance::Action(DurableActionProvenance::Captured {
@@ -671,7 +671,7 @@ fn captured_report_metadata_survives_output_import_failure()
 
     store.publish_failed(
         attempt,
-        FailedAttempt {
+        StoppedAttempt {
             dependencies: Box::new([DurableDependency::CapabilityUse { capability }]),
             diagnostics: Box::new([DurableDiagnostic::from(&diagnostic)]),
             provenance: DurableProvenance::Action(DurableActionProvenance::Captured {

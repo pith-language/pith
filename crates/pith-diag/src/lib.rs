@@ -142,6 +142,9 @@ pub enum EngineCode {
     /// `E-1214` — an attempt was left `Pending` when its owner stopped, and was
     /// marked failed on reopen rather than resumed.
     InterruptedAttempt = 214,
+    /// `E-1215` — the caller cancelled the run. Not a fault: the work that was
+    /// in flight is recorded as cancelled, and re-running it is reasonable.
+    RunCancelled = 215,
 }
 
 impl From<EngineCode> for StableCode {

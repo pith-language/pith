@@ -324,8 +324,12 @@ pub struct CompletedAttempt {
     pub reuse: DurableReuseDecision,
 }
 
+/// What an attempt that stopped without a result retains. `Failed` and
+/// `Cancelled` differ in *why* the attempt stopped, not in what is kept, so
+/// they share this record rather than carrying two structures that would have
+/// to be changed together.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FailedAttempt {
+pub struct StoppedAttempt {
     pub dependencies: Box<[DurableDependency]>,
     pub diagnostics: Box<[DurableDiagnostic]>,
     pub provenance: DurableProvenance,
@@ -335,7 +339,14 @@ pub struct FailedAttempt {
 pub enum DurableAttemptState {
     Pending,
     Complete(CompletedAttempt),
-    Failed(FailedAttempt),
+    /// The attempt ran and could not produce its result.
+    Failed(StoppedAttempt),
+    /// The attempt was stopped before it could produce a result — the run it
+    /// belonged to was cancelled, or a sibling's failure ended that run while
+    /// this attempt was still in flight. Distinct from `Failed` because nothing
+    /// about the computation itself is known to be wrong: re-running it is
+    /// reasonable, where re-running a failure is not.
+    Cancelled(StoppedAttempt),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -350,6 +361,7 @@ pub enum DurableAttemptStatus {
     Pending,
     Complete,
     Failed,
+    Cancelled,
 }
 
 impl DurableAttemptState {
@@ -358,6 +370,41 @@ impl DurableAttemptState {
             Self::Pending => DurableAttemptStatus::Pending,
             Self::Complete(_) => DurableAttemptStatus::Complete,
             Self::Failed(_) => DurableAttemptStatus::Failed,
+            Self::Cancelled(_) => DurableAttemptStatus::Cancelled,
         }
     }
+}
+
+/// Why a completed attempt is not reusable, as a chain over the dependency
+/// graph. Built by [`EngineStateStore::explain_invalidation`] and the live
+/// mirror [`crate::EngineQuery::explain_invalidation`].
+///
+/// The chain follows the single dependency each [`DurableReuseReason`] names.
+/// When reuse is blocked by more than one dependency simultaneously, the
+/// explanation records the first such edge the store reports (the validator at
+/// `state::validate` derives its `first_non_reusable_dependency` the same way),
+/// so the explanation matches the reuse decision the attempt was published with
+/// rather than re-deriving a different one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InvalidationExplanation {
+    pub attempt: DurableAttemptId,
+    pub computation: DurableComputation,
+    pub reason: InvalidationReason,
+}
+
+/// One node of an invalidation chain. A leaf reason carries the
+/// [`DurableReuseReason`] recorded on the attempt; an edge reason names the
+/// specific dependency that is itself not reusable and recurses into its
+/// explanation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InvalidationReason {
+    /// The attempt's own recorded reuse reason, when it does not name a
+    /// dependency the chain can follow (for example `ActionCachingDisabled`).
+    Leaf(DurableReuseReason),
+    /// A dependency the attempt named as the cause of its non-reuse, with the
+    /// recursive explanation of why that dependency is itself not reusable.
+    DependencyInvalidated {
+        edge: DurableDependency,
+        child: Box<InvalidationExplanation>,
+    },
 }

@@ -8,10 +8,12 @@ use std::sync::Arc;
 use pith_core::PureComputationKey;
 
 use crate::MemoryEngineStateStore;
-use crate::state::{DurableAttempt, EngineStateError, EngineStateStore};
+use crate::state::{DurableAttempt, EngineStateError, EngineStateStore, InvalidationExplanation};
 
 use super::run::Tracked;
-use super::translate::{Translation, subject_to_model, translate_attempt, translate_error};
+use super::translate::{
+    Translation, subject_to_model, translate_attempt, translate_error, translate_explanation,
+};
 
 #[derive(Clone, Debug)]
 pub struct Divergence {
@@ -156,6 +158,17 @@ pub(super) fn compare_reads(
             actual.as_deref(),
             &translation,
         )?;
+        compare_explanations(
+            step,
+            "explain_invalidation",
+            &read(step, "explain_invalidation", || {
+                model.explain_invalidation(key)
+            })?,
+            &read(step, "explain_invalidation", || {
+                subject.explain_invalidation(key)
+            })?,
+            &translation,
+        )?;
     }
 
     compare_sequences(
@@ -215,6 +228,29 @@ pub(super) fn compare_records(
 ) -> Result<(), Divergence> {
     let translated = subject.map(|attempt| translate_attempt(attempt, translation));
     if model.cloned() == translated {
+        return Ok(());
+    }
+    Err(Divergence {
+        step,
+        detail: DivergenceDetail::Read {
+            query,
+            model: format!("{model:?}"),
+            subject: format!("{subject:?}"),
+        },
+    })
+}
+
+pub(super) fn compare_explanations(
+    step: usize,
+    query: &'static str,
+    model: &Option<InvalidationExplanation>,
+    subject: &Option<InvalidationExplanation>,
+    translation: &Translation,
+) -> Result<(), Divergence> {
+    let translated = subject
+        .as_ref()
+        .map(|explanation| translate_explanation(explanation, translation));
+    if model == &translated {
         return Ok(());
     }
     Err(Divergence {

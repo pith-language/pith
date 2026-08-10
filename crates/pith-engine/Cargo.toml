@@ -38,3 +38,7 @@ proptest = { workspace = true, optional = true }
 [dev-dependencies]
 proptest.workspace = true
 insta.workspace = true
+async-trait.workspace = true
+# `time` is test-only: the concurrency tests bound their barrier waits so a
+# serialized engine fails instead of hanging.
+tokio = { workspace = true, features = ["time"] }

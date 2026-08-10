@@ -11,8 +11,8 @@ use pith_engine::state::validate::{AttemptLookup, TerminalAttemptState, validate
 use pith_engine::state::{
     CompletedAttempt, DurableActionProvenance, DurableAttempt, DurableAttemptId,
     DurableAttemptStatus, DurableComputation, DurableDiagnostic, DurableProvenance,
-    EngineStateError, EngineStateStore, EngineStateVersions, FailedAttempt, SchemaVersion,
-    SemanticEncodingVersion,
+    EngineStateError, EngineStateStore, EngineStateVersions, InvalidationExplanation,
+    SchemaVersion, SemanticEncodingVersion, StoppedAttempt,
 };
 
 use crate::rows::{
@@ -410,7 +410,7 @@ fn recover_pending(connection: &mut SqliteConnection) -> Result<(), SqliteStateE
     Ok(())
 }
 
-fn interrupted_failure(computation: &DurableComputation) -> FailedAttempt {
+fn interrupted_failure(computation: &DurableComputation) -> StoppedAttempt {
     let provenance = match computation {
         DurableComputation::Pure(_) => DurableProvenance::Pure,
         DurableComputation::Action { .. } => {
@@ -422,7 +422,7 @@ fn interrupted_failure(computation: &DurableComputation) -> FailedAttempt {
         Span::none(),
         "the attempt was left pending when its owner stopped",
     ));
-    FailedAttempt {
+    StoppedAttempt {
         dependencies: Box::new([]),
         diagnostics: [diagnostic].into(),
         provenance,
@@ -444,6 +444,29 @@ impl AttemptLookup for ConnectionLookup<'_> {
             .try_borrow_mut()
             .map_err(|_| EngineStateError::Adapter {
                 message: "the engine-state connection was already in use during validation".into(),
+            })?;
+        let record = load_attempt(&mut connection, attempt).map_err(EngineStateError::from)?;
+        Ok(record.map(Arc::new))
+    }
+}
+
+/// Read-only dependency-edge resolver used by the invalidation chain walk.
+/// Unlike [`ConnectionLookup`] this is not inside a publishing transaction; it
+/// is the same `load_attempt` query run against the snapshot the read holds.
+/// `RefCell` reborrows the connection the way `ConnectionLookup` does, because
+/// [`AttemptLookup::lookup`] takes `&self` while `load_attempt` needs `&mut`.
+struct LoadLookup<'connection>(RefCell<&'connection mut SqliteConnection>);
+
+impl AttemptLookup for LoadLookup<'_> {
+    fn lookup(
+        &self,
+        attempt: DurableAttemptId,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        let mut connection = self
+            .0
+            .try_borrow_mut()
+            .map_err(|_| EngineStateError::Adapter {
+                message: "the engine-state connection was already in use".into(),
             })?;
         let record = load_attempt(&mut connection, attempt).map_err(EngineStateError::from)?;
         Ok(record.map(Arc::new))
@@ -479,9 +502,17 @@ impl EngineStateStore for SqliteEngineStateStore {
     fn publish_failed(
         &self,
         attempt: DurableAttemptId,
-        failure: FailedAttempt,
+        failure: StoppedAttempt,
     ) -> Result<(), EngineStateError> {
         self.publish(attempt, TerminalAttemptState::Failed(failure))
+    }
+
+    fn publish_cancelled(
+        &self,
+        attempt: DurableAttemptId,
+        cancellation: StoppedAttempt,
+    ) -> Result<(), EngineStateError> {
+        self.publish(attempt, TerminalAttemptState::Cancelled(cancellation))
     }
 
     fn attempt(
@@ -516,6 +547,35 @@ impl EngineStateStore for SqliteEngineStateStore {
                 return Ok(None);
             };
             Ok(first(load_attempts(connection, vec![row])?))
+        })
+    }
+
+    fn explain_invalidation(
+        &self,
+        computation: PureComputationKey,
+    ) -> Result<Option<InvalidationExplanation>, EngineStateError> {
+        self.read(|connection| {
+            let latest = match find_pure_computation(connection, computation)? {
+                Some(computation) => match reusable_attempt_row(connection, computation)? {
+                    Some(row) => {
+                        let attempt = load_attempts(connection, vec![row])?
+                            .into_iter()
+                            .next()
+                            .ok_or_else(|| {
+                                Failure::Engine(EngineStateError::Adapter {
+                                    message:
+                                        "the reusable index references an attempt that cannot be read"
+                                            .into(),
+                                })
+                            })?;
+                        Some(Arc::new(attempt))
+                    }
+                    None => None,
+                },
+                None => None,
+            };
+            let lookup = LoadLookup(RefCell::new(connection));
+            Ok(pith_engine::state::explain::explain_latest(&lookup, latest)?)
         })
     }
 

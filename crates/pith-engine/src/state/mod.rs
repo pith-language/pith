@@ -14,6 +14,7 @@
 /// tests.
 #[cfg(any(test, feature = "testing"))]
 pub mod conformance;
+pub mod explain;
 mod memory;
 mod records;
 mod store;

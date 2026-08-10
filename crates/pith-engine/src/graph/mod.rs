@@ -1,50 +1,45 @@
-//! The arena dependency graph, the synchronous pure evaluator, and the async
-//! driver that crosses the sync/async boundary for blob fetches and action
-//! execution (decisions 0021, 0022).
+//! The arena dependency graph and the engine's evaluation entry points
+//! (decisions 0021, 0022).
+//!
+//! The evaluator is split across three modules along the seam 0022 describes:
+//! [`scheduler`] holds the set of in-flight evaluation chains and touches no
+//! arena state, [`eval`] is the synchronous core that runs a chain on the step
+//! machine, and [`drive`] is the shell that serves the effects a chain stops
+//! for. This module owns the graph itself and the public surface over it.
 
 mod action_pipeline;
 mod capabilities;
 mod diagnostics;
+mod drive;
+mod eval;
 pub mod ir;
 pub mod query;
 mod reuse;
+mod scheduler;
 mod state_publish;
 
 pub(crate) use capabilities::canonical_capabilities;
 pub use ir::{
     ActionPlan, ActionRecord, AttemptState, ComputationKind, ComputationNode, DependencyEdge,
-    Evaluation, EvaluationSource, PureRule, PureRuleFrame, PureStep, ReuseDecision, ReuseReason,
-    RuleSelection,
+    Evaluation, EvaluationSource, LiveInvalidationExplanation, LiveInvalidationReason, PureRule,
+    PureRuleFrame, PureStep, Resumption, ReuseDecision, ReuseReason, RuleSelection,
 };
 pub use query::EngineQuery;
 
 use indexmap::IndexMap;
-use pith_core::{
-    Action, Pure, PureComputationKey, Request, Rule, RuleArena, RuleId, Value, select_rule,
-};
-use pith_diag::{Diag, DiagnosticSink, EngineCode, PithResult};
+use pith_core::{Action, Pure, PureComputationKey, Request, Rule, RuleArena, RuleId};
+use pith_diag::PithResult;
 use pith_ids::{ComputationArena, ComputationId, ContentId};
 use pith_store::{ContentStore, MemoryContentStore};
 
 use crate::action::{ActionRule, Executor};
+use crate::cancel::{CancelSignal, NeverCancelled};
 use crate::policy::ActionPolicy;
-use crate::runtime::Runtime;
+use crate::runtime::{Runtime, RuntimeError};
 use crate::state::{DurableAttemptId, EngineStateStore, MemoryEngineStateStore};
-use diagnostics::{
-    InternalInvariant, content_unavailable_diag, cycle_diag, effectful_in_pure_diag, internal_diag,
-    one_diag, store_error_diag,
-};
-use ir::EvalFrame;
+use eval::single_evaluation;
+use ir::StopReason;
 use reuse::PureComputationIndex;
-use smallvec::SmallVec;
-
-pub(super) enum ActionRunOutcome {
-    PlanningFailed(DiagnosticSink),
-    Started {
-        computation: ComputationId,
-        result: PithResult<Value>,
-    },
-}
 
 pub struct Engine {
     pub(crate) rules: RuleArena<Rule<Pure>>,
@@ -158,40 +153,12 @@ impl Engine {
     /// let _ = engine.evaluate_pure(&request);
     /// ```
     pub fn evaluate_pure(&mut self, request: &Request<Pure>) -> PithResult<Evaluation> {
-        let rule = self.resolve_pure_rule(request)?;
-        if let Some(evaluation) = self.reusable_pure_evaluation(rule, request)? {
-            return Ok(evaluation);
+        let mut plan = self.open_roots(std::slice::from_ref(request))?;
+        if let Err(diagnostics) = self.drive_pure(&mut plan.scheduler) {
+            self.stop_live_frames(&plan.scheduler, &diagnostics, StopReason::Failed);
+            return Err(diagnostics);
         }
-        let root = self.start_frame(request.clone(), rule)?;
-        let mut stack = vec![root];
-
-        let result = self.drive_pure(&mut stack);
-        if let Err(diagnostics) = &result {
-            self.fail_pending_frames(&stack, diagnostics);
-        }
-        result
-    }
-
-    fn drive_pure(&mut self, stack: &mut Vec<EvalFrame>) -> PithResult<Evaluation> {
-        loop {
-            let step = self.step_top_frame(stack)?;
-            match step {
-                PureStep::Complete(value) => {
-                    let completed = self.finish_frame(stack, value)?;
-                    if let Some(parent) = stack.last_mut() {
-                        parent.resume_with = Some(completed.value.clone());
-                    } else {
-                        return Ok(completed);
-                    }
-                }
-                PureStep::Need(child_request) => {
-                    self.handle_pure_need(stack, child_request)?;
-                }
-                PureStep::NeedBlob(_) | PureStep::NeedAction(_) => {
-                    return Err(effectful_in_pure_diag());
-                }
-            }
-        }
+        single_evaluation(plan.into_evaluations()?)
     }
 
     /// Evaluate a request, crossing the sync/async boundary as needed: pure
@@ -212,295 +179,82 @@ impl Engine {
         runtime: &R,
         policy: &P,
         executor: &E,
-    ) -> Result<PithResult<Evaluation>, crate::runtime::RuntimeError> {
-        runtime.block_on(self.run_inner(request, policy, executor))
+    ) -> Result<PithResult<Evaluation>, RuntimeError> {
+        self.run_cancellable(request, runtime, policy, executor, &NeverCancelled)
     }
 
-    async fn run_inner<P: ActionPolicy, E: Executor>(
+    /// [`Engine::run`], stoppable. `cancel` is polled at scheduling boundaries;
+    /// when it reports cancellation the run stops, every computation it was
+    /// still working on is recorded `Cancelled`, and the result is `E-1215`.
+    ///
+    /// # Errors
+    /// The same as [`Engine::run`], plus `E-1215` when the run was cancelled.
+    pub fn run_cancellable<R: Runtime, P: ActionPolicy, E: Executor, C: CancelSignal>(
         &mut self,
         request: &Request<Pure>,
+        runtime: &R,
         policy: &P,
         executor: &E,
-    ) -> PithResult<Evaluation> {
-        let rule = self.resolve_pure_rule(request)?;
-        if let Some(evaluation) = self.reusable_pure_evaluation(rule, request)? {
-            return Ok(evaluation);
-        }
-        let root = self.start_frame(request.clone(), rule)?;
-        let mut stack = vec![root];
-
-        let result = self.drive_run(&mut stack, policy, executor).await;
-        if let Err(diagnostics) = &result {
-            self.fail_pending_frames(&stack, diagnostics);
-        }
-        result
+        cancel: &C,
+    ) -> Result<PithResult<Evaluation>, RuntimeError> {
+        let evaluations = runtime.block_on(self.run_inner(
+            std::slice::from_ref(request),
+            policy,
+            executor,
+            cancel,
+        ))?;
+        Ok(evaluations.and_then(single_evaluation))
     }
 
-    async fn drive_run<P: ActionPolicy, E: Executor>(
+    /// Evaluate several requests that do not depend on one another, driving
+    /// them concurrently: their actions overlap, and the results come back in
+    /// request order. This is the multi-target entry point — one root per thing
+    /// the caller asked to build.
+    ///
+    /// A request that fails aborts the whole run, exactly as it does under
+    /// [`Engine::run`]; the diagnostics say which one.
+    ///
+    /// # Errors
+    /// The same as [`Engine::run`].
+    pub fn run_many<R: Runtime, P: ActionPolicy, E: Executor>(
         &mut self,
-        stack: &mut Vec<EvalFrame>,
+        requests: &[Request<Pure>],
+        runtime: &R,
         policy: &P,
         executor: &E,
-    ) -> PithResult<Evaluation> {
-        loop {
-            let step = self.step_top_frame(stack)?;
-            match step {
-                PureStep::Complete(value) => {
-                    let completed = self.finish_frame(stack, value)?;
-                    if let Some(parent) = stack.last_mut() {
-                        parent.resume_with = Some(completed.value.clone());
-                    } else {
-                        return Ok(completed);
-                    }
-                }
-                PureStep::Need(child_request) => {
-                    self.handle_pure_need(stack, child_request)?;
-                }
-                PureStep::NeedBlob(id) => {
-                    let bytes = self.fetch_blob(id)?;
-                    self.record_blob_edge(stack, id);
-                    if let Some(parent) = stack.last_mut() {
-                        parent.resume_with = Some(Value::Bytes(bytes));
-                    } else {
-                        return Err(internal_diag(InternalInvariant::EffectfulStepWithNoFrame(
-                            "blob",
-                        )));
-                    }
-                }
-                PureStep::NeedAction(action_request) => {
-                    let outcome = self.run_action(&action_request, policy, executor).await;
-                    let (action_computation, result) = match outcome {
-                        ActionRunOutcome::PlanningFailed(diagnostics) => return Err(diagnostics),
-                        ActionRunOutcome::Started {
-                            computation,
-                            result,
-                        } => (computation, result),
-                    };
-                    let Some(parent) = stack.last() else {
-                        return Err(internal_diag(InternalInvariant::EffectfulStepWithNoFrame(
-                            "action",
-                        )));
-                    };
-                    let Some(parent_node) = self.computations.get_mut(parent.computation) else {
-                        return Err(internal_diag(InternalInvariant::PureLostParentComputation));
-                    };
-                    parent_node.dependencies.push(DependencyEdge::Action {
-                        computation: action_computation,
-                        request: action_request,
-                    });
-                    let value = result?;
-                    let Some(parent) = stack.last_mut() else {
-                        return Err(internal_diag(InternalInvariant::EffectfulStepWithNoFrame(
-                            "action",
-                        )));
-                    };
-                    parent.resume_with = Some(value);
-                }
-            }
-        }
+    ) -> Result<PithResult<Box<[Evaluation]>>, RuntimeError> {
+        self.run_many_cancellable(requests, runtime, policy, executor, &NeverCancelled)
     }
 
-    fn step_top_frame(&self, stack: &mut [EvalFrame]) -> PithResult<PureStep> {
-        match stack.last_mut() {
-            Some(frame) => frame.body.step(frame.resume_with.take()),
-            None => Err(internal_diag(InternalInvariant::PureLostRootFrame)),
-        }
-    }
-
-    fn resolve_pure_rule(&self, request: &Request<Pure>) -> PithResult<RuleId> {
-        request.validate_inputs().map_err(one_diag)?;
-        select_rule(request, &self.rules)
-            .into_result(request, &self.rules)
-            .map_err(one_diag)
-    }
-
-    fn start_frame(&mut self, request: Request<Pure>, rule: RuleId) -> PithResult<EvalFrame> {
-        let Some(body) = self.bodies.get(&rule) else {
-            return Err(internal_diag(InternalInvariant::SelectedRuleHasNoBody));
-        };
-        let body = body.start(&request.inputs);
-        let Some(rule_metadata) = self.rules.get(rule) else {
-            return Err(internal_diag(InternalInvariant::SelectedRuleHasNoMetadata));
-        };
-        let key = PureComputationKey::new(rule_metadata, &request);
-        let computation = self.computations.push(ComputationNode {
-            kind: ComputationKind::Pure(request.clone()),
-            rule,
-            dependencies: SmallVec::new(),
-            state: AttemptState::Pending,
-            action: None,
-            capabilities: Box::new([]),
-        });
-        self.index_pure_computation(key, computation);
-        if let Err(diagnostics) = self.create_pending_pure_attempt(computation, key) {
-            // The durable attempt could not be created (only a failing adapter
-            // reaches this; the memory adapter is infallible). Mirror the action
-            // path's error hygiene: fail the orphaned arena node so it is not
-            // left Pending. No durable failure is published because no durable
-            // attempt exists; the diagnostics propagate to the caller.
-            self.fail_pure_orphan(computation, &diagnostics);
-            return Err(diagnostics);
-        }
-        Ok(EvalFrame {
-            computation,
-            rule,
-            request,
-            body,
-            resume_with: None,
-        })
-    }
-
-    fn finish_frame(&mut self, stack: &mut Vec<EvalFrame>, value: Value) -> PithResult<Evaluation> {
-        let Some(completed) = stack.last() else {
-            return Err(internal_diag(InternalInvariant::PureCompletedWithoutFrame));
-        };
-        let Some(rule) = self.rules.get(completed.rule) else {
-            return Err(internal_diag(
-                InternalInvariant::PureLostSelectedRuleMetadata,
-            ));
-        };
-        if !value.is_type(&completed.request.interface.output) {
-            let actual = value.value_type();
-            return Err(one_diag(Diag::engine(
-                EngineCode::ResultTypeMismatch,
-                rule.span,
-                format!(
-                    "rule `{}` returned {}, expected {}",
-                    rule.label, actual, completed.request.interface.output
-                ),
-            )));
-        }
-        let (reuse, capabilities) = match self.computations.get(completed.computation) {
-            Some(node) => (
-                self.pure_reuse_decision(&node.dependencies),
-                self.effective_capabilities(&node.dependencies),
-            ),
-            None => return Err(internal_diag(InternalInvariant::PureLostComputationNode)),
-        };
-        let Some(capabilities) = capabilities else {
-            return Err(internal_diag(
-                InternalInvariant::PureLostCapabilityComputation,
-            ));
-        };
-        let Some(node) = self.computations.get_mut(completed.computation) else {
-            return Err(internal_diag(InternalInvariant::PureLostComputationNode));
-        };
-        node.state = AttemptState::Complete {
-            result: value.clone(),
-            reuse,
-        };
-        node.capabilities = capabilities;
-        let computation = completed.computation;
-        // The arena node is terminal; publish the durable record at this
-        // scheduling boundary (decision 0024). `pop` after publishing so the
-        // frame's computation id stays valid for the store call.
-        self.publish_pure_completion(computation)?;
-        stack.pop();
-        Ok(Evaluation {
-            value,
-            computation,
-            source: EvaluationSource::Computed,
-        })
-    }
-
-    fn fail_pending_frames(&mut self, stack: &[EvalFrame], diagnostics: &DiagnosticSink) {
-        for frame in stack {
-            let Some(node) = self.computations.get_mut(frame.computation) else {
-                continue;
-            };
-            if matches!(node.state, AttemptState::Pending) {
-                node.state = AttemptState::Failed {
-                    diagnostics: diagnostics.iter().cloned().collect(),
-                };
-                // Scheduling boundary: publish the durable failure for this
-                // pure attempt. The store call is best-effort with respect to
-                // the returned diagnostics — failure publication must not mask
-                // the diagnostics that caused it.
-                let _ = self.publish_pure_failure(frame.computation);
-            }
-        }
-    }
-
-    /// Reconcile an orphaned pure computation whose durable attempt could not be
-    /// created: mark it `Failed` in the arena so no `Pending` node remains. No
-    /// durable failure is published because no durable attempt exists.
-    fn fail_pure_orphan(&mut self, computation: ComputationId, diagnostics: &DiagnosticSink) {
-        if let Some(node) = self.computations.get_mut(computation) {
-            node.state = AttemptState::Failed {
-                diagnostics: diagnostics.iter().cloned().collect(),
-            };
-        }
-    }
-
-    /// Handle a `PureStep::Need`: select the child rule, cycle-check, allocate
-    /// the child frame, and record the dependency edge on the parent node.
-    fn handle_pure_need(
+    /// [`Engine::run_many`], stoppable. See [`Engine::run_cancellable`].
+    ///
+    /// # Errors
+    /// The same as [`Engine::run_many`], plus `E-1215` when the run was
+    /// cancelled.
+    pub fn run_many_cancellable<R: Runtime, P: ActionPolicy, E: Executor, C: CancelSignal>(
         &mut self,
-        stack: &mut Vec<EvalFrame>,
-        child_request: Request<Pure>,
-    ) -> PithResult<()> {
-        let child_rule = self.resolve_pure_rule(&child_request)?;
-        if stack.iter().any(|frame| {
-            frame.rule == child_rule
-                && frame.request.interface == child_request.interface
-                && frame.request.inputs == child_request.inputs
-        }) {
-            let mut chain: Vec<&str> = stack
-                .iter()
-                .map(|frame| frame.request.label.as_ref())
-                .collect();
-            chain.push(child_request.label.as_ref());
-            return Err(cycle_diag(&chain, child_request.span));
-        }
-
-        if let Some(reused) = self.reusable_pure_evaluation(child_rule, &child_request)? {
-            let Some(parent) = stack.last() else {
-                return Err(internal_diag(InternalInvariant::PureLostRequestingFrame));
-            };
-            let Some(parent_node) = self.computations.get_mut(parent.computation) else {
-                return Err(internal_diag(InternalInvariant::PureLostParentComputation));
-            };
-            parent_node.dependencies.push(DependencyEdge::Request {
-                computation: reused.computation,
-                request: child_request,
-            });
-            let Some(parent) = stack.last_mut() else {
-                return Err(internal_diag(InternalInvariant::PureLostRequestingFrame));
-            };
-            parent.resume_with = Some(reused.value);
-            return Ok(());
-        }
-
-        let child = self.start_frame(child_request.clone(), child_rule)?;
-        let Some(parent) = stack.last() else {
-            return Err(internal_diag(InternalInvariant::PureLostRequestingFrame));
-        };
-        let Some(parent_node) = self.computations.get_mut(parent.computation) else {
-            return Err(internal_diag(InternalInvariant::PureLostParentComputation));
-        };
-        parent_node.dependencies.push(DependencyEdge::Request {
-            computation: child.computation,
-            request: child_request,
-        });
-        stack.push(child);
-        Ok(())
+        requests: &[Request<Pure>],
+        runtime: &R,
+        policy: &P,
+        executor: &E,
+        cancel: &C,
+    ) -> Result<PithResult<Box<[Evaluation]>>, RuntimeError> {
+        runtime.block_on(self.run_inner(requests, policy, executor, cancel))
     }
 
-    fn fetch_blob(&self, id: ContentId) -> PithResult<Box<[u8]>> {
-        match self.store.get_blob(id).map_err(store_error_diag)? {
-            Some(blob) => Ok(blob.as_bytes().to_vec().into_boxed_slice()),
-            None => Err(content_unavailable_diag(id)),
-        }
-    }
-
-    fn record_blob_edge(&mut self, stack: &[EvalFrame], id: ContentId) {
-        let Some(parent) = stack.last() else {
-            return;
-        };
-        let Some(parent_node) = self.computations.get_mut(parent.computation) else {
-            return;
-        };
-        parent_node.dependencies.push(DependencyEdge::Blob { id });
+    async fn run_inner<P: ActionPolicy, E: Executor, C: CancelSignal>(
+        &mut self,
+        requests: &[Request<Pure>],
+        policy: &P,
+        executor: &E,
+        cancel: &C,
+    ) -> PithResult<Box<[Evaluation]>> {
+        let mut plan = self.open_roots(requests)?;
+        // `drive_run` records whatever it was holding before returning, so
+        // there is nothing left Pending to clean up here.
+        self.drive_run(&mut plan.scheduler, policy, executor, cancel)
+            .await?;
+        plan.into_evaluations()
     }
 }
 
@@ -513,8 +267,8 @@ impl Default for Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pith_core::{Interface, RuleIdentity, RuleRevision, Type};
-    use pith_diag::Span;
+    use pith_core::{Interface, RuleIdentity, RuleRevision, Type, Value};
+    use pith_diag::{EngineCode, Span};
 
     struct UnitRule;
 
@@ -527,7 +281,7 @@ mod tests {
     struct UnitFrame;
 
     impl PureRuleFrame for UnitFrame {
-        fn step(&mut self, _input: Option<Value>) -> PithResult<PureStep> {
+        fn step(&mut self, _input: Option<Resumption>) -> PithResult<PureStep> {
             Ok(PureStep::Complete(Value::Unit))
         }
     }

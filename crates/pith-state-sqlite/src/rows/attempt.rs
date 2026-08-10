@@ -4,7 +4,7 @@
 use pith_engine::state::validate::TerminalAttemptState;
 use pith_engine::state::{
     CompletedAttempt, DurableAttempt, DurableAttemptId, DurableAttemptState, DurableAttemptStatus,
-    DurableComputation, DurableReuseDecision, DurableReuseReason, EncodedValue, FailedAttempt,
+    DurableComputation, DurableReuseDecision, DurableReuseReason, EncodedValue, StoppedAttempt,
 };
 
 use crate::columns::{
@@ -67,14 +67,17 @@ pub fn write_terminal_state(
     let status = match terminal_state {
         TerminalAttemptState::Complete(_) => DurableAttemptStatus::Complete,
         TerminalAttemptState::Failed(_) => DurableAttemptStatus::Failed,
+        TerminalAttemptState::Cancelled(_) => DurableAttemptStatus::Cancelled,
     };
+    // Only a completed attempt carries a result and a reuse decision; the two
+    // stopped states retain their edges, diagnostics, and provenance instead.
     let (reuse, reuse_attempt, reuse_computation) = match terminal_state {
         TerminalAttemptState::Complete(completion) => stored_reuse(connection, &completion.reuse)?,
-        TerminalAttemptState::Failed(_) => (None, None, None),
+        TerminalAttemptState::Failed(_) | TerminalAttemptState::Cancelled(_) => (None, None, None),
     };
     let result = match terminal_state {
         TerminalAttemptState::Complete(completion) => Some(completion.result.as_bytes().to_vec()),
-        TerminalAttemptState::Failed(_) => None,
+        TerminalAttemptState::Failed(_) | TerminalAttemptState::Cancelled(_) => None,
     };
 
     diesel::update(attempts::table.find(stored))
@@ -97,8 +100,10 @@ pub fn write_terminal_state(
 
     write_dependencies(connection, stored, terminal_state.dependencies())?;
     write_report_rows(connection, stored, provenance)?;
-    if let TerminalAttemptState::Failed(failure) = terminal_state {
-        write_diagnostics(connection, stored, &failure.diagnostics)?;
+    if let TerminalAttemptState::Failed(stopped) | TerminalAttemptState::Cancelled(stopped) =
+        terminal_state
+    {
+        write_diagnostics(connection, stored, &stopped.diagnostics)?;
     }
     Ok(())
 }
@@ -267,16 +272,28 @@ fn restore_attempt(
             provenance: load_provenance(connection, &row)?,
             reuse: load_reuse(connection, &row)?,
         }),
-        DurableAttemptStatus::Failed => DurableAttemptState::Failed(FailedAttempt {
-            dependencies: load_dependencies(connection, row.id)?,
-            diagnostics: load_diagnostics(connection, row.id)?,
-            provenance: load_provenance(connection, &row)?,
-        }),
+        DurableAttemptStatus::Failed => {
+            DurableAttemptState::Failed(restore_stopped(connection, &row)?)
+        }
+        DurableAttemptStatus::Cancelled => {
+            DurableAttemptState::Cancelled(restore_stopped(connection, &row)?)
+        }
     };
     Ok(DurableAttempt {
         id: row.id.0,
         computation,
         state,
+    })
+}
+
+fn restore_stopped(
+    connection: &mut SqliteConnection,
+    row: &AttemptRow,
+) -> Result<StoppedAttempt, Failure> {
+    Ok(StoppedAttempt {
+        dependencies: load_dependencies(connection, row.id)?,
+        diagnostics: load_diagnostics(connection, row.id)?,
+        provenance: load_provenance(connection, row)?,
     })
 }
 

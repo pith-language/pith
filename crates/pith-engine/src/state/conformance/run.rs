@@ -6,7 +6,7 @@ use crate::MemoryEngineStateStore;
 use crate::policy::ActionAuthorization;
 use crate::state::{
     CompletedAttempt, DurableActionProvenance, DurableAttemptId, DurableComputation,
-    DurableProvenance, EncodedValue, EngineStateStore, FailedAttempt,
+    DurableProvenance, EncodedValue, EngineStateStore, StoppedAttempt,
 };
 
 use super::compare::{Divergence, DivergenceDetail, compare_outcome};
@@ -28,6 +28,7 @@ pub(super) enum TerminalKind {
     CompleteReusable,
     CompleteNotReusable,
     Failed,
+    Cancelled,
 }
 
 impl TerminalKind {
@@ -73,17 +74,19 @@ pub(super) fn run_step(
             subject,
             tracked,
         ),
-        Step::Fail {
+        Step::Stop {
             attempt,
             dependencies,
             message_len,
             notes,
-        } => fail(
+            cancelled,
+        } => stop(
             index,
             *attempt,
             dependencies,
             *message_len,
             *notes,
+            *cancelled,
             model,
             subject,
             tracked,
@@ -151,7 +154,7 @@ fn complete(
         DurableComputation::Pure(_) => DurableProvenance::Pure,
         DurableComputation::Action { authorization, .. } => {
             if matches!(authorization, ActionAuthorization::Denied { .. }) {
-                // A denied action cannot complete; `Fail` covers that path.
+                // A denied action cannot complete; `Stop` covers that path.
                 return Ok(());
             }
             DurableProvenance::Action(DurableActionProvenance::Imported {
@@ -192,12 +195,13 @@ fn complete(
     clippy::too_many_arguments,
     reason = "the harness threads both stores, the tracking table, and the generated step's fields"
 )]
-fn fail(
+fn stop(
     index: usize,
     selector: Selector,
     dependencies: &[GeneratedDependency],
     message_len: u8,
     notes: u8,
+    cancelled: bool,
     model: &MemoryEngineStateStore,
     subject: &dyn EngineStateStore,
     tracked: &mut [Tracked],
@@ -217,26 +221,35 @@ fn fail(
         }
     };
     let diagnostics = diagnostics(message_len, notes);
-    let failure = |space: Space| FailedAttempt {
+    let stopped = |space: Space| StoppedAttempt {
         dependencies: with_capability_edges(materialize(&resolved, tracked, space), &provenance),
         diagnostics: diagnostics.clone(),
         provenance: provenance.clone(),
     };
 
-    let model_outcome = model.publish_failed(target.model, failure(Space::Model));
-    let subject_outcome = subject.publish_failed(target.subject, failure(Space::Subject));
-    compare_outcome(
-        index,
-        "publish_failed",
-        &model_outcome,
-        &subject_outcome,
-        tracked,
-    )?;
+    let (operation, model_outcome, subject_outcome) = if cancelled {
+        (
+            "publish_cancelled",
+            model.publish_cancelled(target.model, stopped(Space::Model)),
+            subject.publish_cancelled(target.subject, stopped(Space::Subject)),
+        )
+    } else {
+        (
+            "publish_failed",
+            model.publish_failed(target.model, stopped(Space::Model)),
+            subject.publish_failed(target.subject, stopped(Space::Subject)),
+        )
+    };
+    compare_outcome(index, operation, &model_outcome, &subject_outcome, tracked)?;
 
     if model_outcome.is_ok()
         && let Some(entry) = tracked.get_mut(position)
     {
-        entry.terminal = Some(TerminalKind::Failed);
+        entry.terminal = Some(if cancelled {
+            TerminalKind::Cancelled
+        } else {
+            TerminalKind::Failed
+        });
     }
     Ok(())
 }
@@ -255,7 +268,7 @@ fn republish_terminal(
     let Some(target) = pick(selector, &terminal) else {
         return Ok(());
     };
-    let failure = FailedAttempt {
+    let failure = StoppedAttempt {
         dependencies: Box::new([]),
         diagnostics: Box::new([]),
         provenance: match &target.computation {

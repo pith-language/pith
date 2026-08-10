@@ -5,6 +5,7 @@ use pith_core::{Interface, Request, Rule, RuleIdentity, RuleRevision, Type, Valu
 use pith_diag::{Diag, DiagnosticSink, EngineCode, PithResult, Severity, Span, StableCode};
 use pith_engine::{
     AttemptState, DependencyEdge, Engine, EvaluationSource, PureRule, PureRuleFrame, PureStep,
+    Resumption,
 };
 
 struct ConstantRule(Value);
@@ -18,7 +19,7 @@ impl PureRule for ConstantRule {
 struct ConstantFrame(Value);
 
 impl PureRuleFrame for ConstantFrame {
-    fn step(&mut self, _input: Option<Value>) -> PithResult<PureStep> {
+    fn step(&mut self, _input: Option<Resumption>) -> PithResult<PureStep> {
         Ok(PureStep::Complete(self.0.clone()))
     }
 }
@@ -34,7 +35,7 @@ impl PureRule for FailingRule {
 struct FailingFrame;
 
 impl PureRuleFrame for FailingFrame {
-    fn step(&mut self, _input: Option<Value>) -> PithResult<PureStep> {
+    fn step(&mut self, _input: Option<Resumption>) -> PithResult<PureStep> {
         let mut diagnostics = DiagnosticSink::new();
         diagnostics.push(Diag::new(
             Severity::Error,
@@ -87,13 +88,13 @@ struct IncrementFrame {
 }
 
 impl PureRuleFrame for IncrementFrame {
-    fn step(&mut self, input: Option<Value>) -> PithResult<PureStep> {
+    fn step(&mut self, input: Option<Resumption>) -> PithResult<PureStep> {
         if !self.requested {
             self.requested = true;
             return Ok(PureStep::Need(self.dependency.clone()));
         }
 
-        let value = match input {
+        let value = match input.and_then(Resumption::one) {
             Some(Value::Int(value)) => Value::Int(value.saturating_add(1)),
             Some(value) => value,
             None => Value::Unit,
@@ -121,12 +122,14 @@ struct ForwardFrame {
 }
 
 impl PureRuleFrame for ForwardFrame {
-    fn step(&mut self, input: Option<Value>) -> PithResult<PureStep> {
+    fn step(&mut self, input: Option<Resumption>) -> PithResult<PureStep> {
         if !self.requested {
             self.requested = true;
             return Ok(PureStep::Need(self.dependency.clone()));
         }
-        Ok(PureStep::Complete(input.unwrap_or(Value::Unit)))
+        Ok(PureStep::Complete(
+            input.and_then(Resumption::one).unwrap_or(Value::Unit),
+        ))
     }
 }
 
@@ -155,7 +158,7 @@ struct CountdownFrame {
 }
 
 impl PureRuleFrame for CountdownFrame {
-    fn step(&mut self, input: Option<Value>) -> PithResult<PureStep> {
+    fn step(&mut self, input: Option<Resumption>) -> PithResult<PureStep> {
         if self.remaining > 0 && !self.requested {
             self.requested = true;
             return Ok(PureStep::Need(request(
@@ -165,7 +168,9 @@ impl PureRuleFrame for CountdownFrame {
             )));
         }
         Ok(PureStep::Complete(
-            input.unwrap_or(Value::Int(self.remaining)),
+            input
+                .and_then(Resumption::one)
+                .unwrap_or(Value::Int(self.remaining)),
         ))
     }
 }

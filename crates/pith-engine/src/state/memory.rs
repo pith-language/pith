@@ -7,7 +7,7 @@ use super::validate::{AttemptLookup, TerminalAttemptState, validate_publication}
 use super::{
     CURRENT_ENGINE_STATE_VERSIONS, CompletedAttempt, DurableAttempt, DurableAttemptId,
     DurableAttemptState, DurableComputation, EngineStateError, EngineStateStore,
-    EngineStateVersions, FailedAttempt,
+    EngineStateVersions, InvalidationExplanation, StoppedAttempt,
 };
 
 /// Deterministic in-memory implementation of [`EngineStateStore`].
@@ -156,9 +156,17 @@ impl EngineStateStore for MemoryEngineStateStore {
     fn publish_failed(
         &self,
         attempt: DurableAttemptId,
-        failure: FailedAttempt,
+        failure: StoppedAttempt,
     ) -> Result<(), EngineStateError> {
         self.publish(attempt, TerminalAttemptState::Failed(failure))
+    }
+
+    fn publish_cancelled(
+        &self,
+        attempt: DurableAttemptId,
+        cancellation: StoppedAttempt,
+    ) -> Result<(), EngineStateError> {
+        self.publish(attempt, TerminalAttemptState::Cancelled(cancellation))
     }
 
     fn attempt(
@@ -193,6 +201,26 @@ impl EngineStateStore for MemoryEngineStateStore {
             });
         };
         Ok(Some(record.clone()))
+    }
+
+    fn explain_invalidation(
+        &self,
+        computation: PureComputationKey,
+    ) -> Result<Option<InvalidationExplanation>, EngineStateError> {
+        let records = self.locked()?;
+        let latest = match records.latest_reusable.get(&computation) {
+            Some(attempt) => match records.attempts.get(attempt) {
+                Some(record) => Some(record.clone()),
+                None => {
+                    return Err(EngineStateError::Adapter {
+                        message: format!("reusable index references missing attempt {attempt}")
+                            .into(),
+                    });
+                }
+            },
+            None => None,
+        };
+        super::explain::explain_latest(&*records, latest)
     }
 
     fn pending_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {

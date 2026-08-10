@@ -279,7 +279,8 @@ impl Engine {
                     reuse: ReuseDecision::NotReusable(_),
                     ..
                 }
-                | AttemptState::Failed { .. } => {
+                | AttemptState::Failed { .. }
+                | AttemptState::Cancelled { .. } => {
                     return ReuseDecision::NotReusable(ReuseReason::DependencyNotReusable {
                         computation,
                     });
