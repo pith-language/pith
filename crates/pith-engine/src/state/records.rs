@@ -14,9 +14,15 @@ use crate::{
     ExecutionReport,
 };
 
+/// Version of the canonical payload encodings durable records embed: a typed
+/// [`Value`] result and an [`ActionSpec`] contract. Reported as the
+/// `semantic_encoding` half of an adapter's [`EngineStateVersions`]. Adapters
+/// choose their own table layout and report it as `schema` (decision 0025).
+pub const RECORD_ENCODING_VERSION: SemanticEncodingVersion = SemanticEncodingVersion::new(1);
+
 pub const CURRENT_ENGINE_STATE_VERSIONS: EngineStateVersions = EngineStateVersions {
     schema: SchemaVersion::new(1),
-    semantic_encoding: SemanticEncodingVersion::new(1),
+    semantic_encoding: RECORD_ENCODING_VERSION,
 };
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

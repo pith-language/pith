@@ -170,10 +170,13 @@ pub trait EngineStateStore: Send + Sync {
 
     /// Create a new attempt in the `Pending` state.
     ///
+    /// Writes take `&self`: an adapter serializes them itself, and requiring
+    /// `&mut` would make the store an exclusive resource for the whole engine.
+    ///
     /// # Errors
     /// Returns an adapter error or an identifier-exhaustion error.
     fn create_pending_attempt(
-        &mut self,
+        &self,
         computation: DurableComputation,
     ) -> Result<DurableAttemptId, EngineStateError>;
 
@@ -184,7 +187,7 @@ pub trait EngineStateStore: Send + Sync {
     /// Returns an error when the attempt is missing, already terminal, has an
     /// invalid completion, or the adapter cannot commit.
     fn publish_complete(
-        &mut self,
+        &self,
         attempt: DurableAttemptId,
         completion: CompletedAttempt,
     ) -> Result<(), EngineStateError>;
@@ -196,7 +199,7 @@ pub trait EngineStateStore: Send + Sync {
     /// Returns an error when the attempt is missing, already terminal, has an
     /// invalid failure record, or the adapter cannot commit.
     fn publish_failed(
-        &mut self,
+        &self,
         attempt: DurableAttemptId,
         failure: FailedAttempt,
     ) -> Result<(), EngineStateError>;

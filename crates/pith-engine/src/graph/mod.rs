@@ -91,17 +91,10 @@ impl Engine {
         }
     }
 
-    /// Read-only access to the durable engine-state adapter (decision 0024).
+    /// The durable engine-state adapter (decision 0024). Writes take `&self`,
+    /// so this is the only accessor the adapter needs.
     pub fn state_store(&self) -> &dyn EngineStateStore {
         self.state_store.as_ref()
-    }
-
-    /// Mutable access to the durable engine-state adapter. The engine-internal
-    /// adapter-boundary discipline (no store calls inside a rule step) still
-    /// applies to the engine's own scheduling paths; this accessor is for hosts
-    /// and tests that need to inspect or seed durable state at scheduling gaps.
-    pub fn state_store_mut(&mut self) -> &mut dyn EngineStateStore {
-        self.state_store.as_mut()
     }
 
     /// The durable attempt identifier the engine published for `computation`,

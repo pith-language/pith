@@ -237,7 +237,7 @@ fn memory_store_conforms_to_the_engine_state_contract() -> Result<(), Box<dyn st
 #[test]
 fn pending_action_retains_durable_plan_authorization_and_observed_report()
 -> Result<(), Box<dyn std::error::Error>> {
-    let mut store = MemoryEngineStateStore::default();
+    let store = MemoryEngineStateStore::default();
     let identity = RuleIdentity::of_module_declaration("engine-state-tests", "action");
     let revision = RuleRevision::of_manifest(identity, b"engine-state-action-v1");
     let plan = action_plan("action")?;
@@ -344,7 +344,7 @@ fn pending_action_retains_durable_plan_authorization_and_observed_report()
 #[test]
 fn pending_attempts_can_be_enumerated_for_crash_recovery() -> Result<(), Box<dyn std::error::Error>>
 {
-    let mut store = MemoryEngineStateStore::default();
+    let store = MemoryEngineStateStore::default();
     let key = pure_computation("interrupted", 1);
     let pending = store.create_pending_attempt(DurableComputation::Pure(key))?;
 
@@ -366,7 +366,7 @@ fn malformed_encoded_results_are_rejected() {
 
 #[test]
 fn mismatched_provenance_does_not_partially_publish() -> Result<(), Box<dyn std::error::Error>> {
-    let mut store = MemoryEngineStateStore::default();
+    let store = MemoryEngineStateStore::default();
     let attempt =
         store.create_pending_attempt(DurableComputation::Pure(pure_computation("pure", 1)))?;
 
@@ -394,7 +394,7 @@ fn mismatched_provenance_does_not_partially_publish() -> Result<(), Box<dyn std:
 
 #[test]
 fn invalid_dependency_edges_do_not_publish() -> Result<(), Box<dyn std::error::Error>> {
-    let mut store = MemoryEngineStateStore::default();
+    let store = MemoryEngineStateStore::default();
     let dependency_key = pure_computation("dependency", 1);
     let dependency_attempt =
         store.create_pending_attempt(DurableComputation::Pure(dependency_key))?;
@@ -498,7 +498,7 @@ fn invalid_dependency_edges_do_not_publish() -> Result<(), Box<dyn std::error::E
 
 #[test]
 fn pure_reuse_is_derived_from_ordered_dependencies() -> Result<(), Box<dyn std::error::Error>> {
-    let mut store = MemoryEngineStateStore::default();
+    let store = MemoryEngineStateStore::default();
     let action_attempt = store.create_pending_attempt(DurableComputation::Action {
         plan: action_plan("reuse-dependency")?,
         authorization: ActionAuthorization::Allowed {
@@ -571,7 +571,7 @@ fn pure_reuse_is_derived_from_ordered_dependencies() -> Result<(), Box<dyn std::
 #[test]
 fn denied_actions_cannot_complete_or_retain_execution_reports()
 -> Result<(), Box<dyn std::error::Error>> {
-    let mut store = MemoryEngineStateStore::default();
+    let store = MemoryEngineStateStore::default();
     let attempt = store.create_pending_attempt(DurableComputation::Action {
         plan: action_plan("denied-action")?,
         authorization: ActionAuthorization::Denied {
@@ -633,7 +633,7 @@ fn denied_actions_cannot_complete_or_retain_execution_reports()
 #[test]
 fn captured_report_metadata_survives_output_import_failure()
 -> Result<(), Box<dyn std::error::Error>> {
-    let mut store = MemoryEngineStateStore::default();
+    let store = MemoryEngineStateStore::default();
     let attempt = store.create_pending_attempt(DurableComputation::Action {
         plan: action_plan("failed-import")?,
         authorization: ActionAuthorization::Allowed {

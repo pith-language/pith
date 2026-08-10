@@ -10,6 +10,12 @@ description = "The pith kernel engine: arena graph, sync step machine, async sch
 [lints]
 workspace = true
 
+[features]
+# Exposes `state::conformance`, the cross-adapter suite an engine-state adapter
+# proves itself against (decision 0025). Off by default: it is test scaffolding,
+# not part of the engine.
+testing = ["dep:proptest"]
+
 [dependencies]
 pith-diag.workspace = true
 pith-ids.workspace = true
@@ -24,6 +30,10 @@ tracing.workspace = true
 # Decisions 0021, 0022: runtime adapter boundary.
 tokio.workspace = true
 async-trait.workspace = true
+
+# Optional so the conformance suite can live in the library rather than in a
+# test file no other crate can reach.
+proptest = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest.workspace = true

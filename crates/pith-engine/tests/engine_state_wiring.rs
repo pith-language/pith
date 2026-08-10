@@ -469,14 +469,14 @@ impl EngineStateStore for CreateFailingStore {
     }
 
     fn create_pending_attempt(
-        &mut self,
+        &self,
         _computation: DurableComputation,
     ) -> Result<DurableAttemptId, EngineStateError> {
         Err(Self::failure())
     }
 
     fn publish_complete(
-        &mut self,
+        &self,
         attempt: DurableAttemptId,
         completion: CompletedAttempt,
     ) -> Result<(), EngineStateError> {
@@ -484,7 +484,7 @@ impl EngineStateStore for CreateFailingStore {
     }
 
     fn publish_failed(
-        &mut self,
+        &self,
         attempt: DurableAttemptId,
         failure: FailedAttempt,
     ) -> Result<(), EngineStateError> {
@@ -539,14 +539,14 @@ impl EngineStateStore for ReadFailingStore {
     }
 
     fn create_pending_attempt(
-        &mut self,
+        &self,
         computation: DurableComputation,
     ) -> Result<DurableAttemptId, EngineStateError> {
         self.inner.create_pending_attempt(computation)
     }
 
     fn publish_complete(
-        &mut self,
+        &self,
         attempt: DurableAttemptId,
         completion: CompletedAttempt,
     ) -> Result<(), EngineStateError> {
@@ -554,7 +554,7 @@ impl EngineStateStore for ReadFailingStore {
     }
 
     fn publish_failed(
-        &mut self,
+        &self,
         attempt: DurableAttemptId,
         failure: FailedAttempt,
     ) -> Result<(), EngineStateError> {
@@ -631,14 +631,14 @@ impl EngineStateStore for SharedEngineStateStore {
     }
 
     fn create_pending_attempt(
-        &mut self,
+        &self,
         computation: DurableComputation,
     ) -> Result<DurableAttemptId, EngineStateError> {
         self.write(|store| store.create_pending_attempt(computation))
     }
 
     fn publish_complete(
-        &mut self,
+        &self,
         attempt: DurableAttemptId,
         completion: CompletedAttempt,
     ) -> Result<(), EngineStateError> {
@@ -646,7 +646,7 @@ impl EngineStateStore for SharedEngineStateStore {
     }
 
     fn publish_failed(
-        &mut self,
+        &self,
         attempt: DurableAttemptId,
         failure: FailedAttempt,
     ) -> Result<(), EngineStateError> {
@@ -686,7 +686,6 @@ fn publish_reusable_attempt(
     computation: PureComputationKey,
     result: &Value,
 ) -> DurableAttemptId {
-    let mut state = state.clone();
     let attempt = match state.create_pending_attempt(DurableComputation::Pure(computation)) {
         Ok(attempt) => attempt,
         Err(error) => unreachable!("shared engine state rejected a pending attempt: {error}"),
@@ -1000,11 +999,11 @@ fn durable_reuse_is_valid_until_a_dependency_result_identity_changes() {
     let leaf_key = pure_key_of(&engine, leaf_computation);
     let original_leaf_attempt = durable_id(&engine, leaf_computation);
     let changed_leaf = engine
-        .state_store_mut()
+        .state_store()
         .create_pending_attempt(DurableComputation::Pure(leaf_key))
         .unwrap();
     engine
-        .state_store_mut()
+        .state_store()
         .publish_complete(
             changed_leaf,
             CompletedAttempt {
@@ -1054,11 +1053,11 @@ fn durable_reuse_remains_valid_when_a_dependency_result_is_canonically_equal() {
     let leaf_computation = leaf_dependency_of(&engine, root_evaluation.computation);
     let leaf_key = pure_key_of(&engine, leaf_computation);
     let equal_leaf = engine
-        .state_store_mut()
+        .state_store()
         .create_pending_attempt(DurableComputation::Pure(leaf_key))
         .unwrap();
     engine
-        .state_store_mut()
+        .state_store()
         .publish_complete(
             equal_leaf,
             CompletedAttempt {
