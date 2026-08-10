@@ -429,10 +429,6 @@ mod tests {
 
     #[test]
     fn prefixes_follow_the_version_template() {
-        // Every prefix must be `pith:<kind>:<version>\0` with the SAME version
-        // segment. Extract that segment (the tail between the final ':' and the
-        // NUL) from each prefix and assert they agree. A drift here would mean
-        // one digest kind silently left the shared version behind.
         let prefixes: [&[u8]; 6] = [
             domain::CONTENT_BLOB,
             domain::CONTENT_TREE,
@@ -446,7 +442,7 @@ mod tests {
             let s = std::str::from_utf8(prefix).expect("prefixes are ASCII + NUL");
             assert!(s.starts_with("pith:"), "{s:?}: missing pith: header");
             assert!(s.ends_with('\0'), "{s:?}: missing NUL terminator");
-            let body = &s["pith:".len()..s.len() - 1]; // strip header and NUL
+            let body = &s["pith:".len()..s.len() - 1];
             let (_, version) = body
                 .rsplit_once(':')
                 .expect("prefix body has a `<kind>:<version>` shape");

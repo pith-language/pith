@@ -269,3 +269,7 @@ mod tests {
         assert_ne!(a, c);
     }
 }
+
+#[cfg(test)]
+#[path = "arena_tests.rs"]
+mod arena_tests;

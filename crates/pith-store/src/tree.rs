@@ -401,3 +401,11 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tree_manifest_tests.rs"]
+mod tree_manifest_tests;
+
+#[cfg(test)]
+#[path = "tree_fuzz.rs"]
+mod tree_fuzz;
