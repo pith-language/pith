@@ -54,6 +54,8 @@ when an accepted decision changes, a new record supersedes it. the old record st
 - [0025: store engine state as normalized relations, not as canonical record blobs](0025-relational-engine-state.md)
 - [0026: a generic structural type calculus, with nominal identity, generic uncertainty, and no predicate types](0026-generic-typed-calculus.md)
 - [0027: frame retention and garbage collection as roots, two stores, and composable policy axes](0027-retention-and-gc.md)
+- [0028: a first-party sandboxed local executor using landlock and seccomp](0028-sandboxed-local-executor.md)
+- [0029: independence is declared by the rule body, not inferred by the scheduler](0029-declared-independence.md)
 
 note: 0013 amends 0005 to add a fifth identity type. 0005 stands; the amendment is recorded in 0013.
 
@@ -64,3 +66,7 @@ note: 0025 refines 0024 by fixing how an adapter represents the records 0024 def
 note: 0026 supersedes 0017 (its structural-default and nominal-by-declaration mechanism becomes one section of the larger calculus) and amends 0010 (settling the calculus questions among 0010's unresolved list). 0017 stays in the repository with a pointer; 0010 stands.
 
 note: 0027 complements 0024 by framing the retention and GC problem 0024 left open. it does not implement GC; it defines the design space (roots, policy axes, cross-store ordering) a later workload-evidence record lands in.
+
+note: 0028 amends 0016 by recording the sandboxing approach 0016 left in "unresolved." 0016 stands; its sanctioned `unsafe`-at-ffi-boundary discipline is what 0028's two `sys_*` modules implement.
+
+note: 0029 refines 0022 by answering where the scheduler's concurrency comes from. 0022 stands; its synchronous core is unchanged, and 0029 records that the width a concurrent scheduler needs is declared by rule bodies rather than inferred.
