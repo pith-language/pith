@@ -22,6 +22,7 @@
         packages = [
           rustToolchain
           pkgs.cargo-nextest
+          pkgs.cargo-llvm-cov
           pkgs.git
         ];
 
