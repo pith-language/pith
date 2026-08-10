@@ -51,7 +51,10 @@ when an accepted decision changes, a new record supersedes it. the old record st
 - [0022: a synchronous pure evaluator core with an async scheduler at the effect boundary](0022-sync-core-async-scheduler.md)
 - [0023: separate stable rule identity from cache-invalidating rule revision](0023-rule-and-cache-identity.md)
 - [0024: persist content in a filesystem cas and engine state in sqlite](0024-persistent-engine-state.md)
+- [0025: store engine state as normalized relations, not as canonical record blobs](0025-relational-engine-state.md)
 
 note: 0013 amends 0005 to add a fifth identity type. 0005 stands; the amendment is recorded in 0013.
 
 note: 0022 refines 0019 by fixing where each effect category executes (synchronous step machine for `Pure`, async scheduler for the other four). 0019 stands; the refinement is recorded in 0022.
+
+note: 0025 refines 0024 by fixing how an adapter represents the records 0024 defines. 0024's choice of storage substrates stands; the representation within them is recorded in 0025.

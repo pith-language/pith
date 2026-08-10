@@ -8,10 +8,13 @@ mod diagnostics;
 pub mod ir;
 pub mod query;
 mod reuse;
+mod state_publish;
 
+pub(crate) use capabilities::canonical_capabilities;
 pub use ir::{
-    ActionPlan, ActionRecord, ComputationKind, ComputationNode, DependencyEdge, Evaluation,
-    EvaluationSource, PureRule, PureRuleFrame, PureStep, ReuseDecision, ReuseReason, RuleSelection,
+    ActionPlan, ActionRecord, AttemptState, ComputationKind, ComputationNode, DependencyEdge,
+    Evaluation, EvaluationSource, PureRule, PureRuleFrame, PureStep, ReuseDecision, ReuseReason,
+    RuleSelection,
 };
 pub use query::EngineQuery;
 
@@ -22,17 +25,18 @@ use pith_core::{
 use pith_diag::{Diag, DiagnosticSink, EngineCode, PithResult};
 use pith_ids::{ComputationArena, ComputationId, ContentId};
 use pith_store::{ContentStore, MemoryContentStore};
-use smallvec::SmallVec;
 
 use crate::action::{ActionRule, Executor};
 use crate::policy::ActionPolicy;
 use crate::runtime::Runtime;
+use crate::state::{DurableAttemptId, EngineStateStore, MemoryEngineStateStore};
 use diagnostics::{
     InternalInvariant, content_unavailable_diag, cycle_diag, effectful_in_pure_diag, internal_diag,
     one_diag, store_error_diag,
 };
 use ir::EvalFrame;
 use reuse::PureComputationIndex;
+use smallvec::SmallVec;
 
 pub(super) enum ActionRunOutcome {
     PlanningFailed(DiagnosticSink),
@@ -50,6 +54,12 @@ pub struct Engine {
     pub(crate) computations: ComputationArena<ComputationNode>,
     pure_computations: PureComputationIndex,
     pub(crate) store: Box<dyn ContentStore>,
+    /// Durable engine metadata. Arena handles never cross this boundary; the
+    /// process-local [`durable_attempts`] side-table maps computation nodes to
+    /// their durable attempt identifiers. Store calls happen only at engine
+    /// scheduling boundaries (decision 0024, "adapter boundaries").
+    pub(crate) state_store: Box<dyn EngineStateStore>,
+    pub(crate) durable_attempts: IndexMap<ComputationId, DurableAttemptId>,
 }
 
 impl Engine {
@@ -58,6 +68,16 @@ impl Engine {
     }
 
     pub fn with_content_store(store: impl ContentStore + 'static) -> Self {
+        Self::with_state_store(store, MemoryEngineStateStore::default())
+    }
+
+    /// Build an engine with explicit content and engine-state adapters. The
+    /// state store is shared, not moved, so callers (typically tests) can read
+    /// the durable records the engine publishes.
+    pub fn with_state_store(
+        store: impl ContentStore + 'static,
+        state_store: impl EngineStateStore + 'static,
+    ) -> Self {
         Self {
             rules: RuleArena::new(),
             bodies: IndexMap::new(),
@@ -66,7 +86,22 @@ impl Engine {
             computations: ComputationArena::new(),
             pure_computations: IndexMap::new(),
             store: Box::new(store),
+            state_store: Box::new(state_store),
+            durable_attempts: IndexMap::new(),
         }
+    }
+
+    /// The durable engine-state adapter (decision 0024). Writes take `&self`,
+    /// so this is the only accessor the adapter needs.
+    pub fn state_store(&self) -> &dyn EngineStateStore {
+        self.state_store.as_ref()
+    }
+
+    /// The durable attempt identifier the engine published for `computation`,
+    /// if any. `None` for computations that never left `Pending` or that this
+    /// engine instance did not allocate.
+    pub fn durable_attempt_for(&self, computation: ComputationId) -> Option<DurableAttemptId> {
+        self.durable_attempts.get(&computation).copied()
     }
 
     /// Register a pure rule together with its executable body.
@@ -124,17 +159,25 @@ impl Engine {
     /// ```
     pub fn evaluate_pure(&mut self, request: &Request<Pure>) -> PithResult<Evaluation> {
         let rule = self.resolve_pure_rule(request)?;
-        if let Some(evaluation) = self.reusable_pure_evaluation(rule, request) {
+        if let Some(evaluation) = self.reusable_pure_evaluation(rule, request)? {
             return Ok(evaluation);
         }
         let root = self.start_frame(request.clone(), rule)?;
         let mut stack = vec![root];
 
+        let result = self.drive_pure(&mut stack);
+        if let Err(diagnostics) = &result {
+            self.fail_pending_frames(&stack, diagnostics);
+        }
+        result
+    }
+
+    fn drive_pure(&mut self, stack: &mut Vec<EvalFrame>) -> PithResult<Evaluation> {
         loop {
-            let step = self.step_top_frame(&mut stack)?;
+            let step = self.step_top_frame(stack)?;
             match step {
                 PureStep::Complete(value) => {
-                    let completed = self.finish_frame(&mut stack, value)?;
+                    let completed = self.finish_frame(stack, value)?;
                     if let Some(parent) = stack.last_mut() {
                         parent.resume_with = Some(completed.value.clone());
                     } else {
@@ -142,7 +185,7 @@ impl Engine {
                     }
                 }
                 PureStep::Need(child_request) => {
-                    self.handle_pure_need(&mut stack, child_request)?;
+                    self.handle_pure_need(stack, child_request)?;
                 }
                 PureStep::NeedBlob(_) | PureStep::NeedAction(_) => {
                     return Err(effectful_in_pure_diag());
@@ -180,17 +223,30 @@ impl Engine {
         executor: &E,
     ) -> PithResult<Evaluation> {
         let rule = self.resolve_pure_rule(request)?;
-        if let Some(evaluation) = self.reusable_pure_evaluation(rule, request) {
+        if let Some(evaluation) = self.reusable_pure_evaluation(rule, request)? {
             return Ok(evaluation);
         }
         let root = self.start_frame(request.clone(), rule)?;
         let mut stack = vec![root];
 
+        let result = self.drive_run(&mut stack, policy, executor).await;
+        if let Err(diagnostics) = &result {
+            self.fail_pending_frames(&stack, diagnostics);
+        }
+        result
+    }
+
+    async fn drive_run<P: ActionPolicy, E: Executor>(
+        &mut self,
+        stack: &mut Vec<EvalFrame>,
+        policy: &P,
+        executor: &E,
+    ) -> PithResult<Evaluation> {
         loop {
-            let step = self.step_top_frame(&mut stack)?;
+            let step = self.step_top_frame(stack)?;
             match step {
                 PureStep::Complete(value) => {
-                    let completed = self.finish_frame(&mut stack, value)?;
+                    let completed = self.finish_frame(stack, value)?;
                     if let Some(parent) = stack.last_mut() {
                         parent.resume_with = Some(completed.value.clone());
                     } else {
@@ -198,11 +254,11 @@ impl Engine {
                     }
                 }
                 PureStep::Need(child_request) => {
-                    self.handle_pure_need(&mut stack, child_request)?;
+                    self.handle_pure_need(stack, child_request)?;
                 }
                 PureStep::NeedBlob(id) => {
                     let bytes = self.fetch_blob(id)?;
-                    self.record_blob_edge(&stack, id);
+                    self.record_blob_edge(stack, id);
                     if let Some(parent) = stack.last_mut() {
                         parent.resume_with = Some(Value::Bytes(bytes));
                     } else {
@@ -271,12 +327,20 @@ impl Engine {
             kind: ComputationKind::Pure(request.clone()),
             rule,
             dependencies: SmallVec::new(),
-            result: None,
+            state: AttemptState::Pending,
             action: None,
             capabilities: Box::new([]),
-            reuse: ReuseDecision::Pending,
         });
         self.index_pure_computation(key, computation);
+        if let Err(diagnostics) = self.create_pending_pure_attempt(computation, key) {
+            // The durable attempt could not be created (only a failing adapter
+            // reaches this; the memory adapter is infallible). Mirror the action
+            // path's error hygiene: fail the orphaned arena node so it is not
+            // left Pending. No durable failure is published because no durable
+            // attempt exists; the diagnostics propagate to the caller.
+            self.fail_pure_orphan(computation, &diagnostics);
+            return Err(diagnostics);
+        }
         Ok(EvalFrame {
             computation,
             rule,
@@ -287,7 +351,7 @@ impl Engine {
     }
 
     fn finish_frame(&mut self, stack: &mut Vec<EvalFrame>, value: Value) -> PithResult<Evaluation> {
-        let Some(completed) = stack.pop() else {
+        let Some(completed) = stack.last() else {
             return Err(internal_diag(InternalInvariant::PureCompletedWithoutFrame));
         };
         let Some(rule) = self.rules.get(completed.rule) else {
@@ -321,14 +385,51 @@ impl Engine {
         let Some(node) = self.computations.get_mut(completed.computation) else {
             return Err(internal_diag(InternalInvariant::PureLostComputationNode));
         };
-        node.result = Some(value.clone());
+        node.state = AttemptState::Complete {
+            result: value.clone(),
+            reuse,
+        };
         node.capabilities = capabilities;
-        node.reuse = reuse;
+        let computation = completed.computation;
+        // The arena node is terminal; publish the durable record at this
+        // scheduling boundary (decision 0024). `pop` after publishing so the
+        // frame's computation id stays valid for the store call.
+        self.publish_pure_completion(computation)?;
+        stack.pop();
         Ok(Evaluation {
             value,
-            computation: completed.computation,
+            computation,
             source: EvaluationSource::Computed,
         })
+    }
+
+    fn fail_pending_frames(&mut self, stack: &[EvalFrame], diagnostics: &DiagnosticSink) {
+        for frame in stack {
+            let Some(node) = self.computations.get_mut(frame.computation) else {
+                continue;
+            };
+            if matches!(node.state, AttemptState::Pending) {
+                node.state = AttemptState::Failed {
+                    diagnostics: diagnostics.iter().cloned().collect(),
+                };
+                // Scheduling boundary: publish the durable failure for this
+                // pure attempt. The store call is best-effort with respect to
+                // the returned diagnostics — failure publication must not mask
+                // the diagnostics that caused it.
+                let _ = self.publish_pure_failure(frame.computation);
+            }
+        }
+    }
+
+    /// Reconcile an orphaned pure computation whose durable attempt could not be
+    /// created: mark it `Failed` in the arena so no `Pending` node remains. No
+    /// durable failure is published because no durable attempt exists.
+    fn fail_pure_orphan(&mut self, computation: ComputationId, diagnostics: &DiagnosticSink) {
+        if let Some(node) = self.computations.get_mut(computation) {
+            node.state = AttemptState::Failed {
+                diagnostics: diagnostics.iter().cloned().collect(),
+            };
+        }
     }
 
     /// Handle a `PureStep::Need`: select the child rule, cycle-check, allocate
@@ -352,7 +453,7 @@ impl Engine {
             return Err(cycle_diag(&chain, child_request.span));
         }
 
-        if let Some(reused) = self.reusable_pure_evaluation(child_rule, &child_request) {
+        if let Some(reused) = self.reusable_pure_evaluation(child_rule, &child_request)? {
             let Some(parent) = stack.last() else {
                 return Err(internal_diag(InternalInvariant::PureLostRequestingFrame));
             };

@@ -13,15 +13,15 @@ use pith_store::{Tree, TreeEntry, TreeEntryContent};
 use smallvec::SmallVec;
 
 use super::ir::{
-    ActionPlan, ActionRecord, ComputationKind, ComputationNode, DependencyEdge, ReuseDecision,
-    ReuseReason,
+    ActionPlan, ActionRecord, AttemptState, ComputationKind, ComputationNode, DependencyEdge,
+    ReuseDecision, ReuseReason,
 };
 use super::{ActionRunOutcome, Engine};
 use crate::action::{
-    ActionExecution, ActionInvocation, CapturedActionExecution, CapturedFileContent,
-    CapturedOutputContent, CapturedTreeEntryContent, ExecutionReport, Executor,
-    MaterializedActionInput, MaterializedBlob, MaterializedContent, MaterializedFileContent,
-    MaterializedTree, MaterializedTreeEntryContent, ProducedOutput,
+    ActionExecution, ActionInvocation, CapturedFileContent, CapturedOutputContent,
+    CapturedTreeEntryContent, ExecutionReport, Executor, MaterializedActionInput, MaterializedBlob,
+    MaterializedContent, MaterializedFileContent, MaterializedTree, MaterializedTreeEntryContent,
+    ProducedOutput,
 };
 use crate::graph::capabilities::canonical_capabilities;
 use crate::graph::diagnostics::{
@@ -96,16 +96,35 @@ impl Engine {
             kind: ComputationKind::Action(request.clone()),
             rule,
             dependencies: SmallVec::new(),
-            result: None,
+            state: AttemptState::Pending,
             action: Some(ActionRecord {
                 spec_digest: plan.spec_digest,
                 spec: plan.spec.clone(),
-                authorization,
-                report: None,
+                authorization: authorization.clone(),
+                executor_report: None,
+                imported_report: None,
             }),
             capabilities: canonical_capabilities(&plan.spec.capabilities),
-            reuse: ReuseDecision::Pending,
         });
+
+        let durable_plan = match self.durable_action_plan(rule, &plan.spec) {
+            Ok(plan) => plan,
+            Err(diagnostics) => {
+                self.mark_action_failed(computation, &diagnostics);
+                return ActionRunOutcome::PlanningFailed(diagnostics);
+            }
+        };
+        let durable_computation = crate::state::DurableComputation::Action {
+            plan: durable_plan,
+            authorization,
+        };
+        if let Err(diagnostics) =
+            self.create_pending_action_attempt(computation, durable_computation)
+        {
+            self.mark_action_failed(computation, &diagnostics);
+            let _ = self.publish_action_failure(computation, &diagnostics);
+            return ActionRunOutcome::PlanningFailed(diagnostics);
+        }
 
         let result = self
             .run_action_body(
@@ -139,44 +158,43 @@ impl Engine {
     ) -> PithResult<Value> {
         // Up to and including execution: no report exists on failure yet.
         if let Some(diagnostics) = denial {
-            self.set_action_reuse(computation, ReuseReason::PolicyDenied);
-            return Err(diagnostics);
+            return Err(self.fail_action(computation, diagnostics));
         }
 
-        let invocation = self.materialize_action(spec)?;
+        let invocation = match self.materialize_action(spec) {
+            Ok(invocation) => invocation,
+            Err(diagnostics) => return Err(self.fail_action(computation, diagnostics)),
+        };
         let captured = match executor.execute(&invocation).await {
             Ok(execution) => execution,
-            Err(diagnostics) => return Err(self.fail_action(computation, None, diagnostics)),
+            Err(diagnostics) => return Err(self.fail_action(computation, diagnostics)),
         };
-        let execution = match self.import_execution(captured) {
+        let imported = self.import_execution(&captured.report);
+        if let Err(diagnostics) = self.record_executor_report(computation, captured.report) {
+            return Err(self.fail_action(computation, diagnostics));
+        }
+        let execution = match imported {
             Ok(execution) => execution,
-            Err(diagnostics) => return Err(self.fail_action(computation, None, diagnostics)),
+            Err(diagnostics) => return Err(self.fail_action(computation, diagnostics)),
         };
 
-        // From here every failure retains the execution report.
-        let capabilities_used = canonical_capabilities(&execution.report.capabilities_used);
-        let Some(node) = self.computations.get_mut(computation) else {
-            return Err(internal_diag(InternalInvariant::ActionLostComputationNode));
-        };
-        node.dependencies.extend(
-            capabilities_used
-                .into_iter()
-                .map(|capability| DependencyEdge::CapabilityUse { capability }),
-        );
+        if let Err(diagnostics) = self.record_imported_report(computation, execution.report.clone())
+        {
+            return Err(self.fail_action(computation, diagnostics));
+        }
         if let Err(diagnostics) = self.validate_execution(spec, &execution) {
-            return Err(self.fail_action(computation, Some(execution.report), diagnostics));
+            return Err(self.fail_action(computation, diagnostics));
         }
         let Some(body) = self.action_bodies.get(&rule_meta.rule) else {
             return Err(self.fail_action(
                 computation,
-                Some(execution.report),
                 internal_diag(InternalInvariant::SelectedActionRuleHasNoBody),
             ));
         };
         let value = match body.complete(&request.inputs, &execution) {
             Ok(value) => value,
             Err(diagnostics) => {
-                return Err(self.fail_action(computation, Some(execution.report), diagnostics));
+                return Err(self.fail_action(computation, diagnostics));
             }
         };
         if let Err(diagnostics) = validate_action_result(
@@ -185,18 +203,19 @@ impl Engine {
             &rule_meta.label,
             rule_meta.span,
         ) {
-            return Err(self.fail_action(computation, Some(execution.report), diagnostics));
+            return Err(self.fail_action(computation, diagnostics));
         }
 
         let Some(node) = self.computations.get_mut(computation) else {
             return Err(internal_diag(InternalInvariant::ActionLostComputationNode));
         };
-        node.result = Some(value.clone());
-        node.reuse = ReuseDecision::NotReusable(ReuseReason::ActionCachingDisabled);
-        let Some(action) = node.action.as_mut() else {
-            return Err(internal_diag(InternalInvariant::ActionLostActionRecord));
+        node.state = AttemptState::Complete {
+            result: value.clone(),
+            reuse: ReuseDecision::NotReusable(ReuseReason::ActionCachingDisabled),
         };
-        action.report = Some(execution.report);
+        // Scheduling boundary: publish the durable action completion. The
+        // arena node is terminal, so the publish reads its final state.
+        self.publish_action_completion(computation)?;
 
         Ok(value)
     }
@@ -207,17 +226,50 @@ impl Engine {
     fn fail_action(
         &mut self,
         computation: ComputationId,
-        report: Option<ExecutionReport>,
         diagnostics: DiagnosticSink,
     ) -> DiagnosticSink {
-        self.mark_action_failed(computation, report);
+        self.mark_action_failed(computation, &diagnostics);
+        // Scheduling boundary: publish the durable action failure. Best-effort
+        // with respect to the returned diagnostics — failure publication must
+        // not mask the diagnostics that caused it.
+        let _ = self.publish_action_failure(computation, &diagnostics);
         diagnostics
     }
 
-    fn set_action_reuse(&mut self, computation: ComputationId, reason: ReuseReason) {
-        if let Some(node) = self.computations.get_mut(computation) {
-            node.reuse = ReuseDecision::NotReusable(reason);
-        }
+    fn record_executor_report(
+        &mut self,
+        computation: ComputationId,
+        report: crate::CapturedExecutionReport,
+    ) -> PithResult<()> {
+        let capabilities_used = canonical_capabilities(&report.capabilities_used);
+        let Some(node) = self.computations.get_mut(computation) else {
+            return Err(internal_diag(InternalInvariant::ActionLostComputationNode));
+        };
+        node.dependencies.extend(
+            capabilities_used
+                .into_iter()
+                .map(|capability| DependencyEdge::CapabilityUse { capability }),
+        );
+        let Some(action) = node.action.as_mut() else {
+            return Err(internal_diag(InternalInvariant::ActionLostActionRecord));
+        };
+        action.executor_report = Some(report);
+        Ok(())
+    }
+
+    fn record_imported_report(
+        &mut self,
+        computation: ComputationId,
+        report: ExecutionReport,
+    ) -> PithResult<()> {
+        let Some(node) = self.computations.get_mut(computation) else {
+            return Err(internal_diag(InternalInvariant::ActionLostComputationNode));
+        };
+        let Some(action) = node.action.as_mut() else {
+            return Err(internal_diag(InternalInvariant::ActionLostActionRecord));
+        };
+        action.imported_report = Some(report);
+        Ok(())
     }
 
     fn materialize_action(&self, spec: &ActionSpec) -> PithResult<ActionInvocation> {
@@ -306,10 +358,10 @@ impl Engine {
 
     fn import_execution(
         &mut self,
-        captured: CapturedActionExecution,
+        report: &crate::CapturedExecutionReport,
     ) -> PithResult<ActionExecution> {
-        let mut outputs = Vec::with_capacity(captured.report.outputs.len());
-        for output in &captured.report.outputs {
+        let mut outputs = Vec::with_capacity(report.outputs.len());
+        for output in &report.outputs {
             let content = self.import_output(&output.content)?;
             outputs.push(ProducedOutput {
                 path: output.path.clone(),
@@ -318,11 +370,11 @@ impl Engine {
         }
         Ok(ActionExecution {
             report: ExecutionReport {
-                executor: captured.report.executor,
-                platform: captured.report.platform,
-                access: captured.report.access,
+                executor: report.executor.clone(),
+                platform: report.platform.clone(),
+                access: report.access,
                 outputs: outputs.into_boxed_slice(),
-                capabilities_used: captured.report.capabilities_used,
+                capabilities_used: report.capabilities_used.clone(),
             },
         })
     }
@@ -418,16 +470,11 @@ impl Engine {
         Ok(())
     }
 
-    fn mark_action_failed(
-        &mut self,
-        computation: ComputationId,
-        report: Option<crate::ExecutionReport>,
-    ) {
+    fn mark_action_failed(&mut self, computation: ComputationId, diagnostics: &DiagnosticSink) {
         if let Some(node) = self.computations.get_mut(computation) {
-            node.reuse = ReuseDecision::NotReusable(ReuseReason::FailedExecution);
-            if let Some(action) = node.action.as_mut() {
-                action.report = report;
-            }
+            node.state = AttemptState::Failed {
+                diagnostics: diagnostics.iter().cloned().collect(),
+            };
         }
     }
 }

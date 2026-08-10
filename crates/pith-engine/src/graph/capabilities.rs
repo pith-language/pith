@@ -2,7 +2,7 @@ use pith_core::CapabilityRequirement;
 
 use super::{DependencyEdge, Engine};
 
-pub(super) fn canonical_capabilities<'capability>(
+pub(crate) fn canonical_capabilities<'capability>(
     capabilities: impl IntoIterator<Item = &'capability CapabilityRequirement>,
 ) -> Box<[CapabilityRequirement]> {
     let mut capabilities: Vec<_> = capabilities.into_iter().cloned().collect();

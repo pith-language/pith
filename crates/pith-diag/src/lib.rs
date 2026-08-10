@@ -139,6 +139,9 @@ pub enum EngineCode {
     PlatformMismatch = 212,
     /// `E-1213` — the action policy denied the planned action.
     PolicyDenied = 213,
+    /// `E-1214` — an attempt was left `Pending` when its owner stopped, and was
+    /// marked failed on reopen rather than resumed.
+    InterruptedAttempt = 214,
 }
 
 impl From<EngineCode> for StableCode {
@@ -328,6 +331,7 @@ mod tests {
         assert_eq!(StableCode::from(EngineCode::MissingDeclaredOutput).0, 1210);
         assert_eq!(StableCode::from(EngineCode::PlatformMismatch).0, 1212);
         assert_eq!(StableCode::from(EngineCode::PolicyDenied).0, 1213);
+        assert_eq!(StableCode::from(EngineCode::InterruptedAttempt).0, 1214);
     }
 
     #[test]

@@ -83,6 +83,8 @@ silent interpretation under a different schema is forbidden. explicit migrations
 
 `pith-store` owns the content-store interface and its memory and filesystem adapters. `pith-engine` owns an engine-state interface expressed in durable pith data types. the sqlite implementation stays behind that interface.
 
+decision 0025 refines how that implementation represents the records listed above: they are normalized relations rather than canonical record blobs, so the reverse queries and crash recovery named in this decision's context are queries rather than scans.
+
 the synchronous pure evaluator does not perform sqlite work during an individual rule step. state lookup and transactional publication happen at engine scheduling boundaries. the first implementation may serialize metadata access through the engine owner rather than adding locks throughout the arena graph.
 
 ## alternatives considered
@@ -125,7 +127,13 @@ initial schema incompatibility trades cache loss for correctness and implementat
 
 the engine accepts any content adapter through the pith-owned `ContentStore` interface and defaults to the in-memory implementation. the filesystem adapter stores blobs and canonical tree manifests under content digests, publishes same-directory temporary files after flushing them, verifies raced existing objects, and rejects stored data whose content does not reproduce the requested identity. file executability, subtree identity, and symlink target bytes survive a store reopen through the canonical tree manifest.
 
-sqlite engine metadata, durable graph hydration, attempt lifecycle persistence, dependency revalidation, and cross-process cache reuse remain unimplemented.
+the engine publishes every computation that leaves `Pending` through a pith-owned engine-state interface with an in-memory adapter, and resolves a request from durable state before running a rule body. a request that misses this instance's arena consults the reusable index, revalidates the recorded dependency set, and loads the completed attempt into a fresh arena node. the hydrated node is mapped onto the attempt it was loaded from rather than recording a new one, so a computation built on it publishes an edge naming the original attempt. a dependency whose latest reusable attempt changed makes the consumer dirty; an equal result under canonical equality stops propagation. adapter failure and records that contradict the reusable index's own contract are engine errors, never cache misses.
+
+a hydrated node has no arena subgraph: a durable pure edge records a computation key, not the request a child node would need. its recorded dependency set therefore stays authoritative on the durable attempt and is read through the query interface rather than reconstructed as arena edges.
+
+a sqlite adapter stores engine metadata as normalized relations (0025). one process computes a pure result and exits; a second process opens the same database, finds the recorded attempt, and hydrates the result without running the rule body, which proves durability across a process boundary rather than only across engine instances sharing memory. an incompatible recorded version moves the database aside and rebuilds it empty, and the version gate is read before any schema is applied.
+
+reopen marks every attempt still `Pending` as failed. each is written through the same validated transaction a caller-driven failure uses, with a diagnostic that names it as interrupted work, so a reader opening the database after a crash finds a consistent graph rather than one waiting on an owner that will not return.
 
 ## unresolved
 

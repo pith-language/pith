@@ -5,10 +5,13 @@
 //! IR without pulling in the scheduler.
 
 pub mod action;
+mod action_codec;
+pub mod codec;
 pub mod effect;
 mod manifest;
 pub mod rule;
 pub mod value;
+mod value_codec;
 
 pub use action::{
     ActionInput, ActionInputContent, ActionOutput, ActionSpec, CapabilityRequirement, Content,
@@ -20,6 +23,7 @@ pub use rule::{
     Interface, PureComputationKey, Request, Rule, RuleArena, RuleId, SelectOutcome, select_rule,
 };
 pub use value::{Type, Value, ValueArena, ValueId};
+pub use value_codec::CanonicalDecodeError;
 
 use pith_output::{IntoOutput, OutputRecord};
 

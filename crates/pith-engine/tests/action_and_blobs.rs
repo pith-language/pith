@@ -12,13 +12,13 @@ use pith_core::{
 use pith_diag::{Diag, DiagnosticSink, EngineCode, PithResult, Severity, Span, StableCode};
 use pith_engine::{
     AccessVerification, ActionAuthorization, ActionExecution, ActionInvocation, ActionPlan,
-    ActionPolicy, ActionRule, AllowAllActions, CapturedActionExecution, CapturedExecutionReport,
-    CapturedOutput, CapturedOutputContent, ComputationKind, Engine, EvaluationSource,
-    ExecutionPlatform, Executor, MaterializedContent, PureRule, PureRuleFrame, PureStep,
-    ReuseDecision, ReuseReason, TokioRuntime,
+    ActionPolicy, ActionRule, AllowAllActions, AttemptState, CapturedActionExecution,
+    CapturedExecutionReport, CapturedOutput, CapturedOutputContent, ComputationKind, Engine,
+    EvaluationSource, ExecutionPlatform, Executor, MaterializedContent, PureRule, PureRuleFrame,
+    PureStep, ReuseDecision, ReuseReason, TokioRuntime,
 };
 use pith_ids::ContentId;
-use pith_store::MemoryContentStore;
+use pith_store::{Blob, ContentStore, MemoryContentStore, StoreError, Tree};
 
 struct BlobLenRule {
     blob: ContentId,
@@ -137,6 +137,30 @@ impl ActionRule for WrongTypeAction {
 
     fn complete(&self, _inputs: &[Value], _execution: &ActionExecution) -> PithResult<Value> {
         Ok(Value::Int(0))
+    }
+}
+
+struct FailingPlanner;
+
+impl ActionRule for FailingPlanner {
+    fn plan(&self, _inputs: &[Value]) -> PithResult<ActionSpec> {
+        Err(fixture_error("action planning failed"))
+    }
+
+    fn complete(&self, _inputs: &[Value], _execution: &ActionExecution) -> PithResult<Value> {
+        Err(fixture_error("unplanned action cannot complete"))
+    }
+}
+
+struct FailingCompletionAction;
+
+impl ActionRule for FailingCompletionAction {
+    fn plan(&self, inputs: &[Value]) -> PithResult<ActionSpec> {
+        DoubleAction.plan(inputs)
+    }
+
+    fn complete(&self, _inputs: &[Value], _execution: &ActionExecution) -> PithResult<Value> {
+        Err(fixture_error("action completion failed"))
     }
 }
 
@@ -267,6 +291,30 @@ struct NeverExecutor {
     executions: Arc<AtomicUsize>,
 }
 
+struct FailingExecutor;
+
+struct RejectOutputImportsStore {
+    content: MemoryContentStore,
+}
+
+impl ContentStore for RejectOutputImportsStore {
+    fn put_blob(&mut self, _bytes: &[u8]) -> Result<ContentId, StoreError> {
+        Err(StoreError::new("fixture rejected output import"))
+    }
+
+    fn get_blob(&self, id: ContentId) -> Result<Option<Blob>, StoreError> {
+        self.content.get_blob(id)
+    }
+
+    fn put_tree(&mut self, _tree: Tree) -> Result<ContentId, StoreError> {
+        Err(StoreError::new("fixture rejected output import"))
+    }
+
+    fn get_tree(&self, id: ContentId) -> Result<Option<Tree>, StoreError> {
+        self.content.get_tree(id)
+    }
+}
+
 #[async_trait::async_trait]
 impl Executor for UnverifiedCountingExecutor {
     async fn execute(&self, invocation: &ActionInvocation) -> PithResult<CapturedActionExecution> {
@@ -290,6 +338,13 @@ impl Executor for NeverExecutor {
     async fn execute(&self, _invocation: &ActionInvocation) -> PithResult<CapturedActionExecution> {
         self.executions.fetch_add(1, Ordering::Relaxed);
         Err(fixture_error("executor should not be called"))
+    }
+}
+
+#[async_trait::async_trait]
+impl Executor for FailingExecutor {
+    async fn execute(&self, _invocation: &ActionInvocation) -> PithResult<CapturedActionExecution> {
+        Err(fixture_error("executor failed"))
     }
 }
 
@@ -377,6 +432,21 @@ fn fixture_engine() -> Engine {
     engine
 }
 
+fn import_failing_engine() -> Engine {
+    let mut content = MemoryContentStore::default();
+    let executable = match content.put_blob(b"fixture:double") {
+        Ok(identity) => identity,
+        Err(error) => unreachable!("memory content store failed to store executable: {error}"),
+    };
+    let input = match content.put_blob(b"fixture input") {
+        Ok(identity) => identity,
+        Err(error) => unreachable!("memory content store failed to store input: {error}"),
+    };
+    assert_eq!(executable, double_executable());
+    assert_eq!(input, double_input());
+    Engine::with_content_store(RejectOutputImportsStore { content })
+}
+
 fn put_fixture_blob(engine: &mut Engine, bytes: &[u8]) -> ContentId {
     match engine.put_blob(bytes) {
         Ok(identity) => identity,
@@ -417,6 +487,15 @@ fn action_request(
     inputs: impl Into<Box<[Value]>>,
 ) -> Request<Action> {
     Request::<Action>::new(label, interface, inputs, Span::none())
+}
+
+fn assert_no_pending_attempts(engine: &Engine) {
+    assert!(
+        engine
+            .query()
+            .computations()
+            .all(|(_, node)| !matches!(node.state, AttemptState::Pending))
+    );
 }
 
 #[test]
@@ -470,6 +549,7 @@ fn missing_blob_reports_clean_diagnostic() {
     let err = result.unwrap_err();
     let diag = err.iter().next().unwrap();
     assert_eq!(diag.code, StableCode::from(EngineCode::ContentUnavailable));
+    assert_no_pending_attempts(&engine);
 }
 
 #[test]
@@ -543,7 +623,7 @@ fn action_dependency_driven_through_run() {
         }
     );
     assert_eq!(
-        action.report.as_ref().map(|report| report.access),
+        action.imported_report.as_ref().map(|report| report.access),
         Some(AccessVerification::Prevented)
     );
     assert_eq!(
@@ -649,6 +729,59 @@ fn action_output_bytes_are_imported_by_the_engine() {
 }
 
 #[test]
+fn missing_action_executable_is_rejected_before_executor_call() {
+    let mut engine = Engine::new();
+    let action_interface = interface(&[Type::Int], Type::Blob);
+    let root_interface = interface(&[], Type::Blob);
+    engine.register_action_rule(
+        action_rule("double", action_interface.clone()),
+        DoubleAction,
+    );
+    engine.register_rule(
+        pure_rule("entry", root_interface.clone()),
+        ActionDepRule {
+            dependency: action_request("double", action_interface, [Value::Int(21)]),
+        },
+    );
+    let executions = Arc::new(AtomicUsize::new(0));
+
+    let diagnostics = engine
+        .run(
+            &pure_request("entry", root_interface, []),
+            &TokioRuntime,
+            &AllowAllActions,
+            &NeverExecutor {
+                executions: executions.clone(),
+            },
+        )
+        .unwrap()
+        .unwrap_err();
+
+    assert_eq!(
+        diagnostics.iter().next().map(|diagnostic| diagnostic.code),
+        Some(StableCode::from(EngineCode::ContentUnavailable))
+    );
+    assert_eq!(executions.load(Ordering::Relaxed), 0);
+    assert_no_pending_attempts(&engine);
+    let query = engine.query();
+    let (action_computation, action) = query
+        .computations()
+        .find(|(_, node)| matches!(node.kind, ComputationKind::Action(_)))
+        .unwrap();
+    assert!(matches!(action.state, AttemptState::Failed { .. }));
+    let parent = query
+        .computations()
+        .find(|(_, node)| matches!(node.kind, ComputationKind::Pure(_)))
+        .map(|(_, node)| node)
+        .unwrap();
+    assert!(parent.dependencies.iter().any(|dependency| matches!(
+        dependency,
+        pith_engine::DependencyEdge::Action { computation, .. }
+            if *computation == action_computation
+    )));
+}
+
+#[test]
 fn missing_action_input_is_rejected_before_executor_call() {
     let mut engine = Engine::new();
     assert_eq!(
@@ -688,6 +821,167 @@ fn missing_action_input_is_rejected_before_executor_call() {
         StableCode::from(EngineCode::ContentUnavailable)
     );
     assert_eq!(executions.load(Ordering::Relaxed), 0);
+    assert_no_pending_attempts(&engine);
+
+    let query = engine.query();
+    let (action_computation, action_node) = query
+        .computations()
+        .find(|(_, node)| matches!(node.kind, ComputationKind::Action(_)))
+        .unwrap();
+    assert!(matches!(action_node.state, AttemptState::Failed { .. }));
+    let action_record = action_node.action.as_ref().unwrap();
+    assert!(action_record.executor_report.is_none());
+    assert!(action_record.imported_report.is_none());
+    let parent = query
+        .computations()
+        .find(|(_, node)| matches!(node.kind, ComputationKind::Pure(_)))
+        .map(|(_, node)| node)
+        .unwrap();
+    assert!(matches!(parent.state, AttemptState::Failed { .. }));
+    assert!(parent.dependencies.iter().any(|dependency| matches!(
+        dependency,
+        pith_engine::DependencyEdge::Action { computation, .. }
+            if *computation == action_computation
+    )));
+}
+
+#[test]
+fn planner_failure_creates_no_action_attempt() {
+    let mut engine = Engine::new();
+    let action_interface = interface(&[], Type::Unit);
+    let root_interface = interface(&[], Type::Unit);
+    engine.register_action_rule(
+        action_rule("failing planner", action_interface.clone()),
+        FailingPlanner,
+    );
+    engine.register_rule(
+        pure_rule("entry", root_interface.clone()),
+        ActionDepRule {
+            dependency: action_request("failing planner", action_interface, []),
+        },
+    );
+
+    let diagnostics = engine
+        .run(
+            &pure_request("entry", root_interface, []),
+            &TokioRuntime,
+            &AllowAllActions,
+            &NeverExecutor {
+                executions: Arc::new(AtomicUsize::new(0)),
+            },
+        )
+        .unwrap()
+        .unwrap_err();
+
+    assert_eq!(
+        diagnostics
+            .iter()
+            .next()
+            .map(|diagnostic| diagnostic.message.0.as_ref()),
+        Some("action planning failed")
+    );
+    assert_no_pending_attempts(&engine);
+    assert!(
+        engine
+            .query()
+            .computations()
+            .all(|(_, node)| !matches!(node.kind, ComputationKind::Action(_)))
+    );
+}
+
+#[test]
+fn executor_failure_finalizes_action_and_parent_without_a_report() {
+    let mut engine = fixture_engine();
+    let action_interface = interface(&[Type::Int], Type::Blob);
+    let root_interface = interface(&[], Type::Blob);
+    engine.register_action_rule(
+        action_rule("double", action_interface.clone()),
+        DoubleAction,
+    );
+    engine.register_rule(
+        pure_rule("entry", root_interface.clone()),
+        ActionDepRule {
+            dependency: action_request("double", action_interface, [Value::Int(21)]),
+        },
+    );
+
+    let diagnostics = engine
+        .run(
+            &pure_request("entry", root_interface, []),
+            &TokioRuntime,
+            &AllowAllActions,
+            &FailingExecutor,
+        )
+        .unwrap()
+        .unwrap_err();
+
+    assert_eq!(
+        diagnostics
+            .iter()
+            .next()
+            .map(|diagnostic| diagnostic.message.0.as_ref()),
+        Some("executor failed")
+    );
+    assert_no_pending_attempts(&engine);
+    let action = engine
+        .query()
+        .computations()
+        .find(|(_, node)| matches!(node.kind, ComputationKind::Action(_)))
+        .map(|(_, node)| node)
+        .unwrap();
+    assert!(matches!(action.state, AttemptState::Failed { .. }));
+    let action_record = action.action.as_ref().unwrap();
+    assert!(action_record.executor_report.is_none());
+    assert!(action_record.imported_report.is_none());
+}
+
+#[test]
+fn output_import_failure_retains_the_executor_report() {
+    let mut engine = import_failing_engine();
+    let action_interface = interface(&[Type::Int], Type::Blob);
+    let root_interface = interface(&[], Type::Blob);
+    engine.register_action_rule(
+        action_rule("double", action_interface.clone()),
+        DoubleAction,
+    );
+    engine.register_rule(
+        pure_rule("entry", root_interface.clone()),
+        ActionDepRule {
+            dependency: action_request("double", action_interface, [Value::Int(21)]),
+        },
+    );
+
+    let diagnostics = engine
+        .run(
+            &pure_request("entry", root_interface, []),
+            &TokioRuntime,
+            &AllowAllActions,
+            &FixtureExecutor,
+        )
+        .unwrap()
+        .unwrap_err();
+
+    assert_eq!(
+        diagnostics.iter().next().map(|diagnostic| diagnostic.code),
+        Some(StableCode::from(EngineCode::StoreError))
+    );
+    assert_no_pending_attempts(&engine);
+    let action = engine
+        .query()
+        .computations()
+        .find(|(_, node)| matches!(node.kind, ComputationKind::Action(_)))
+        .map(|(_, node)| node)
+        .unwrap();
+    assert!(matches!(action.state, AttemptState::Failed { .. }));
+    let action_record = action.action.as_ref().unwrap();
+    assert_eq!(
+        action_record
+            .executor_report
+            .as_ref()
+            .map(|report| report.executor.as_ref()),
+        Some("fixture")
+    );
+    assert!(action_record.imported_report.is_none());
 }
 
 #[test]
@@ -715,6 +1009,63 @@ fn action_result_type_checked_against_interface() {
     let err = result.unwrap_err();
     let diag = err.iter().next().unwrap();
     assert_eq!(diag.code, StableCode::from(EngineCode::ResultTypeMismatch));
+    assert_no_pending_attempts(&engine);
+    let action = engine
+        .query()
+        .computations()
+        .find(|(_, node)| matches!(node.kind, ComputationKind::Action(_)))
+        .map(|(_, node)| node)
+        .unwrap();
+    assert!(matches!(action.state, AttemptState::Failed { .. }));
+    let action_record = action.action.as_ref().unwrap();
+    assert!(action_record.executor_report.is_some());
+    assert!(action_record.imported_report.is_some());
+}
+
+#[test]
+fn completion_failure_retains_executor_and_imported_reports() {
+    let mut engine = fixture_engine();
+    let action_interface = interface(&[Type::Int], Type::Blob);
+    let root_interface = interface(&[], Type::Blob);
+    engine.register_action_rule(
+        action_rule("failing completion", action_interface.clone()),
+        FailingCompletionAction,
+    );
+    engine.register_rule(
+        pure_rule("entry", root_interface.clone()),
+        ActionDepRule {
+            dependency: action_request("failing completion", action_interface, [Value::Int(21)]),
+        },
+    );
+
+    let diagnostics = engine
+        .run(
+            &pure_request("entry", root_interface, []),
+            &TokioRuntime,
+            &AllowAllActions,
+            &FixtureExecutor,
+        )
+        .unwrap()
+        .unwrap_err();
+
+    assert_eq!(
+        diagnostics
+            .iter()
+            .next()
+            .map(|diagnostic| diagnostic.message.0.as_ref()),
+        Some("action completion failed")
+    );
+    assert_no_pending_attempts(&engine);
+    let action = engine
+        .query()
+        .computations()
+        .find(|(_, node)| matches!(node.kind, ComputationKind::Action(_)))
+        .map(|(_, node)| node)
+        .unwrap();
+    assert!(matches!(action.state, AttemptState::Failed { .. }));
+    let action_record = action.action.as_ref().unwrap();
+    assert!(action_record.executor_report.is_some());
+    assert!(action_record.imported_report.is_some());
 }
 
 #[test]
@@ -758,15 +1109,23 @@ fn undeclared_capability_use_is_rejected() {
     let reported = node
         .action
         .as_ref()
-        .and_then(|action| action.report.as_ref())
+        .and_then(|action| action.imported_report.as_ref())
+        .map(|report| report.capabilities_used.as_ref());
+    let executor_reported = node
+        .action
+        .as_ref()
+        .and_then(|action| action.executor_report.as_ref())
         .map(|report| report.capabilities_used.as_ref());
 
+    assert_no_pending_attempts(&engine);
+    assert!(matches!(node.state, AttemptState::Failed { .. }));
     assert_eq!(uses.len(), 1);
     assert_eq!(
         uses.first().map(|use_| use_.name.as_ref()),
         Some("fixture.clock")
     );
     assert_eq!(reported, Some(uses.as_slice()));
+    assert_eq!(executor_reported, Some(uses.as_slice()));
 }
 
 #[test]
@@ -802,6 +1161,7 @@ fn policy_denial_is_recorded_before_execution() {
     let diagnostic = diagnostics.iter().next().unwrap();
     assert_eq!(diagnostic.code, StableCode::from(EngineCode::PolicyDenied));
     assert_eq!(executions.load(Ordering::Relaxed), 0);
+    assert_no_pending_attempts(&engine);
 
     let query = engine.query();
     let (denied_computation, denied_node, denied_action) = query
@@ -819,11 +1179,14 @@ fn policy_denial_is_recorded_before_execution() {
             reason: "fixture compute access is disabled".into(),
         }
     );
-    assert!(denied_action.report.is_none());
-    assert_eq!(
-        denied_node.reuse,
-        ReuseDecision::NotReusable(ReuseReason::PolicyDenied)
-    );
+    assert!(denied_action.executor_report.is_none());
+    assert!(denied_action.imported_report.is_none());
+    assert!(matches!(
+        denied_node.state,
+        AttemptState::Failed { ref diagnostics }
+            if diagnostics.first().map(|diagnostic| diagnostic.code)
+                == Some(StableCode::from(EngineCode::PolicyDenied))
+    ));
     let denied_parent = query
         .computations()
         .find(|(_, node)| matches!(node.kind, ComputationKind::Pure(_)))
@@ -876,7 +1239,14 @@ fn executor_must_report_the_planned_platform() {
         .unwrap();
     assert_eq!(
         failed_action
-            .report
+            .imported_report
+            .as_ref()
+            .map(|report| report.platform.operating_system.as_ref()),
+        Some("other")
+    );
+    assert_eq!(
+        failed_action
+            .executor_report
             .as_ref()
             .map(|report| report.platform.operating_system.as_ref()),
         Some("other")
@@ -939,21 +1309,27 @@ fn action_dependencies_are_not_reused_without_a_cache_identity() {
         .and_then(|dependencies| dependencies.first())
         .and_then(pith_engine::DependencyEdge::computation_id)
         .unwrap();
-    let action_reuse = &engine
+    let action_state = &engine
         .query()
         .computation(action_computation)
         .unwrap()
-        .reuse;
-    assert_eq!(
-        action_reuse,
-        &ReuseDecision::NotReusable(ReuseReason::ActionCachingDisabled)
-    );
-    assert_eq!(
-        &engine.query().computation(first.computation).unwrap().reuse,
-        &ReuseDecision::NotReusable(ReuseReason::DependencyNotReusable {
-            computation: action_computation,
-        })
-    );
+        .state;
+    assert!(matches!(
+        action_state,
+        AttemptState::Complete {
+            reuse: ReuseDecision::NotReusable(ReuseReason::ActionCachingDisabled),
+            ..
+        }
+    ));
+    assert!(matches!(
+        &engine.query().computation(first.computation).unwrap().state,
+        AttemptState::Complete {
+            reuse: ReuseDecision::NotReusable(ReuseReason::DependencyNotReusable {
+                computation,
+            }),
+            ..
+        } if *computation == action_computation
+    ));
 }
 
 #[test]

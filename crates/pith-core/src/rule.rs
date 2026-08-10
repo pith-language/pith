@@ -8,7 +8,8 @@ use std::marker::PhantomData;
 
 use crate::{
     EffectCategory, Pure, Type, Value,
-    manifest::{encode_bytes, encode_length, encode_str},
+    manifest::encode_length,
+    value_codec::{encode_type_payload, encode_value_payload},
 };
 
 define_arena!(RuleId, RuleArena, RuleBrand);
@@ -74,7 +75,7 @@ impl PureComputationKey {
         request
             .inputs
             .iter()
-            .for_each(|value| encode_value(&mut computation_manifest, value));
+            .for_each(|value| encode_value_payload(&mut computation_manifest, value));
 
         Self {
             rule_identity: rule.identity,
@@ -164,62 +165,8 @@ fn encode_interface(manifest: &mut Vec<u8>, interface: &Interface) {
     interface
         .inputs
         .iter()
-        .for_each(|input| encode_type(manifest, input));
-    encode_type(manifest, &interface.output);
-}
-
-/// Discriminant tags for `Type`/`Value` variants in the pure-computation
-/// manifest. `Type` and `Value` deliberately share numbering for their
-/// overlapping variants so a value and its type encode under the same tag;
-/// `Nominal` is `Type`-only. These are a stable digest format: renumbering
-/// invalidates every persisted pure-computation key.
-const TAG_UNIT: u8 = 0;
-const TAG_BOOL: u8 = 1;
-const TAG_INT: u8 = 2;
-const TAG_TEXT: u8 = 3;
-const TAG_BYTES: u8 = 4;
-const TAG_BLOB: u8 = 5;
-const TAG_NOMINAL: u8 = 6;
-
-fn encode_type(manifest: &mut Vec<u8>, value_type: &Type) {
-    match value_type {
-        Type::Unit => manifest.push(TAG_UNIT),
-        Type::Bool => manifest.push(TAG_BOOL),
-        Type::Int => manifest.push(TAG_INT),
-        Type::Text => manifest.push(TAG_TEXT),
-        Type::Bytes => manifest.push(TAG_BYTES),
-        Type::Blob => manifest.push(TAG_BLOB),
-        Type::Nominal { name } => {
-            manifest.push(TAG_NOMINAL);
-            encode_str(manifest, name);
-        }
-    }
-}
-
-fn encode_value(manifest: &mut Vec<u8>, value: &Value) {
-    match value {
-        Value::Unit => manifest.push(TAG_UNIT),
-        Value::Bool(value) => {
-            manifest.push(TAG_BOOL);
-            manifest.push(u8::from(*value));
-        }
-        Value::Int(value) => {
-            manifest.push(TAG_INT);
-            manifest.extend_from_slice(&value.to_le_bytes());
-        }
-        Value::Text(value) => {
-            manifest.push(TAG_TEXT);
-            encode_str(manifest, value);
-        }
-        Value::Bytes(value) => {
-            manifest.push(TAG_BYTES);
-            encode_bytes(manifest, value);
-        }
-        Value::Blob(value) => {
-            manifest.push(TAG_BLOB);
-            manifest.extend_from_slice(value.digest().as_bytes());
-        }
-    }
+        .for_each(|input| encode_type_payload(manifest, input));
+    encode_type_payload(manifest, &interface.output);
 }
 
 /// Zero, one, or multiple matching providers. Ambiguity is never ranked.
@@ -297,6 +244,9 @@ impl SelectOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value_codec::{
+        TAG_BLOB, TAG_BOOL, TAG_BYTES, TAG_INT, TAG_NOMINAL, TAG_TEXT, TAG_UNIT,
+    };
     use pith_arena::Arena;
 
     #[test]
@@ -334,7 +284,7 @@ mod tests {
         ];
         for (value, expected) in &values {
             let mut manifest = Vec::new();
-            encode_value(&mut manifest, value);
+            encode_value_payload(&mut manifest, value);
             assert_eq!(
                 manifest.first(),
                 Some(expected),

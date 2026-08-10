@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 7bf90281ba2c37021daa76898a363653db50ce18d3b0f596177394636b53db4b # shrinks to scenario = Scenario { steps: [CreatePure { rule: 0, input: 0 }, CreatePure { rule: 0, input: 0 }, Complete { attempt: 0, dependencies: [Blob(0), Blob(1)], result: 0, corrupt_reuse: false }] }

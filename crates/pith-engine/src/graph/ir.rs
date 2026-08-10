@@ -4,7 +4,7 @@
 use pith_core::{
     Action, ActionSpec, CapabilityRequirement, Interface, Pure, Request, RuleId, Value,
 };
-use pith_diag::PithResult;
+use pith_diag::{Diag, PithResult};
 use pith_ids::{ActionSpecDigest, ComputationId, ContentId};
 use smallvec::SmallVec;
 
@@ -88,17 +88,30 @@ pub struct ActionPlan {
     pub spec: ActionSpec,
 }
 
-/// Declared contract, authorization, and executor report retained as action provenance.
+/// Declared contract, authorization, and executor reports retained as action provenance.
 pub struct ActionRecord {
     pub spec_digest: ActionSpecDigest,
     pub spec: ActionSpec,
     pub authorization: crate::ActionAuthorization,
-    pub report: Option<crate::ExecutionReport>,
+    /// The executor's observation, retained before the engine imports outputs.
+    pub executor_report: Option<crate::CapturedExecutionReport>,
+    /// The same report after captured outputs have engine-owned content identities.
+    pub imported_report: Option<crate::ExecutionReport>,
+}
+
+/// Lifecycle of one allocated computation attempt.
+///
+/// Cancellation will become a distinct terminal state when the scheduler can
+/// actually cancel work. Ordinary evaluation failures must not stand in for it.
+#[derive(Clone, Debug)]
+pub enum AttemptState {
+    Pending,
+    Complete { result: Value, reuse: ReuseDecision },
+    Failed { diagnostics: Box<[Diag]> },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReuseDecision {
-    Pending,
     Reusable,
     NotReusable(ReuseReason),
 }
@@ -106,11 +119,9 @@ pub enum ReuseDecision {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReuseReason {
     ActionCachingDisabled,
-    PolicyDenied,
     DependencyPending { computation: ComputationId },
     DependencyNotReusable { computation: ComputationId },
     DependencyMissing { computation: ComputationId },
-    FailedExecution,
 }
 
 /// One rule application in the in-memory graph.
@@ -118,10 +129,9 @@ pub struct ComputationNode {
     pub kind: ComputationKind,
     pub rule: RuleId,
     pub dependencies: SmallVec<[DependencyEdge; 4]>,
-    pub result: Option<Value>,
+    pub state: AttemptState,
     pub action: Option<ActionRecord>,
     pub capabilities: Box<[CapabilityRequirement]>,
-    pub reuse: ReuseDecision,
 }
 
 /// A completed evaluation and the graph node that produced it.
@@ -134,8 +144,16 @@ pub struct Evaluation {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum EvaluationSource {
+    /// The rule body ran in this engine instance.
     Computed,
+    /// A completed computation already in this engine's arena was reused.
     Reused,
+    /// A completed attempt recorded by a previous engine instance was
+    /// revalidated and loaded from engine state (decision 0024). The rule body
+    /// did not run here, and this instance's arena holds no subgraph for it:
+    /// its recorded dependency set lives on the durable attempt, reachable
+    /// through [`crate::EngineQuery::durable_attempt_of`].
+    Hydrated,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

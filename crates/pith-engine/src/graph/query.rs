@@ -1,11 +1,15 @@
 //! The read-only query interface over a built graph (requirement K-12).
 
+use std::sync::Arc;
+
 use pith_core::{Action, CapabilityRequirement, Pure, Request, Rule, RuleId, select_rule};
 use pith_diag::{Diag, PithResult};
 use pith_ids::ComputationId;
 
 use super::Engine;
+use super::diagnostics::{InternalInvariant, internal_diag};
 use super::ir::{ActionPlan, ComputationNode, DependencyEdge, RuleSelection};
+use crate::state::DurableAttempt;
 
 pub struct EngineQuery<'engine> {
     engine: &'engine Engine,
@@ -77,6 +81,32 @@ impl<'engine> EngineQuery<'engine> {
                 | DependencyEdge::Action { .. } => None,
             })
         })
+    }
+
+    /// The durable attempt this engine recorded or loaded for `id`, carrying
+    /// the recorded dependency set, result, provenance, and reuse decision.
+    ///
+    /// This is the authoritative dependency provenance for a computation whose
+    /// [`EvaluationSource`] is [`Hydrated`]: such a node was loaded terminal
+    /// from engine state, so [`Self::dependencies_of`] reports the empty arena
+    /// subgraph while the recorded edges live here.
+    ///
+    /// `Ok(None)` when `id` is unknown to this engine or never left `Pending`.
+    ///
+    /// [`EvaluationSource`]: super::EvaluationSource
+    /// [`Hydrated`]: super::EvaluationSource::Hydrated
+    ///
+    /// # Errors
+    /// `E-1207` (internal invariant) when the engine-state adapter cannot be
+    /// read.
+    pub fn durable_attempt_of(&self, id: ComputationId) -> PithResult<Option<Arc<DurableAttempt>>> {
+        let Some(attempt) = self.engine.durable_attempt_for(id) else {
+            return Ok(None);
+        };
+        self.engine
+            .state_store
+            .attempt(attempt)
+            .map_err(|error| internal_diag(InternalInvariant::EngineStateReadFailed(error)))
     }
 
     pub fn dependents_of(
