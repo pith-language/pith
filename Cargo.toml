@@ -8,6 +8,7 @@ members = [
     "crates/pith-arena",
     "crates/pith-core",
     "crates/pith-engine",
+    "crates/pith-state-sqlite",
     "crates/pith-cli",
     "xtask",
 ]
@@ -32,6 +33,13 @@ smallvec = { version = "1", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 blake3 = "1"
+diesel = { version = "2.3", default-features = false, features = [
+    "sqlite",
+    "returning_clauses_for_sqlite_3_35",
+] }
+# Bundled so the engine-state schema does not depend on a system sqlite whose
+# version varies per machine. MIT, like diesel's other sqlite dependencies.
+libsqlite3-sys = { version = "0.35", features = ["bundled"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros"] }
 # async fn in dyn-dispatch traits (ActionRule is stored as Box<dyn ActionRule>).
 # Native async-fn-in-trait does not support dyn dispatch; async_trait is the
@@ -52,6 +60,7 @@ pith-store = { path = "crates/pith-store", version = "0.1.0" }
 pith-arena = { path = "crates/pith-arena", version = "0.1.0" }
 pith-core = { path = "crates/pith-core", version = "0.1.0" }
 pith-engine = { path = "crates/pith-engine", version = "0.1.0" }
+pith-state-sqlite = { path = "crates/pith-state-sqlite", version = "0.1.0" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

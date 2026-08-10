@@ -1,0 +1,36 @@
+[package]
+name = "pith-state-sqlite"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# The cross-process test needs an engine in another process to have written the
+# database it reads. Off by default so a test fixture is not an installable
+# binary of this crate.
+fixtures = ["dep:pith-store"]
+
+[dependencies]
+pith-core.workspace = true
+pith-diag.workspace = true
+pith-engine.workspace = true
+pith-ids.workspace = true
+diesel.workspace = true
+libsqlite3-sys.workspace = true
+pith-store = { workspace = true, optional = true }
+
+[dev-dependencies]
+pith-state-sqlite = { path = ".", features = ["fixtures"] }
+pith-engine = { workspace = true, features = ["testing"] }
+pith-store.workspace = true
+proptest.workspace = true
+
+[[bin]]
+name = "write-leaf"
+path = "src/bin/write_leaf.rs"
+required-features = ["fixtures"]
+
+[lints]
+workspace = true
