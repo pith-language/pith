@@ -8,6 +8,7 @@ members = [
     "crates/pith-arena",
     "crates/pith-core",
     "crates/pith-engine",
+    "crates/pith-executor-local",
     "crates/pith-state-sqlite",
     "crates/pith-cli",
     "xtask",
@@ -45,6 +46,13 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros"] 
 # Native async-fn-in-trait does not support dyn dispatch; async_trait is the
 # standard solution.
 async-trait = "0.1"
+# Typed Linux syscalls for the sandboxed executor (decision 0028). Chosen over
+# raw `libc` to minimize `unsafe`: rustix wraps the landlock and process
+# surface the executor needs, leaving `unsafe` only for the seccomp and any
+# landlock calls rustix does not yet expose.
+rustix = { version = "1", default-features = false, features = ["process"] }
+# Per-action scratch roots for the sandboxed executor (decision 0028).
+tempfile = "3"
 anstream = "0.6"
 anstyle = "1"
 owo-colors = "4"
