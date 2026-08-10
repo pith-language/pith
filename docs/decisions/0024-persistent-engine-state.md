@@ -83,6 +83,8 @@ silent interpretation under a different schema is forbidden. explicit migrations
 
 `pith-store` owns the content-store interface and its memory and filesystem adapters. `pith-engine` owns an engine-state interface expressed in durable pith data types. the sqlite implementation stays behind that interface.
 
+decision 0025 refines how that implementation represents the records listed above: they are normalized relations rather than canonical record blobs, so the reverse queries and crash recovery named in this decision's context are queries rather than scans.
+
 the synchronous pure evaluator does not perform sqlite work during an individual rule step. state lookup and transactional publication happen at engine scheduling boundaries. the first implementation may serialize metadata access through the engine owner rather than adding locks throughout the arena graph.
 
 ## alternatives considered
@@ -129,7 +131,9 @@ the engine publishes every computation that leaves `Pending` through a pith-owne
 
 a hydrated node has no arena subgraph: a durable pure edge records a computation key, not the request a child node would need. its recorded dependency set therefore stays authoritative on the durable attempt and is read through the query interface rather than reconstructed as arena edges.
 
-sqlite engine metadata, crash recovery for interrupted `Pending` attempts, and cross-process reuse remain unimplemented. hydration is proved across engine instances sharing one in-memory adapter, which exercises the durable semantics without yet proving durability across a process boundary.
+a sqlite adapter stores engine metadata as normalized relations (0025). one process computes a pure result and exits; a second process opens the same database, finds the recorded attempt, and hydrates the result without running the rule body, which proves durability across a process boundary rather than only across engine instances sharing memory. an incompatible recorded version moves the database aside and rebuilds it empty, and the version gate is read before any schema is applied.
+
+reopen marks every attempt still `Pending` as failed. each is written through the same validated transaction a caller-driven failure uses, with a diagnostic that names it as interrupted work, so a reader opening the database after a crash finds a consistent graph rather than one waiting on an owner that will not return.
 
 ## unresolved
 
