@@ -286,7 +286,10 @@ fn an_interrupted_pending_attempt_is_marked_failed_on_reopen() {
         Ok(pending) => pending,
         Err(error) => unreachable!("pending attempts are unreadable: {error}"),
     };
-    assert!(pending.is_empty(), "an interrupted attempt was not recovered");
+    assert!(
+        pending.is_empty(),
+        "an interrupted attempt was not recovered"
+    );
 
     let restored = match state.attempt(interrupted) {
         Ok(Some(restored)) => restored,
@@ -297,9 +300,10 @@ fn an_interrupted_pending_attempt_is_marked_failed_on_reopen() {
         unreachable!("the interrupted attempt was not marked failed");
     };
     assert!(
-        failure.diagnostics.iter().any(|diagnostic| {
-            diagnostic.code == pith_diag::StableCode(1214)
-        }),
+        failure
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code == pith_diag::StableCode(1214) }),
         "the failure does not carry an interrupted diagnostic"
     );
     // An interrupted attempt never produced a result, so it is not reusable.

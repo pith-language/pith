@@ -10,8 +10,9 @@ use pith_diag::{Diag, EngineCode, Span};
 use pith_engine::state::validate::{AttemptLookup, TerminalAttemptState, validate_publication};
 use pith_engine::state::{
     CompletedAttempt, DurableActionProvenance, DurableAttempt, DurableAttemptId,
-    DurableAttemptStatus, DurableComputation, DurableDiagnostic, DurableProvenance, EngineStateError,
-    EngineStateStore, EngineStateVersions, FailedAttempt, SchemaVersion, SemanticEncodingVersion,
+    DurableAttemptStatus, DurableComputation, DurableDiagnostic, DurableProvenance,
+    EngineStateError, EngineStateStore, EngineStateVersions, FailedAttempt, SchemaVersion,
+    SemanticEncodingVersion,
 };
 
 use crate::rows::{
@@ -372,7 +373,7 @@ fn recover_pending(connection: &mut SqliteConnection) -> Result<(), SqliteStateE
             return Err(SqliteStateError::Recovery {
                 attempt: None,
                 reason: error,
-            })
+            });
         }
     };
     if pending.is_empty() {
