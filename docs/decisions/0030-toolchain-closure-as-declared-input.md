@@ -94,7 +94,13 @@ the seccomp allowlist is the next increment. 0028's measurement of the 45-syscal
 
 action caching is the increment after that. `finish_action` records every action `NotReusable(ActionCachingDisabled)` until its identity covers the resolved platform and complete execution semantics, and the closure the action declared is part of that identity. the `real_toolchain` test that asserts the second run re-executes flips when caching lands.
 
-the closure adapter covers nix store paths and not yet distribution compilers. the discovery mechanism for a non-nix toolchain is a follow-up that does not change the contract.
+the closure adapter covers nix store paths and not yet distribution compilers. the discovery mechanism for a non-nix toolchain is a follow-up that does not change the contract. what discovery must not use is `ldd`: it picks a loader from `PATH` rather than the one named in the binary's own `PT_INTERP`, so inside a nix devshell it resolves a distribution binary against nix's glibc and reports libraries the binary will never open. asking the binary's own loader through `LD_TRACE_LOADED_OBJECTS` reports what the kernel will actually open, and is what the tests use where a store path is unavailable.
+
+a confined action needs a writable temporary directory, and the executor provides it. the assembler in a compile creates temporaries and reaches for `/tmp`, which is outside the scratch root and therefore denied. the executor now creates `tmp` alongside `work` in the scratch root and exports `TMPDIR` naming it, so a tool that asks the ordinary way gets somewhere inside the sandbox to write.
+
+this is the one variable the executor adds to an otherwise declared-only environment, and the reason it is not the ambient authority `env_clear` exists to prevent is that it names a directory the executor itself just created inside the action's own scratch root. it is the same kind of thing as the working directory: execution environment the executor constructs, not host state leaking in. a spec that declares its own `TMPDIR` still wins, because the declared environment is applied after.
+
+the temporary directory is a sibling of the working directory rather than a subdirectory of it. declared input and output paths are relative and land under `work`, so a tool's temporaries cannot collide with a declared path, and capture, which reads only declared outputs under `work`, can never mistake one for an output.
 
 `NetworkPolicy::AllowHosts` and `AllowAll` remain rejected by the local executor, on the same ground and with the same deferral 0028 records. the network-namespace design that would honor them is untouched by this record.
 
