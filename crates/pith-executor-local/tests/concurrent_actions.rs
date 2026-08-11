@@ -6,13 +6,21 @@
 //! for it to matter: that two actual processes run at the same time, through
 //! the real staging, fork/exec, and capture path.
 //!
-//! Overlap is not inferred from wall time here. Each action touches its own
-//! marker in a shared directory and then waits for its sibling's, so the two
-//! can only both finish if they were running together. An engine that ran them
-//! one at a time deadlocks the first one, which gives up after ten seconds and
-//! exits nonzero — a failed run with a diagnostic, not a hung test.
+//! Overlap is not inferred from wall time here. Each action marks its arrival
+//! in its own scratch root and waits to be released, and the test releases both
+//! only once both markers exist. An engine that ran them one at a time never
+//! releases the first, which gives up after ten seconds and exits nonzero — a
+//! failed run with a diagnostic, not a hung test.
+//!
+//! The children cannot see each other: landlock confines each to its own scratch
+//! root (decision 0030). The rendezvous is therefore observed and released from
+//! outside, by the test.
 
 #![cfg(target_os = "linux")]
+
+use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use pith_core::{
     Action, ActionOutput, ActionSpec, Content, EnvironmentVariable, Interface, OutputKind, Pure,
@@ -26,6 +34,8 @@ use pith_engine::{
 use pith_executor_local::LocalExecutor;
 use pith_ids::ContentId;
 
+mod support;
+
 /// A runtime for one test. Built per call: constructing a thread pool is
 /// cheap next to what these tests do, and it keeps each test independent.
 fn runtime() -> TokioRuntime {
@@ -35,56 +45,54 @@ fn runtime() -> TokioRuntime {
     }
 }
 
-/// Touch this participant's marker, wait for its sibling's, then write the
-/// result. The wait is bounded so a serialized engine fails the run instead of
-/// hanging it; ten seconds is far longer than the rendezvous needs and far
-/// shorter than a test-suite timeout.
+/// Mark arrival, wait to be released, write the result. The wait is bounded so a
+/// serialized engine fails the run instead of hanging it; ten seconds is far
+/// longer than the rendezvous needs and far shorter than a test-suite timeout.
 const RENDEZVOUS_SCRIPT: &str = r#"
-touch "$RENDEZVOUS/$ME"
+: > arrived
 attempts=0
-while [ ! -e "$RENDEZVOUS/$PEER" ]; do
+while [ ! -e released ]; do
     attempts=$((attempts + 1))
     if [ "$attempts" -gt 200 ]; then
-        echo "timed out waiting for $PEER: the actions did not overlap" >&2
+        echo "timed out waiting for release: the actions did not overlap" >&2
         exit 3
     fi
-    sleep 0.05
+    "$SLEEP" 0.05
 done
 printf 'met:%s' "$ME" > result
 "#;
 
-/// One participant in the rendezvous. Each gets a distinct spec — different
-/// `ME`/`PEER` — so the engine plans, materializes, and caches them separately.
+/// The marker a child writes on arrival, and the one the test writes to release
+/// it. Both live in the child's own scratch root.
+const ARRIVED: &str = "arrived";
+const RELEASED: &str = "released";
+
+const POLL_INTERVAL: Duration = Duration::from_millis(20);
+const RENDEZVOUS_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// One participant in the rendezvous. Each gets a distinct spec — a different
+/// `ME` — so the engine plans, materializes, and caches them separately.
 struct RendezvousAction {
-    executable: ContentId,
-    rendezvous: String,
+    executable: &'static str,
+    sleep: Box<str>,
     me: String,
-    peer: String,
 }
 
 impl ActionRule for RendezvousAction {
     fn plan(&self, _inputs: &[Value]) -> PithResult<ActionSpec> {
         let mut spec = ActionSpec::isolated(self.executable);
+        spec.toolchain = support::closure_for(&[self.executable, "sleep"]);
         spec.arguments = ["-c".into(), RENDEZVOUS_SCRIPT.into()].into();
         spec.environment = [
-            // The child runs with `env_clear`, so the tools the script uses
-            // have to be declared. Inheriting the host's PATH is what makes
-            // this a test of scheduling rather than of nix path layout.
+            // The script calls `sleep` by absolute path, so the child needs no
+            // PATH at all.
             EnvironmentVariable {
-                name: "PATH".into(),
-                value: host_path().into_boxed_str(),
-            },
-            EnvironmentVariable {
-                name: "RENDEZVOUS".into(),
-                value: self.rendezvous.clone().into_boxed_str(),
+                name: "SLEEP".into(),
+                value: self.sleep.clone(),
             },
             EnvironmentVariable {
                 name: "ME".into(),
                 value: self.me.clone().into_boxed_str(),
-            },
-            EnvironmentVariable {
-                name: "PEER".into(),
-                value: self.peer.clone().into_boxed_str(),
             },
         ]
         .into();
@@ -175,8 +183,73 @@ impl PureRuleFrame for BothAtOnceFrame {
     }
 }
 
-fn host_path() -> String {
-    std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin".to_string())
+/// Watches the executors' scratch base for every participant to arrive, then
+/// releases them all at once. Nothing is released until the last arrives, so a
+/// serialized engine never gets past its first child.
+struct Rendezvous {
+    watcher: thread::JoinHandle<usize>,
+}
+
+impl Rendezvous {
+    fn watching(base: PathBuf, participants: usize) -> Self {
+        let watcher = thread::spawn(move || {
+            let started = Instant::now();
+            loop {
+                let arrived = arrived_roots(&base);
+                if arrived.len() >= participants {
+                    for root in &arrived {
+                        drop(std::fs::File::create(root.join(RELEASED)));
+                    }
+                    return arrived.len();
+                }
+                if started.elapsed() >= RENDEZVOUS_TIMEOUT {
+                    return arrived.len();
+                }
+                thread::sleep(POLL_INTERVAL);
+            }
+        });
+        Self { watcher }
+    }
+
+    /// How many participants were seen together. Anything short of the expected
+    /// count means they did not overlap.
+    fn released(self) -> usize {
+        self.watcher.join().unwrap_or(0)
+    }
+}
+
+/// The directories beneath `base` holding an arrival marker. Searched rather
+/// than derived, because where a child runs inside its scratch root is the
+/// executor's business and not something this test should restate.
+fn arrived_roots(base: &Path) -> Vec<PathBuf> {
+    const MAX_DEPTH: usize = 3;
+    let mut found = Vec::new();
+    let mut frontier = vec![(base.to_path_buf(), 0usize)];
+    while let Some((directory, depth)) = frontier.pop() {
+        if directory.join(ARRIVED).is_file() {
+            found.push(directory);
+            continue;
+        }
+        if depth >= MAX_DEPTH {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.filter_map(Result::ok) {
+            if entry.path().is_dir() {
+                frontier.push((entry.path(), depth.saturating_add(1)));
+            }
+        }
+    }
+    found
+}
+
+fn scratch_base() -> Option<tempfile::TempDir> {
+    tempfile::Builder::new()
+        .prefix("pith-scratch-")
+        .tempdir()
+        .ok()
 }
 
 /// Rules are selected by interface, so the two participants are told apart by
@@ -219,24 +292,21 @@ fn fixture_error(message: &str) -> DiagnosticSink {
 
 /// Register two rendezvous participants and return the pure requests that run
 /// them. Participant `i` has arity `i`, because rules are selected by interface.
-fn register_participants(
-    engine: &mut Engine,
-    rendezvous: &std::path::Path,
-) -> Option<Vec<Request<Pure>>> {
-    let shell = std::fs::read("/bin/sh").ok()?;
-    let executable = engine.put_blob(&shell).ok()?;
+fn register_participants(engine: &mut Engine) -> Option<Vec<Request<Pure>>> {
+    if std::fs::read("/bin/sh").is_err() {
+        return None;
+    }
+    let sleep: Box<str> = support::program_path("sleep").into_boxed_str();
     let names = ["first", "second"];
     let mut requests = Vec::new();
     for (arity, name) in names.iter().enumerate() {
-        let peer = names.iter().find(|other| *other != name)?;
         let action_interface = interface(arity, Type::Blob);
         engine.register_action_rule(
             rule::<Action>(&format!("act-{name}"), action_interface.clone()),
             RendezvousAction {
-                executable,
-                rendezvous: rendezvous.to_string_lossy().into_owned(),
+                executable: "/bin/sh",
+                sleep: sleep.clone(),
                 me: (*name).to_string(),
-                peer: (*peer).to_string(),
             },
         );
         engine.register_rule(
@@ -258,47 +328,38 @@ fn register_participants(
     Some(requests)
 }
 
-fn rendezvous_directory() -> Option<tempfile::TempDir> {
-    tempfile::Builder::new()
-        .prefix("pith-rendezvous-")
-        .tempdir()
-        .ok()
-}
-
 #[test]
 fn two_real_child_processes_run_at_the_same_time() {
-    let Some(rendezvous) = rendezvous_directory() else {
-        eprintln!("skipping: could not create a rendezvous directory");
+    let Some(base) = scratch_base() else {
+        eprintln!("skipping: could not create a scratch base");
         return;
     };
     let mut engine = Engine::new();
-    let Some(requests) = register_participants(&mut engine, rendezvous.path()) else {
-        eprintln!("skipping: /bin/sh is not readable");
+    let Some(requests) = register_participants(&mut engine) else {
+        eprintln!("skipping: /bin/sh is not readable on this host");
         return;
     };
+    let rendezvous = Rendezvous::watching(base.path().to_path_buf(), 2);
 
     let evaluations = engine
         .run_many(
             &requests,
             &runtime(),
             &AllowAllActions,
-            &LocalExecutor::new(),
+            &LocalExecutor::with_scratch_base(base.path().to_path_buf()),
         )
         .expect("the runtime drives the run")
         .expect("both actions meet at the rendezvous");
 
     assert_eq!(evaluations.len(), 2);
-    // Both markers exist and both children wrote their result, which they only
-    // reach after seeing each other.
-    for name in ["first", "second"] {
-        assert!(
-            rendezvous.path().join(name).exists(),
-            "{name} never reached the rendezvous"
-        );
-    }
+    assert_eq!(
+        rendezvous.released(),
+        2,
+        "the two actions were never in flight together"
+    );
     // The engine content-addresses what each child wrote, so the identity of
-    // the imported output is the assertion: only a child that saw its sibling
-    // gets as far as writing `met:<name>`.
+    // the imported output is the assertion: only a released child gets as far
+    // as writing `met:<name>`.
     let identities: Vec<Value> = evaluations
         .iter()
         .map(|evaluation| evaluation.value.clone())
@@ -314,15 +375,16 @@ fn two_real_child_processes_run_at_the_same_time() {
 
 #[test]
 fn a_fan_out_overlaps_real_child_processes() {
-    let Some(rendezvous) = rendezvous_directory() else {
-        eprintln!("skipping: could not create a rendezvous directory");
+    let Some(base) = scratch_base() else {
+        eprintln!("skipping: could not create a scratch base");
         return;
     };
     let mut engine = Engine::new();
-    let Some(requests) = register_participants(&mut engine, rendezvous.path()) else {
-        eprintln!("skipping: /bin/sh is not readable");
+    let Some(requests) = register_participants(&mut engine) else {
+        eprintln!("skipping: /bin/sh is not readable on this host");
         return;
     };
+    let rendezvous = Rendezvous::watching(base.path().to_path_buf(), 2);
     // Arity 2 keeps the root distinct from the arity-0 and arity-1 participants.
     let root_interface = interface(2, Type::Int);
     engine.register_rule(
@@ -337,10 +399,15 @@ fn a_fan_out_overlaps_real_child_processes() {
             &request::<Pure>("both", root_interface, inputs(2)),
             &runtime(),
             &AllowAllActions,
-            &LocalExecutor::new(),
+            &LocalExecutor::with_scratch_base(base.path().to_path_buf()),
         )
         .expect("the runtime drives the run")
         .expect("the fan-out's actions meet at the rendezvous");
 
     assert_eq!(evaluation.value, Value::Int(2));
+    assert_eq!(
+        rendezvous.released(),
+        2,
+        "the fan-out's actions were never in flight together"
+    );
 }

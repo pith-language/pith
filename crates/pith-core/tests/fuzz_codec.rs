@@ -53,8 +53,21 @@ fn value_strategy() -> impl Strategy<Value = Value> {
     ]
 }
 
-fn content_id_strategy() -> impl Strategy<Value = ContentId> {
-    bounded_bytes(32).prop_map(|b| ContentId::of_blob(&b))
+/// Valid absolute host paths for the `executable` field (decision 0030). Built
+/// from a fixed alphabet so every generated path passes `is_valid_host_path`:
+/// absolute, NUL-free, no traversal components.
+fn executable_path_strategy() -> impl Strategy<Value = Box<str>> {
+    let components = ["a", "bin", "tool", "nix", "store", "gcc", "x86_64"];
+    proptest::collection::vec(0u8..(components.len() as u8), 1..4).prop_map(move |indices| {
+        let mut path = String::from("/");
+        for (i, idx) in indices.iter().enumerate() {
+            if i > 0 {
+                path.push('/');
+            }
+            path.push_str(components.get(*idx as usize).copied().unwrap_or("a"));
+        }
+        path.into_boxed_str()
+    })
 }
 
 fn action_input_strategy() -> impl Strategy<Value = ActionInput> {
@@ -130,7 +143,7 @@ fn network_strategy() -> impl Strategy<Value = NetworkPolicy> {
 
 fn spec_strategy() -> impl Strategy<Value = ActionSpec> {
     (
-        content_id_strategy(),
+        executable_path_strategy(),
         proptest::collection::vec(bounded_string(16), 0..4),
         proptest::collection::vec(action_input_strategy(), 0..4),
         proptest::collection::vec(action_output_strategy(), 0..4),
@@ -152,6 +165,7 @@ fn spec_strategy() -> impl Strategy<Value = ActionSpec> {
             )| {
                 ActionSpec {
                     executable,
+                    toolchain: Box::new([]),
                     arguments: arguments
                         .into_iter()
                         .map(|a| a.into_boxed_str())

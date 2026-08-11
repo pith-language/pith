@@ -99,7 +99,7 @@ impl StableCode {
 }
 
 /// Named engine diagnostic codes. The discriminant is the stable `n` in
-/// `P{1000 + n}`; never renumber, only append (requirement K-11).
+/// `E-{1000 + n}`; never renumber, only append (requirement K-11).
 ///
 /// This is the single source of truth for engine codes: every diagnostic the
 /// kernel emits names its variant here, so the code, its number, and a label
@@ -280,7 +280,7 @@ impl miette::Diagnostic for Diag {
     }
 
     fn code<'a>(&'a self) -> Option<Box<dyn std::fmt::Display + 'a>> {
-        Some(Box::new(format!("P{}", self.code.0)))
+        Some(Box::new(format!("E-{}", self.code.0)))
     }
 }
 

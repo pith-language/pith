@@ -56,6 +56,7 @@ when an accepted decision changes, a new record supersedes it. the old record st
 - [0027: frame retention and garbage collection as roots, two stores, and composable policy axes](0027-retention-and-gc.md)
 - [0028: a first-party sandboxed local executor using landlock and seccomp](0028-sandboxed-local-executor.md)
 - [0029: independence is declared by the rule body, not inferred by the scheduler](0029-declared-independence.md)
+- [0030: a toolchain enters an action as a declared closure of host paths](0030-toolchain-closure-as-declared-input.md)
 
 note: 0013 amends 0005 to add a fifth identity type. 0005 stands; the amendment is recorded in 0013.
 
@@ -70,3 +71,5 @@ note: 0027 complements 0024 by framing the retention and GC problem 0024 left op
 note: 0028 amends 0016 by recording the sandboxing approach 0016 left in "unresolved." 0016 stands; its sanctioned `unsafe`-at-ffi-boundary discipline is what 0028's two `sys_*` modules implement.
 
 note: 0029 refines 0022 by answering where the scheduler's concurrency comes from. 0022 stands; its synchronous core is unchanged, and 0029 records that the width a concurrent scheduler needs is declared by rule bodies rather than inferred.
+
+note: 0030 amends 0028 by recording how a toolchain enters an action contract as a declared closure of host paths rather than a single executable blob. 0028 stands; the executable-as-blob model its "unresolved" section named as wrong is resolved here, and reading a nix store path's closure is recorded as the first prototype of the local content-store adapter over a Nix store that 0020 named.

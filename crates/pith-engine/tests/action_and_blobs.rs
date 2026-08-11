@@ -179,7 +179,7 @@ struct FixtureExecutor;
 impl Executor for FixtureExecutor {
     async fn execute(&self, invocation: &ActionInvocation) -> PithResult<CapturedActionExecution> {
         let spec = &invocation.spec;
-        let content = if spec.executable == double_executable() {
+        let content = if spec.executable.as_ref() == double_executable() {
             let Some(input) = invocation.inputs.first() else {
                 return Err(fixture_error("double action fixture requires one input"));
             };
@@ -357,16 +357,16 @@ impl Executor for FailingExecutor {
     }
 }
 
-fn double_executable() -> ContentId {
-    ContentId::of_blob(b"fixture:double")
+fn double_executable() -> &'static str {
+    "/bin/fixture-double"
 }
 
 fn double_input() -> ContentId {
     ContentId::of_blob(b"fixture input")
 }
 
-fn wrong_type_executable() -> ContentId {
-    ContentId::of_blob(b"fixture:wrong-type")
+fn wrong_type_executable() -> &'static str {
+    "/bin/fixture-wrong-type"
 }
 
 fn double_result_bytes(number: i64) -> Box<[u8]> {
@@ -426,14 +426,8 @@ fn fixture_error(message: &str) -> DiagnosticSink {
 
 fn fixture_engine() -> Engine {
     let mut engine = Engine::with_content_store(MemoryContentStore::default());
-    assert_eq!(
-        put_fixture_blob(&mut engine, b"fixture:double"),
-        double_executable()
-    );
-    assert_eq!(
-        put_fixture_blob(&mut engine, b"fixture:wrong-type"),
-        wrong_type_executable()
-    );
+    // The executable is a host path now (decision 0030), so only the declared
+    // input blob needs to be in the store for the fixture action to materialize.
     assert_eq!(
         put_fixture_blob(&mut engine, b"fixture input"),
         double_input()
@@ -443,15 +437,10 @@ fn fixture_engine() -> Engine {
 
 fn import_failing_engine() -> Engine {
     let mut content = MemoryContentStore::default();
-    let executable = match content.put_blob(b"fixture:double") {
-        Ok(identity) => identity,
-        Err(error) => unreachable!("memory content store failed to store executable: {error}"),
-    };
     let input = match content.put_blob(b"fixture input") {
         Ok(identity) => identity,
-        Err(error) => unreachable!("memory content store failed to store input: {error}"),
+        Err(error) => unreachable!("memory content store failed to store the input: {error}"),
     };
-    assert_eq!(executable, double_executable());
     assert_eq!(input, double_input());
     Engine::with_content_store(RejectOutputImportsStore { content })
 }
@@ -582,7 +571,7 @@ fn action_dependency_driven_through_run() {
             [Value::Int(21)],
         ))
         .unwrap();
-    assert_eq!(plan.spec.executable, double_executable());
+    assert_eq!(plan.spec.executable.as_ref(), double_executable());
     assert_eq!(plan.spec_digest, plan.spec.digest().unwrap());
     assert_eq!(
         plan.spec.capabilities.as_ref(),
@@ -624,7 +613,7 @@ fn action_dependency_driven_through_run() {
         .and_then(|node| node.action.as_ref())
         .unwrap();
     assert_eq!(action.spec_digest, action.spec.digest().unwrap());
-    assert_eq!(action.spec.executable, double_executable());
+    assert_eq!(action.spec.executable.as_ref(), double_executable());
     assert_eq!(
         action.authorization,
         ActionAuthorization::Allowed {
@@ -738,65 +727,11 @@ fn action_output_bytes_are_imported_by_the_engine() {
 }
 
 #[test]
-fn missing_action_executable_is_rejected_before_executor_call() {
-    let mut engine = Engine::new();
-    let action_interface = interface(&[Type::Int], Type::Blob);
-    let root_interface = interface(&[], Type::Blob);
-    engine.register_action_rule(
-        action_rule("double", action_interface.clone()),
-        DoubleAction,
-    );
-    engine.register_rule(
-        pure_rule("entry", root_interface.clone()),
-        ActionDepRule {
-            dependency: action_request("double", action_interface, [Value::Int(21)]),
-        },
-    );
-    let executions = Arc::new(AtomicUsize::new(0));
-
-    let diagnostics = engine
-        .run(
-            &pure_request("entry", root_interface, []),
-            &runtime(),
-            &AllowAllActions,
-            &NeverExecutor {
-                executions: executions.clone(),
-            },
-        )
-        .unwrap()
-        .unwrap_err();
-
-    assert_eq!(
-        diagnostics.iter().next().map(|diagnostic| diagnostic.code),
-        Some(StableCode::from(EngineCode::ContentUnavailable))
-    );
-    assert_eq!(executions.load(Ordering::Relaxed), 0);
-    assert_no_pending_attempts(&engine);
-    let query = engine.query();
-    let (action_computation, action) = query
-        .computations()
-        .find(|(_, node)| matches!(node.kind, ComputationKind::Action(_)))
-        .unwrap();
-    assert!(matches!(action.state, AttemptState::Failed { .. }));
-    let parent = query
-        .computations()
-        .find(|(_, node)| matches!(node.kind, ComputationKind::Pure(_)))
-        .map(|(_, node)| node)
-        .unwrap();
-    assert!(parent.dependencies.iter().any(|dependency| matches!(
-        dependency,
-        pith_engine::DependencyEdge::Action { computation, .. }
-            if *computation == action_computation
-    )));
-}
-
-#[test]
 fn missing_action_input_is_rejected_before_executor_call() {
     let mut engine = Engine::new();
-    assert_eq!(
-        put_fixture_blob(&mut engine, b"fixture:double"),
-        double_executable()
-    );
+    // The declared input is deliberately not stored; the engine must reject the
+    // action before the executor runs. The executable is a host path (0030) and
+    // needs no store entry.
     let action_interface = interface(&[Type::Int], Type::Blob);
     let root_interface = interface(&[], Type::Blob);
     engine.register_action_rule(

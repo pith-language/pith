@@ -14,6 +14,8 @@ use pith_engine::{
 use pith_executor_local::LocalExecutor;
 use pith_ids::ContentId;
 
+mod support;
+
 /// A runtime for one test. Built per call: constructing a thread pool is
 /// cheap next to what these tests do, and it keeps each test independent.
 fn runtime() -> TokioRuntime {
@@ -24,13 +26,15 @@ fn runtime() -> TokioRuntime {
 }
 
 struct RunScript {
-    executable: ContentId,
+    executable: &'static str,
     input: ContentId,
 }
 
 impl ActionRule for RunScript {
     fn plan(&self, _inputs: &[Value]) -> PithResult<ActionSpec> {
         let mut spec = ActionSpec::isolated(self.executable);
+        // The script is shell builtins only, so the shell is the whole closure.
+        spec.toolchain = support::closure_for(&[self.executable]);
         spec.arguments = [
             "-c".into(),
             "IFS= read -r value < operand; printf 'processed:%s' \"$value\" > result".into(),
@@ -169,13 +173,10 @@ fn fixture_error(message: &str) -> DiagnosticSink {
 
 #[test]
 fn engine_executes_imports_and_rematerializes_a_real_local_action() {
-    let Some(shell_bytes) = std::fs::read("/bin/sh").ok() else {
+    if std::fs::read("/bin/sh").is_err() {
         return;
-    };
+    }
     let mut engine = Engine::new();
-    let Some(executable) = engine.put_blob(&shell_bytes).ok() else {
-        return;
-    };
     let Some(input) = engine.put_blob(b"hello\n").ok() else {
         return;
     };
@@ -183,7 +184,10 @@ fn engine_executes_imports_and_rematerializes_a_real_local_action() {
     let root_interface = interface(&[], Type::Blob);
     engine.register_action_rule(
         rule::<Action>("process", action_interface.clone()),
-        RunScript { executable, input },
+        RunScript {
+            executable: "/bin/sh",
+            input,
+        },
     );
     engine.register_rule(
         rule::<Pure>("root", root_interface.clone()),

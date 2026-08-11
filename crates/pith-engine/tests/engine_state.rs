@@ -43,7 +43,7 @@ fn pure_computation(declaration: &str, input: i64) -> PureComputationKey {
 fn action_plan(declaration: &str) -> Result<DurableActionPlan, Diag> {
     let identity = RuleIdentity::of_module_declaration("engine-state-tests", declaration);
     let revision = RuleRevision::of_manifest(identity, b"engine-state-action-v1");
-    let mut spec = ActionSpec::isolated(ContentId::of_blob(b"executable"));
+    let mut spec = ActionSpec::isolated("/bin/executable");
     spec.outputs = Box::new([ActionOutput {
         path: "result".into(),
         kind: OutputKind::Blob,

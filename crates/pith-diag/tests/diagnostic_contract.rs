@@ -91,7 +91,7 @@ fn miette_codes_use_the_stable_p_prefix() {
 
     assert_eq!(
         diag.code().map(|code| code.to_string()),
-        Some("P1213".to_string())
+        Some("E-1213".to_string())
     );
 }
 

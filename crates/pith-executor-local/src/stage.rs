@@ -1,4 +1,4 @@
-//! Staging declared inputs and the executable into a private scratch root.
+//! Staging declared inputs into a private scratch root.
 //!
 //! Pure filesystem work: no `unsafe`, no syscalls beyond ordinary `mkdir`,
 //! `write`, and `symlink`. The executor's authority is the mapping from the
@@ -6,6 +6,11 @@
 //! child sees. Paths come from the validated [`pith_core::ActionSpec`], which
 //! already rejected absolute paths, `..`, trailing slashes, and overlapping
 //! input/output pairs (see `pith_core::ActionSpec::validate`).
+//!
+//! The executable is a host path the executor `execve`s directly (decision
+//! 0030); it is not staged here. Only declared source inputs are laid out under
+//! the working directory, which is one of two directories in the scratch root:
+//! `work` holds them, `tmp` holds whatever the child writes as a temporary.
 
 use std::path::{Path, PathBuf};
 
@@ -19,56 +24,48 @@ use tokio::fs;
 
 use crate::executor_diag;
 
-/// The staged scratch root: where inputs were laid out, where the executable
-/// lives, and where the child should run. Paths are absolute and local to this
-/// machine; they do not escape the executor.
+/// The staged scratch root: where inputs were laid out and where the child
+/// should run, plus the host path of the executable to `execve`. Paths are
+/// absolute and local to this machine; they do not escape the executor.
 pub(super) struct StagedAction {
+    /// The whole scratch root, holding the working and temporary directories.
+    pub(super) scratch_root: PathBuf,
     /// The directory the child runs in (`chdir` target).
     pub(super) working_dir: PathBuf,
-    /// The absolute path to the staged executable, with its executable bit set.
-    pub(super) executable: PathBuf,
+    /// Where the child writes temporaries. A sibling of the working directory,
+    /// so a tool's temporaries can never collide with a declared path or be
+    /// mistaken for a declared output.
+    pub(super) temp_dir: PathBuf,
+    /// The absolute host path the executor `execve`s. Carried from
+    /// `spec.executable` so the process driver does not re-parse the spec.
+    pub(super) executable: Box<str>,
 }
 
 type StageResult<T> = pith_diag::PithResult<T>;
 
-/// Stage `invocation` under `root`: a working directory, the executable blob
-/// with its executable bit set, and each declared input at its declared relative
-/// path. Output paths are *not* created here; the child creates them as it
-/// writes, and [`crate::capture`] reads them back after exit.
+/// Stage `invocation` under `root`: a working directory and each declared input
+/// at its declared relative path. The executable is not staged; it is a host
+/// path carried through for the executor to `execve`. Output paths are *not*
+/// created here; the child creates them as it writes, and [`crate::capture`]
+/// reads them back after exit.
 pub(super) async fn stage(invocation: &ActionInvocation, root: &Path) -> StageResult<StagedAction> {
     let working_dir = root.join("work");
     fs::create_dir_all(&working_dir)
         .await
         .map_err(|error| io_diag("working directory", error))?;
+    let temp_dir = root.join("tmp");
+    fs::create_dir_all(&temp_dir)
+        .await
+        .map_err(|error| io_diag("temporary directory", error))?;
 
-    let executable = stage_executable(invocation, root).await?;
     stage_inputs(invocation, &working_dir).await?;
 
     Ok(StagedAction {
+        scratch_root: root.to_path_buf(),
         working_dir,
-        executable,
+        temp_dir,
+        executable: invocation.spec.executable.clone(),
     })
-}
-
-/// The staged executable's path, written with its executable bit set so the
-/// child can `execve` it. Lives at `root/exe` (a single well-known name) so the
-/// landlock rule for it is one path, not one per action.
-async fn stage_executable(invocation: &ActionInvocation, root: &Path) -> StageResult<PathBuf> {
-    let executable_path = root.join("exe");
-    let MaterializedContent::Blob(blob) = &invocation.executable else {
-        return Err(executor_diag(
-            "the action executable materialized as a tree, not a blob",
-        ));
-    };
-    // Held until the write handle is gone, so no concurrent fork can copy it
-    // and make this executable busy for the action about to run it (see
-    // `crate::spawn_gate`).
-    let _writing = crate::spawn_gate::writing_executable().await;
-    fs::write(&executable_path, &blob.bytes)
-        .await
-        .map_err(|error| io_diag("executable", error))?;
-    set_executable_bit(&executable_path)?;
-    Ok(executable_path)
 }
 
 /// Lay out each declared input at its declared relative path under the working

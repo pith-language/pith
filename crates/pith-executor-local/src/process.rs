@@ -17,7 +17,6 @@ use pith_engine::{
 use tokio::process::Command;
 
 use crate::capture::capture;
-use crate::spawn_gate;
 use crate::stage;
 use crate::sys_landlock::landlock_installed;
 use crate::sys_seccomp::{register_sandbox_hook, seccomp_filter_installed};
@@ -48,10 +47,11 @@ impl LocalExecutor {
 
     /// The [`AccessVerification`] this build reports, given which confinement
     /// layers it actually installed. `Prevented` requires both landlock and
-    /// seccomp; `Observed` is seccomp-only; `Unverified` is neither. Because
-    /// neither layer is fully installed in this build (see
-    /// [`crate::sys_landlock`] and [`crate::sys_seccomp`]), this is currently
-    /// `Unverified`.
+    /// seccomp; `Observed` is one layer alone; `Unverified` is neither. This
+    /// build installs the landlock path-confinement ruleset but not yet the
+    /// seccomp syscall allowlist (see [`crate::sys_landlock`] and
+    /// [`crate::sys_seccomp`]), so the honest report is `Observed`: paths are a
+    /// kernel-enforced fact, syscalls are not yet.
     fn access_verification() -> AccessVerification {
         match (landlock_installed(), seccomp_filter_installed()) {
             (true, true) => AccessVerification::Prevented,
@@ -188,19 +188,10 @@ fn stderr_excerpt(stderr: &[u8]) -> &[u8] {
     }
 }
 
-/// Fork the child under the spawn gate, then wait for it outside the gate.
-///
-/// `Command::spawn` returns once the child has exec'd or reported why it could
-/// not, so holding the gate across it covers exactly the window in which the
-/// child holds copies of this process's descriptors — see [`crate::spawn_gate`]
-/// for what that window costs if it is left open. The child's run is not held:
-/// a gate spanning that would serialize the build.
+/// Fork the child and wait for its output.
 async fn run_child(command: &mut Command) -> pith_diag::PithResult<std::process::Output> {
-    let spawned = {
-        let _forking = spawn_gate::forking_child().await;
-        command.spawn()
-    };
-    let child = spawned
+    let child = command
+        .spawn()
         .map_err(|error| crate::executor_diag(format!("spawning the action failed: {error}")))?;
     child
         .wait_with_output()
@@ -215,13 +206,15 @@ async fn run_in_scratch(
     let staged = stage::stage(invocation, scratch_root).await?;
     let declared_outputs = stage::declared_outputs(invocation);
 
-    let mut command = Command::new(&staged.executable);
+    let mut command = Command::new(staged.executable.as_ref());
     command
         .args(invocation.spec.arguments.iter().map(|arg| arg.as_ref()))
         .current_dir(&staged.working_dir)
-        // A clean environment: only the variables the spec declared, with no
-        // ambient inheritance. This is the least-authority default.
+        // A clean environment: no ambient inheritance. `TMPDIR` is set before
+        // the declared variables rather than after, so a spec that declares its
+        // own still wins.
         .env_clear()
+        .env("TMPDIR", &staged.temp_dir)
         .envs(
             invocation
                 .spec
@@ -238,7 +231,18 @@ async fn run_in_scratch(
         // die with it. Without this a cancelled action leaves a process running
         // against a scratch root that is about to be deleted.
         .kill_on_drop(true);
-    register_sandbox_hook(&mut command);
+    // Built before the fork so the child's pre_exec hook allocates nothing.
+    let paths = crate::sys_landlock::SandboxPaths::new(
+        &staged.scratch_root,
+        staged.executable.as_ref(),
+        &invocation.spec.toolchain,
+    )
+    .map_err(|error| {
+        crate::executor_diag(format!(
+            "a declared sandbox path cannot be confined: {error}"
+        ))
+    })?;
+    register_sandbox_hook(&mut command, paths);
 
     let output = run_child(&mut command).await?;
     if !output.status.success() {

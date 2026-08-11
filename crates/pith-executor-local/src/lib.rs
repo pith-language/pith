@@ -29,7 +29,6 @@
 
 mod capture;
 mod process;
-mod spawn_gate;
 mod stage;
 mod sys_landlock;
 mod sys_seccomp;
