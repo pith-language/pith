@@ -102,7 +102,7 @@ the engine's evaluator splits along the seam this decision describes: a schedule
 
 the executor now sees concurrent calls. `Executor::execute` takes `&self` and was already required to be `Sync`, so this imposes no new bound, but an executor with shared mutable state now has to say what it does about it. the first-party local executor (0028) has none: each action gets its own scratch root.
 
-overlap costs memory. `n` fan-out children mean `n` live chains and up to `n` materialized action invocations at once. no bound is imposed by this record; see unresolved.
+overlap costs memory. `n` fan-out children mean `n` live chains, and the actions among them are started under a bound (`Engine::action_concurrency`) rather than all at once; see unresolved.
 
 ## alternatives considered
 
@@ -126,7 +126,7 @@ rejected as insufficient. it gives a build tool concurrency across targets and n
 
 ## unresolved
 
-there is no width limit. a `NeedAll` of a thousand requests starts a thousand chains and, if each needs an action, materializes a thousand invocations. a bound belongs with the resource limits 0028 defers (timeouts, rlimits, cgroups) rather than in this record, because the useful bound is over concurrent *actions* — the thing that costs memory and processes — not over chains, which are cheap.
+the width limit is over actions and is now in place. a `NeedAll` of a thousand requests still starts a thousand chains — chains are cheap — but the actions those chains stop for are started `Engine::action_concurrency` at a time, defaulting to the host's available parallelism. a chain that stops for an action joins a queue holding the *request*, so an action waiting for a slot has not been planned, has no computation node, and has materialized nothing; the bound therefore limits live invocations and child processes, which is what costs. the remaining resource limits 0028 defers (timeouts, rlimits, cgroups) are unaffected by this and stay open.
 
 duplicate requests inside one batch each get their own computation. the reusable index dedupes across time, not within a batch, because no attempt has completed while the batch is being prepared. whether the engine should coalesce identical in-flight pure computations — a general "one computation per key in flight" property, which also covers two chains reaching the same request independently — is a real question and a separate one; it needs the same machinery as cancellation, and it is deferred to the record that lands that.
 

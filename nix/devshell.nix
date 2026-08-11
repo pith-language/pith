@@ -23,6 +23,16 @@
           rustToolchain
           pkgs.cargo-nextest
           pkgs.cargo-llvm-cov
+          pkgs.cargo-mutants
+          pkgs.cargo-hack
+          pkgs.cargo-machete
+          pkgs.cargo-deny
+          pkgs.typos
+          pkgs.lychee
+          pkgs.bacon
+          pkgs.just
+          pkgs.deadnix
+          pkgs.statix
           pkgs.git
         ];
 

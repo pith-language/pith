@@ -9,6 +9,7 @@
 //! that only releases once every participant has arrived, so an engine that ran
 //! its actions one at a time could not get past it.
 
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
@@ -20,8 +21,9 @@ use pith_diag::{Diag, DiagnosticSink, EngineCode, PithResult, Severity, Span, St
 use pith_engine::state::DurableAttemptState;
 use pith_engine::{
     AccessVerification, ActionExecution, ActionInvocation, ActionRule, AllowAllActions,
-    AttemptState, CapturedActionExecution, CapturedExecutionReport, Engine, Evaluation,
-    ExecutionPlatform, Executor, PureRule, PureRuleFrame, PureStep, Resumption, TokioRuntime,
+    AttemptState, CapturedActionExecution, CapturedExecutionReport, ComputationKind, Engine,
+    Evaluation, ExecutionPlatform, Executor, PureRule, PureRuleFrame, PureStep, Resumption,
+    TokioRuntime,
 };
 use pith_ids::ContentId;
 use pith_store::MemoryContentStore;
@@ -230,6 +232,20 @@ impl BarrierExecutor {
     }
 }
 
+/// Let `engine` run `actions` at once, and return a barrier of the same width.
+///
+/// The two numbers have to agree. The engine's default bound is the host's core
+/// count, so without this a barrier wider than the host's cores would never
+/// release and the test would measure the machine rather than the engine.
+fn barrier_across(engine: &mut Engine, actions: usize) -> BarrierExecutor {
+    allow_actions(engine, actions);
+    BarrierExecutor::expecting(actions)
+}
+
+fn allow_actions(engine: &mut Engine, actions: usize) {
+    engine.set_action_concurrency(NonZeroUsize::new(actions).unwrap_or(NonZeroUsize::MIN));
+}
+
 #[async_trait::async_trait]
 impl Executor for BarrierExecutor {
     async fn execute(&self, _invocation: &ActionInvocation) -> PithResult<CapturedActionExecution> {
@@ -410,7 +426,7 @@ fn assert_no_pending_attempts(engine: &Engine) {
 fn independent_roots_run_their_actions_concurrently() {
     let mut engine = fixture_engine();
     let roots = register_action_leaves(&mut engine, 2);
-    let executor = BarrierExecutor::expecting(2);
+    let executor = barrier_across(&mut engine, 2);
 
     let evaluations = engine
         .run_many(&roots, &runtime(), &AllowAllActions, &executor)
@@ -438,7 +454,7 @@ fn a_fan_out_runs_its_actions_concurrently() {
             dependencies: leaves.into_boxed_slice(),
         },
     );
-    let executor = BarrierExecutor::expecting(3);
+    let executor = barrier_across(&mut engine, 3);
 
     let evaluation = engine
         .run(
@@ -456,6 +472,83 @@ fn a_fan_out_runs_its_actions_concurrently() {
         executor.peak(),
         3,
         "all three fan-out actions should have been in flight together"
+    );
+    assert_no_pending_attempts(&engine);
+}
+
+/// The width of the fan-out the bounded tests build, and the bound they hold it
+/// to. Six over two is three batches: enough that a driver which started a batch
+/// and then stopped refilling would not finish.
+const BOUNDED_FAN_OUT: usize = 6;
+const ACTION_BOUND: usize = 2;
+
+/// Build a root that fans out over `BOUNDED_FAN_OUT` action-backed leaves.
+fn wide_fan_out_root(engine: &mut Engine) -> Request<Pure> {
+    let leaves = register_action_leaves(engine, BOUNDED_FAN_OUT);
+    let root_interface = int_interface(BOUNDED_FAN_OUT);
+    engine.register_rule(
+        pure_rule("root", root_interface.clone()),
+        SumAllRule {
+            dependencies: leaves.into_boxed_slice(),
+        },
+    );
+    pure_request("root", root_interface, int_inputs(BOUNDED_FAN_OUT))
+}
+
+fn action_computations(engine: &Engine) -> usize {
+    engine
+        .query()
+        .computations()
+        .filter(|(_, node)| matches!(node.kind, ComputationKind::Action(_)))
+        .count()
+}
+
+#[test]
+fn a_fan_out_wider_than_the_bound_runs_its_actions_in_batches() {
+    let mut engine = fixture_engine();
+    let root = wide_fan_out_root(&mut engine);
+    // The barrier is as wide as the bound, so it releases once the driver has
+    // filled the pipe and not before. A driver that started the whole fan-out
+    // would show a peak of six; one that started a batch and never refilled
+    // would never reach the third generation and would time out.
+    let executor = barrier_across(&mut engine, ACTION_BOUND);
+
+    let evaluation = engine
+        .run(&root, &runtime(), &AllowAllActions, &executor)
+        .expect("the runtime drives the run")
+        .expect("the root evaluates");
+
+    // 2 * (0 + 1 + 2 + 3 + 4 + 5)
+    assert_eq!(evaluation.value, Value::Int(30));
+    assert_eq!(
+        executor.peak(),
+        ACTION_BOUND,
+        "the bound should have held the fan-out to {ACTION_BOUND} actions at a time"
+    );
+    assert_no_pending_attempts(&engine);
+}
+
+#[test]
+fn actions_waiting_for_a_slot_are_not_planned() {
+    let mut engine = fixture_engine();
+    let root = wide_fan_out_root(&mut engine);
+    allow_actions(&mut engine, ACTION_BOUND);
+    // Leaf 0's action plans with the argument "0", so the failure lands in the
+    // first batch and the run aborts while the rest are still queued.
+    let executor = FailOneExecutor { failing: 0 };
+
+    let result = engine
+        .run(&root, &runtime(), &AllowAllActions, &executor)
+        .expect("the runtime drives the run");
+
+    assert!(result.is_err(), "the failing action should abort the run");
+    // The cost the bound exists to control is the materialized invocation, not
+    // the chain. A queued action has no computation node: it was never planned,
+    // so its inputs were never read out of the content store.
+    assert_eq!(
+        action_computations(&engine),
+        ACTION_BOUND,
+        "only the actions that had a slot should have been planned"
     );
     assert_no_pending_attempts(&engine);
 }
@@ -572,6 +665,7 @@ fn a_cycle_is_detected_through_the_frame_that_opened_the_fan_out() {
 fn a_failing_action_leaves_no_concurrent_sibling_pending() {
     let mut engine = fixture_engine();
     let roots = register_action_leaves(&mut engine, 2);
+    allow_actions(&mut engine, 2);
     // Leaf 1's action plans with the argument "1"; the executor fails that one
     // and yields on the other, so the sibling is in flight when the run aborts.
     let executor = FailOneExecutor { failing: 1 };
@@ -641,6 +735,7 @@ fn attempt_states(engine: &Engine) -> Vec<AttemptState> {
 fn a_cancelled_run_reports_the_cancellation() {
     let mut engine = fixture_engine();
     let roots = register_action_leaves(&mut engine, 2);
+    allow_actions(&mut engine, 2);
     let cancel = Arc::new(AtomicBool::new(false));
     let executor = CancellingExecutor {
         cancel: Arc::clone(&cancel),
@@ -672,6 +767,7 @@ fn a_cancelled_run_reports_the_cancellation() {
 fn cancelled_work_is_recorded_as_cancelled_rather_than_failed() {
     let mut engine = fixture_engine();
     let roots = register_action_leaves(&mut engine, 2);
+    allow_actions(&mut engine, 2);
     let cancel = Arc::new(AtomicBool::new(false));
     let executor = CancellingExecutor {
         cancel: Arc::clone(&cancel),
@@ -714,6 +810,7 @@ fn cancelled_work_is_recorded_as_cancelled_rather_than_failed() {
 fn cancelled_attempts_are_published_as_cancelled() {
     let mut engine = fixture_engine();
     let roots = register_action_leaves(&mut engine, 2);
+    allow_actions(&mut engine, 2);
     let cancel = Arc::new(AtomicBool::new(false));
     let executor = CancellingExecutor {
         cancel: Arc::clone(&cancel),
@@ -766,7 +863,7 @@ fn an_uncancelled_signal_lets_the_run_finish() {
     let mut engine = fixture_engine();
     let roots = register_action_leaves(&mut engine, 2);
     let cancel = AtomicBool::new(false);
-    let executor = BarrierExecutor::expecting(2);
+    let executor = barrier_across(&mut engine, 2);
 
     let evaluations = engine
         .run_many_cancellable(&roots, &runtime(), &AllowAllActions, &executor, &cancel)

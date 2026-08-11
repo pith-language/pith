@@ -26,6 +26,8 @@ pub use ir::{
 };
 pub use query::EngineQuery;
 
+use std::num::NonZeroUsize;
+
 use indexmap::IndexMap;
 use pith_core::{Action, Pure, PureComputationKey, Request, Rule, RuleArena, RuleId};
 use pith_diag::PithResult;
@@ -55,6 +57,18 @@ pub struct Engine {
     /// scheduling boundaries (decision 0024, "adapter boundaries").
     pub(crate) state_store: Box<dyn EngineStateStore>,
     pub(crate) durable_attempts: IndexMap<ComputationId, DurableAttemptId>,
+    action_concurrency: NonZeroUsize,
+}
+
+/// How many actions a run keeps in flight when the caller does not say.
+///
+/// The bound is over actions rather than chains because an action is what costs
+/// a materialized invocation and a child process; a parked chain is a stack
+/// (decision 0029, "unresolved"). One action per available core is the same
+/// default every build tool converges on, and it is derived from the host rather
+/// than written down, so it needs no revising when the host changes.
+fn default_action_concurrency() -> NonZeroUsize {
+    std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN)
 }
 
 impl Engine {
@@ -83,7 +97,26 @@ impl Engine {
             store: Box::new(store),
             state_store: Box::new(state_store),
             durable_attempts: IndexMap::new(),
+            action_concurrency: default_action_concurrency(),
         }
+    }
+
+    /// How many actions a run keeps in flight at once.
+    #[must_use]
+    pub fn action_concurrency(&self) -> NonZeroUsize {
+        self.action_concurrency
+    }
+
+    /// Bound the actions a run keeps in flight. A fan-out wider than `limit`
+    /// still opens every chain — chains are cheap — but the actions those chains
+    /// stop for are started `limit` at a time, so a batch of a thousand
+    /// compilations materializes `limit` invocations rather than a thousand.
+    ///
+    /// Raising or lowering this changes only how much of the run overlaps. The
+    /// results do not depend on it: the requests in a fan-out are declared
+    /// independent (decision 0029), so no order among them is observable.
+    pub fn set_action_concurrency(&mut self, limit: NonZeroUsize) {
+        self.action_concurrency = limit;
     }
 
     /// The durable engine-state adapter (decision 0024). Writes take `&self`,

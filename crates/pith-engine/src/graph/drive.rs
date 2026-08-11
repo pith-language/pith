@@ -5,7 +5,14 @@
 //! that stopped for an effect: the pure driver rejects it, and the run driver
 //! serves it — reading blob bytes inline, and handing actions to the executor
 //! so that actions belonging to independent chains overlap.
+//!
+//! Overlap is bounded. A chain that stops for an action joins a queue, and the
+//! run driver starts from that queue only while fewer than
+//! [`Engine::action_concurrency`] actions are running. The queue holds requests,
+//! not invocations: an action waiting for a slot has not been planned, has no
+//! computation node, and has materialized nothing.
 
+use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::Poll;
@@ -130,6 +137,7 @@ impl Engine {
         cancel: &C,
         in_flight: &mut Vec<InFlightAction<'a>>,
     ) -> Result<(), RunAbort> {
+        let mut waiting: VecDeque<(ChainId, Request<Action>)> = VecDeque::new();
         loop {
             while let Some(chain) = scheduler.next_ready() {
                 if cancel.is_cancelled() {
@@ -143,13 +151,21 @@ impl Engine {
                         self.record_edge(parent, DependencyEdge::Blob { id })?;
                         scheduler.resume(chain, Resumption::One(Value::Bytes(bytes)))?;
                     }
-                    ChainPause::Action(request) => {
-                        self.start_action(scheduler, chain, request, policy, executor, in_flight)?;
-                    }
+                    ChainPause::Action(request) => waiting.push_back((chain, request)),
                 }
             }
 
+            while in_flight.len() < self.action_concurrency().get() {
+                let Some((chain, request)) = waiting.pop_front() else {
+                    break;
+                };
+                self.start_action(scheduler, chain, request, policy, executor, in_flight)?;
+            }
+
             if in_flight.is_empty() {
+                // Nothing is running, so nothing will free a slot. The queue is
+                // empty too: the loop above starts at least one action while the
+                // limit is non-zero, so a queued action cannot be left here.
                 return Ok(());
             }
             let (index, captured) = first_finished(in_flight).await;
