@@ -32,8 +32,6 @@ pub(super) fn cycle_diag(chain: &[&str], span: Span) -> DiagnosticSink {
 /// compile-checked: adding or removing one is a visible event, and a typo in a
 /// free-text message cannot silently change which invariant fired.
 pub(super) enum InternalInvariant {
-    /// A pure step requested a blob/action but the evaluation stack was empty.
-    EffectfulStepWithNoFrame(&'static str),
     /// The parent frame of a dependency request was missing from the stack.
     PureLostRequestingFrame,
     /// The parent computation of a dependency request was missing from the arena.
@@ -103,14 +101,19 @@ pub(super) enum InternalInvariant {
     /// type. The computation key covers the interface, so a decoded value of
     /// another type contradicts the key it was indexed under.
     HydratedResultTypeMismatch { expected: Type, actual: Type },
+    /// The scheduler was asked for an evaluation chain it no longer holds.
+    SchedulerLostChain,
+    /// A completed chain named a fan-out group the scheduler no longer holds.
+    SchedulerLostGroup,
+    /// A fan-out group completed but the frame that opened it was gone.
+    SchedulerLostFanOutFrame,
+    /// A root chain completed but its result slot was gone.
+    SchedulerLostRootSlot,
 }
 
 impl InternalInvariant {
     fn message(&self) -> String {
         match self {
-            InternalInvariant::EffectfulStepWithNoFrame(step) => {
-                format!("{step} requested with no frame on the stack")
-            }
             InternalInvariant::PureLostRequestingFrame => {
                 "pure evaluator lost a requesting frame".to_string()
             }
@@ -195,6 +198,18 @@ impl InternalInvariant {
             InternalInvariant::HydratedResultTypeMismatch { expected, actual } => {
                 format!("a hydrated result is {actual}, expected {expected}")
             }
+            InternalInvariant::SchedulerLostChain => {
+                "the scheduler lost an evaluation chain".to_string()
+            }
+            InternalInvariant::SchedulerLostGroup => {
+                "the scheduler lost a fan-out group".to_string()
+            }
+            InternalInvariant::SchedulerLostFanOutFrame => {
+                "the scheduler lost the frame that opened a fan-out group".to_string()
+            }
+            InternalInvariant::SchedulerLostRootSlot => {
+                "the scheduler lost a root result slot".to_string()
+            }
         }
     }
 }
@@ -213,6 +228,17 @@ pub(super) fn effectful_in_pure_diag() -> DiagnosticSink {
         EngineCode::EffectfulStepInPure,
         Span::none(),
         "effectful step (NeedBlob/NeedAction) in a pure-only evaluation; use Engine::run",
+    ))
+}
+
+/// The diagnostic a cancelled run carries. Not a fault: it reports that the
+/// caller stopped the work, which is why the attempts it stopped are recorded
+/// as cancelled rather than failed.
+pub(super) fn cancelled_diag() -> DiagnosticSink {
+    one_diag(Diag::engine(
+        EngineCode::RunCancelled,
+        Span::none(),
+        "the run was cancelled by its caller",
     ))
 }
 
@@ -294,7 +320,6 @@ mod tests {
     #[test]
     fn every_internal_invariant_carries_the_right_code_and_message() {
         let invariants = [
-            InternalInvariant::EffectfulStepWithNoFrame("blob"),
             InternalInvariant::PureLostRequestingFrame,
             InternalInvariant::PureLostParentComputation,
             InternalInvariant::PureLostComputationNode,
@@ -332,6 +357,10 @@ mod tests {
                 expected: Type::Int,
                 actual: Type::Bool,
             },
+            InternalInvariant::SchedulerLostChain,
+            InternalInvariant::SchedulerLostGroup,
+            InternalInvariant::SchedulerLostFanOutFrame,
+            InternalInvariant::SchedulerLostRootSlot,
         ];
         for invariant in invariants {
             let sink = internal_diag(invariant);

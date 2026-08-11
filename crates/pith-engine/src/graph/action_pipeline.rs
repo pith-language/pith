@@ -1,10 +1,11 @@
 //! The action lifecycle: plan, authorize, materialize, execute, import,
 //! validate, and record provenance for declared actions.
 //!
-//! These methods live on [`Engine`] but are separated from the pure step
-//! machine for readability. They cross the sync/async boundary at the executor
-//! call (decision 0022): planning, materialization, import, and validation are
-//! synchronous; only `executor.execute` is awaited.
+//! Nothing here awaits. The lifecycle is split at the executor call (decision
+//! 0022) into [`Engine::begin_action`], which plans and materializes, and
+//! [`Engine::finish_action`], which imports and validates. Both need
+//! `&mut Engine`; the call between them needs neither, which is what lets the
+//! driver park the requesting chain and run other work meanwhile.
 
 use pith_core::{Action, ActionSpec, Content, Request, RuleId, Type, Value, select_rule};
 use pith_diag::{Diag, DiagnosticSink, EngineCode, PithResult, Span};
@@ -12,14 +13,14 @@ use pith_ids::{ComputationId, ContentId};
 use pith_store::{Tree, TreeEntry, TreeEntryContent};
 use smallvec::SmallVec;
 
+use super::Engine;
 use super::ir::{
     ActionPlan, ActionRecord, AttemptState, ComputationKind, ComputationNode, DependencyEdge,
-    ReuseDecision, ReuseReason,
+    ReuseDecision, ReuseReason, StopReason,
 };
-use super::{ActionRunOutcome, Engine};
 use crate::action::{
     ActionExecution, ActionInvocation, CapturedFileContent, CapturedOutputContent,
-    CapturedTreeEntryContent, ExecutionReport, Executor, MaterializedActionInput, MaterializedBlob,
+    CapturedTreeEntryContent, ExecutionReport, MaterializedActionInput, MaterializedBlob,
     MaterializedContent, MaterializedFileContent, MaterializedTree, MaterializedTreeEntryContent,
     ProducedOutput,
 };
@@ -31,12 +32,41 @@ use crate::graph::diagnostics::{
 use crate::policy::{ActionAuthorization, ActionPolicy};
 
 /// Metadata copied out of the selected action rule for the duration of one
-/// execution. Bundling these keeps `run_action_body`'s argument list small.
-struct ActionRuleMeta {
+/// execution. Bundling these keeps [`Engine::finish_action`]'s argument list
+/// small.
+pub(super) struct ActionRuleMeta {
     rule: RuleId,
     declared_output: Type,
     span: Span,
     label: Box<str>,
+}
+
+/// What [`Engine::begin_action`] leaves behind. Splitting the action lifecycle
+/// here is what lets independent actions overlap: everything before this point
+/// needs `&mut Engine`, the executor call that follows needs neither, and
+/// [`Engine::finish_action`] takes `&mut Engine` again. The scheduler parks the
+/// requesting chain across the gap and drives other chains meanwhile.
+pub(super) enum ActionStart {
+    /// The action never got a computation node; nothing to record.
+    PlanningFailed(DiagnosticSink),
+    /// The node exists and is already marked failed — policy denied the action
+    /// or its inputs could not be materialized — so no executor runs. The
+    /// caller still records the dependency edge before propagating.
+    Refused {
+        computation: ComputationId,
+        diagnostics: DiagnosticSink,
+    },
+    /// Ready to hand to an executor.
+    Ready(Box<PreparedAction>),
+}
+
+/// An action that has a computation node, a durable attempt, and materialized
+/// inputs, and is waiting only on an executor.
+pub(super) struct PreparedAction {
+    pub(super) computation: ComputationId,
+    pub(super) spec: ActionSpec,
+    pub(super) rule_meta: ActionRuleMeta,
+    pub(super) invocation: ActionInvocation,
 }
 
 impl Engine {
@@ -59,15 +89,16 @@ impl Engine {
         })
     }
 
-    pub(super) async fn run_action<P: ActionPolicy, E: Executor>(
+    /// Plan, authorize, allocate, and materialize one action, stopping at the
+    /// executor call. See [`ActionStart`] for why the split is here.
+    pub(super) fn begin_action<P: ActionPolicy>(
         &mut self,
         request: &Request<Action>,
         policy: &P,
-        executor: &E,
-    ) -> ActionRunOutcome {
+    ) -> ActionStart {
         let plan = match self.plan_action(request) {
             Ok(plan) => plan,
-            Err(diagnostics) => return ActionRunOutcome::PlanningFailed(diagnostics),
+            Err(diagnostics) => return ActionStart::PlanningFailed(diagnostics),
         };
         let rule = plan.rule;
         let authorization = policy.authorize(&plan);
@@ -81,7 +112,7 @@ impl Engine {
         };
 
         let Some(action_rule) = self.action_rules.get(rule) else {
-            return ActionRunOutcome::PlanningFailed(internal_diag(
+            return ActionStart::PlanningFailed(internal_diag(
                 InternalInvariant::SelectedActionRuleHasNoMetadata,
             ));
         };
@@ -108,10 +139,10 @@ impl Engine {
         });
 
         let durable_plan = match self.durable_action_plan(rule, &plan.spec) {
-            Ok(plan) => plan,
+            Ok(durable_plan) => durable_plan,
             Err(diagnostics) => {
                 self.mark_action_failed(computation, &diagnostics);
-                return ActionRunOutcome::PlanningFailed(diagnostics);
+                return ActionStart::PlanningFailed(diagnostics);
             }
         };
         let durable_computation = crate::state::DurableComputation::Action {
@@ -121,51 +152,48 @@ impl Engine {
         if let Err(diagnostics) =
             self.create_pending_action_attempt(computation, durable_computation)
         {
-            self.mark_action_failed(computation, &diagnostics);
-            let _ = self.publish_action_failure(computation, &diagnostics);
-            return ActionRunOutcome::PlanningFailed(diagnostics);
+            self.stop_action(computation, &diagnostics, StopReason::Failed);
+            return ActionStart::PlanningFailed(diagnostics);
         }
 
-        let result = self
-            .run_action_body(
+        // Up to and including materialization: no report exists on failure yet.
+        if let Some(diagnostics) = denial {
+            return ActionStart::Refused {
                 computation,
-                request,
-                &plan.spec,
-                &rule_meta,
-                denial,
-                executor,
-            )
-            .await;
-
-        ActionRunOutcome::Started {
-            computation,
-            result,
+                diagnostics: self.fail_action(computation, diagnostics),
+            };
         }
+        let invocation = match self.materialize_action(&plan.spec) {
+            Ok(invocation) => invocation,
+            Err(diagnostics) => {
+                return ActionStart::Refused {
+                    computation,
+                    diagnostics: self.fail_action(computation, diagnostics),
+                };
+            }
+        };
+
+        ActionStart::Ready(Box::new(PreparedAction {
+            computation,
+            spec: plan.spec,
+            rule_meta,
+            invocation,
+        }))
     }
 
-    /// Drive one action from authorization through result validation, after the
-    /// computation node has been allocated. Every failure path applies the same
-    /// cleanup via [`Engine::fail_action`]: mark the computation failed and, if
-    /// the execution report exists, retain it as provenance.
-    async fn run_action_body<E: Executor>(
+    /// Import, validate, and record one action's result, after its executor
+    /// returned. Every failure path applies the same cleanup via
+    /// [`Engine::fail_action`]: mark the computation failed and, if the
+    /// execution report exists, retain it as provenance.
+    pub(super) fn finish_action(
         &mut self,
         computation: ComputationId,
         request: &Request<Action>,
         spec: &ActionSpec,
         rule_meta: &ActionRuleMeta,
-        denial: Option<DiagnosticSink>,
-        executor: &E,
+        captured: PithResult<crate::action::CapturedActionExecution>,
     ) -> PithResult<Value> {
-        // Up to and including execution: no report exists on failure yet.
-        if let Some(diagnostics) = denial {
-            return Err(self.fail_action(computation, diagnostics));
-        }
-
-        let invocation = match self.materialize_action(spec) {
-            Ok(invocation) => invocation,
-            Err(diagnostics) => return Err(self.fail_action(computation, diagnostics)),
-        };
-        let captured = match executor.execute(&invocation).await {
+        let captured = match captured {
             Ok(execution) => execution,
             Err(diagnostics) => return Err(self.fail_action(computation, diagnostics)),
         };
@@ -220,20 +248,43 @@ impl Engine {
         Ok(value)
     }
 
+    /// Give up on an action that was still running when its run ended. Its
+    /// executor result will never be read, so it is recorded as cancelled: the
+    /// action was stopped, and nothing was learned about whether it would have
+    /// worked.
+    pub(super) fn cancel_action(
+        &mut self,
+        computation: ComputationId,
+        diagnostics: &DiagnosticSink,
+    ) {
+        self.stop_action(computation, diagnostics, StopReason::Cancelled);
+    }
+
     /// Record a failed action computation and return the diagnostics unchanged.
     /// Centralizing the cleanup here keeps the failure tail at one line per site
-    /// instead of repeating `mark_action_failed` + `return Err` six times.
+    /// instead of repeating the mark-and-publish pair six times.
     fn fail_action(
         &mut self,
         computation: ComputationId,
         diagnostics: DiagnosticSink,
     ) -> DiagnosticSink {
-        self.mark_action_failed(computation, &diagnostics);
-        // Scheduling boundary: publish the durable action failure. Best-effort
-        // with respect to the returned diagnostics — failure publication must
-        // not mask the diagnostics that caused it.
-        let _ = self.publish_action_failure(computation, &diagnostics);
+        self.stop_action(computation, &diagnostics, StopReason::Failed);
         diagnostics
+    }
+
+    fn stop_action(
+        &mut self,
+        computation: ComputationId,
+        diagnostics: &DiagnosticSink,
+        reason: StopReason,
+    ) {
+        if let Some(node) = self.computations.get_mut(computation) {
+            node.state = reason.attempt_state(diagnostics.iter().cloned().collect());
+        }
+        // Scheduling boundary: publish the durable record. Best-effort with
+        // respect to the returned diagnostics — publication must not mask the
+        // diagnostics that caused it.
+        let _ = self.publish_action_stop(computation, diagnostics, reason);
     }
 
     fn record_executor_report(

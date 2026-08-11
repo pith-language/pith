@@ -14,17 +14,26 @@ use pith_engine::state::{
     CompletedAttempt, DurableActionProvenance, DurableAttempt, DurableAttemptId,
     DurableAttemptState, DurableComputation, DurableDependency, DurableProvenance,
     DurableReuseDecision, DurableReuseReason, EncodedValue, EngineStateError, EngineStateStore,
-    EngineStateVersions, FailedAttempt, MemoryEngineStateStore,
+    EngineStateVersions, InvalidationExplanation, MemoryEngineStateStore, StoppedAttempt,
 };
 use pith_engine::{
     AccessVerification, ActionAuthorization, ActionExecution, ActionInvocation, ActionRule,
     AllowAllActions, AttemptState, CapturedActionExecution, CapturedExecutionReport,
     CapturedOutput, CapturedOutputContent, ComputationKind, Engine, EvaluationSource,
-    ExecutionPlatform, Executor, PureRule, PureRuleFrame, PureStep,
+    ExecutionPlatform, Executor, PureRule, PureRuleFrame, PureStep, Resumption, TokioRuntime,
 };
 use pith_ids::ContentId;
 use pith_store::{ContentStore, MemoryContentStore};
 use std::sync::Arc;
+
+/// A runtime for one test. Built per call: constructing a thread pool is
+/// cheap next to what these tests do, and it keeps each test independent.
+fn runtime() -> TokioRuntime {
+    match TokioRuntime::new() {
+        Ok(runtime) => runtime,
+        Err(error) => unreachable!("could not build a tokio runtime: {error:?}"),
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Pure-rule fixtures
@@ -41,7 +50,7 @@ impl PureRule for ConstantRule {
 struct ConstantFrame(Value);
 
 impl PureRuleFrame for ConstantFrame {
-    fn step(&mut self, _input: Option<Value>) -> PithResult<PureStep> {
+    fn step(&mut self, _input: Option<Resumption>) -> PithResult<PureStep> {
         Ok(PureStep::Complete(self.0.clone()))
     }
 }
@@ -57,7 +66,7 @@ impl PureRule for FailingRule {
 struct FailingFrame;
 
 impl PureRuleFrame for FailingFrame {
-    fn step(&mut self, _input: Option<Value>) -> PithResult<PureStep> {
+    fn step(&mut self, _input: Option<Resumption>) -> PithResult<PureStep> {
         Err(fixture_diag("fixture pure failure"))
     }
 }
@@ -81,12 +90,14 @@ struct ForwardFrame {
 }
 
 impl PureRuleFrame for ForwardFrame {
-    fn step(&mut self, input: Option<Value>) -> PithResult<PureStep> {
+    fn step(&mut self, input: Option<Resumption>) -> PithResult<PureStep> {
         if !self.requested {
             self.requested = true;
             return Ok(PureStep::Need(self.dependency.clone()));
         }
-        Ok(PureStep::Complete(input.unwrap_or(Value::Unit)))
+        Ok(PureStep::Complete(
+            input.and_then(Resumption::one).unwrap_or(Value::Unit),
+        ))
     }
 }
 
@@ -109,12 +120,12 @@ struct IncrementFrame {
 }
 
 impl PureRuleFrame for IncrementFrame {
-    fn step(&mut self, input: Option<Value>) -> PithResult<PureStep> {
+    fn step(&mut self, input: Option<Resumption>) -> PithResult<PureStep> {
         if !self.requested {
             self.requested = true;
             return Ok(PureStep::Need(self.dependency.clone()));
         }
-        match input {
+        match input.and_then(Resumption::one) {
             Some(Value::Int(n)) => Ok(PureStep::Complete(Value::Int(n.saturating_add(1)))),
             Some(value) => Ok(PureStep::Complete(value)),
             None => Ok(PureStep::Complete(Value::Unit)),
@@ -141,12 +152,13 @@ struct ActionDepFrame {
 }
 
 impl PureRuleFrame for ActionDepFrame {
-    fn step(&mut self, input: Option<Value>) -> PithResult<PureStep> {
+    fn step(&mut self, input: Option<Resumption>) -> PithResult<PureStep> {
         if !self.requested {
             self.requested = true;
             return Ok(PureStep::NeedAction(self.dependency.clone()));
         }
         input
+            .and_then(Resumption::one)
             .map(PureStep::Complete)
             .ok_or_else(|| fixture_diag("action dependency completed without a value"))
     }
@@ -378,7 +390,7 @@ fn completed_record(
 fn failed_record(
     store: &dyn EngineStateStore,
     attempt: DurableAttemptId,
-) -> pith_engine::state::FailedAttempt {
+) -> pith_engine::state::StoppedAttempt {
     let record = read_attempt(store, attempt);
     match &record.state {
         DurableAttemptState::Failed(failure) => failure.clone(),
@@ -486,9 +498,17 @@ impl EngineStateStore for CreateFailingStore {
     fn publish_failed(
         &self,
         attempt: DurableAttemptId,
-        failure: FailedAttempt,
+        failure: StoppedAttempt,
     ) -> Result<(), EngineStateError> {
         self.inner.publish_failed(attempt, failure)
+    }
+
+    fn publish_cancelled(
+        &self,
+        attempt: DurableAttemptId,
+        cancellation: StoppedAttempt,
+    ) -> Result<(), EngineStateError> {
+        self.inner.publish_cancelled(attempt, cancellation)
     }
 
     fn attempt(
@@ -510,6 +530,13 @@ impl EngineStateStore for CreateFailingStore {
         computation: PureComputationKey,
     ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
         self.inner.latest_completed_reusable_attempt(computation)
+    }
+
+    fn explain_invalidation(
+        &self,
+        computation: PureComputationKey,
+    ) -> Result<Option<InvalidationExplanation>, EngineStateError> {
+        self.inner.explain_invalidation(computation)
     }
 
     fn pending_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
@@ -556,9 +583,17 @@ impl EngineStateStore for ReadFailingStore {
     fn publish_failed(
         &self,
         attempt: DurableAttemptId,
-        failure: FailedAttempt,
+        failure: StoppedAttempt,
     ) -> Result<(), EngineStateError> {
         self.inner.publish_failed(attempt, failure)
+    }
+
+    fn publish_cancelled(
+        &self,
+        attempt: DurableAttemptId,
+        cancellation: StoppedAttempt,
+    ) -> Result<(), EngineStateError> {
+        self.inner.publish_cancelled(attempt, cancellation)
     }
 
     fn attempt(
@@ -579,6 +614,13 @@ impl EngineStateStore for ReadFailingStore {
         &self,
         _computation: PureComputationKey,
     ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        Err(Self::failure())
+    }
+
+    fn explain_invalidation(
+        &self,
+        _computation: PureComputationKey,
+    ) -> Result<Option<InvalidationExplanation>, EngineStateError> {
         Err(Self::failure())
     }
 
@@ -648,9 +690,17 @@ impl EngineStateStore for SharedEngineStateStore {
     fn publish_failed(
         &self,
         attempt: DurableAttemptId,
-        failure: FailedAttempt,
+        failure: StoppedAttempt,
     ) -> Result<(), EngineStateError> {
         self.write(|store| store.publish_failed(attempt, failure))
+    }
+
+    fn publish_cancelled(
+        &self,
+        attempt: DurableAttemptId,
+        cancellation: StoppedAttempt,
+    ) -> Result<(), EngineStateError> {
+        self.write(|store| store.publish_cancelled(attempt, cancellation))
     }
 
     fn attempt(
@@ -672,6 +722,13 @@ impl EngineStateStore for SharedEngineStateStore {
         computation: PureComputationKey,
     ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
         self.read(|store| store.latest_completed_reusable_attempt(computation))
+    }
+
+    fn explain_invalidation(
+        &self,
+        computation: PureComputationKey,
+    ) -> Result<Option<InvalidationExplanation>, EngineStateError> {
+        self.read(|store| store.explain_invalidation(computation))
     }
 
     fn pending_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
@@ -871,7 +928,7 @@ fn action_dependency_publishes_non_reusable_action_and_not_reusable_parent() {
     let evaluation = engine
         .run(
             &pure_request("entry", root_interface, []),
-            &pith_engine::TokioRuntime,
+            &runtime(),
             &AllowAllActions,
             &FixtureExecutor,
         )
@@ -939,7 +996,7 @@ fn denied_action_publishes_failed_attempt_with_not_executed_provenance() {
     let diagnostics = engine
         .run(
             &pure_request("entry", root_interface, []),
-            &pith_engine::TokioRuntime,
+            &runtime(),
             &DenyCapability,
             &FixtureExecutor,
         )

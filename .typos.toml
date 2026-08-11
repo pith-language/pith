@@ -6,6 +6,10 @@ locale = "en-us"
 hd = "hd"
 intra = "intra"
 flate = "flate"
+# british spellings used throughout the project's prose
+behaviour = "behaviour"
+flavour = "flavour"
+labour = "labour"
 
 [files]
 extend-exclude = [

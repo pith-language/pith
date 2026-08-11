@@ -16,7 +16,29 @@ pub trait Runtime: Send + Sync {
 #[derive(Debug)]
 pub struct RuntimeError(pub Box<str>);
 
-pub struct TokioRuntime;
+/// A multi-threaded tokio runtime, owned by whoever built it.
+///
+/// The caller holds it rather than the crate holding one globally: a run drives
+/// every action it started on this runtime, so the runtime outliving a single
+/// `run` call is load-bearing, and a process-wide one would make that lifetime
+/// implicit, unconfigurable, and impossible to tear down. Owning it also keeps
+/// the adapter boundary honest — the runtime is a thing the host supplies, the
+/// same as a content store or an executor.
+pub struct TokioRuntime {
+    runtime: tokio::runtime::Runtime,
+}
+
+impl TokioRuntime {
+    /// Build a runtime for the engine to drive its runs on.
+    ///
+    /// # Errors
+    /// Returns `RuntimeError` if the thread pool could not be created.
+    pub fn new() -> Result<Self, RuntimeError> {
+        tokio::runtime::Runtime::new()
+            .map(|runtime| Self { runtime })
+            .map_err(|error| RuntimeError(error.to_string().into()))
+    }
+}
 
 impl Runtime for TokioRuntime {
     fn block_on<F>(&self, future: F) -> Result<F::Output, RuntimeError>
@@ -24,8 +46,6 @@ impl Runtime for TokioRuntime {
         F: Future + Send,
         F::Output: Send,
     {
-        tokio::runtime::Runtime::new()
-            .map(|rt| rt.block_on(future))
-            .map_err(|e| RuntimeError(e.to_string().into()))
+        Ok(self.runtime.block_on(future))
     }
 }

@@ -5,6 +5,7 @@
 //! `Action` / `Observation` / `Mutation` / `Opaque` (decisions 0021, 0022).
 
 pub mod action;
+pub mod cancel;
 pub mod graph;
 pub mod policy;
 pub mod runtime;
@@ -18,10 +19,12 @@ pub use action::{
     MaterializedFileContent, MaterializedTree, MaterializedTreeEntry, MaterializedTreeEntryContent,
     ProducedOutput,
 };
+pub use cancel::{CancelSignal, NeverCancelled};
 pub use graph::{
     ActionPlan, ActionRecord, AttemptState, ComputationKind, ComputationNode, DependencyEdge,
-    Engine, EngineQuery, Evaluation, EvaluationSource, PureRule, PureRuleFrame, PureStep,
-    ReuseDecision, ReuseReason, RuleSelection,
+    Engine, EngineQuery, Evaluation, EvaluationSource, LiveInvalidationExplanation,
+    LiveInvalidationReason, PureRule, PureRuleFrame, PureStep, Resumption, ReuseDecision,
+    ReuseReason, RuleSelection,
 };
 pub use policy::{ActionAuthorization, ActionPolicy, AllowAllActions};
 pub use runtime::{Runtime, RuntimeError, TokioRuntime};

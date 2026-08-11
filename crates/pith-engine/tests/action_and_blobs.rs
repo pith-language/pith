@@ -15,10 +15,19 @@ use pith_engine::{
     ActionPolicy, ActionRule, AllowAllActions, AttemptState, CapturedActionExecution,
     CapturedExecutionReport, CapturedOutput, CapturedOutputContent, ComputationKind, Engine,
     EvaluationSource, ExecutionPlatform, Executor, MaterializedContent, PureRule, PureRuleFrame,
-    PureStep, ReuseDecision, ReuseReason, TokioRuntime,
+    PureStep, Resumption, ReuseDecision, ReuseReason, TokioRuntime,
 };
 use pith_ids::ContentId;
 use pith_store::{Blob, ContentStore, MemoryContentStore, StoreError, Tree};
+
+/// A runtime for one test. Built per call: constructing a thread pool is
+/// cheap next to what these tests do, and it keeps each test independent.
+fn runtime() -> TokioRuntime {
+    match TokioRuntime::new() {
+        Ok(runtime) => runtime,
+        Err(error) => unreachable!("could not build a tokio runtime: {error:?}"),
+    }
+}
 
 struct BlobLenRule {
     blob: ContentId,
@@ -39,12 +48,12 @@ struct BlobLenFrame {
 }
 
 impl PureRuleFrame for BlobLenFrame {
-    fn step(&mut self, _input: Option<Value>) -> PithResult<PureStep> {
+    fn step(&mut self, _input: Option<Resumption>) -> PithResult<PureStep> {
         if !self.requested {
             self.requested = true;
             return Ok(PureStep::NeedBlob(self.blob));
         }
-        let len = match _input {
+        let len = match _input.and_then(Resumption::one) {
             Some(Value::Bytes(b)) => b.len() as i64,
             _ => 0,
         };
@@ -71,12 +80,12 @@ struct ActionDepFrame {
 }
 
 impl PureRuleFrame for ActionDepFrame {
-    fn step(&mut self, input: Option<Value>) -> PithResult<PureStep> {
+    fn step(&mut self, input: Option<Resumption>) -> PithResult<PureStep> {
         if !self.requested {
             self.requested = true;
             return Ok(PureStep::NeedAction(self.dependency.clone()));
         }
-        match input {
+        match input.and_then(Resumption::one) {
             Some(value) => Ok(PureStep::Complete(value)),
             None => Err(fixture_error("action dependency completed without a value")),
         }
@@ -510,7 +519,7 @@ fn blob_dependency_resumes_with_bytes_and_records_edge() {
     let evaluation = engine
         .run(
             &pure_request("length", interface(&[], Type::Int), []),
-            &TokioRuntime,
+            &runtime(),
             &AllowAllActions,
             &FixtureExecutor,
         )
@@ -540,7 +549,7 @@ fn missing_blob_reports_clean_diagnostic() {
     let result = engine
         .run(
             &pure_request("length", interface(&[], Type::Int), []),
-            &TokioRuntime,
+            &runtime(),
             &AllowAllActions,
             &FixtureExecutor,
         )
@@ -590,7 +599,7 @@ fn action_dependency_driven_through_run() {
     let evaluation = engine
         .run(
             &pure_request("entry", pure_iface, []),
-            &TokioRuntime,
+            &runtime(),
             &AllowAllActions,
             &FixtureExecutor,
         )
@@ -651,7 +660,7 @@ fn actual_capability_uses_are_dependency_edges() {
 
     let evaluation = match engine.run(
         &pure_request("entry", pure_iface, []),
-        &TokioRuntime,
+        &runtime(),
         &AllowAllActions,
         &ObservedCapabilityExecutor,
     ) {
@@ -700,7 +709,7 @@ fn action_output_bytes_are_imported_by_the_engine() {
     let action_evaluation = engine
         .run(
             &pure_request("entry", pure_iface, []),
-            &TokioRuntime,
+            &runtime(),
             &AllowAllActions,
             &FixtureExecutor,
         )
@@ -717,7 +726,7 @@ fn action_output_bytes_are_imported_by_the_engine() {
     let bytes_evaluation = engine
         .run(
             &pure_request("length", interface(&[], Type::Int), []),
-            &TokioRuntime,
+            &runtime(),
             &AllowAllActions,
             &FixtureExecutor,
         )
@@ -748,7 +757,7 @@ fn missing_action_executable_is_rejected_before_executor_call() {
     let diagnostics = engine
         .run(
             &pure_request("entry", root_interface, []),
-            &TokioRuntime,
+            &runtime(),
             &AllowAllActions,
             &NeverExecutor {
                 executions: executions.clone(),
@@ -808,7 +817,7 @@ fn missing_action_input_is_rejected_before_executor_call() {
     let diagnostics = engine
         .run(
             &pure_request("entry", root_interface, []),
-            &TokioRuntime,
+            &runtime(),
             &AllowAllActions,
             &executor,
         )
@@ -864,7 +873,7 @@ fn planner_failure_creates_no_action_attempt() {
     let diagnostics = engine
         .run(
             &pure_request("entry", root_interface, []),
-            &TokioRuntime,
+            &runtime(),
             &AllowAllActions,
             &NeverExecutor {
                 executions: Arc::new(AtomicUsize::new(0)),
@@ -908,7 +917,7 @@ fn executor_failure_finalizes_action_and_parent_without_a_report() {
     let diagnostics = engine
         .run(
             &pure_request("entry", root_interface, []),
-            &TokioRuntime,
+            &runtime(),
             &AllowAllActions,
             &FailingExecutor,
         )
@@ -954,7 +963,7 @@ fn output_import_failure_retains_the_executor_report() {
     let diagnostics = engine
         .run(
             &pure_request("entry", root_interface, []),
-            &TokioRuntime,
+            &runtime(),
             &AllowAllActions,
             &FixtureExecutor,
         )
@@ -1000,7 +1009,7 @@ fn action_result_type_checked_against_interface() {
     let result = engine
         .run(
             &pure_request("entry", pure_iface, []),
-            &TokioRuntime,
+            &runtime(),
             &AllowAllActions,
             &FixtureExecutor,
         )
@@ -1041,7 +1050,7 @@ fn completion_failure_retains_executor_and_imported_reports() {
     let diagnostics = engine
         .run(
             &pure_request("entry", root_interface, []),
-            &TokioRuntime,
+            &runtime(),
             &AllowAllActions,
             &FixtureExecutor,
         )
@@ -1084,7 +1093,7 @@ fn undeclared_capability_use_is_rejected() {
     let result = engine
         .run(
             &pure_request("entry", pure_iface, []),
-            &TokioRuntime,
+            &runtime(),
             &AllowAllActions,
             &UndeclaredCapabilityExecutor,
         )
@@ -1151,7 +1160,7 @@ fn policy_denial_is_recorded_before_execution() {
     let runtime_result = engine
         .run(
             &pure_request("entry", root_interface, []),
-            &TokioRuntime,
+            &runtime(),
             &DenyDoubleCapability,
             &executor,
         )
@@ -1220,7 +1229,7 @@ fn executor_must_report_the_planned_platform() {
     let runtime_result = engine
         .run(
             &pure_request("entry", root_interface, []),
-            &TokioRuntime,
+            &runtime(),
             &AllowAllActions,
             &WrongPlatformExecutor,
         )
@@ -1286,14 +1295,12 @@ fn action_dependencies_are_not_reused_without_a_cache_identity() {
     };
     let root_request = pure_request("entry", root_interface, []);
 
-    let first_runtime_result =
-        engine.run(&root_request, &TokioRuntime, &AllowAllActions, &executor);
+    let first_runtime_result = engine.run(&root_request, &runtime(), &AllowAllActions, &executor);
     assert!(matches!(&first_runtime_result, Ok(Ok(_))));
     let first_evaluation_result = first_runtime_result.unwrap();
     let first = first_evaluation_result.unwrap();
 
-    let second_runtime_result =
-        engine.run(&root_request, &TokioRuntime, &AllowAllActions, &executor);
+    let second_runtime_result = engine.run(&root_request, &runtime(), &AllowAllActions, &executor);
     assert!(matches!(&second_runtime_result, Ok(Ok(_))));
     let second_evaluation_result = second_runtime_result.unwrap();
     let second = second_evaluation_result.unwrap();
@@ -1361,7 +1368,7 @@ fn distinct_parents_do_not_share_action_results() {
             boolean_parent_interface,
             [Value::Bool(true)],
         ),
-        &TokioRuntime,
+        &runtime(),
         &AllowAllActions,
         &executor,
     );
@@ -1375,7 +1382,7 @@ fn distinct_parents_do_not_share_action_results() {
             text_parent_interface,
             [Value::Text("input".into())],
         ),
-        &TokioRuntime,
+        &runtime(),
         &AllowAllActions,
         &executor,
     );
@@ -1423,14 +1430,12 @@ fn unverified_action_dependencies_are_not_reused() {
     };
     let root_request = pure_request("entry", root_interface, []);
 
-    let first_runtime_result =
-        engine.run(&root_request, &TokioRuntime, &AllowAllActions, &executor);
+    let first_runtime_result = engine.run(&root_request, &runtime(), &AllowAllActions, &executor);
     assert!(matches!(&first_runtime_result, Ok(Ok(_))));
     let first_evaluation_result = first_runtime_result.unwrap();
     let first = first_evaluation_result.unwrap();
 
-    let second_runtime_result =
-        engine.run(&root_request, &TokioRuntime, &AllowAllActions, &executor);
+    let second_runtime_result = engine.run(&root_request, &runtime(), &AllowAllActions, &executor);
     assert!(matches!(&second_runtime_result, Ok(Ok(_))));
     let second_evaluation_result = second_runtime_result.unwrap();
     let second = second_evaluation_result.unwrap();

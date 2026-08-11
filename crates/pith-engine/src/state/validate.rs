@@ -19,13 +19,14 @@ use super::{
     CompletedAttempt, DurableActionProvenance, DurableAttempt, DurableAttemptId,
     DurableAttemptState, DurableComputation, DurableDependency, DurableProvenance,
     DurableReuseDecision, DurableReuseReason, EngineStateError, ExpectedReuseDecision,
-    FailedAttempt, InvalidActionLifecycleReason, InvalidDependencyReason,
+    InvalidActionLifecycleReason, InvalidDependencyReason, StoppedAttempt,
 };
 
 /// The terminal state an adapter is being asked to publish.
 pub enum TerminalAttemptState {
     Complete(CompletedAttempt),
-    Failed(FailedAttempt),
+    Failed(StoppedAttempt),
+    Cancelled(StoppedAttempt),
 }
 
 impl TerminalAttemptState {
@@ -33,7 +34,7 @@ impl TerminalAttemptState {
     pub fn provenance(&self) -> &DurableProvenance {
         match self {
             Self::Complete(completion) => &completion.provenance,
-            Self::Failed(failure) => &failure.provenance,
+            Self::Failed(stopped) | Self::Cancelled(stopped) => &stopped.provenance,
         }
     }
 
@@ -41,7 +42,7 @@ impl TerminalAttemptState {
     pub fn dependencies(&self) -> &[DurableDependency] {
         match self {
             Self::Complete(completion) => &completion.dependencies,
-            Self::Failed(failure) => &failure.dependencies,
+            Self::Failed(stopped) | Self::Cancelled(stopped) => &stopped.dependencies,
         }
     }
 
@@ -54,7 +55,8 @@ impl TerminalAttemptState {
     pub fn into_attempt_state(self) -> DurableAttemptState {
         match self {
             Self::Complete(completion) => DurableAttemptState::Complete(completion),
-            Self::Failed(failure) => DurableAttemptState::Failed(failure),
+            Self::Failed(stopped) => DurableAttemptState::Failed(stopped),
+            Self::Cancelled(stopped) => DurableAttemptState::Cancelled(stopped),
         }
     }
 
@@ -163,12 +165,19 @@ fn validate_dependency(
         DurableAttemptState::Pending => {
             return Err(invalid(InvalidDependencyReason::PendingAttempt));
         }
-        DurableAttemptState::Failed(_) if terminal_state.is_complete() => {
+        // A complete attempt cannot depend on one that produced no result.
+        // Cancellation is as disqualifying as failure here: the dependency has
+        // no value, whatever the reason.
+        DurableAttemptState::Failed(_) | DurableAttemptState::Cancelled(_)
+            if terminal_state.is_complete() =>
+        {
             return Err(invalid(
                 InvalidDependencyReason::FailedDependencyForCompleteAttempt,
             ));
         }
-        DurableAttemptState::Complete(_) | DurableAttemptState::Failed(_) => {}
+        DurableAttemptState::Complete(_)
+        | DurableAttemptState::Failed(_)
+        | DurableAttemptState::Cancelled(_) => {}
     }
 
     match dependency {

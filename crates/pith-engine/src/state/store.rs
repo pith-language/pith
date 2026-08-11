@@ -4,7 +4,7 @@ use pith_core::PureComputationKey;
 
 use super::{
     CompletedAttempt, DurableAttempt, DurableAttemptId, DurableAttemptStatus, DurableComputation,
-    FailedAttempt,
+    StoppedAttempt,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -201,7 +201,24 @@ pub trait EngineStateStore: Send + Sync {
     fn publish_failed(
         &self,
         attempt: DurableAttemptId,
-        failure: FailedAttempt,
+        failure: StoppedAttempt,
+    ) -> Result<(), EngineStateError>;
+
+    /// Atomically replace `Pending` with `Cancelled`, including available edges,
+    /// diagnostics, and provenance.
+    ///
+    /// Cancellation is a distinct terminal state, not a flavour of failure: the
+    /// attempt was stopped before it could produce a result, and nothing about
+    /// the computation itself is known to be wrong. A reader can tell "this
+    /// cannot work" from "this did not get to run."
+    ///
+    /// # Errors
+    /// Returns an error when the attempt is missing, already terminal, has an
+    /// invalid cancellation record, or the adapter cannot commit.
+    fn publish_cancelled(
+        &self,
+        attempt: DurableAttemptId,
+        cancellation: StoppedAttempt,
     ) -> Result<(), EngineStateError>;
 
     /// # Errors
@@ -229,6 +246,24 @@ pub trait EngineStateStore: Send + Sync {
         &self,
         computation: PureComputationKey,
     ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError>;
+
+    /// Explain why the latest completed attempt for `computation` is not
+    /// reusable, as a chain over the recorded dependency graph. `Ok(None)` when
+    /// there is no completed attempt for the key, or when that attempt is
+    /// reusable (there is nothing to explain).
+    ///
+    /// The chain follows the single dependency the attempt's own
+    /// [`DurableReuseReason`](super::DurableReuseReason) names, so the
+    /// explanation matches the reuse decision the attempt was published with
+    /// rather than re-deriving one.
+    ///
+    /// # Errors
+    /// Returns an adapter error when the attempt, its dependencies, or the
+    /// dependencies' attempts cannot be read.
+    fn explain_invalidation(
+        &self,
+        computation: PureComputationKey,
+    ) -> Result<Option<super::InvalidationExplanation>, EngineStateError>;
 
     /// Enumerate all unfinished attempts in creation order. After reopening a
     /// store following interruption, callers use this operation to identify

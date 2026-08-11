@@ -1,10 +1,10 @@
 //! The canonical wire primitives shared by every versioned pith encoding.
 //!
-//! [`crate::manifest`] owns the write half: a little-endian `u64` length
-//! followed by raw bytes, so two encodings that differ only by field boundaries
-//! cannot collide. This module owns the matching read half and re-exports both,
-//! so a persistence adapter outside `pith-core` builds on the same primitive
-//! rather than a second implementation of it.
+//! The private manifest encoder owns the write half: a little-endian `u64`
+//! length followed by raw bytes, so two encodings that differ only by field
+//! boundaries cannot collide. This module owns the matching read half and
+//! re-exports both, so a persistence adapter outside `pith-core` builds on the
+//! same primitive rather than a second implementation of it.
 //!
 //! A *digest* manifest and a *storage* encoding are different contracts even
 //! when they share these primitives. Decision 0023 keeps the digest manifest

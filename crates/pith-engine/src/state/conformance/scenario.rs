@@ -37,11 +37,15 @@ pub enum Step {
         /// Publish a reuse decision the dependencies do not justify.
         corrupt_reuse: bool,
     },
-    Fail {
+    /// Stop an attempt without a result. `cancelled` picks which terminal
+    /// state it is published as; the record carried is the same either way, so
+    /// one step covers both and the two cannot drift apart in what they test.
+    Stop {
         attempt: Selector,
         dependencies: Box<[GeneratedDependency]>,
         message_len: u8,
         notes: u8,
+        cancelled: bool,
     },
     /// Publish over an attempt that already reached a terminal state.
     RepublishTerminal {
@@ -87,14 +91,22 @@ fn step() -> impl Strategy<Value = Step> {
                 result,
                 corrupt_reuse,
             }),
-        2 => (any::<Selector>(), generated_dependencies(), 0u8..24, 0u8..3).prop_map(
-            |(attempt, dependencies, message_len, notes)| Step::Fail {
-                attempt,
-                dependencies,
-                message_len,
-                notes,
-            }
-        ),
+        2 => (
+            any::<Selector>(),
+            generated_dependencies(),
+            0u8..24,
+            0u8..3,
+            any::<bool>(),
+        )
+            .prop_map(
+                |(attempt, dependencies, message_len, notes, cancelled)| Step::Stop {
+                    attempt,
+                    dependencies,
+                    message_len,
+                    notes,
+                    cancelled,
+                }
+            ),
         1 => any::<Selector>().prop_map(|attempt| Step::RepublishTerminal { attempt }),
     ]
 }

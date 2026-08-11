@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use crate::state::{
     CompletedAttempt, DurableAttempt, DurableAttemptId, DurableAttemptState, DurableDependency,
     DurableReuseDecision, DurableReuseReason, EngineStateError, ExpectedReuseDecision,
-    FailedAttempt,
+    InvalidationExplanation, InvalidationReason, StoppedAttempt,
 };
 
 use super::run::Tracked;
@@ -54,12 +54,21 @@ pub(super) fn translate_attempt(
                     },
                 })
             }
-            DurableAttemptState::Failed(failure) => DurableAttemptState::Failed(FailedAttempt {
-                dependencies: translate_dependencies(&failure.dependencies, translation),
-                diagnostics: failure.diagnostics.clone(),
-                provenance: failure.provenance.clone(),
-            }),
+            DurableAttemptState::Failed(stopped) => {
+                DurableAttemptState::Failed(translate_stopped(stopped, translation))
+            }
+            DurableAttemptState::Cancelled(stopped) => {
+                DurableAttemptState::Cancelled(translate_stopped(stopped, translation))
+            }
         },
+    }
+}
+
+fn translate_stopped(stopped: &StoppedAttempt, translation: &Translation) -> StoppedAttempt {
+    StoppedAttempt {
+        dependencies: translate_dependencies(&stopped.dependencies, translation),
+        diagnostics: stopped.diagnostics.clone(),
+        provenance: stopped.provenance.clone(),
     }
 }
 
@@ -162,5 +171,54 @@ pub(super) fn translate_error(
         }
         without_attempt @ (EngineStateError::AttemptIdentifierExhausted
         | EngineStateError::Adapter { .. }) => without_attempt.clone(),
+    }
+}
+
+/// Rewrite an invalidation explanation into the model's identifier space. The
+/// explanation carries attempt ids at the root, inside each dependency edge,
+/// and recursively in the child; all three are translated so a subject and the
+/// model can be compared directly.
+pub(super) fn translate_explanation(
+    explanation: &InvalidationExplanation,
+    translation: &Translation,
+) -> InvalidationExplanation {
+    InvalidationExplanation {
+        attempt: translate(explanation.attempt, translation),
+        computation: explanation.computation.clone(),
+        reason: translate_reason(&explanation.reason, translation),
+    }
+}
+
+fn translate_reason(reason: &InvalidationReason, translation: &Translation) -> InvalidationReason {
+    match reason {
+        InvalidationReason::Leaf(leaf) => {
+            InvalidationReason::Leaf(translate_reuse_reason(leaf, translation))
+        }
+        InvalidationReason::DependencyInvalidated { edge, child } => {
+            InvalidationReason::DependencyInvalidated {
+                edge: translate_single_edge(edge, translation),
+                child: Box::new(translate_explanation(child, translation)),
+            }
+        }
+    }
+}
+
+/// Translate a single dependency edge — the one-element case of
+/// [`translate_dependencies`], which the explanation carries one edge at a
+/// time. Mirrors that function's per-variant rewrite so the two cannot drift.
+fn translate_single_edge(edge: &DurableDependency, translation: &Translation) -> DurableDependency {
+    match edge {
+        DurableDependency::Pure {
+            computation,
+            attempt,
+        } => DurableDependency::Pure {
+            computation: *computation,
+            attempt: translate(*attempt, translation),
+        },
+        DurableDependency::Action { attempt } => DurableDependency::Action {
+            attempt: translate(*attempt, translation),
+        },
+        blob_or_capability @ (DurableDependency::Blob { .. }
+        | DurableDependency::CapabilityUse { .. }) => blob_or_capability.clone(),
     }
 }

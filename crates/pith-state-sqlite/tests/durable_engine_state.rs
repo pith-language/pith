@@ -14,11 +14,11 @@ use pith_diag::{PithResult, Severity, Span, StableCode};
 use pith_engine::state::{
     CompletedAttempt, DurableActionProvenance, DurableAttemptState, DurableComputation,
     DurableDependency, DurableDiagnostic, DurableProvenance, DurableReuseDecision,
-    DurableReuseReason, DurableRule, EncodedValue, EngineStateStore, FailedAttempt,
+    DurableReuseReason, DurableRule, EncodedValue, EngineStateStore, StoppedAttempt,
 };
 use pith_engine::{
     AccessVerification, ActionAuthorization, Engine, EvaluationSource, ExecutionPlatform,
-    ExecutionReport, ProducedOutput, PureRule, PureRuleFrame, PureStep,
+    ExecutionReport, ProducedOutput, PureRule, PureRuleFrame, PureStep, Resumption,
 };
 use pith_ids::{ContentDigest, ContentId};
 use pith_state_sqlite::SqliteEngineStateStore;
@@ -107,7 +107,7 @@ impl PureRule for FailingRule {
 struct FailingFrame;
 
 impl PureRuleFrame for FailingFrame {
-    fn step(&mut self, _input: Option<Value>) -> PithResult<PureStep> {
+    fn step(&mut self, _input: Option<Resumption>) -> PithResult<PureStep> {
         let mut sink = pith_diag::DiagnosticSink::new();
         sink.push(pith_diag::Diag::new(
             Severity::Error,
@@ -403,7 +403,7 @@ fn a_failed_attempt_round_trips_its_diagnostics() {
         Ok(attempt) => attempt,
         Err(error) => unreachable!("could not create an attempt: {error}"),
     };
-    let failure = FailedAttempt {
+    let failure = StoppedAttempt {
         dependencies: Box::new([]),
         diagnostics: [DurableDiagnostic {
             severity: Severity::Error,

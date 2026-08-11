@@ -22,6 +22,8 @@ relations:
 
 # structural types by default, nominal by declaration
 
+> superseded by [0026: a generic structural type calculus](0026-generic-typed-calculus.md). the structural-default and nominal-by-declaration mechanism below is carried forward unchanged as one section of the larger calculus; 0026 adds the rest of the constructor set (records, sums, generics, effect types, uncertainty types) and settles the questions this record left open. this record stays in the repository as the history of the structural-versus-nominal decision.
+
 ## context
 
 decision 0010 left nominal versus structural typing open as a separate question. values-and-types names it as one of the things the exact type calculus still has to settle.

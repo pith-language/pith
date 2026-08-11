@@ -13,3 +13,6 @@ workspace = true
 [dependencies]
 pith-ids.workspace = true
 indexmap.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

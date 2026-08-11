@@ -15,6 +15,7 @@ relations:
     - research-configuration
   depends_on:
     - decision-0010-typed-pure-language
+    - decision-0026-generic-typed-calculus
     - design-kernel
   supersedes: []
 ---
@@ -43,5 +44,5 @@ these operations should return values with provenance. there is no global magic 
 
 values crossing a persistent cache or process boundary need a canonical representation and a versioned schema. local opaque values may exist when their rule contract makes the limitation clear.
 
-the exact language and type calculus remain open. decision 0010 sets the direction: stronger typing, pure evaluation, and honest dynamic boundaries.
+the type calculus is settled by decision 0026: one closed structural calculus with records, declared sums, parametric generics, nominal identity as a declaration attribute, the effect categories of 0019, and generic uncertainty types (`Unknown`, `Unchecked<T>`, `Stale<T>`, `Conflicted<T>`, `Unreachable`). predicate refinements stay out of the type language and live as pure validation rules; row polymorphism is deferred; there is no higher-order polymorphism in the surface. decision 0010 set the direction; 0026 names the constructors.
 
