@@ -1,10 +1,11 @@
 //! Translation from arena computation state into durable engine-state records.
 //!
 //! The live [`Engine`] publishes every computation that leaves the `Pending`
-//! state through [`EngineStateStore`] (decision 0024). Arena handles never
-//! cross the boundary: [`Engine::durable_attempts`] maps each computation node
-//! to its durable attempt identifier, and edges are translated into the typed
-//! durable records defined in [`crate::state::records`].
+//! state through [`crate::state::EngineStateStore`] (decision 0024). Arena
+//! handles never cross the boundary: the private `Engine::durable_attempts`
+//! table maps each computation node to its durable attempt identifier, and
+//! edges are translated into the typed durable records re-exported by
+//! [`crate::state`].
 //!
 //! Store calls happen only at engine scheduling boundaries (decision 0024,
 //! "adapter boundaries") — frame allocation, terminal transitions, and the

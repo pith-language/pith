@@ -12,10 +12,11 @@
 //! rustix 1.1.4 does not wrap the landlock syscalls, and `landlock(2)` is
 //! intricate enough that a correct, reviewed implementation is a dedicated
 //! increment. Until that lands, [`landlock_installed`] reports `false` and the
-//! executor reports [`AccessVerification::Unverified`] (or `Observed` when
-//! seccomp alone is installed) rather than claiming path confinement it did not
-//! install. This keeps the [`AccessVerification::Prevented`] claim honest: it
-//! is reported only when *both* layers are installed.
+//! executor reports [`pith_engine::AccessVerification::Unverified`] (or
+//! `Observed` when seccomp alone is installed) rather than claiming path
+//! confinement it did not install. This keeps the
+//! [`pith_engine::AccessVerification::Prevented`] claim honest: it is reported
+//! only when *both* layers are installed.
 
 #![allow(
     unsafe_code,
@@ -25,7 +26,7 @@
 /// Whether the landlock ruleset is installed by this build.
 ///
 /// `false` today. The executor uses this to decide what
-/// [`AccessVerification`] to report, so the contract stays honest.
+/// [`pith_engine::AccessVerification`] to report, so the contract stays honest.
 pub(super) const fn landlock_installed() -> bool {
     false
 }

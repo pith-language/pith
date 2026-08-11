@@ -239,7 +239,7 @@ pub(crate) struct EvalFrame {
 /// [`ComputationId`] (arena handles) rather than `DurableAttemptId`.
 ///
 /// Does not derive `PartialEq`/`Eq` because [`DependencyEdge`] carries a
-/// [`Request`](pith_core::Request) that does not implement them; the durable
+/// [`Request`] that does not implement them; the durable
 /// side, which is what the conformance suite compares, does.
 #[derive(Clone, Debug)]
 pub struct LiveInvalidationExplanation {

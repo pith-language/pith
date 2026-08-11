@@ -15,7 +15,8 @@
 //! failure writes the final state, dependency set, provenance, and reusable
 //! index entry in one transaction, so a reader never sees a half-published
 //! attempt. Publication validation is shared with the in-memory adapter, and
-//! [`pith_engine::state::conformance`] checks that the two behave alike.
+//! the feature-gated `pith_engine::state::conformance` suite checks that the two
+//! behave alike.
 //!
 //! [`EngineStateStore`]: pith_engine::state::EngineStateStore
 

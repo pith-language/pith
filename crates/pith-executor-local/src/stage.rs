@@ -3,9 +3,9 @@
 //! Pure filesystem work: no `unsafe`, no syscalls beyond ordinary `mkdir`,
 //! `write`, and `symlink`. The executor's authority is the mapping from the
 //! engine's typed [`MaterializedContent`] to a concrete directory layout the
-//! child sees. Paths come from the validated [`ActionSpec`], which already
-//! rejected absolute paths, `..`, trailing slashes, and overlapping input/output
-//! pairs (see `pith_core::ActionSpec::validate`).
+//! child sees. Paths come from the validated [`pith_core::ActionSpec`], which
+//! already rejected absolute paths, `..`, trailing slashes, and overlapping
+//! input/output pairs (see `pith_core::ActionSpec::validate`).
 
 use std::path::{Path, PathBuf};
 

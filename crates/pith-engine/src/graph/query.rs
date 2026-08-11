@@ -134,7 +134,7 @@ impl<'engine> EngineQuery<'engine> {
     /// [`ComputationId`] rather than `DurableAttemptId`.
     ///
     /// The chain follows the single dependency the computation's own
-    /// [`ReuseReason`](super::ir::ReuseReason) names, so the explanation
+    /// [`ReuseReason`] names, so the explanation
     /// matches the reuse decision the engine computed for the node.
     ///
     /// [`EngineStateStore::explain_invalidation`]:

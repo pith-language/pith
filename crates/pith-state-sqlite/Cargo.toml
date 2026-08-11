@@ -22,7 +22,7 @@ libsqlite3-sys.workspace = true
 pith-store = { workspace = true, optional = true }
 
 [dev-dependencies]
-pith-state-sqlite = { path = ".", features = ["fixtures"] }
+pith-state-sqlite = { workspace = true, features = ["fixtures"] }
 pith-engine = { workspace = true, features = ["testing"] }
 pith-store.workspace = true
 proptest.workspace = true

@@ -4,7 +4,7 @@
 //! in-memory map, a `SELECT`), so they supply an [`AttemptLookup`] the way they
 //! do for [`validate_publication`](super::validate::validate_publication). The
 //! chain follows the single dependency the attempt's own
-//! [`DurableReuseReason`](super::DurableReuseReason) names, so the explanation
+//! [`DurableReuseReason`] names, so the explanation
 //! matches the reuse decision the attempt was published with rather than
 //! re-deriving one.
 
@@ -163,13 +163,13 @@ pub fn explain_latest(
 mod tests {
     use super::*;
     use crate::state::{DurableProvenance, EncodedValue};
+    use indexmap::IndexMap;
     use pith_core::{PureComputationKey, RuleIdentity, RuleRevision, Value};
     use pith_ids::{ContentDigest, DIGEST_LEN, PureComputationDigest};
-    use std::collections::HashMap;
 
     /// A lookup backed by a map, for exercising the chain walk without an
     /// adapter. Mirrors the in-memory adapter's `AttemptLookup for Records`.
-    struct MapLookup(HashMap<DurableAttemptId, Arc<DurableAttempt>>);
+    struct MapLookup(IndexMap<DurableAttemptId, Arc<DurableAttempt>>);
 
     impl MapLookup {
         fn from_attempts(attempts: impl IntoIterator<Item = Arc<DurableAttempt>>) -> Self {

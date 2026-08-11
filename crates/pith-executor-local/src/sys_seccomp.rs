@@ -17,8 +17,9 @@
 //! the next increment: it is substantial systems code that needs a dedicated
 //! review and a test fixture that runs a child which issues a forbidden syscall
 //! and is killed. Until that lands, [`seccomp_filter_installed`] reports
-//! `false`, and the executor reports [`AccessVerification::Unverified`] rather
-//! than claiming confinement it did not install.
+//! `false`, and the executor reports
+//! [`pith_engine::AccessVerification::Unverified`] rather than claiming
+//! confinement it did not install.
 
 #![allow(
     unsafe_code,
@@ -34,7 +35,7 @@ const PR_SET_NO_NEW_PRIVS: i32 = 38;
 /// Whether the full deny-by-default seccomp filter is installed by this build.
 ///
 /// `false` today: only `no_new_privs` is set. The executor uses this to decide
-/// what [`AccessVerification`] to report, so the contract stays honest.
+/// what [`pith_engine::AccessVerification`] to report, so the contract stays honest.
 pub(super) const fn seccomp_filter_installed() -> bool {
     false
 }

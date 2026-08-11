@@ -2,9 +2,9 @@
 //! (decisions 0021, 0022).
 //!
 //! The evaluator is split across three modules along the seam 0022 describes:
-//! [`scheduler`] holds the set of in-flight evaluation chains and touches no
-//! arena state, [`eval`] is the synchronous core that runs a chain on the step
-//! machine, and [`drive`] is the shell that serves the effects a chain stops
+//! `scheduler` holds the set of in-flight evaluation chains and touches no
+//! arena state, `eval` is the synchronous core that runs a chain on the step
+//! machine, and `drive` is the shell that serves the effects a chain stops
 //! for. This module owns the graph itself and the public surface over it.
 
 mod action_pipeline;
@@ -52,7 +52,7 @@ pub struct Engine {
     pure_computations: PureComputationIndex,
     pub(crate) store: Box<dyn ContentStore>,
     /// Durable engine metadata. Arena handles never cross this boundary; the
-    /// process-local [`durable_attempts`] side-table maps computation nodes to
+    /// process-local `durable_attempts` side-table maps computation nodes to
     /// their durable attempt identifiers. Store calls happen only at engine
     /// scheduling boundaries (decision 0024, "adapter boundaries").
     pub(crate) state_store: Box<dyn EngineStateStore>,

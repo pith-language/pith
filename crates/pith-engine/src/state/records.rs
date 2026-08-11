@@ -376,8 +376,8 @@ impl DurableAttemptState {
 }
 
 /// Why a completed attempt is not reusable, as a chain over the dependency
-/// graph. Built by [`EngineStateStore::explain_invalidation`] and the live
-/// mirror [`crate::EngineQuery::explain_invalidation`].
+/// graph. Built by [`crate::state::EngineStateStore::explain_invalidation`] and
+/// the live mirror [`crate::EngineQuery::explain_invalidation`].
 ///
 /// The chain follows the single dependency each [`DurableReuseReason`] names.
 /// When reuse is blocked by more than one dependency simultaneously, the
