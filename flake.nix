@@ -13,6 +13,8 @@
     };
 
     crane.url = "github:ipetkov/crane";
+
+    treefmt-nix.url = "github:numtide/treefmt-nix";
   };
 
   outputs =
@@ -27,12 +29,7 @@
 
       imports = [
         ./nix/devshell.nix
+        ./nix/treefmt.nix
       ];
-
-      perSystem =
-        { pkgs, ... }:
-        {
-          formatter = pkgs.alejandra;
-        };
     };
 }
