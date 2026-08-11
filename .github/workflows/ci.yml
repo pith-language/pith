@@ -13,19 +13,18 @@ jobs:
   checks:
     name: fmt + clippy + deny + test + determinism
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: DeterminateSystems/determinate-nix-action@61cbfe2efc2d4e7a8a6d56967c3c1058e846c858 # v3.21.9
-      - name: format & lint check
-        run: nix develop --command treefmt --ci
-      - name: clippy
-        run: nix develop --command cargo clippy --workspace --all-targets -- -D warnings
-      - name: cargo-deny
-        run: nix develop --command cargo deny check
-      - name: test
-        run: nix develop --command cargo test --workspace
-      - name: determinism (no HashMap in source)
-        run: nix develop --command cargo run -p xtask -- check-determinism
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+        with:
+          determinate: false
+      - name: checks
+        run: |
+          nix develop --command bash -c '
+            set -e
+            treefmt --ci
+            cargo clippy --workspace --all-targets -- -D warnings
+            cargo deny check
+            cargo test --workspace
+            cargo run -p xtask -- check-determinism
+          '
