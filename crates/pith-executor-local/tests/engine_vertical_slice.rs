@@ -14,6 +14,8 @@ use pith_engine::{
 use pith_executor_local::LocalExecutor;
 use pith_ids::ContentId;
 
+mod support;
+
 /// A runtime for one test. Built per call: constructing a thread pool is
 /// cheap next to what these tests do, and it keeps each test independent.
 fn runtime() -> TokioRuntime {
@@ -31,6 +33,8 @@ struct RunScript {
 impl ActionRule for RunScript {
     fn plan(&self, _inputs: &[Value]) -> PithResult<ActionSpec> {
         let mut spec = ActionSpec::isolated(self.executable);
+        // The script is shell builtins only, so the shell is the whole closure.
+        spec.toolchain = support::closure_for(&[self.executable]);
         spec.arguments = [
             "-c".into(),
             "IFS= read -r value < operand; printf 'processed:%s' \"$value\" > result".into(),

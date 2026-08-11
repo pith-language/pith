@@ -18,6 +18,8 @@ use pith_engine::{
 use pith_executor_local::LocalExecutor;
 use pith_ids::ContentId;
 
+mod support;
+
 /// Whether `/bin/sh` exists on the host, so each `#[test]` can fail loudly via
 /// its own assertion rather than a helper panic; tests skip with a clear message
 /// otherwise.
@@ -30,7 +32,7 @@ fn shell_present() -> bool {
 fn invocation(script: &str, operand: &str) -> ActionInvocation {
     let spec = ActionSpec {
         executable: "/bin/sh".into(),
-        toolchain: Box::new([]),
+        toolchain: support::closure_for(&["/bin/sh", "wc", "tr"]),
         arguments: ["-c".into(), script.into()].into(),
         inputs: [ActionInput {
             path: "operand".into(),
@@ -44,7 +46,7 @@ fn invocation(script: &str, operand: &str) -> ActionInvocation {
         .into(),
         environment: [EnvironmentVariable {
             name: "PATH".into(),
-            value: "/usr/bin:/bin".into(),
+            value: support::path_for(&["wc", "tr"]).into_boxed_str(),
         }]
         .into(),
         platform: PlatformRequirement::Any,
@@ -94,10 +96,11 @@ async fn runs_a_real_child_and_captures_declared_output() {
 }
 
 #[tokio::test]
-async fn reports_unverified_until_both_layers_are_installed() {
-    // The first build installs no_new_privs only (see sys_seccomp /
-    // sys_landlock), so the honest report is Unverified. When landlock and the
-    // full seccomp filter land, this assertion flips to Prevented.
+async fn reports_observed_because_landlock_is_installed_without_seccomp() {
+    // This build installs the landlock path-confinement ruleset but not yet the
+    // seccomp syscall allowlist (decisions 0028, 0030), so the honest report is
+    // Observed: paths are enforced, syscalls are not. When seccomp lands this
+    // assertion flips to Prevented, which 0028 reserves for both layers.
     let executor = LocalExecutor::new();
     if !shell_present() {
         eprintln!("skipping: /bin/sh is not readable");
@@ -108,7 +111,41 @@ async fn reports_unverified_until_both_layers_are_installed() {
         .execute(&invocation)
         .await
         .expect("execution succeeds");
-    assert_eq!(captured.report.access, AccessVerification::Unverified);
+    assert_eq!(captured.report.access, AccessVerification::Observed);
+}
+
+#[tokio::test]
+async fn an_undeclared_path_is_denied_by_the_ruleset() {
+    let executor = LocalExecutor::new();
+    if !shell_present() {
+        eprintln!("skipping: /bin/sh is not readable");
+        return;
+    }
+    // The file is world-readable and outside the declared closure, so without
+    // the ruleset the child reads it and the action succeeds. The shell says
+    // "Permission denied" for a denied open and "No such file" for a missing
+    // one, so the message tells the two apart.
+    const UNDECLARED: &str = "/etc/hostname";
+    assert!(
+        std::fs::read(UNDECLARED).is_ok(),
+        "{UNDECLARED} must be readable for this test to mean anything"
+    );
+    let invocation = invocation(&format!("read -r line < {UNDECLARED}"), "x");
+    let error = executor
+        .execute(&invocation)
+        .await
+        .expect_err("an undeclared read is denied");
+    let message = error
+        .iter()
+        .next()
+        .expect("one diagnostic")
+        .message
+        .0
+        .as_ref();
+    assert!(
+        message.contains("Permission denied"),
+        "the child should have been denied the undeclared path, got: {message}"
+    );
 }
 
 #[tokio::test]

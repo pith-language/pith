@@ -22,6 +22,13 @@ use pith_executor_local::LocalExecutor;
 use pith_ids::ContentId;
 use pith_store::TreeEntry;
 
+mod support;
+
+/// The shell, plus the two coreutils the tree-output script shells out to.
+fn fixture_closure() -> Box<[Box<str>]> {
+    support::closure_for(&["/bin/sh", "mkdir", "chmod", "mktemp", "ls"])
+}
+
 fn shell_present() -> bool {
     std::fs::read("/bin/sh").is_ok()
 }
@@ -40,7 +47,7 @@ fn invocation(script: &str) -> Option<ActionInvocation> {
     Some(ActionInvocation {
         spec: ActionSpec {
             executable: "/bin/sh".into(),
-            toolchain: Box::new([]),
+            toolchain: fixture_closure(),
             arguments: ["-c".into(), script.into()].into(),
             inputs: Box::new([]),
             outputs: Box::new([]),
@@ -170,9 +177,12 @@ async fn multiple_inputs_are_available_to_one_action() {
 }
 
 #[tokio::test]
-async fn only_declared_environment_variables_reach_the_child() {
+async fn only_declared_environment_variables_and_tmpdir_reach_the_child() {
+    // `TMPDIR` is the one variable the executor adds: a confined child cannot
+    // reach the host's temp directory, so the executor gives it one inside the
+    // scratch root. Everything else must come from the spec.
     let Some(mut invocation) = invocation(
-        "if [ -z \"${HOME+x}\" ] && [ \"$DECLARED\" = visible ]; then printf yes > result; else printf no > result; fi",
+        "if [ -z \"${HOME+x}\" ] && [ \"$DECLARED\" = visible ] && [ -d \"$TMPDIR\" ]; then printf yes > result; else printf no > result; fi",
     ) else {
         return;
     };
@@ -190,6 +200,53 @@ async fn only_declared_environment_variables_reach_the_child() {
             .ok()
             .and_then(|value| captured_blob(&value, 0).map(<[u8]>::to_vec)),
         Some(b"yes".to_vec())
+    );
+}
+
+#[tokio::test]
+async fn the_temporary_directory_sits_outside_the_working_directory() {
+    // A tool's temporaries must not be able to collide with a declared path or
+    // be mistaken for a declared output, so `TMPDIR` is a sibling of the
+    // working directory rather than a subdirectory of it.
+    let Some(mut invocation) = invocation(
+        "case \"$TMPDIR\" in \"$PWD\"|\"$PWD\"/*) printf inside > result;; *) printf outside > result;; esac",
+    ) else {
+        return;
+    };
+    declare_blob_output(&mut invocation, "result");
+
+    let execution = LocalExecutor::new().execute(&invocation).await;
+
+    assert_eq!(
+        execution
+            .ok()
+            .and_then(|value| captured_blob(&value, 0).map(<[u8]>::to_vec)),
+        Some(b"outside".to_vec())
+    );
+}
+
+#[tokio::test]
+async fn a_temporary_does_not_appear_in_the_working_directory() {
+    // `mktemp` puts its file wherever `TMPDIR` says. Listing the working
+    // directory afterwards is what catches a temporary directory that is really
+    // the working directory under another name.
+    let Some(mut invocation) = invocation("created=$(mktemp); ls > result") else {
+        return;
+    };
+    invocation.spec.environment = [EnvironmentVariable {
+        name: "PATH".into(),
+        value: support::path_for(&["mktemp", "ls"]).into_boxed_str(),
+    }]
+    .into();
+    declare_blob_output(&mut invocation, "result");
+
+    let execution = LocalExecutor::new().execute(&invocation).await;
+
+    assert_eq!(
+        execution
+            .ok()
+            .and_then(|value| captured_blob(&value, 0).map(<[u8]>::to_vec)),
+        Some(b"result\n".to_vec())
     );
 }
 
@@ -267,7 +324,7 @@ async fn nested_tree_outputs_preserve_files_and_executable_bits() {
     };
     invocation.spec.environment = [EnvironmentVariable {
         name: "PATH".into(),
-        value: "/usr/bin:/bin".into(),
+        value: support::path_for(&["mkdir", "chmod"]).into_boxed_str(),
     }]
     .into();
     declare_tree_output(&mut invocation, "result");

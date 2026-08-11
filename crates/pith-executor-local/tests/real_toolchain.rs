@@ -27,6 +27,8 @@ use pith_executor_local::LocalExecutor;
 use pith_ids::ContentId;
 use pith_store::{ContentStore, FilesystemContentStore};
 
+mod support;
+
 const SOURCE: &[u8] = b"int answer(void) { return 42; }\n";
 const SOURCE_PATH: &str = "answer.c";
 const OBJECT_PATH: &str = "answer.o";
@@ -50,6 +52,8 @@ const ELF_MAGIC: &[u8] = b"\x7fELF";
 struct HostCompiler {
     /// Absolute host path of the `cc` driver the action execves.
     driver: Box<str>,
+    /// Every host path the driver reads.
+    closure: Box<[Box<str>]>,
     /// Where the driver looks for `cc1` before it looks at `PATH`.
     program_path: Box<str>,
     /// The directory the driver came from, which is where `as` and `ld` live on
@@ -58,11 +62,20 @@ struct HostCompiler {
 }
 
 impl HostCompiler {
+    /// `None` when there is no `cc`, or when `cc` is outside the nix store,
+    /// where discovery cannot see past the loader to `cc1` and the fixed
+    /// includes. A short closure would fail on an undeclared read and say
+    /// nothing about the engine.
     fn discover() -> Option<Self> {
         let driver_path = find_in_path("cc")?;
+        let driver = driver_path.to_str()?;
+        if !support::closure_is_complete_for(driver) {
+            return None;
+        }
         let cc1 = print_program_path(&driver_path, "cc1")?;
         Some(Self {
-            driver: driver_path.to_str()?.into(),
+            driver: driver.into(),
+            closure: support::closure_for(&[driver]),
             program_path: directory_of(&cc1)?,
             tool_directory: directory_of(&driver_path)?,
         })
@@ -101,6 +114,7 @@ fn directory_of(path: &Path) -> Option<Box<str>> {
 /// the only output, and the environment is two search paths and nothing else.
 struct CompileAction {
     compiler: Box<str>,
+    closure: Box<[Box<str>]>,
     source: ContentId,
     program_path: Box<str>,
     tool_directory: Box<str>,
@@ -110,7 +124,7 @@ impl ActionRule for CompileAction {
     fn plan(&self, _inputs: &[Value]) -> PithResult<ActionSpec> {
         Ok(ActionSpec {
             executable: self.compiler.clone(),
-            toolchain: Box::new([]),
+            toolchain: self.closure.clone(),
             arguments: [
                 "-c".into(),
                 SOURCE_PATH.into(),
@@ -222,7 +236,7 @@ fn compile_engine(root: &Path, compiler: &HostCompiler) -> (Engine, Request<Pure
 
     // The compiler driver is referenced by host path (decision 0030), so only
     // the source blob is stored. The closure the driver reads is declared in
-    // the spec's `toolchain` field (filled in for the landlock increment).
+    // the spec's `toolchain` field, and landlock confines the child to it.
     let source_blob = match engine.put_blob(SOURCE) {
         Ok(identity) => identity,
         Err(error) => unreachable!("the store failed to hold the source: {error:?}"),
@@ -237,6 +251,7 @@ fn compile_engine(root: &Path, compiler: &HostCompiler) -> (Engine, Request<Pure
         ),
         CompileAction {
             compiler: compiler.driver.clone(),
+            closure: compiler.closure.clone(),
             source: source_blob,
             program_path: compiler.program_path.clone(),
             tool_directory: compiler.tool_directory.clone(),
