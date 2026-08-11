@@ -18,7 +18,7 @@ pith-store.workspace = true
 pith-engine.workspace = true
 async-trait.workspace = true
 tokio = { workspace = true, features = ["process", "fs", "io-util", "rt", "sync", "macros"] }
-rustix.workspace = true
+rustix = { workspace = true, features = ["fs"] }
 tempfile.workspace = true
 
 [dev-dependencies]

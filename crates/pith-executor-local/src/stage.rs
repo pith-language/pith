@@ -9,7 +9,8 @@
 //!
 //! The executable is a host path the executor `execve`s directly (decision
 //! 0030); it is not staged here. Only declared source inputs are laid out under
-//! the scratch root.
+//! the working directory, which is one of two directories in the scratch root:
+//! `work` holds them, `tmp` holds whatever the child writes as a temporary.
 
 use std::path::{Path, PathBuf};
 
@@ -27,8 +28,14 @@ use crate::executor_diag;
 /// should run, plus the host path of the executable to `execve`. Paths are
 /// absolute and local to this machine; they do not escape the executor.
 pub(super) struct StagedAction {
+    /// The whole scratch root, holding the working and temporary directories.
+    pub(super) scratch_root: PathBuf,
     /// The directory the child runs in (`chdir` target).
     pub(super) working_dir: PathBuf,
+    /// Where the child writes temporaries. A sibling of the working directory,
+    /// so a tool's temporaries can never collide with a declared path or be
+    /// mistaken for a declared output.
+    pub(super) temp_dir: PathBuf,
     /// The absolute host path the executor `execve`s. Carried from
     /// `spec.executable` so the process driver does not re-parse the spec.
     pub(super) executable: Box<str>,
@@ -46,11 +53,17 @@ pub(super) async fn stage(invocation: &ActionInvocation, root: &Path) -> StageRe
     fs::create_dir_all(&working_dir)
         .await
         .map_err(|error| io_diag("working directory", error))?;
+    let temp_dir = root.join("tmp");
+    fs::create_dir_all(&temp_dir)
+        .await
+        .map_err(|error| io_diag("temporary directory", error))?;
 
     stage_inputs(invocation, &working_dir).await?;
 
     Ok(StagedAction {
+        scratch_root: root.to_path_buf(),
         working_dir,
+        temp_dir,
         executable: invocation.spec.executable.clone(),
     })
 }

@@ -47,10 +47,11 @@ impl LocalExecutor {
 
     /// The [`AccessVerification`] this build reports, given which confinement
     /// layers it actually installed. `Prevented` requires both landlock and
-    /// seccomp; `Observed` is seccomp-only; `Unverified` is neither. Because
-    /// neither layer is fully installed in this build (see
-    /// [`crate::sys_landlock`] and [`crate::sys_seccomp`]), this is currently
-    /// `Unverified`.
+    /// seccomp; `Observed` is one layer alone; `Unverified` is neither. This
+    /// build installs the landlock path-confinement ruleset but not yet the
+    /// seccomp syscall allowlist (see [`crate::sys_landlock`] and
+    /// [`crate::sys_seccomp`]), so the honest report is `Observed`: paths are a
+    /// kernel-enforced fact, syscalls are not yet.
     fn access_verification() -> AccessVerification {
         match (landlock_installed(), seccomp_filter_installed()) {
             (true, true) => AccessVerification::Prevented,
@@ -209,9 +210,11 @@ async fn run_in_scratch(
     command
         .args(invocation.spec.arguments.iter().map(|arg| arg.as_ref()))
         .current_dir(&staged.working_dir)
-        // A clean environment: only the variables the spec declared, with no
-        // ambient inheritance. This is the least-authority default.
+        // A clean environment: no ambient inheritance. `TMPDIR` is set before
+        // the declared variables rather than after, so a spec that declares its
+        // own still wins.
         .env_clear()
+        .env("TMPDIR", &staged.temp_dir)
         .envs(
             invocation
                 .spec
@@ -228,7 +231,18 @@ async fn run_in_scratch(
         // die with it. Without this a cancelled action leaves a process running
         // against a scratch root that is about to be deleted.
         .kill_on_drop(true);
-    register_sandbox_hook(&mut command);
+    // Built before the fork so the child's pre_exec hook allocates nothing.
+    let paths = crate::sys_landlock::SandboxPaths::new(
+        &staged.scratch_root,
+        staged.executable.as_ref(),
+        &invocation.spec.toolchain,
+    )
+    .map_err(|error| {
+        crate::executor_diag(format!(
+            "a declared sandbox path cannot be confined: {error}"
+        ))
+    })?;
+    register_sandbox_hook(&mut command, paths);
 
     let output = run_child(&mut command).await?;
     if !output.status.success() {
