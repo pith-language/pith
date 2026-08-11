@@ -60,6 +60,10 @@ async fn stage_executable(invocation: &ActionInvocation, root: &Path) -> StageRe
             "the action executable materialized as a tree, not a blob",
         ));
     };
+    // Held until the write handle is gone, so no concurrent fork can copy it
+    // and make this executable busy for the action about to run it (see
+    // `crate::spawn_gate`).
+    let _writing = crate::spawn_gate::writing_executable().await;
     fs::write(&executable_path, &blob.bytes)
         .await
         .map_err(|error| io_diag("executable", error))?;

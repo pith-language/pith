@@ -17,6 +17,7 @@ use pith_engine::{
 use tokio::process::Command;
 
 use crate::capture::capture;
+use crate::spawn_gate;
 use crate::stage;
 use crate::sys_landlock::landlock_installed;
 use crate::sys_seccomp::{register_sandbox_hook, seccomp_filter_installed};
@@ -187,44 +188,24 @@ fn stderr_excerpt(stderr: &[u8]) -> &[u8] {
     }
 }
 
-/// How many times a spawn refused with `ETXTBSY` is attempted before the
-/// executor reports it, and how long it waits between attempts. The window it
-/// waits out is one sibling action's fork-to-exec gap, which is microseconds;
-/// the delay is generous and the attempt count is what bounds the wait.
-const SPAWN_ATTEMPTS: usize = 5;
-const SPAWN_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(10);
-
-/// Run the child, re-attempting a spawn the kernel refused with `ETXTBSY`.
+/// Fork the child under the spawn gate, then wait for it outside the gate.
 ///
-/// `execve` fails with `ETXTBSY` while any process holds the executable open
-/// for writing. Rust opens files `O_CLOEXEC`, so the handle used to stage an
-/// executable is closed at `execve` — but not at `fork`, and a forked child
-/// holds a copy of every parent descriptor until it execs. Two actions staging
-/// and spawning at the same time can therefore have one action's pre-exec child
-/// holding a writer on the other's freshly staged executable, which fails that
-/// other spawn for a reason that has nothing to do with it.
-///
-/// The window is inherent to fork/exec from a process with threads: the
-/// descriptor is duplicated by `fork` and there is no way to ask the kernel not
-/// to. Since the condition is transient by construction, the spawn is retried.
-/// A genuine `ETXTBSY` — something outside this process holding the executable
-/// open for writing — survives every attempt and is reported.
+/// `Command::spawn` returns once the child has exec'd or reported why it could
+/// not, so holding the gate across it covers exactly the window in which the
+/// child holds copies of this process's descriptors — see [`crate::spawn_gate`]
+/// for what that window costs if it is left open. The child's run is not held:
+/// a gate spanning that would serialize the build.
 async fn run_child(command: &mut Command) -> pith_diag::PithResult<std::process::Output> {
-    let mut remaining = SPAWN_ATTEMPTS;
-    loop {
-        let error = match command.output().await {
-            Ok(output) => return Ok(output),
-            Err(error) => error,
-        };
-        remaining = remaining.saturating_sub(1);
-        if remaining == 0 || error.raw_os_error() != Some(rustix::io::Errno::TXTBSY.raw_os_error())
-        {
-            return Err(crate::executor_diag(format!(
-                "spawning the action failed: {error}"
-            )));
-        }
-        tokio::time::sleep(SPAWN_RETRY_DELAY).await;
-    }
+    let spawned = {
+        let _forking = spawn_gate::forking_child().await;
+        command.spawn()
+    };
+    let child = spawned
+        .map_err(|error| crate::executor_diag(format!("spawning the action failed: {error}")))?;
+    child
+        .wait_with_output()
+        .await
+        .map_err(|error| crate::executor_diag(format!("waiting for the action failed: {error}")))
 }
 
 async fn run_in_scratch(
@@ -249,6 +230,10 @@ async fn run_in_scratch(
                 .map(|var| (var.name.as_ref(), var.value.as_ref())),
         )
         .stdin(Stdio::null())
+        // Piped explicitly because the child is spawned rather than run through
+        // `output()`, which would set these itself.
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         // The engine drops this future to cancel an action, so the child has to
         // die with it. Without this a cancelled action leaves a process running
         // against a scratch root that is about to be deleted.
