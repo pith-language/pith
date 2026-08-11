@@ -325,7 +325,7 @@ fn an_action_attempt_round_trips_its_plan_and_provenance() {
         name: "net".into(),
         scope: "example.test".into(),
     };
-    let mut spec = ActionSpec::isolated(content_id(1));
+    let mut spec = ActionSpec::isolated("/bin/tool");
     spec.arguments = ["--build".into()].into();
     spec.capabilities = [capability.clone()].into();
     spec.outputs = [pith_core::ActionOutput {

@@ -13,7 +13,8 @@ use pith_ids::ContentId;
 
 fn valid_spec() -> ActionSpec {
     ActionSpec {
-        executable: ContentId::of_blob(b"tool"),
+        executable: "/bin/tool".into(),
+        toolchain: Box::new([]),
         arguments: ["--mode".into(), "release".into()].into(),
         inputs: [
             ActionInput {
@@ -109,7 +110,7 @@ fn every_non_relative_path_shape_is_rejected_for_inputs_and_outputs() {
         "windows\\separator",
         "nul\0component",
     ] {
-        let mut input_spec = ActionSpec::isolated(ContentId::of_blob(b"tool"));
+        let mut input_spec = ActionSpec::isolated("/bin/tool");
         input_spec.inputs = [ActionInput {
             path: path.into(),
             content: Content::Blob(ContentId::of_blob(b"input")),
@@ -120,7 +121,7 @@ fn every_non_relative_path_shape_is_rejected_for_inputs_and_outputs() {
             "input path {path:?} unexpectedly validated"
         );
 
-        let mut output_spec = ActionSpec::isolated(ContentId::of_blob(b"tool"));
+        let mut output_spec = ActionSpec::isolated("/bin/tool");
         output_spec.outputs = [ActionOutput {
             path: path.into(),
             kind: OutputKind::Blob,
@@ -136,7 +137,7 @@ fn every_non_relative_path_shape_is_rejected_for_inputs_and_outputs() {
 #[test]
 fn duplicate_and_ancestor_input_paths_are_rejected() {
     for second in ["source", "source/generated"] {
-        let mut spec = ActionSpec::isolated(ContentId::of_blob(b"tool"));
+        let mut spec = ActionSpec::isolated("/bin/tool");
         spec.inputs = [
             ActionInput {
                 path: "source".into(),
@@ -156,7 +157,7 @@ fn duplicate_and_ancestor_input_paths_are_rejected() {
 #[test]
 fn duplicate_and_ancestor_output_paths_are_rejected() {
     for second in ["result", "result/nested"] {
-        let mut spec = ActionSpec::isolated(ContentId::of_blob(b"tool"));
+        let mut spec = ActionSpec::isolated("/bin/tool");
         spec.outputs = [
             ActionOutput {
                 path: "result".into(),
@@ -176,7 +177,7 @@ fn duplicate_and_ancestor_output_paths_are_rejected() {
 #[test]
 fn input_output_overlap_is_rejected_in_both_ancestor_directions() {
     for (input, output) in [("work", "work/out"), ("work/source", "work")] {
-        let mut spec = ActionSpec::isolated(ContentId::of_blob(b"tool"));
+        let mut spec = ActionSpec::isolated("/bin/tool");
         spec.inputs = [ActionInput {
             path: input.into(),
             content: Content::Blob(ContentId::of_blob(b"input")),
@@ -194,7 +195,7 @@ fn input_output_overlap_is_rejected_in_both_ancestor_directions() {
 
 #[test]
 fn lexical_prefixes_that_are_not_path_ancestors_do_not_overlap() {
-    let mut spec = ActionSpec::isolated(ContentId::of_blob(b"tool"));
+    let mut spec = ActionSpec::isolated("/bin/tool");
     spec.inputs = [ActionInput {
         path: "source".into(),
         content: Content::Blob(ContentId::of_blob(b"input")),
@@ -212,7 +213,7 @@ fn lexical_prefixes_that_are_not_path_ancestors_do_not_overlap() {
 #[test]
 fn invalid_environment_names_are_rejected() {
     for name in ["", "A=B", "A\0B"] {
-        let mut spec = ActionSpec::isolated(ContentId::of_blob(b"tool"));
+        let mut spec = ActionSpec::isolated("/bin/tool");
         spec.environment = [EnvironmentVariable {
             name: name.into(),
             value: "value".into(),
@@ -225,7 +226,7 @@ fn invalid_environment_names_are_rejected() {
 
 #[test]
 fn environment_values_may_be_empty_but_not_contain_nul() {
-    let mut empty = ActionSpec::isolated(ContentId::of_blob(b"tool"));
+    let mut empty = ActionSpec::isolated("/bin/tool");
     empty.environment = [EnvironmentVariable {
         name: "EMPTY".into(),
         value: "".into(),
@@ -242,7 +243,7 @@ fn environment_values_may_be_empty_but_not_contain_nul() {
 
 #[test]
 fn duplicate_environment_names_are_rejected_even_with_different_values() {
-    let mut spec = ActionSpec::isolated(ContentId::of_blob(b"tool"));
+    let mut spec = ActionSpec::isolated("/bin/tool");
     spec.environment = [
         EnvironmentVariable {
             name: "MODE".into(),
@@ -261,7 +262,7 @@ fn duplicate_environment_names_are_rejected_even_with_different_values() {
 #[test]
 fn an_exact_platform_requires_both_components() {
     for (operating_system, architecture) in [("", "x86_64"), ("linux", "")] {
-        let mut spec = ActionSpec::isolated(ContentId::of_blob(b"tool"));
+        let mut spec = ActionSpec::isolated("/bin/tool");
         spec.platform = PlatformRequirement::Exact {
             operating_system: operating_system.into(),
             architecture: architecture.into(),
@@ -279,7 +280,7 @@ fn capabilities_require_nonempty_nul_free_names_and_scopes() {
         ("na\0me", "scope"),
         ("name", "sco\0pe"),
     ] {
-        let mut spec = ActionSpec::isolated(ContentId::of_blob(b"tool"));
+        let mut spec = ActionSpec::isolated("/bin/tool");
         spec.capabilities = [CapabilityRequirement {
             name: name.into(),
             scope: scope.into(),
@@ -296,11 +297,11 @@ fn only_exact_duplicate_capabilities_are_rejected() {
         name: "filesystem.read".into(),
         scope: "one".into(),
     };
-    let mut duplicate = ActionSpec::isolated(ContentId::of_blob(b"tool"));
+    let mut duplicate = ActionSpec::isolated("/bin/tool");
     duplicate.capabilities = [capability.clone(), capability].into();
     assert!(validation_message(&duplicate).contains("duplicate"));
 
-    let mut distinct_scope = ActionSpec::isolated(ContentId::of_blob(b"tool"));
+    let mut distinct_scope = ActionSpec::isolated("/bin/tool");
     distinct_scope.capabilities = [
         CapabilityRequirement {
             name: "filesystem.read".into(),
@@ -322,7 +323,7 @@ fn allowed_hosts_must_be_nonempty_nul_free_and_unique() {
         vec!["bad\0host"],
         vec!["same.example", "same.example"],
     ] {
-        let mut spec = ActionSpec::isolated(ContentId::of_blob(b"tool"));
+        let mut spec = ActionSpec::isolated("/bin/tool");
         spec.network = NetworkPolicy::AllowHosts(
             hosts
                 .into_iter()
@@ -362,7 +363,7 @@ fn digest_preserves_argument_order() {
 #[test]
 fn digest_distinguishes_blob_and_tree_discriminants() {
     let content = ContentId::of_blob(b"same identity payload");
-    let mut blob_input = ActionSpec::isolated(ContentId::of_blob(b"tool"));
+    let mut blob_input = ActionSpec::isolated("/bin/tool");
     blob_input.inputs = [ActionInput {
         path: "input".into(),
         content: Content::Blob(content),
@@ -374,7 +375,7 @@ fn digest_distinguishes_blob_and_tree_discriminants() {
     }
     assert_ne!(blob_input.digest().ok(), tree_input.digest().ok());
 
-    let mut blob_output = ActionSpec::isolated(ContentId::of_blob(b"tool"));
+    let mut blob_output = ActionSpec::isolated("/bin/tool");
     blob_output.outputs = [ActionOutput {
         path: "output".into(),
         kind: OutputKind::Blob,

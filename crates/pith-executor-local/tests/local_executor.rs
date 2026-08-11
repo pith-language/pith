@@ -1,8 +1,8 @@
 //! End-to-end tests for the local executor (decision 0028).
 //!
 //! These run real child processes through [`LocalExecutor`], proving the
-//! stage → fork/exec → capture path works. The executable is `/bin/sh` bytes
-//! staged from a materialized blob, so the tests exercise the same byte-staging
+//! stage → fork/exec → capture path works. The executable is the host path
+//! `/bin/sh` (decision 0030), so the tests exercise the same execve-a-path
 //! path the engine's `materialize_action` produces without depending on the
 //! engine.
 
@@ -18,25 +18,19 @@ use pith_engine::{
 use pith_executor_local::LocalExecutor;
 use pith_ids::ContentId;
 
-/// Read `/bin/sh` once; it is the executable the action runs. Staged as a blob
-/// the way the engine would stage it. Returns `None` if `/bin/sh` is missing so
-/// each `#[test]` can fail loudly via its own assertion rather than a helper
-/// panic; tests skip with a clear message in that case.
-fn shell_blob() -> Option<MaterializedContent> {
-    let bytes = std::fs::read("/bin/sh").ok()?;
-    let id = ContentId::of_blob(&bytes);
-    Some(MaterializedContent::Blob(MaterializedBlob {
-        id,
-        bytes: bytes.into(),
-    }))
+/// Whether `/bin/sh` exists on the host, so each `#[test]` can fail loudly via
+/// its own assertion rather than a helper panic; tests skip with a clear message
+/// otherwise.
+fn shell_present() -> bool {
+    std::fs::read("/bin/sh").is_ok()
 }
 
 /// Build an invocation that runs `/bin/sh -c <script>` with `operand` staged as
 /// an input and `result` declared as a blob output.
-fn invocation(shell: MaterializedContent, script: &str, operand: &str) -> ActionInvocation {
-    let executable = ContentId::of_blob(b"shell");
+fn invocation(script: &str, operand: &str) -> ActionInvocation {
     let spec = ActionSpec {
-        executable,
+        executable: "/bin/sh".into(),
+        toolchain: Box::new([]),
         arguments: ["-c".into(), script.into()].into(),
         inputs: [ActionInput {
             path: "operand".into(),
@@ -59,7 +53,6 @@ fn invocation(shell: MaterializedContent, script: &str, operand: &str) -> Action
     };
     ActionInvocation {
         spec,
-        executable: shell,
         inputs: [pith_engine::MaterializedActionInput {
             path: "operand".into(),
             content: MaterializedContent::Blob(MaterializedBlob {
@@ -75,11 +68,11 @@ fn invocation(shell: MaterializedContent, script: &str, operand: &str) -> Action
 async fn runs_a_real_child_and_captures_declared_output() {
     let executor = LocalExecutor::new();
     // Double the input's length and write it to the declared output path.
-    let Some(shell) = shell_blob() else {
+    if !shell_present() {
         eprintln!("skipping: /bin/sh is not readable");
         return;
-    };
-    let invocation = invocation(shell, "wc -c < operand | tr -d ' ' > result", "hello");
+    }
+    let invocation = invocation("wc -c < operand | tr -d ' ' > result", "hello");
     let captured = executor
         .execute(&invocation)
         .await
@@ -106,11 +99,11 @@ async fn reports_unverified_until_both_layers_are_installed() {
     // sys_landlock), so the honest report is Unverified. When landlock and the
     // full seccomp filter land, this assertion flips to Prevented.
     let executor = LocalExecutor::new();
-    let Some(shell) = shell_blob() else {
+    if !shell_present() {
         eprintln!("skipping: /bin/sh is not readable");
         return;
-    };
-    let invocation = invocation(shell, "true > result", "x");
+    }
+    let invocation = invocation("true > result", "x");
     let captured = executor
         .execute(&invocation)
         .await
@@ -121,11 +114,11 @@ async fn reports_unverified_until_both_layers_are_installed() {
 #[tokio::test]
 async fn refuses_specs_that_request_network_access() {
     let executor = LocalExecutor::new();
-    let Some(shell) = shell_blob() else {
+    if !shell_present() {
         eprintln!("skipping: /bin/sh is not readable");
         return;
-    };
-    let mut invocation = invocation(shell, "true > result", "x");
+    }
+    let mut invocation = invocation("true > result", "x");
     invocation.spec.network = NetworkPolicy::AllowAll;
     let error = executor
         .execute(&invocation)
@@ -147,11 +140,11 @@ async fn refuses_specs_that_request_network_access() {
 #[tokio::test]
 async fn refuses_specs_that_require_a_different_platform() {
     let executor = LocalExecutor::new();
-    let Some(shell) = shell_blob() else {
+    if !shell_present() {
         eprintln!("skipping: /bin/sh is not readable");
         return;
-    };
-    let mut invocation = invocation(shell, "true > result", "x");
+    }
+    let mut invocation = invocation("true > result", "x");
     invocation.spec.platform = PlatformRequirement::Exact {
         operating_system: "plan9".into(),
         architecture: "x86_64".into(),
@@ -177,11 +170,11 @@ async fn refuses_specs_that_require_a_different_platform() {
 async fn action_failure_surfaces_as_a_diagnostic() {
     let executor = LocalExecutor::new();
     // `false` exits nonzero and produces no output.
-    let Some(shell) = shell_blob() else {
+    if !shell_present() {
         eprintln!("skipping: /bin/sh is not readable");
         return;
-    };
-    let invocation = invocation(shell, "false", "x");
+    }
+    let invocation = invocation("false", "x");
     let error = executor
         .execute(&invocation)
         .await

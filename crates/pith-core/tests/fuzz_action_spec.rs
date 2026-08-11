@@ -32,6 +32,7 @@ const CAP_SCOPES: &[&str] = &["s1", "s2", "host"];
 const HOSTS: &[&str] = &["h1.example", "h2.example", "h3.example"];
 const PLATFORM_OS: &[&str] = &["linux", "darwin"];
 const PLATFORM_ARCH: &[&str] = &["x86_64", "aarch64"];
+const EXECUTABLES: &[&str] = &["/bin/a", "/bin/b", "/bin/c", "/bin/d", "/bin/e"];
 
 fn input_decisions() -> impl Strategy<Value = Vec<(bool, bool, u8)>> {
     proptest::collection::vec(
@@ -182,7 +183,12 @@ fn build_spec(
         .collect();
 
     ActionSpec {
-        executable: ContentId::of_blob(&[executable_seed]),
+        executable: EXECUTABLES
+            .get(executable_seed as usize)
+            .copied()
+            .unwrap_or(EXECUTABLES.first().copied().unwrap())
+            .into(),
+        toolchain: Box::new([]),
         arguments: arguments.into_boxed_slice(),
         inputs: input_vec.into_boxed_slice(),
         outputs: output_vec.into_boxed_slice(),

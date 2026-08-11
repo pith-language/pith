@@ -35,10 +35,14 @@ pub trait Executor: Send + Sync {
 }
 
 /// Least-authority input view passed to an executor for one action.
+///
+/// The executable is a host path carried in [`ActionSpec::executable`] (decision
+/// 0030); the executor `execve`s it directly and does not receive materialized
+/// bytes for it. Only declared source inputs are materialized here, since they
+/// are content the engine resolves from its store.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActionInvocation {
     pub spec: ActionSpec,
-    pub executable: MaterializedContent,
     pub inputs: Box<[MaterializedActionInput]>,
 }
 

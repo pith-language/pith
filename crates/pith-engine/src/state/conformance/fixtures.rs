@@ -51,7 +51,7 @@ pub(super) fn action_computation(
 ) -> Option<DurableComputation> {
     let identity =
         RuleIdentity::of_module_declaration("pith-conformance", &format!("action-{rule}"));
-    let mut spec = ActionSpec::isolated(content_id(executable));
+    let mut spec = ActionSpec::isolated(host_path(executable));
     spec.capabilities = capabilities.iter().copied().map(capability).collect();
     let plan = DurableActionPlan::new(
         DurableRule::new(RuleRevision::of_manifest(identity, &[rule])),
@@ -105,4 +105,23 @@ pub(super) fn capability(seed: u8) -> CapabilityRequirement {
 
 pub(super) fn content_id(seed: u8) -> ContentId {
     ContentId::from_digest(ContentDigest::from_bytes([seed; DIGEST_LEN]))
+}
+
+/// A host path for an action executable, varied by `seed` so distinct conformance
+/// actions get distinct identities (decision 0030: `executable` is a host path).
+pub(super) fn host_path(seed: u8) -> &'static str {
+    const PATHS: &[&str] = &[
+        "/bin/a",
+        "/bin/b",
+        "/bin/c",
+        "/bin/d",
+        "/bin/e",
+        "/bin/f",
+        "/bin/g",
+        "/bin/h",
+    ];
+    PATHS
+        .get(seed as usize)
+        .copied()
+        .unwrap_or(PATHS.first().copied().unwrap_or("/bin/a"))
 }

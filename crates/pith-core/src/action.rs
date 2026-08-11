@@ -105,8 +105,17 @@ pub enum NetworkPolicy {
 /// Complete, inspectable contract for one bounded external action.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ActionSpec {
-    /// Content identity of the executable artifact.
-    pub executable: ContentId,
+    /// Absolute host path of the program the executor runs. The executable is
+    /// not staged from the content store; the executor `execve`s this path
+    /// directly. See decision 0030 for why a toolchain executable is a host
+    /// path rather than a content identity.
+    pub executable: Box<str>,
+    /// Host filesystem paths the action may read to find the rest of its
+    /// toolchain. For a nix toolchain these are the top-level `/nix/store/...`
+    /// directories returned by `nix path-info -r` over the executable's store
+    /// path. The executor adds one landlock `PathBeneath` rule per path. See
+    /// decision 0030.
+    pub toolchain: Box<[Box<str>]>,
     /// Ordered command arguments. The executable itself is not repeated here.
     pub arguments: Box<[Box<str>]>,
     pub inputs: Box<[ActionInput]>,
@@ -119,9 +128,10 @@ pub struct ActionSpec {
 
 impl ActionSpec {
     /// A minimal contract with no ambient environment, network, or authority.
-    pub fn isolated(executable: ContentId) -> Self {
+    pub fn isolated(executable: &str) -> Self {
         Self {
-            executable,
+            executable: executable.into(),
+            toolchain: Box::new([]),
             arguments: Box::new([]),
             inputs: Box::new([]),
             outputs: Box::new([]),
@@ -141,6 +151,31 @@ impl ActionSpec {
         for argument in &self.arguments {
             if argument.contains('\0') {
                 return Err(invalid_action_spec("action argument contains a NUL byte"));
+            }
+        }
+
+        if !is_valid_host_path(&self.executable) {
+            return Err(invalid_action_spec(format!(
+                "invalid action executable path `{}`",
+                self.executable
+            )));
+        }
+
+        for (position, path) in self.toolchain.iter().enumerate() {
+            if !is_valid_host_path(path) {
+                return Err(invalid_action_spec(format!(
+                    "invalid action toolchain path `{path}`"
+                )));
+            }
+            if self
+                .toolchain
+                .iter()
+                .take(position)
+                .any(|previous| previous == path)
+            {
+                return Err(invalid_action_spec(format!(
+                    "duplicate action toolchain path `{path}`"
+                )));
             }
         }
 
@@ -255,7 +290,14 @@ impl ActionSpec {
 
     fn canonical_manifest(&self) -> Vec<u8> {
         let mut manifest = Vec::new();
-        manifest.extend_from_slice(self.executable.digest().as_bytes());
+        encode_str(&mut manifest, &self.executable);
+
+        let mut toolchain: Vec<_> = self.toolchain.iter().collect();
+        toolchain.sort();
+        encode_length(&mut manifest, toolchain.len());
+        for path in toolchain {
+            encode_str(&mut manifest, path);
+        }
 
         encode_length(&mut manifest, self.arguments.len());
         for argument in &self.arguments {
@@ -376,6 +418,23 @@ fn is_valid_action_path(path: &str) -> bool {
             .all(|component| !component.is_empty() && component != "." && component != "..")
 }
 
+/// Validation for an absolute host path (`executable`, `toolchain`). These name
+/// where the executor finds the program and its closure on the host filesystem,
+/// so they are absolute, NUL-free, and reject `..` so a declared path cannot
+/// escape its directory by traversal. A trailing slash would name a directory,
+/// which is valid for a `toolchain` closure entry but not for an `executable`,
+/// so callers that need a file reject the trailing-slash case themselves.
+fn is_valid_host_path(path: &str) -> bool {
+    !path.is_empty()
+        && path.starts_with('/')
+        && !path.contains('\0')
+        && !path.contains('\\')
+        && path
+            .split('/')
+            .skip(1)
+            .all(|component| !component.is_empty() && component != "." && component != "..")
+}
+
 fn paths_overlap(left: &str, right: &str) -> bool {
     left == right
         || right
@@ -414,7 +473,7 @@ mod tests {
 
     #[test]
     fn isolated_action_denies_ambient_authority() {
-        let spec = ActionSpec::isolated(ContentId::of_blob(b"tool"));
+        let spec = ActionSpec::isolated("/bin/tool");
 
         assert!(spec.environment.is_empty());
         assert!(spec.capabilities.is_empty());
@@ -435,7 +494,7 @@ mod tests {
 
     #[test]
     fn action_contract_is_structural_data() {
-        let mut spec = ActionSpec::isolated(ContentId::of_blob(b"compiler"));
+        let mut spec = ActionSpec::isolated("/bin/compiler");
         spec.arguments = ["source.c".into(), "-o".into(), "source.o".into()].into();
         spec.outputs = [ActionOutput {
             path: "source.o".into(),
@@ -454,7 +513,7 @@ mod tests {
     fn identity_is_stable_for_unordered_contract_fields() {
         let first_blob = ContentId::of_blob(b"first");
         let second_blob = ContentId::of_blob(b"second");
-        let mut first = ActionSpec::isolated(ContentId::of_blob(b"tool"));
+        let mut first = ActionSpec::isolated("/bin/tool");
         first.inputs = [
             ActionInput {
                 path: "b".into(),
@@ -477,16 +536,18 @@ mod tests {
             },
         ]
         .into();
+        first.toolchain = ["/nix/store/a".into(), "/nix/store/b".into()].into();
         let mut second = first.clone();
         second.inputs.reverse();
         second.environment.reverse();
+        second.toolchain = ["/nix/store/b".into(), "/nix/store/a".into()].into();
 
         assert_eq!(first.digest().unwrap(), second.digest().unwrap());
     }
 
     #[test]
     fn every_contract_field_participates_in_identity() {
-        let executable = ContentId::of_blob(b"tool");
+        let executable = "/bin/tool";
         let mut baseline = ActionSpec::isolated(executable);
         baseline.arguments = ["argument".into()].into();
         baseline.inputs = [ActionInput {
@@ -517,7 +578,11 @@ mod tests {
 
         let variants = [
             ActionSpec {
-                executable: ContentId::of_blob(b"other tool"),
+                executable: "/bin/other-tool".into(),
+                ..baseline.clone()
+            },
+            ActionSpec {
+                toolchain: ["/nix/store/other".into()].into(),
                 ..baseline.clone()
             },
             ActionSpec {
@@ -583,7 +648,7 @@ mod tests {
             "trailing/",
             "back\\slash",
         ] {
-            let mut spec = ActionSpec::isolated(ContentId::of_blob(b"tool"));
+            let mut spec = ActionSpec::isolated("/bin/tool");
             spec.inputs = [ActionInput {
                 path: path.into(),
                 content: Content::Blob(ContentId::of_blob(b"input")),
@@ -596,7 +661,7 @@ mod tests {
             );
         }
 
-        let mut overlapping = ActionSpec::isolated(ContentId::of_blob(b"tool"));
+        let mut overlapping = ActionSpec::isolated("/bin/tool");
         overlapping.inputs = [ActionInput {
             path: "source".into(),
             content: Content::Tree(ContentId::of_tree(b"source")),

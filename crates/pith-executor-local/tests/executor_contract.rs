@@ -22,9 +22,8 @@ use pith_executor_local::LocalExecutor;
 use pith_ids::ContentId;
 use pith_store::TreeEntry;
 
-fn shell() -> Option<MaterializedContent> {
-    let bytes = std::fs::read("/bin/sh").ok()?;
-    Some(blob(&bytes))
+fn shell_present() -> bool {
+    std::fs::read("/bin/sh").is_ok()
 }
 
 fn blob(bytes: &[u8]) -> MaterializedContent {
@@ -35,14 +34,13 @@ fn blob(bytes: &[u8]) -> MaterializedContent {
 }
 
 fn invocation(script: &str) -> Option<ActionInvocation> {
-    let executable = shell()?;
-    let executable_id = match &executable {
-        MaterializedContent::Blob(blob) => blob.id,
-        MaterializedContent::Tree(_) => return None,
-    };
+    if !shell_present() {
+        return None;
+    }
     Some(ActionInvocation {
         spec: ActionSpec {
-            executable: executable_id,
+            executable: "/bin/sh".into(),
+            toolchain: Box::new([]),
             arguments: ["-c".into(), script.into()].into(),
             inputs: Box::new([]),
             outputs: Box::new([]),
@@ -51,7 +49,6 @@ fn invocation(script: &str) -> Option<ActionInvocation> {
             capabilities: Box::new([]),
             network: NetworkPolicy::Deny,
         },
-        executable,
         inputs: Box::new([]),
     })
 }
@@ -478,28 +475,24 @@ async fn declaring_a_file_as_a_tree_is_a_capture_error() {
 }
 
 #[tokio::test]
-async fn a_tree_cannot_be_used_as_the_executable() {
-    let Some(mut invocation) = invocation(":") else {
-        return;
+async fn an_executable_path_that_does_not_exist_is_a_spawn_error() {
+    // The executable is a host path (decision 0030). A path that does not exist
+    // on the host fails at spawn with an adapter diagnostic, before any child
+    // runs.
+    let invocation = ActionInvocation {
+        spec: ActionSpec {
+            executable: "/bin/definitely-not-a-real-executable".into(),
+            toolchain: Box::new([]),
+            arguments: Box::new([]),
+            inputs: Box::new([]),
+            outputs: Box::new([]),
+            environment: Box::new([]),
+            platform: PlatformRequirement::Any,
+            capabilities: Box::new([]),
+            network: NetworkPolicy::Deny,
+        },
+        inputs: Box::new([]),
     };
-    invocation.executable = MaterializedContent::Tree(MaterializedTree {
-        id: ContentId::of_tree(b"executable tree"),
-        entries: Box::new([]),
-    });
-
-    let error = LocalExecutor::new().execute(&invocation).await.err();
-
-    assert!(error.as_ref().is_some_and(|sink| {
-        first_diagnostic_message(sink).contains("executable materialized as a tree")
-    }));
-}
-
-#[tokio::test]
-async fn invalid_executable_bytes_are_rejected_with_an_adapter_diagnostic() {
-    let Some(mut invocation) = invocation(":") else {
-        return;
-    };
-    invocation.executable = blob(b"not an executable image");
 
     let error = LocalExecutor::new().execute(&invocation).await.err();
 

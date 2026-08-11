@@ -257,8 +257,8 @@ impl pith_engine::ActionPolicy for DenyCapability {
     }
 }
 
-fn action_executable() -> ContentId {
-    ContentId::of_blob(b"fixture:action-executable")
+fn action_executable() -> &'static str {
+    "/bin/fixture-action"
 }
 
 fn action_input() -> ContentId {
@@ -338,8 +338,8 @@ fn engine_with_fixtures() -> Engine {
 /// so those tests build several engines over one shared adapter.
 fn engine_with_state(state: impl EngineStateStore + 'static) -> Engine {
     let mut content = MemoryContentStore::default();
-    let executable = put_fixture_blob(&mut content, b"fixture:action-executable");
-    assert_eq!(executable, action_executable());
+    // The executable is a host path (decision 0030); only the declared input
+    // blob is stored.
     let input = put_fixture_blob(&mut content, b"fixture input");
     assert_eq!(input, action_input());
     Engine::with_state_store(content, state)

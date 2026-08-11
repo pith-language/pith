@@ -17,7 +17,6 @@ use pith_engine::{
 use tokio::process::Command;
 
 use crate::capture::capture;
-use crate::spawn_gate;
 use crate::stage;
 use crate::sys_landlock::landlock_installed;
 use crate::sys_seccomp::{register_sandbox_hook, seccomp_filter_installed};
@@ -188,19 +187,10 @@ fn stderr_excerpt(stderr: &[u8]) -> &[u8] {
     }
 }
 
-/// Fork the child under the spawn gate, then wait for it outside the gate.
-///
-/// `Command::spawn` returns once the child has exec'd or reported why it could
-/// not, so holding the gate across it covers exactly the window in which the
-/// child holds copies of this process's descriptors — see [`crate::spawn_gate`]
-/// for what that window costs if it is left open. The child's run is not held:
-/// a gate spanning that would serialize the build.
+/// Fork the child and wait for its output.
 async fn run_child(command: &mut Command) -> pith_diag::PithResult<std::process::Output> {
-    let spawned = {
-        let _forking = spawn_gate::forking_child().await;
-        command.spawn()
-    };
-    let child = spawned
+    let child = command
+        .spawn()
         .map_err(|error| crate::executor_diag(format!("spawning the action failed: {error}")))?;
     child
         .wait_with_output()
@@ -215,7 +205,7 @@ async fn run_in_scratch(
     let staged = stage::stage(invocation, scratch_root).await?;
     let declared_outputs = stage::declared_outputs(invocation);
 
-    let mut command = Command::new(&staged.executable);
+    let mut command = Command::new(staged.executable.as_ref());
     command
         .args(invocation.spec.arguments.iter().map(|arg| arg.as_ref()))
         .current_dir(&staged.working_dir)

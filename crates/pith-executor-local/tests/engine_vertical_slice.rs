@@ -24,7 +24,7 @@ fn runtime() -> TokioRuntime {
 }
 
 struct RunScript {
-    executable: ContentId,
+    executable: &'static str,
     input: ContentId,
 }
 
@@ -169,13 +169,10 @@ fn fixture_error(message: &str) -> DiagnosticSink {
 
 #[test]
 fn engine_executes_imports_and_rematerializes_a_real_local_action() {
-    let Some(shell_bytes) = std::fs::read("/bin/sh").ok() else {
+    if std::fs::read("/bin/sh").is_err() {
         return;
-    };
+    }
     let mut engine = Engine::new();
-    let Some(executable) = engine.put_blob(&shell_bytes).ok() else {
-        return;
-    };
     let Some(input) = engine.put_blob(b"hello\n").ok() else {
         return;
     };
@@ -183,7 +180,10 @@ fn engine_executes_imports_and_rematerializes_a_real_local_action() {
     let root_interface = interface(&[], Type::Blob);
     engine.register_action_rule(
         rule::<Action>("process", action_interface.clone()),
-        RunScript { executable, input },
+        RunScript {
+            executable: "/bin/sh",
+            input,
+        },
     );
     engine.register_rule(
         rule::<Pure>("root", root_interface.clone()),

@@ -25,7 +25,6 @@ use pith_engine::{
     Evaluation, ExecutionPlatform, Executor, PureRule, PureRuleFrame, PureStep, Resumption,
     TokioRuntime,
 };
-use pith_ids::ContentId;
 use pith_store::MemoryContentStore;
 use tokio::sync::Barrier;
 
@@ -304,8 +303,8 @@ fn empty_execution() -> CapturedActionExecution {
 // ---------------------------------------------------------------------------
 // Fixtures
 
-fn fixture_executable() -> ContentId {
-    ContentId::of_blob(b"fixture:double")
+fn fixture_executable() -> &'static str {
+    "/bin/fixture-action"
 }
 
 fn fixture_error(message: &str) -> DiagnosticSink {
@@ -320,12 +319,9 @@ fn fixture_error(message: &str) -> DiagnosticSink {
 }
 
 fn fixture_engine() -> Engine {
-    let mut engine = Engine::with_content_store(MemoryContentStore::default());
-    match engine.put_blob(b"fixture:double") {
-        Ok(identity) => assert_eq!(identity, fixture_executable()),
-        Err(error) => unreachable!("the memory store failed to hold the executable: {error}"),
-    }
-    engine
+    // The executable is a host path (decision 0030) and the concurrency fixture
+    // action declares no inputs, so the store starts empty.
+    Engine::with_content_store(MemoryContentStore::default())
 }
 
 fn interface(inputs: &[Type], output: Type) -> Interface {

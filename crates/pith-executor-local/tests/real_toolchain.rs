@@ -36,17 +36,20 @@ const OBJECT_PATH: &str = "answer.o";
 /// business and not the engine's.
 const ELF_MAGIC: &[u8] = b"\x7fELF";
 
-/// The host C compiler: the driver's bytes, and the two search paths the driver
+/// The host C compiler: the driver's path, and the two search paths the driver
 /// needs to find the rest of itself.
 ///
 /// A compiler is not one executable. The driver `cc` execs `cc1` to compile and
 /// `as` to assemble, and it finds them through paths baked in at *its* build
-/// time, relative to where the driver itself lives. Staged into a scratch root
-/// under a different name, it finds neither. Both paths are therefore asked of
-/// the driver rather than assumed: a distribution compiler and a nix one keep
-/// them in different places, and neither is guessable.
+/// time, relative to where the driver itself lives. Both paths are therefore
+/// asked of the driver rather than assumed: a distribution compiler and a nix
+/// one keep them in different places, and neither is guessable. The driver
+/// itself is referenced by its host path (decision 0030); its bytes are not
+/// staged, because the driver opens the rest of its closure at baked-in
+/// absolute paths only it knows.
 struct HostCompiler {
-    driver: Box<[u8]>,
+    /// Absolute host path of the `cc` driver the action execves.
+    driver: Box<str>,
     /// Where the driver looks for `cc1` before it looks at `PATH`.
     program_path: Box<str>,
     /// The directory the driver came from, which is where `as` and `ld` live on
@@ -59,7 +62,7 @@ impl HostCompiler {
         let driver_path = find_in_path("cc")?;
         let cc1 = print_program_path(&driver_path, "cc1")?;
         Some(Self {
-            driver: std::fs::read(&driver_path).ok()?.into_boxed_slice(),
+            driver: driver_path.to_str()?.into(),
             program_path: directory_of(&cc1)?,
             tool_directory: directory_of(&driver_path)?,
         })
@@ -97,7 +100,7 @@ fn directory_of(path: &Path) -> Option<Box<str>> {
 /// the compiler is the executable, the source is the only input, the object is
 /// the only output, and the environment is two search paths and nothing else.
 struct CompileAction {
-    compiler: ContentId,
+    compiler: Box<str>,
     source: ContentId,
     program_path: Box<str>,
     tool_directory: Box<str>,
@@ -106,7 +109,8 @@ struct CompileAction {
 impl ActionRule for CompileAction {
     fn plan(&self, _inputs: &[Value]) -> PithResult<ActionSpec> {
         Ok(ActionSpec {
-            executable: self.compiler,
+            executable: self.compiler.clone(),
+            toolchain: Box::new([]),
             arguments: [
                 "-c".into(),
                 SOURCE_PATH.into(),
@@ -216,10 +220,9 @@ fn compile_engine(root: &Path, compiler: &HostCompiler) -> (Engine, Request<Pure
     };
     let mut engine = Engine::with_content_store(store);
 
-    let compiler_blob = match engine.put_blob(&compiler.driver) {
-        Ok(identity) => identity,
-        Err(error) => unreachable!("the store failed to hold the compiler: {error:?}"),
-    };
+    // The compiler driver is referenced by host path (decision 0030), so only
+    // the source blob is stored. The closure the driver reads is declared in
+    // the spec's `toolchain` field (filled in for the landlock increment).
     let source_blob = match engine.put_blob(SOURCE) {
         Ok(identity) => identity,
         Err(error) => unreachable!("the store failed to hold the source: {error:?}"),
@@ -233,7 +236,7 @@ fn compile_engine(root: &Path, compiler: &HostCompiler) -> (Engine, Request<Pure
             Span::none(),
         ),
         CompileAction {
-            compiler: compiler_blob,
+            compiler: compiler.driver.clone(),
             source: source_blob,
             program_path: compiler.program_path.clone(),
             tool_directory: compiler.tool_directory.clone(),

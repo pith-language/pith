@@ -324,7 +324,6 @@ impl Engine {
     }
 
     fn materialize_action(&self, spec: &ActionSpec) -> PithResult<ActionInvocation> {
-        let executable = self.materialize_content_by_id(spec.executable)?;
         let mut inputs = Vec::with_capacity(spec.inputs.len());
         for input in &spec.inputs {
             let content = match &input.content {
@@ -338,22 +337,8 @@ impl Engine {
         }
         Ok(ActionInvocation {
             spec: spec.clone(),
-            executable,
             inputs: inputs.into_boxed_slice(),
         })
-    }
-
-    fn materialize_content_by_id(&self, id: ContentId) -> PithResult<MaterializedContent> {
-        if let Some(blob) = self.store.get_blob(id).map_err(store_error_diag)? {
-            return Ok(MaterializedContent::Blob(MaterializedBlob {
-                id,
-                bytes: blob.as_bytes().to_vec().into_boxed_slice(),
-            }));
-        }
-        if self.store.get_tree(id).map_err(store_error_diag)?.is_some() {
-            return Ok(MaterializedContent::Tree(self.materialize_tree(id)?));
-        }
-        Err(content_unavailable_diag(id))
     }
 
     fn materialize_blob(&self, id: ContentId) -> PithResult<MaterializedContent> {

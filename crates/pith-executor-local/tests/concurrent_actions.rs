@@ -56,7 +56,7 @@ printf 'met:%s' "$ME" > result
 /// One participant in the rendezvous. Each gets a distinct spec — different
 /// `ME`/`PEER` — so the engine plans, materializes, and caches them separately.
 struct RendezvousAction {
-    executable: ContentId,
+    executable: &'static str,
     rendezvous: String,
     me: String,
     peer: String,
@@ -223,8 +223,9 @@ fn register_participants(
     engine: &mut Engine,
     rendezvous: &std::path::Path,
 ) -> Option<Vec<Request<Pure>>> {
-    let shell = std::fs::read("/bin/sh").ok()?;
-    let executable = engine.put_blob(&shell).ok()?;
+    if std::fs::read("/bin/sh").is_err() {
+        return None;
+    }
     let names = ["first", "second"];
     let mut requests = Vec::new();
     for (arity, name) in names.iter().enumerate() {
@@ -233,7 +234,7 @@ fn register_participants(
         engine.register_action_rule(
             rule::<Action>(&format!("act-{name}"), action_interface.clone()),
             RendezvousAction {
-                executable,
+                executable: "/bin/sh",
                 rendezvous: rendezvous.to_string_lossy().into_owned(),
                 me: (*name).to_string(),
                 peer: (*peer).to_string(),

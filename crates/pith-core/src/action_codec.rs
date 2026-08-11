@@ -30,7 +30,10 @@ impl ActionSpec {
     #[must_use]
     pub fn encode_stored(&self) -> Vec<u8> {
         let mut encoded = vec![ENCODING_VERSION];
-        encoded.extend_from_slice(self.executable.digest().as_bytes());
+        encode_str(&mut encoded, &self.executable);
+        encode_sequence(&mut encoded, &self.toolchain, |out, path| {
+            encode_str(out, path);
+        });
         encode_sequence(&mut encoded, &self.arguments, |out, argument| {
             encode_str(out, argument);
         });
@@ -69,7 +72,8 @@ impl ActionSpec {
 
 /// Decode a contract body after its version byte has been read.
 fn read_spec(reader: &mut CanonicalReader<'_>) -> Result<ActionSpec, CanonicalDecodeError> {
-    let executable = reader.read_content_id()?;
+    let executable = reader.read_text()?.into();
+    let toolchain = reader.read_sequence(|reader| reader.read_text().map(Box::<str>::from))?;
     let arguments = reader.read_sequence(|reader| reader.read_text().map(Box::<str>::from))?;
     let inputs = reader.read_sequence(|reader| {
         let path = Box::<str>::from(reader.read_text()?);
@@ -91,6 +95,7 @@ fn read_spec(reader: &mut CanonicalReader<'_>) -> Result<ActionSpec, CanonicalDe
     let network = read_network(reader)?;
     Ok(ActionSpec {
         executable,
+        toolchain,
         arguments,
         inputs,
         outputs,
@@ -162,7 +167,8 @@ mod tests {
 
     fn populated_spec() -> ActionSpec {
         ActionSpec {
-            executable: content_id(1),
+            executable: "/bin/tool".into(),
+            toolchain: ["/nix/store/gcc".into(), "/nix/store/glibc".into()].into(),
             arguments: ["--flag".into(), "".into()].into(),
             inputs: [
                 ActionInput {
@@ -214,7 +220,7 @@ mod tests {
 
     #[test]
     fn an_isolated_contract_round_trips() {
-        let spec = ActionSpec::isolated(content_id(9));
+        let spec = ActionSpec::isolated("/bin/tool");
         let decoded =
             ActionSpec::decode_stored(&spec.encode_stored()).expect("the contract decodes");
         assert_eq!(decoded, spec);
@@ -235,7 +241,7 @@ mod tests {
                 NetworkPolicy::AllowHosts(Box::new([])),
                 NetworkPolicy::AllowHosts(["a".into(), "b".into()].into()),
             ] {
-                let mut spec = ActionSpec::isolated(content_id(4));
+                let mut spec = ActionSpec::isolated("/bin/tool");
                 spec.platform = platform.clone();
                 spec.network = network.clone();
                 let decoded =
@@ -257,7 +263,7 @@ mod tests {
 
     #[test]
     fn an_unsupported_version_is_rejected() {
-        let spec = ActionSpec::isolated(content_id(5));
+        let spec = ActionSpec::isolated("/bin/tool");
         let mut encoded = spec.encode_stored();
         if let Some(version) = encoded.first_mut() {
             *version = ENCODING_VERSION.wrapping_add(1);
