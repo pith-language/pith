@@ -111,14 +111,7 @@ pub(super) fn content_id(seed: u8) -> ContentId {
 /// actions get distinct identities (decision 0030: `executable` is a host path).
 pub(super) fn host_path(seed: u8) -> &'static str {
     const PATHS: &[&str] = &[
-        "/bin/a",
-        "/bin/b",
-        "/bin/c",
-        "/bin/d",
-        "/bin/e",
-        "/bin/f",
-        "/bin/g",
-        "/bin/h",
+        "/bin/a", "/bin/b", "/bin/c", "/bin/d", "/bin/e", "/bin/f", "/bin/g", "/bin/h",
     ];
     PATHS
         .get(seed as usize)
