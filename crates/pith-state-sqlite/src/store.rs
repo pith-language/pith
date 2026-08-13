@@ -414,8 +414,7 @@ fn recover_pending(connection: &mut SqliteConnection) -> Result<(), SqliteStateE
             if status != DurableAttemptStatus::Pending {
                 return Ok(());
             }
-            let terminal_state =
-                TerminalAttemptState::Cancelled(interrupted_attempt(&computation));
+            let terminal_state = TerminalAttemptState::Cancelled(interrupted_attempt(&computation));
             {
                 let lookup = ConnectionLookup(RefCell::new(connection));
                 validate_publication(&lookup, attempt, &computation, &terminal_state)?;

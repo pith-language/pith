@@ -11,9 +11,7 @@
 use std::sync::Arc;
 
 use indexmap::IndexMap;
-use pith_core::{
-    Action, ActionComputationKey, Content, Pure, PureComputationKey, Request, RuleId,
-};
+use pith_core::{Action, ActionComputationKey, Content, Pure, PureComputationKey, Request, RuleId};
 use pith_diag::{DiagnosticSink, PithResult};
 use pith_ids::ComputationId;
 use smallvec::SmallVec;
@@ -441,8 +439,16 @@ impl Engine {
         }
         for output in &report.outputs {
             let present = match &output.content {
-                Content::Blob(id) => self.store.get_blob(*id).map_err(store_error_diag)?.is_some(),
-                Content::Tree(id) => self.store.get_tree(*id).map_err(store_error_diag)?.is_some(),
+                Content::Blob(id) => self
+                    .store
+                    .get_blob(*id)
+                    .map_err(store_error_diag)?
+                    .is_some(),
+                Content::Tree(id) => self
+                    .store
+                    .get_tree(*id)
+                    .map_err(store_error_diag)?
+                    .is_some(),
             };
             if !present {
                 return Ok(false);

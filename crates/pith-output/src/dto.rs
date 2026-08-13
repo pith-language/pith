@@ -5,11 +5,21 @@
 #[serde(tag = "value_kind", rename_all = "snake_case")]
 pub enum ValueRepr {
     Unit,
-    Bool { b: bool },
-    Int { n: i64 },
-    Text { s: Box<str> },
-    Bytes { len: u64 },
-    Blob { digest: Box<str> },
+    Bool {
+        b: bool,
+    },
+    Int {
+        n: i64,
+    },
+    Text {
+        s: Box<str>,
+    },
+    Bytes {
+        len: u64,
+    },
+    Blob {
+        digest: Box<str>,
+    },
     Nominal {
         name: Box<str>,
         representation: Box<ValueRepr>,

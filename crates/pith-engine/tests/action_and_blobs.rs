@@ -15,8 +15,7 @@ use pith_engine::{
     ActionPolicy, ActionRule, AllowAllActions, AttemptState, CapturedActionExecution,
     CapturedExecutionReport, CapturedOutput, CapturedOutputContent, ComputationKind, Engine,
     EvaluationSource, ExecutionPlatform, Executor, ExecutorIdentity, MaterializedContent, PureRule,
-    PureRuleFrame,
-    PureStep, Resumption, ReuseDecision, ReuseReason, TokioRuntime,
+    PureRuleFrame, PureStep, Resumption, ReuseDecision, ReuseReason, TokioRuntime,
 };
 use pith_ids::ContentId;
 use pith_store::{Blob, ContentStore, MemoryContentStore, StoreError, Tree};

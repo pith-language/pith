@@ -190,10 +190,18 @@ pub enum ReuseReason {
     /// carry the identity of the action rule that will be selected, so a result
     /// recorded before that rule was revised could be served after it
     /// (decision 0031).
-    EffectfulDependency { computation: ComputationId },
-    DependencyPending { computation: ComputationId },
-    DependencyNotReusable { computation: ComputationId },
-    DependencyMissing { computation: ComputationId },
+    EffectfulDependency {
+        computation: ComputationId,
+    },
+    DependencyPending {
+        computation: ComputationId,
+    },
+    DependencyNotReusable {
+        computation: ComputationId,
+    },
+    DependencyMissing {
+        computation: ComputationId,
+    },
 }
 
 /// One rule application in the in-memory graph.

@@ -13,8 +13,7 @@ mod provenance;
 pub use attempt::{
     attempt_computation, attempts_for_computation, insert_pending_attempt, load_attempt,
     load_attempts, pending_attempt_rows, publish_reusable, reusable_action_attempt_row,
-    reusable_attempt_row,
-    write_terminal_state,
+    reusable_attempt_row, write_terminal_state,
 };
 pub use computation::{find_pure_computation, intern_computation};
 
