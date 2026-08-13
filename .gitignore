@@ -15,3 +15,5 @@
 # tooling
 /.zcode
 /mutants.out
+
+/_tmp

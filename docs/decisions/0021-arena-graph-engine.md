@@ -4,7 +4,7 @@ id: decision-0021-arena-graph-engine
 title: a hand-built arena graph with explicit change propagation, not a salsa query DB
 summary: the engine is a hand-built arena graph over per-instance branded arenas with explicit dependency edges and a change-propagation pass, rather than the salsa query-DB framework
 kind: decision
-status: proposed
+status: accepted
 created: 2026-04-27
 updated: 2026-06-01
 tags:
@@ -36,7 +36,7 @@ the question is load-bearing. the kernel's central invariant (requirement K-9) i
 
 the rules-and-graph design doc already describes the engine in arena-and-edge terms: dependencies are recorded as a rule evaluates; they may depend on earlier results; requests are part of the semantic interface; the engine needs parallel requests, cancellation, persistent caching, equality-based change pruning, and invalidation queries. the design test (a new domain implementable without a core patch) and the no-first-party-privilege requirement (U-10) both assume an engine whose extension surface is ordinary typed values, not framework-specific macros.
 
-## proposed decision
+## decision
 
 ### hand-built arena graph
 
@@ -114,11 +114,15 @@ the adapter discipline (every nontrivial external crate behind a pith-owned trai
 
 the in-memory prototype interns completed pure applications by a versioned, domain-separated key over stable rule identity, cache-invalidating rule revision, the request interface, and input values (0023). rust-hosted rules supply conservative explicit revision data until their providing artifact can derive it. request labels and spans do not participate in reuse. distinct roots share completed pure dependencies.
 
-action contracts are validated before receiving a versioned, domain-separated digest over their complete canonical representation. this digest identifies the declared contract, not a reusable computation: it does not include the selected rule's completion semantics, the resolved execution platform, or policy decisions. action computations therefore remain non-reusable, and that decision propagates to pure parents.
+action contracts are validated before receiving a versioned, domain-separated digest over their complete canonical representation. that digest identifies the declared contract rather than a reusable computation, which is why it is not the action's cache key: [0031](0031-action-cache-identity.md) builds the key over the rule identity, revision, interface, request inputs, and this digest, and makes the execution facts an admission test instead. action computations are reusable on those terms. a pure computation that consumes one is not, and records `EffectfulDependency` as its own reason; closing that is the follow-up 0031 names.
 
 action computations record their canonical declared capability requirements and actual capability use as dependency edges, including uses reported by an execution that is later rejected. completed pure computations derive the canonical union of their dependency requirements, and the query interface exposes both effective requirements and direct use edges. this proves propagation and use recording through the implemented `Pure` and `Action` composition path; the other effect categories remain open.
 
-the graph records a structured reuse decision instead of a boolean, so queries can distinguish reusable pure computations from actions whose caching is disabled and parents with non-reusable dependencies. this proves exact pure reuse and the shape of a pure-computation key inside one engine instance. it does not settle durable rule-revision identity, action cache identity, persistent graph or cache storage, invalidation after changed durable inputs, or cache explanations, so the decision remains proposed.
+the graph records a structured reuse decision instead of a boolean, so queries can distinguish reusable computations from parents with non-reusable dependencies, and name which dependency was responsible.
+
+this record previously listed five things it did not settle, and stayed proposed on them: durable rule-revision identity, action cache identity, persistent graph or cache storage, invalidation after changed durable inputs, and cache explanations. all five exist. rule identity and revision are separated by 0023 and persisted; action cache identity is 0031; graph and cache storage is 0024 with the relational representation of 0025; a dependency changed by another process makes its consumer dirty across a process boundary; and `explain_invalidation` walks the recorded reuse reasons in both adapters, compared against each other by the conformance suite.
+
+the record is accepted on that basis. what it decided was to own the engine rather than delegate it to a query framework, and the engine now carries per-edge identity kinds, capability propagation, category-dependent reuse, durable hydration, and invalidation explanations — the structured per-edge data the "why not salsa" argument said would end up in side tables under a framework. the unresolved items below are refinements within that direction rather than doubts about it, which is the distinction between accepted and proposed.
 
 ## unresolved
 

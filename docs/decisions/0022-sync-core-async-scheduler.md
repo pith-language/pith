@@ -130,6 +130,6 @@ the prototype now has concrete `PureStep` variants for pure requests, blobs, act
 
 cancelling part of a run rather than all of it is not expressible. a caller stops the whole run; there is no way to say "this request is superseded, drop it and keep going," which is what an interactive host watching a changing input actually wants. the machinery is in place — the scheduler can retire a chain and drop its action — but naming the unit a caller cancels, and deciding what happens to work shared with a request that is still wanted, is open.
 
-reopening a database still marks attempts left `Pending` by a dead owner as `Failed` with `E-1214`, which predates the cancelled state and now looks like the wrong classification: an interrupted attempt was stopped, not broken, which is exactly what `Cancelled` means. changing it is a durable-state question rather than a scheduler one, and it belongs with whichever record revisits 0024's recovery path.
+the interrupted-attempt classification this section previously named as wrong is fixed. reopening a database marks attempts left `Pending` by a dead owner as `Cancelled` with `E-1214`, not `Failed`, which is the distinction this record's own cancellation work introduced: the attempt was stopped, not broken. the correction is recorded in [0024](0024-persistent-engine-state.md), whose recovery path it belongs to.
 
 whether the step machine's depth backstop (0018) is best expressed as a step count, a recursion depth, or a fuel mechanism, and how it interacts with the scheduler's right to cancel, is open.

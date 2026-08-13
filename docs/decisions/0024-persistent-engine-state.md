@@ -61,7 +61,9 @@ sqlite stores:
 
 an evaluation attempt has one of four states: `Pending`, `Complete`, `Failed`, or `Cancelled`. only `Complete` attempts can enter a reusable-result index. failures and cancellations remain provenance but are never result cache hits.
 
-creating an attempt records `Pending` before effectful execution begins. completion writes the result, final dependency set, provenance, and reusable index entry in one transaction. failure or cancellation writes its final state and available provenance in one transaction. after a crash, remaining `Pending` attempts are marked failed as interrupted work; they are not resumed implicitly.
+creating an attempt records `Pending` before effectful execution begins. completion writes the result, final dependency set, provenance, and reusable index entry in one transaction. failure or cancellation writes its final state and available provenance in one transaction. after a crash, remaining `Pending` attempts are marked cancelled as interrupted work; they are not resumed implicitly.
+
+this record originally said failed, because it was written before [0022](0022-sync-core-async-scheduler.md) introduced `Cancelled` as a terminal state distinct from `Failed`. 0022's unresolved section then named the classification as wrong and left it to whichever record revisited this recovery path. it is corrected here rather than in a new record, because the change is which of two existing states an interrupted attempt is written as, and nothing else in this decision moves. the reason it matters is the distinction 0022 drew: a failure tells a later reader the computation cannot work, and an attempt whose owner was killed says nothing about the computation at all.
 
 ## dynamic dependencies and revalidation
 
@@ -133,7 +135,7 @@ a hydrated node has no arena subgraph: a durable pure edge records a computation
 
 a sqlite adapter stores engine metadata as normalized relations (0025). one process computes a pure result and exits; a second process opens the same database, finds the recorded attempt, and hydrates the result without running the rule body, which proves durability across a process boundary rather than only across engine instances sharing memory. an incompatible recorded version moves the database aside and rebuilds it empty, and the version gate is read before any schema is applied.
 
-reopen marks every attempt still `Pending` as failed. each is written through the same validated transaction a caller-driven failure uses, with a diagnostic that names it as interrupted work, so a reader opening the database after a crash finds a consistent graph rather than one waiting on an owner that will not return.
+reopen marks every attempt still `Pending` as cancelled. each is written through the same validated transaction a caller-driven stop uses, with an `E-1214` diagnostic that names it as interrupted work, so a reader opening the database after a crash finds a consistent graph rather than one waiting on an owner that will not return.
 
 ## unresolved
 

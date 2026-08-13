@@ -92,5 +92,5 @@ milestone M-1 used decisions 0015 and 0019 as prototype hypotheses and is comple
 
 - which implementation language gives the right balance of performance, embedding, and development speed? (decision 0016 proposes rust for the kernel, with prolog and lean outside it)
 - how is the first toolchain bootstrapped without making the bootstrap chain the permanent public model?
-- can an existing Make, Cargo, npm, Nix, or Terraform project be imported as an explicit opaque boundary?
+- can an existing Make, Cargo, npm, Nix, or Terraform project be imported as an explicit opaque boundary? ([0032](../decisions/0032-action-granularity.md) settles the granularity: a foreign build system is one `Opaque` and one tool invocation is one `Action`, declared per target rather than inferred. whether the import is usable is untested, because `Opaque` exists only as a marker type)
 - what is the smallest vertical slice that tests the kernel instead of building a polished domain facade around missing semantics?
