@@ -59,6 +59,7 @@ when an accepted decision changes, a new record supersedes it. the old record st
 - [0030: a toolchain enters an action as a declared closure of host paths](0030-toolchain-closure-as-declared-input.md)
 - [0031: an action is identified by its request and admitted by its execution facts](0031-action-cache-identity.md)
 - [0032: one action is one tool invocation, and a foreign build system is one opaque boundary](0032-action-granularity.md)
+- [0033: a consumer of an action revalidates by re-planning it](0033-consumer-of-action-reuse.md)
 
 note: 0013 amends 0005 to add a fifth identity type. 0005 stands; the amendment is recorded in 0013.
 
@@ -79,5 +80,7 @@ note: 0031 completes the action half of 0023, which built a computation key for 
 note: 0021 moved from proposed to accepted once the five things its "prototype evidence" section named as unsettled all existed: durable rule-revision identity (0023), action cache identity (0031), persistent graph and cache storage (0024, 0025), invalidation after changed durable inputs, and cache explanations. its own unresolved items remain, which is what `accepted` allows — the direction is chosen, not every question closed.
 
 note: 0032 introduces no mechanism. it states the granularity at which external work enters the graph, which the glossary, the rules-and-graph design doc, requirement U-5, 0019, and 0020 each imply separately and none states. 0019 and 0020 stand unchanged; 0032 is the record a build library can be started from.
+
+note: 0033 completes the consumer half of 0031, which cached an action and kept the pure computation above it out of the index. 0031 stands; its key and its admission test are unchanged, and 0033 adds what a pure attempt has to record and re-derive before it may hold an action edge and still be reused. the first build library is what turned 0031's note into a measurement.
 
 note: 0030 amends 0028 by recording how a toolchain enters an action contract as a declared closure of host paths rather than a single executable blob. 0028 stands; the executable-as-blob model its "unresolved" section named as wrong is resolved here, and reading a nix store path's closure is recorded as the first prototype of the local content-store adapter over a Nix store that 0020 named.
