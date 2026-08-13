@@ -100,6 +100,11 @@ pub(super) fn translate_reuse_reason(
     translation: &Translation,
 ) -> DurableReuseReason {
     match reason {
+        DurableReuseReason::EffectfulDependency { attempt } => {
+            DurableReuseReason::EffectfulDependency {
+                attempt: translate(*attempt, translation),
+            }
+        }
         DurableReuseReason::DependencyPending { attempt } => {
             DurableReuseReason::DependencyPending {
                 attempt: translate(*attempt, translation),

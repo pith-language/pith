@@ -17,7 +17,8 @@ use pith_diag::Severity;
 use pith_engine::AccessVerification;
 use pith_engine::state::{DurableAttemptId, DurableAttemptStatus};
 use pith_ids::{
-    ActionSpecDigest, ContentDigest, ContentId, DIGEST_LEN, PureComputationDigest, RuleIdentity,
+    ActionComputationDigest, ActionSpecDigest, ContentDigest, ContentId, DIGEST_LEN,
+    PureComputationDigest, RuleIdentity,
 };
 
 fn digest_from_bytes(bytes: &[u8]) -> deserialize::Result<ContentDigest> {
@@ -69,6 +70,12 @@ digest_column!(
     StoredActionSpecDigest,
     ActionSpecDigest,
     ActionSpecDigest::from_digest,
+    |digest| digest.digest()
+);
+digest_column!(
+    StoredActionDigest,
+    ActionComputationDigest,
+    ActionComputationDigest::from_digest,
     |digest| digest.digest()
 );
 digest_column!(
@@ -193,6 +200,7 @@ stored_enum!(StoredProvenanceKind, ProvenanceKind, {
 pub enum ReuseKind {
     Reusable,
     ActionCachingDisabled,
+    EffectfulDependency,
     DependencyPending,
     DependencyNotReusable,
     DependencyMissing,
@@ -204,6 +212,7 @@ stored_enum!(StoredReuseKind, ReuseKind, {
     ReuseKind::DependencyPending => 2,
     ReuseKind::DependencyNotReusable => 3,
     ReuseKind::DependencyMissing => 4,
+    ReuseKind::EffectfulDependency => 5,
 });
 
 /// Attempt identifiers are allocated by sqlite as `i64` and exposed as `u64`.

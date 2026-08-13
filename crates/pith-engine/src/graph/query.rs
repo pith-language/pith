@@ -206,7 +206,8 @@ impl<'engine> EngineQuery<'engine> {
 /// The computation a live reuse reason names as the cause of non-reuse, if any.
 fn live_named_dependency(reason: &ReuseReason) -> Option<ComputationId> {
     match reason {
-        ReuseReason::DependencyPending { computation }
+        ReuseReason::EffectfulDependency { computation }
+        | ReuseReason::DependencyPending { computation }
         | ReuseReason::DependencyNotReusable { computation }
         | ReuseReason::DependencyMissing { computation } => Some(*computation),
         ReuseReason::ActionCachingDisabled => None,

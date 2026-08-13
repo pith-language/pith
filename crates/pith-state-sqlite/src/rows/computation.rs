@@ -1,11 +1,13 @@
 //! The pure key or action contract an attempt belongs to.
 
 use pith_core::{ActionSpec, PureComputationKey, RuleRevision};
+use pith_ids::ActionComputationDigest;
 use pith_engine::ActionAuthorization;
 use pith_engine::state::{DurableActionPlan, DurableComputation, DurableRule};
 
 use crate::columns::{
-    StoredActionSpecDigest, StoredPureDigest, StoredRevisionDigest, StoredRuleIdentity,
+    StoredActionDigest, StoredActionSpecDigest, StoredPureDigest, StoredRevisionDigest,
+    StoredRuleIdentity,
 };
 use crate::schema::computations;
 
@@ -22,6 +24,7 @@ struct ComputationRow {
     rule_identity: StoredRuleIdentity,
     rule_revision: StoredRevisionDigest,
     pure_digest: Option<StoredPureDigest>,
+    action_digest: Option<StoredActionDigest>,
     action_spec_digest: Option<StoredActionSpecDigest>,
     action_spec: Option<Vec<u8>>,
     authorization_denied: Option<bool>,
@@ -35,6 +38,7 @@ struct NewComputation {
     rule_identity: StoredRuleIdentity,
     rule_revision: StoredRevisionDigest,
     pure_digest: Option<StoredPureDigest>,
+    action_digest: Option<StoredActionDigest>,
     action_spec_digest: Option<StoredActionSpecDigest>,
     action_spec: Option<Vec<u8>>,
     authorization_denied: Option<bool>,
@@ -48,6 +52,7 @@ impl NewComputation {
             rule_identity: StoredRuleIdentity(key.rule_identity),
             rule_revision: StoredRevisionDigest(key.rule_revision.digest()),
             pure_digest: Some(StoredPureDigest(key.digest)),
+            action_digest: None,
             action_spec_digest: None,
             action_spec: None,
             authorization_denied: None,
@@ -56,7 +61,11 @@ impl NewComputation {
         }
     }
 
-    fn action(plan: &DurableActionPlan, authorization: &ActionAuthorization) -> Self {
+    fn action(
+        computation_digest: ActionComputationDigest,
+        plan: &DurableActionPlan,
+        authorization: &ActionAuthorization,
+    ) -> Self {
         let (denied, policy, reason) = match authorization {
             ActionAuthorization::Allowed { policy } => (false, policy.to_string(), None),
             ActionAuthorization::Denied { policy, reason } => {
@@ -67,6 +76,7 @@ impl NewComputation {
             rule_identity: StoredRuleIdentity(plan.rule().identity()),
             rule_revision: StoredRevisionDigest(plan.rule().revision().digest()),
             pure_digest: None,
+            action_digest: Some(StoredActionDigest(computation_digest)),
             action_spec_digest: Some(StoredActionSpecDigest(plan.spec_digest())),
             action_spec: Some(plan.spec().encode_stored()),
             authorization_denied: Some(denied),
@@ -88,10 +98,11 @@ pub fn intern_computation(
     match computation {
         DurableComputation::Pure(key) => intern_pure_computation(connection, *key),
         DurableComputation::Action {
+            computation_digest,
             plan,
             authorization,
         } => Ok(diesel::insert_into(computations::table)
-            .values(NewComputation::action(plan, authorization))
+            .values(NewComputation::action(*computation_digest, plan, authorization))
             .returning(computations::id)
             .get_result(connection)?),
     }
@@ -160,7 +171,8 @@ impl ComputationRow {
             }));
         }
         let revision = self.revision();
-        let (Some(stored_digest), Some(encoded), Some(denied), Some(policy)) = (
+        let (Some(action_digest), Some(stored_digest), Some(encoded), Some(denied), Some(policy)) = (
+            self.action_digest,
             self.action_spec_digest,
             self.action_spec,
             self.authorization_denied,
@@ -194,6 +206,7 @@ impl ComputationRow {
             }
         };
         Ok(DurableComputation::Action {
+            computation_digest: action_digest.0,
             plan,
             authorization,
         })

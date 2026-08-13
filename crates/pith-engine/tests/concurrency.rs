@@ -22,8 +22,8 @@ use pith_engine::state::DurableAttemptState;
 use pith_engine::{
     AccessVerification, ActionExecution, ActionInvocation, ActionRule, AllowAllActions,
     AttemptState, CapturedActionExecution, CapturedExecutionReport, ComputationKind, Engine,
-    Evaluation, ExecutionPlatform, Executor, PureRule, PureRuleFrame, PureStep, Resumption,
-    TokioRuntime,
+    Evaluation, ExecutionPlatform, Executor, ExecutorIdentity, PureRule, PureRuleFrame, PureStep,
+    Resumption, TokioRuntime,
 };
 use pith_store::MemoryContentStore;
 use tokio::sync::Barrier;
@@ -247,6 +247,10 @@ fn allow_actions(engine: &mut Engine, actions: usize) {
 
 #[async_trait::async_trait]
 impl Executor for BarrierExecutor {
+    fn identity(&self) -> ExecutorIdentity {
+        fixture_identity()
+    }
+
     async fn execute(&self, _invocation: &ActionInvocation) -> PithResult<CapturedActionExecution> {
         let live = self.live.fetch_add(1, Ordering::SeqCst).saturating_add(1);
         self.peak.fetch_max(live, Ordering::SeqCst);
@@ -269,6 +273,10 @@ struct FailOneExecutor {
 
 #[async_trait::async_trait]
 impl Executor for FailOneExecutor {
+    fn identity(&self) -> ExecutorIdentity {
+        fixture_identity()
+    }
+
     async fn execute(&self, invocation: &ActionInvocation) -> PithResult<CapturedActionExecution> {
         // The spec declares nothing else distinguishing, so the argument list
         // is what tells the two actions apart.
@@ -285,14 +293,22 @@ impl Executor for FailOneExecutor {
     }
 }
 
+fn fixture_identity() -> ExecutorIdentity {
+    ExecutorIdentity {
+        executor: "fixture".into(),
+        platform: ExecutionPlatform {
+            operating_system: "fixture".into(),
+            architecture: "fixture".into(),
+        },
+    }
+}
+
 fn empty_execution() -> CapturedActionExecution {
+    let identity = fixture_identity();
     CapturedActionExecution {
         report: CapturedExecutionReport {
-            executor: "fixture".into(),
-            platform: ExecutionPlatform {
-                operating_system: "fixture".into(),
-                architecture: "fixture".into(),
-            },
+            executor: identity.executor,
+            platform: identity.platform,
             access: AccessVerification::Prevented,
             outputs: Box::new([]),
             capabilities_used: Box::new([]),
@@ -707,6 +723,10 @@ struct CancellingExecutor {
 
 #[async_trait::async_trait]
 impl Executor for CancellingExecutor {
+    fn identity(&self) -> ExecutorIdentity {
+        fixture_identity()
+    }
+
     async fn execute(&self, _invocation: &ActionInvocation) -> PithResult<CapturedActionExecution> {
         self.cancel.store(true, Ordering::SeqCst);
         if tokio::time::timeout(BARRIER_TIMEOUT, self.barrier.wait())

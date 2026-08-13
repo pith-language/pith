@@ -1,6 +1,7 @@
 //! The attempt row itself: status, result, reuse decision, and the queries
 //! that find attempts by computation, by reusability, or by being unfinished.
 
+use pith_core::ActionComputationKey;
 use pith_engine::state::validate::TerminalAttemptState;
 use pith_engine::state::{
     CompletedAttempt, DurableAttempt, DurableAttemptId, DurableAttemptState, DurableAttemptStatus,
@@ -8,9 +9,10 @@ use pith_engine::state::{
 };
 
 use crate::columns::{
-    ReuseKind, StoredAccess, StoredAttemptId, StoredProvenanceKind, StoredReuseKind, StoredStatus,
+    ReuseKind, StoredAccess, StoredActionDigest, StoredAttemptId, StoredProvenanceKind,
+    StoredReuseKind, StoredRevisionDigest, StoredRuleIdentity, StoredStatus,
 };
-use crate::schema::{attempts, reusable_index};
+use crate::schema::{attempts, computations, reusable_index};
 
 use super::computation::{intern_pure_computation, load_computation, load_pure_key};
 use super::corrupt;
@@ -130,6 +132,11 @@ fn stored_reuse(
             None,
             None,
         ),
+        DurableReuseReason::EffectfulDependency { attempt } => (
+            Some(StoredReuseKind(ReuseKind::EffectfulDependency)),
+            Some(StoredAttemptId(*attempt)),
+            None,
+        ),
         DurableReuseReason::DependencyPending { attempt } => (
             Some(StoredReuseKind(ReuseKind::DependencyPending)),
             Some(StoredAttemptId(*attempt)),
@@ -159,6 +166,9 @@ fn load_reuse(
     let reason = match kind.0 {
         ReuseKind::Reusable => return Ok(DurableReuseDecision::Reusable),
         ReuseKind::ActionCachingDisabled => DurableReuseReason::ActionCachingDisabled,
+        ReuseKind::EffectfulDependency => DurableReuseReason::EffectfulDependency {
+            attempt: row.reuse_attempt.ok_or_else(|| missing("attempt"))?.0,
+        },
         ReuseKind::DependencyPending => DurableReuseReason::DependencyPending {
             attempt: row.reuse_attempt.ok_or_else(|| missing("attempt"))?.0,
         },
@@ -232,6 +242,35 @@ pub fn reusable_attempt_row(
                 .eq(reusable_index::attempt.nullable())),
         )
         .filter(reusable_index::computation.eq(computation))
+        .select(AttemptRow::as_select())
+        .first(connection)
+        .optional()?)
+}
+
+/// The newest reusable attempt for one action key (decision 0031).
+///
+/// An action computation row is never shared — it carries the authorization of
+/// its own attempt — so one key can have many rows, each with its own index
+/// entry. Ordering by attempt identifier picks the newest of them.
+pub fn reusable_action_attempt_row(
+    connection: &mut SqliteConnection,
+    key: ActionComputationKey,
+) -> Result<Option<AttemptRow>, Failure> {
+    Ok(reusable_index::table
+        .inner_join(
+            attempts::table.on(attempts::id
+                .nullable()
+                .eq(reusable_index::attempt.nullable())),
+        )
+        .inner_join(
+            computations::table.on(computations::id
+                .nullable()
+                .eq(reusable_index::computation.nullable())),
+        )
+        .filter(computations::rule_identity.eq(StoredRuleIdentity(key.rule_identity)))
+        .filter(computations::rule_revision.eq(StoredRevisionDigest(key.rule_revision.digest())))
+        .filter(computations::action_digest.eq(StoredActionDigest(key.digest)))
+        .order(reusable_index::attempt.desc())
         .select(AttemptRow::as_select())
         .first(connection)
         .optional()?)

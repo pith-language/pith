@@ -7,20 +7,20 @@ use std::process::Command;
 
 use diesel::Connection as _;
 use pith_core::{
-    ActionSpec, CapabilityRequirement, Content, Interface, Pure, PureComputationKey, Request, Rule,
-    RuleIdentity, RuleRevision, Type, Value,
+    ActionComputationKey, ActionSpec, CapabilityRequirement, Content, Interface, Pure,
+    PureComputationKey, Request, Rule, RuleIdentity, RuleRevision, Type, Value,
 };
 use pith_diag::{PithResult, Severity, Span, StableCode};
 use pith_engine::state::{
     CompletedAttempt, DurableActionProvenance, DurableAttemptState, DurableComputation,
     DurableDependency, DurableDiagnostic, DurableProvenance, DurableReuseDecision,
-    DurableReuseReason, DurableRule, EncodedValue, EngineStateStore, StoppedAttempt,
+    DurableRule, EncodedValue, EngineStateStore, StoppedAttempt,
 };
 use pith_engine::{
     AccessVerification, ActionAuthorization, Engine, EvaluationSource, ExecutionPlatform,
     ExecutionReport, ProducedOutput, PureRule, PureRuleFrame, PureStep, Resumption,
 };
-use pith_ids::{ContentDigest, ContentId};
+use pith_ids::{ActionComputationDigest, ContentDigest, ContentId};
 use pith_state_sqlite::SqliteEngineStateStore;
 
 fn database_url(path: &Path) -> &str {
@@ -340,7 +340,14 @@ fn an_action_attempt_round_trips_its_plan_and_provenance() {
         Ok(plan) => plan,
         Err(error) => unreachable!("the fixture contract is invalid: {error:?}"),
     };
+    let computation_digest = ActionComputationDigest::of_manifest(b"compile-request");
+    let key = ActionComputationKey {
+        rule_identity: identity,
+        rule_revision: revision,
+        digest: computation_digest,
+    };
     let computation = DurableComputation::Action {
+        computation_digest,
         plan: plan.clone(),
         authorization: ActionAuthorization::Allowed {
             policy: "allow-all-actions".into(),
@@ -373,7 +380,7 @@ fn an_action_attempt_round_trips_its_plan_and_provenance() {
                 capabilities_used: [capability].into(),
             },
         }),
-        reuse: DurableReuseDecision::NotReusable(DurableReuseReason::ActionCachingDisabled),
+        reuse: DurableReuseDecision::Reusable,
     };
     if let Err(error) = state.publish_complete(attempt, completion.clone()) {
         unreachable!("could not publish the action attempt: {error}");
@@ -390,8 +397,12 @@ fn an_action_attempt_round_trips_its_plan_and_provenance() {
         DurableAttemptState::Complete(completion),
         "an action attempt did not survive its round trip through sqlite"
     );
-    // An action is never reusable, so it never enters the reusable index.
-    assert!(state.pending_attempts().is_ok());
+    // A reusable action is findable under its own key (decision 0031).
+    match state.latest_completed_reusable_action_attempt(key) {
+        Ok(Some(found)) => assert_eq!(found.id, attempt),
+        Ok(None) => unreachable!("the reusable action index did not answer for its own key"),
+        Err(error) => unreachable!("the reusable action index is unreadable: {error}"),
+    }
 }
 
 #[test]

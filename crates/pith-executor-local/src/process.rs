@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use pith_core::{NetworkPolicy, PlatformRequirement};
 use pith_engine::{
     AccessVerification, ActionInvocation, CapturedActionExecution, CapturedExecutionReport,
-    ExecutionPlatform, Executor,
+    ExecutionPlatform, Executor, ExecutorIdentity,
 };
 use tokio::process::Command;
 
@@ -20,6 +20,20 @@ use crate::capture::capture;
 use crate::stage;
 use crate::sys_landlock::landlock_installed;
 use crate::sys_seccomp::{register_sandbox_hook, seccomp_filter_installed};
+
+/// The name this executor stamps on every report, and answers the engine with
+/// when asked who is about to run (decision 0031).
+const EXECUTOR_NAME: &str = "pith-executor-local";
+
+/// Who this executor is and where it runs. The engine is answered from this
+/// before execution and the report is built from it after, so the two cannot
+/// disagree about which executor produced a result.
+fn executor_identity() -> ExecutorIdentity {
+    ExecutorIdentity {
+        executor: EXECUTOR_NAME.into(),
+        platform: LocalExecutor::platform(),
+    }
+}
 
 /// Configuration for the local executor.
 #[derive(Clone, Debug)]
@@ -79,6 +93,10 @@ impl Default for LocalExecutor {
 
 #[async_trait]
 impl Executor for LocalExecutor {
+    fn identity(&self) -> ExecutorIdentity {
+        executor_identity()
+    }
+
     async fn execute(
         &self,
         invocation: &ActionInvocation,
@@ -255,10 +273,11 @@ async fn run_in_scratch(
 
     let captured_outputs = capture(&staged.working_dir, &declared_outputs).await?;
 
+    let identity = executor_identity();
     Ok(CapturedActionExecution {
         report: CapturedExecutionReport {
-            executor: "pith-executor-local".into(),
-            platform: LocalExecutor::platform(),
+            executor: identity.executor,
+            platform: identity.platform,
             access: LocalExecutor::access_verification(),
             outputs: captured_outputs.into_boxed_slice(),
             // The executor enforced whatever capabilities the spec declared via

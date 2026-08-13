@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use diesel::connection::SimpleConnection;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
-use pith_core::PureComputationKey;
+use pith_core::{ActionComputationKey, PureComputationKey};
 use pith_diag::{Diag, EngineCode, Span};
 use pith_engine::state::validate::{AttemptLookup, TerminalAttemptState, validate_publication};
 use pith_engine::state::{
@@ -18,7 +18,7 @@ use pith_engine::state::{
 use crate::rows::{
     Failure, attempt_computation, attempts_for_computation, find_pure_computation,
     insert_pending_attempt, intern_computation, load_attempt, load_attempts, pending_attempt_rows,
-    publish_reusable, reusable_attempt_row, write_terminal_state,
+    publish_reusable, reusable_action_attempt_row, reusable_attempt_row, write_terminal_state,
 };
 use crate::schema::{CREATE_SCHEMA, CURRENT_VERSIONS, engine_state_versions};
 
@@ -209,7 +209,7 @@ impl SqliteEngineStateStore {
                     let lookup = ConnectionLookup(RefCell::new(connection));
                     validate_publication(&lookup, attempt, &computation, &terminal_state)?;
                 }
-                let reusable = terminal_state.reusable_computation(&computation).is_some();
+                let reusable = terminal_state.is_reusable();
                 write_terminal_state(connection, attempt, &terminal_state)?;
                 if reusable {
                     publish_reusable(connection, computation_id, attempt)?;
@@ -544,6 +544,18 @@ impl EngineStateStore for SqliteEngineStateStore {
                 return Ok(None);
             };
             let Some(row) = reusable_attempt_row(connection, computation)? else {
+                return Ok(None);
+            };
+            Ok(first(load_attempts(connection, vec![row])?))
+        })
+    }
+
+    fn latest_completed_reusable_action_attempt(
+        &self,
+        computation: ActionComputationKey,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        self.read(|connection| {
+            let Some(row) = reusable_action_attempt_row(connection, computation)? else {
                 return Ok(None);
             };
             Ok(first(load_attempts(connection, vec![row])?))

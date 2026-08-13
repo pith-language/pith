@@ -16,11 +16,12 @@ use smallvec::SmallVec;
 use super::Engine;
 use super::ir::{
     ActionPlan, ActionRecord, AttemptState, ComputationKind, ComputationNode, DependencyEdge,
-    ReuseDecision, ReuseReason, StopReason,
+    Evaluation, ReuseDecision, ReuseReason, StopReason,
 };
 use crate::action::{
     ActionExecution, ActionInvocation, CapturedFileContent, CapturedOutputContent,
-    CapturedTreeEntryContent, ExecutionReport, MaterializedActionInput, MaterializedBlob,
+    CapturedTreeEntryContent, ExecutionReport, ExecutorIdentity, MaterializedActionInput,
+    MaterializedBlob,
     MaterializedContent, MaterializedFileContent, MaterializedTree, MaterializedTreeEntryContent,
     ProducedOutput,
 };
@@ -58,6 +59,10 @@ pub(super) enum ActionStart {
     },
     /// Ready to hand to an executor.
     Ready(Box<PreparedAction>),
+    /// A completed attempt for this exact rule application was found and
+    /// admitted, so no executor runs (decision 0031). The caller records the
+    /// dependency edge and resumes its chain with the recorded result.
+    Reused(Evaluation),
 }
 
 /// An action that has a computation node, a durable attempt, and materialized
@@ -95,6 +100,7 @@ impl Engine {
         &mut self,
         request: &Request<Action>,
         policy: &P,
+        environment: &ExecutorIdentity,
     ) -> ActionStart {
         let plan = match self.plan_action(request) {
             Ok(plan) => plan,
@@ -123,12 +129,27 @@ impl Engine {
             label: action_rule.label.clone(),
         };
 
+        let key = match self.action_computation_key(rule, request, plan.spec_digest) {
+            Ok(key) => key,
+            Err(diagnostics) => return ActionStart::PlanningFailed(diagnostics),
+        };
+        // A denied action must not be answered from a run that was allowed.
+        if denial.is_none() {
+            match self.reusable_action_evaluation(key, request, &plan, &authorization, environment)
+            {
+                Ok(Some(evaluation)) => return ActionStart::Reused(evaluation),
+                Ok(None) => {}
+                Err(diagnostics) => return ActionStart::PlanningFailed(diagnostics),
+            }
+        }
+
         let computation = self.computations.push(ComputationNode {
             kind: ComputationKind::Action(request.clone()),
             rule,
             dependencies: SmallVec::new(),
             state: AttemptState::Pending,
             action: Some(ActionRecord {
+                key,
                 spec_digest: plan.spec_digest,
                 spec: plan.spec.clone(),
                 authorization: authorization.clone(),
@@ -146,6 +167,7 @@ impl Engine {
             }
         };
         let durable_computation = crate::state::DurableComputation::Action {
+            computation_digest: key.digest,
             plan: durable_plan,
             authorization,
         };
@@ -234,18 +256,37 @@ impl Engine {
             return Err(self.fail_action(computation, diagnostics));
         }
 
+        let reuse = if self.action_caching() {
+            let dependencies = self.action_dependencies(computation);
+            self.reuse_decision(&dependencies)
+        } else {
+            ReuseDecision::NotReusable(ReuseReason::ActionCachingDisabled)
+        };
         let Some(node) = self.computations.get_mut(computation) else {
             return Err(internal_diag(InternalInvariant::ActionLostComputationNode));
         };
         node.state = AttemptState::Complete {
             result: value.clone(),
-            reuse: ReuseDecision::NotReusable(ReuseReason::ActionCachingDisabled),
+            reuse: reuse.clone(),
         };
+        let key = node.action.as_ref().map(|action| action.key);
+        // A `Pending` node answers no request, and an attempt the engine
+        // refused to index must not be findable in the arena either.
+        if let (Some(key), ReuseDecision::Reusable) = (key, &reuse) {
+            self.index_action_computation(key, computation);
+        }
         // Scheduling boundary: publish the durable action completion. The
         // arena node is terminal, so the publish reads its final state.
         self.publish_action_completion(computation)?;
 
         Ok(value)
+    }
+
+    fn action_dependencies(&self, computation: ComputationId) -> Box<[DependencyEdge]> {
+        self.computations
+            .get(computation)
+            .map(|node| node.dependencies.to_vec().into_boxed_slice())
+            .unwrap_or_default()
     }
 
     /// Give up on an action that was still running when its run ended. Its

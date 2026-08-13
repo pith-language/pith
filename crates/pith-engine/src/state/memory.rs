@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use indexmap::{IndexMap, IndexSet};
-use pith_core::PureComputationKey;
+use pith_core::{ActionComputationKey, PureComputationKey};
 
 use super::validate::{AttemptLookup, TerminalAttemptState, validate_publication};
 use super::{
@@ -22,6 +22,7 @@ struct Records {
     attempts: IndexMap<DurableAttemptId, Arc<DurableAttempt>>,
     pure_history: IndexMap<PureComputationKey, Vec<DurableAttemptId>>,
     latest_reusable: IndexMap<PureComputationKey, DurableAttemptId>,
+    latest_reusable_action: IndexMap<ActionComputationKey, DurableAttemptId>,
     pending: IndexSet<DurableAttemptId>,
 }
 
@@ -68,7 +69,7 @@ impl MemoryEngineStateStore {
         }
         let computation = pending_attempt.computation.clone();
         validate_publication(&*records, attempt, &computation, &terminal_state)?;
-        let reusable_computation = terminal_state.reusable_computation(&computation);
+        let reusable = terminal_state.is_reusable().then(|| computation.clone());
         let terminal_attempt = Arc::new(DurableAttempt {
             id: attempt,
             computation,
@@ -77,14 +78,40 @@ impl MemoryEngineStateStore {
 
         let _ = records.attempts.insert(attempt, terminal_attempt);
         let _ = records.pending.shift_remove(&attempt);
-        if let Some(computation) = reusable_computation {
-            records.latest_reusable.insert(computation, attempt);
+        match reusable {
+            Some(DurableComputation::Pure(key)) => {
+                records.latest_reusable.insert(key, attempt);
+            }
+            Some(computation @ DurableComputation::Action { .. }) => {
+                if let Some(key) = computation.action_key() {
+                    records.latest_reusable_action.insert(key, attempt);
+                }
+            }
+            None => {}
         }
         Ok(())
     }
 }
 
 impl Records {
+    /// Resolve an entry the reusable index produced. The index only ever names
+    /// attempts this store published, so a missing record is an adapter fault
+    /// and not an empty answer.
+    fn indexed_attempt(
+        &self,
+        attempt: Option<DurableAttemptId>,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        let Some(attempt) = attempt else {
+            return Ok(None);
+        };
+        match self.attempts.get(&attempt) {
+            Some(record) => Ok(Some(record.clone())),
+            None => Err(EngineStateError::Adapter {
+                message: format!("reusable index references missing attempt {attempt}").into(),
+            }),
+        }
+    }
+
     fn attempts_by_id(
         &self,
         identifiers: impl IntoIterator<Item = DurableAttemptId>,
@@ -192,15 +219,17 @@ impl EngineStateStore for MemoryEngineStateStore {
         computation: PureComputationKey,
     ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
         let records = self.locked()?;
-        let Some(attempt) = records.latest_reusable.get(&computation) else {
-            return Ok(None);
-        };
-        let Some(record) = records.attempts.get(attempt) else {
-            return Err(EngineStateError::Adapter {
-                message: format!("reusable index references missing attempt {attempt}").into(),
-            });
-        };
-        Ok(Some(record.clone()))
+        let indexed = records.latest_reusable.get(&computation).copied();
+        records.indexed_attempt(indexed)
+    }
+
+    fn latest_completed_reusable_action_attempt(
+        &self,
+        computation: ActionComputationKey,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        let records = self.locked()?;
+        let indexed = records.latest_reusable_action.get(&computation).copied();
+        records.indexed_attempt(indexed)
     }
 
     fn explain_invalidation(
@@ -208,18 +237,8 @@ impl EngineStateStore for MemoryEngineStateStore {
         computation: PureComputationKey,
     ) -> Result<Option<InvalidationExplanation>, EngineStateError> {
         let records = self.locked()?;
-        let latest = match records.latest_reusable.get(&computation) {
-            Some(attempt) => match records.attempts.get(attempt) {
-                Some(record) => Some(record.clone()),
-                None => {
-                    return Err(EngineStateError::Adapter {
-                        message: format!("reusable index references missing attempt {attempt}")
-                            .into(),
-                    });
-                }
-            },
-            None => None,
-        };
+        let indexed = records.latest_reusable.get(&computation).copied();
+        let latest = records.indexed_attempt(indexed)?;
         super::explain::explain_latest(&*records, latest)
     }
 

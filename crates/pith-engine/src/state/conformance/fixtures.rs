@@ -4,7 +4,9 @@ use pith_core::{
     ActionSpec, CapabilityRequirement, Content, PureComputationKey, RuleIdentity, RuleRevision,
 };
 use pith_diag::{Severity, Span, StableCode};
-use pith_ids::{ContentDigest, ContentId, DIGEST_LEN, PureComputationDigest};
+use pith_ids::{
+    ActionComputationDigest, ContentDigest, ContentId, DIGEST_LEN, PureComputationDigest,
+};
 
 use crate::AccessVerification;
 use crate::action::{ExecutionPlatform, ExecutionReport, ProducedOutput};
@@ -53,11 +55,14 @@ pub(super) fn action_computation(
         RuleIdentity::of_module_declaration("pith-conformance", &format!("action-{rule}"));
     let mut spec = ActionSpec::isolated(host_path(executable));
     spec.capabilities = capabilities.iter().copied().map(capability).collect();
-    let plan = DurableActionPlan::new(
-        DurableRule::new(RuleRevision::of_manifest(identity, &[rule])),
-        spec,
-    )
-    .ok()?;
+    let revision = RuleRevision::of_manifest(identity, &[rule]);
+    let plan = DurableActionPlan::new(DurableRule::new(revision), spec).ok()?;
+    // Stands in for a digest derived from a request and a planned contract.
+    // Distinct generated actions need distinct digests; nothing else here
+    // depends on how one is built.
+    let mut key_manifest = vec![rule, executable];
+    key_manifest.extend_from_slice(capabilities);
+    let computation_digest = ActionComputationDigest::of_manifest(&key_manifest);
     let authorization = if denied {
         ActionAuthorization::Denied {
             policy: "conformance".into(),
@@ -69,6 +74,7 @@ pub(super) fn action_computation(
         }
     };
     Some(DurableComputation::Action {
+        computation_digest,
         plan,
         authorization,
     })

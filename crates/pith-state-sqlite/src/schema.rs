@@ -40,6 +40,7 @@ pub const CREATE_SCHEMA: &str = "
         rule_identity blob not null,
         rule_revision blob not null,
         pure_digest blob,
+        action_digest blob,
         action_spec_digest blob,
         action_spec blob,
         authorization_denied integer,
@@ -50,6 +51,13 @@ pub const CREATE_SCHEMA: &str = "
     create unique index if not exists computations_pure_key
         on computations (rule_identity, rule_revision, pure_digest)
         where pure_digest is not null;
+
+    -- Not unique: an action computation row carries the authorization decision
+    -- of its own attempt, so one action key has a row per attempt. Reading the
+    -- reusable index needs all of them (decision 0031).
+    create index if not exists computations_action_key
+        on computations (rule_identity, rule_revision, action_digest)
+        where action_digest is not null;
 
     create table if not exists attempts (
         id integer primary key autoincrement,
@@ -144,6 +152,7 @@ diesel::table! {
         rule_identity -> Binary,
         rule_revision -> Binary,
         pure_digest -> Nullable<Binary>,
+        action_digest -> Nullable<Binary>,
         action_spec_digest -> Nullable<Binary>,
         action_spec -> Nullable<Binary>,
         authorization_denied -> Nullable<Bool>,

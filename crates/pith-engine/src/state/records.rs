@@ -4,10 +4,11 @@
 //! handles never cross this boundary.
 
 use pith_core::{
-    ActionSpec, CanonicalDecodeError, CapabilityRequirement, OutputKind, PureComputationKey, Value,
+    ActionComputationKey, ActionSpec, CanonicalDecodeError, CapabilityRequirement, OutputKind,
+    PureComputationKey, Value,
 };
 use pith_diag::{Diag, Severity, Span, StableCode};
-use pith_ids::{ActionSpecDigest, ContentId, RuleIdentity, RuleRevision};
+use pith_ids::{ActionComputationDigest, ActionSpecDigest, ContentId, RuleIdentity, RuleRevision};
 
 use crate::{
     AccessVerification, ActionAuthorization, CapturedExecutionReport, ExecutionPlatform,
@@ -169,6 +170,10 @@ impl std::fmt::Display for DurableAttemptId {
 pub enum DurableComputation {
     Pure(PureComputationKey),
     Action {
+        /// The digest half of the reusable-index key (decision 0031). The rule
+        /// identity and revision the key also carries belong to the plan, and
+        /// [`Self::action_key`] rebuilds the whole key from both halves.
+        computation_digest: ActionComputationDigest,
         plan: DurableActionPlan,
         authorization: ActionAuthorization,
     },
@@ -179,6 +184,23 @@ impl DurableComputation {
         match self {
             Self::Pure(key) => Some(*key),
             Self::Action { .. } => None,
+        }
+    }
+
+    /// The key the reusable action index is read and written under. Rebuilt
+    /// from the plan's rule and the stored digest rather than stored whole.
+    pub fn action_key(&self) -> Option<ActionComputationKey> {
+        match self {
+            Self::Action {
+                computation_digest,
+                plan,
+                ..
+            } => Some(ActionComputationKey {
+                rule_identity: plan.rule().identity(),
+                rule_revision: plan.rule().revision(),
+                digest: *computation_digest,
+            }),
+            Self::Pure(_) => None,
         }
     }
 }
@@ -310,7 +332,13 @@ pub enum DurableReuseDecision {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DurableReuseReason {
+    /// The engine that published this attempt had action caching switched off
+    /// (decision 0031).
     ActionCachingDisabled,
+    /// A pure attempt that depends on an action. A pure key does not carry the
+    /// action rule's identity, so decision 0031 keeps the consumer out of the
+    /// reusable index even when the action itself is in it.
+    EffectfulDependency { attempt: DurableAttemptId },
     DependencyPending { attempt: DurableAttemptId },
     DependencyNotReusable { attempt: DurableAttemptId },
     DependencyMissing { computation: PureComputationKey },

@@ -114,7 +114,8 @@ fn explain_node(
 /// The attempt id a reuse reason names as the cause of non-reuse, if any.
 fn named_dependency(reason: &DurableReuseReason) -> Option<DurableAttemptId> {
     match reason {
-        DurableReuseReason::DependencyPending { attempt }
+        DurableReuseReason::EffectfulDependency { attempt }
+        | DurableReuseReason::DependencyPending { attempt }
         | DurableReuseReason::DependencyNotReusable { attempt } => Some(*attempt),
         DurableReuseReason::ActionCachingDisabled
         | DurableReuseReason::DependencyMissing { .. } => None,

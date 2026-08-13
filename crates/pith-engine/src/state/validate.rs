@@ -60,23 +60,19 @@ impl TerminalAttemptState {
         }
     }
 
-    /// The computation key to index as reusable, if this publication earns a
-    /// place in the reusable index: a pure attempt completing as `Reusable`.
+    /// Whether this publication earns a place in the reusable index: a
+    /// completed attempt whose recorded decision is `Reusable`. Which index it
+    /// lands in follows from the computation, since decision 0031 gives action
+    /// applications an index of their own.
     #[must_use]
-    pub fn reusable_computation(
-        &self,
-        computation: &DurableComputation,
-    ) -> Option<pith_core::PureComputationKey> {
-        match (computation, self) {
-            (
-                DurableComputation::Pure(key),
-                Self::Complete(CompletedAttempt {
-                    reuse: DurableReuseDecision::Reusable,
-                    ..
-                }),
-            ) => Some(*key),
-            _ => None,
-        }
+    pub const fn is_reusable(&self) -> bool {
+        matches!(
+            self,
+            Self::Complete(CompletedAttempt {
+                reuse: DurableReuseDecision::Reusable,
+                ..
+            })
+        )
     }
 }
 
@@ -109,8 +105,14 @@ pub fn validate_publication(
     validate_action_lifecycle(attempt, computation, terminal_state)?;
 
     let mut first_non_reusable_dependency = None;
+    let mut first_action_dependency = None;
     for dependency in terminal_state.dependencies() {
         let dependency_record = validate_dependency(lookup, attempt, terminal_state, dependency)?;
+        if first_action_dependency.is_none()
+            && let DurableDependency::Action { attempt } = dependency
+        {
+            first_action_dependency = Some(*attempt);
+        }
         if first_non_reusable_dependency.is_none()
             && let Some(dependency_record) = dependency_record
             && !matches!(
@@ -134,6 +136,7 @@ pub fn validate_publication(
         computation,
         terminal_state,
         first_non_reusable_dependency,
+        first_action_dependency,
     )?;
     Ok(())
 }
@@ -291,24 +294,40 @@ fn validate_reuse_decision(
     computation: &DurableComputation,
     terminal_state: &TerminalAttemptState,
     first_non_reusable_dependency: Option<DurableAttemptId>,
+    first_action_dependency: Option<DurableAttemptId>,
 ) -> Result<(), EngineStateError> {
     let TerminalAttemptState::Complete(completion) = terminal_state else {
         return Ok(());
     };
-    let expected = match computation {
-        DurableComputation::Pure(_) => match first_non_reusable_dependency {
-            Some(attempt) => ExpectedReuseDecision::DependencyNotReusable { attempt },
-            None => ExpectedReuseDecision::Reusable,
-        },
-        DurableComputation::Action { .. } => ExpectedReuseDecision::ActionCachingDisabled,
+    // Refusing to index a result is always sound, so an action attempt may
+    // record `ActionCachingDisabled` whatever its dependencies say. The reason
+    // describes the engine that published it, and is meaningless on a pure
+    // attempt. Claiming reuse the dependencies do not support stays rejected.
+    if matches!(
+        (computation, &completion.reuse),
+        (
+            DurableComputation::Action { .. },
+            DurableReuseDecision::NotReusable(DurableReuseReason::ActionCachingDisabled)
+        )
+    ) {
+        return Ok(());
+    }
+    // A non-reusable dependency is reported ahead of a merely effectful one,
+    // since both stop reuse and the first is the more specific answer.
+    let expected = match (first_non_reusable_dependency, first_action_dependency) {
+        (Some(attempt), _) => ExpectedReuseDecision::DependencyNotReusable { attempt },
+        (None, Some(attempt)) => ExpectedReuseDecision::EffectfulDependency { attempt },
+        (None, None) => ExpectedReuseDecision::Reusable,
     };
     let matches_expected = match (&completion.reuse, expected) {
-        (DurableReuseDecision::Reusable, ExpectedReuseDecision::Reusable)
-        | (
-            DurableReuseDecision::NotReusable(DurableReuseReason::ActionCachingDisabled),
-            ExpectedReuseDecision::ActionCachingDisabled,
-        ) => true,
+        (DurableReuseDecision::Reusable, ExpectedReuseDecision::Reusable) => true,
         (
+            DurableReuseDecision::NotReusable(DurableReuseReason::EffectfulDependency {
+                attempt: actual,
+            }),
+            ExpectedReuseDecision::EffectfulDependency { attempt: expected },
+        )
+        | (
             DurableReuseDecision::NotReusable(DurableReuseReason::DependencyNotReusable {
                 attempt: actual,
             }),

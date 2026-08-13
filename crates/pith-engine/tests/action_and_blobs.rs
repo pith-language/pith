@@ -14,7 +14,8 @@ use pith_engine::{
     AccessVerification, ActionAuthorization, ActionExecution, ActionInvocation, ActionPlan,
     ActionPolicy, ActionRule, AllowAllActions, AttemptState, CapturedActionExecution,
     CapturedExecutionReport, CapturedOutput, CapturedOutputContent, ComputationKind, Engine,
-    EvaluationSource, ExecutionPlatform, Executor, MaterializedContent, PureRule, PureRuleFrame,
+    EvaluationSource, ExecutionPlatform, Executor, ExecutorIdentity, MaterializedContent, PureRule,
+    PureRuleFrame,
     PureStep, Resumption, ReuseDecision, ReuseReason, TokioRuntime,
 };
 use pith_ids::ContentId;
@@ -175,8 +176,19 @@ impl ActionRule for FailingCompletionAction {
 
 struct FixtureExecutor;
 
+fn fixture_identity() -> ExecutorIdentity {
+    ExecutorIdentity {
+        executor: "fixture".into(),
+        platform: fixture_platform(),
+    }
+}
+
 #[async_trait::async_trait]
 impl Executor for FixtureExecutor {
+    fn identity(&self) -> ExecutorIdentity {
+        fixture_identity()
+    }
+
     async fn execute(&self, invocation: &ActionInvocation) -> PithResult<CapturedActionExecution> {
         let spec = &invocation.spec;
         let content = if spec.executable.as_ref() == double_executable() {
@@ -212,10 +224,11 @@ impl Executor for FixtureExecutor {
         let Some(output) = spec.outputs.first() else {
             return Err(fixture_error("fixture action requires one declared output"));
         };
+        let identity = self.identity();
         Ok(CapturedActionExecution {
             report: CapturedExecutionReport {
-                executor: "fixture".into(),
-                platform: fixture_platform(),
+                executor: identity.executor,
+                platform: identity.platform,
                 access: AccessVerification::Prevented,
                 outputs: [CapturedOutput {
                     path: output.path.clone(),
@@ -252,6 +265,10 @@ impl ActionPolicy for DenyDoubleCapability {
 
 #[async_trait::async_trait]
 impl Executor for UndeclaredCapabilityExecutor {
+    fn identity(&self) -> ExecutorIdentity {
+        fixture_identity()
+    }
+
     async fn execute(&self, _invocation: &ActionInvocation) -> PithResult<CapturedActionExecution> {
         Ok(CapturedActionExecution {
             report: CapturedExecutionReport {
@@ -271,6 +288,10 @@ impl Executor for UndeclaredCapabilityExecutor {
 
 #[async_trait::async_trait]
 impl Executor for ObservedCapabilityExecutor {
+    fn identity(&self) -> ExecutorIdentity {
+        fixture_identity()
+    }
+
     async fn execute(&self, invocation: &ActionInvocation) -> PithResult<CapturedActionExecution> {
         let mut execution = FixtureExecutor.execute(invocation).await?;
         execution.report.access = AccessVerification::Observed;
@@ -281,6 +302,12 @@ impl Executor for ObservedCapabilityExecutor {
 
 #[async_trait::async_trait]
 impl Executor for WrongPlatformExecutor {
+    fn identity(&self) -> ExecutorIdentity {
+        let mut identity = fixture_identity();
+        identity.platform.operating_system = "other".into();
+        identity
+    }
+
     async fn execute(&self, invocation: &ActionInvocation) -> PithResult<CapturedActionExecution> {
         let mut execution = FixtureExecutor.execute(invocation).await?;
         execution.report.platform.operating_system = "other".into();
@@ -326,6 +353,10 @@ impl ContentStore for RejectOutputImportsStore {
 
 #[async_trait::async_trait]
 impl Executor for UnverifiedCountingExecutor {
+    fn identity(&self) -> ExecutorIdentity {
+        fixture_identity()
+    }
+
     async fn execute(&self, invocation: &ActionInvocation) -> PithResult<CapturedActionExecution> {
         self.executions.fetch_add(1, Ordering::Relaxed);
         let mut execution = FixtureExecutor.execute(invocation).await?;
@@ -336,6 +367,10 @@ impl Executor for UnverifiedCountingExecutor {
 
 #[async_trait::async_trait]
 impl Executor for CountingExecutor {
+    fn identity(&self) -> ExecutorIdentity {
+        fixture_identity()
+    }
+
     async fn execute(&self, invocation: &ActionInvocation) -> PithResult<CapturedActionExecution> {
         self.executions.fetch_add(1, Ordering::Relaxed);
         FixtureExecutor.execute(invocation).await
@@ -344,6 +379,10 @@ impl Executor for CountingExecutor {
 
 #[async_trait::async_trait]
 impl Executor for NeverExecutor {
+    fn identity(&self) -> ExecutorIdentity {
+        fixture_identity()
+    }
+
     async fn execute(&self, _invocation: &ActionInvocation) -> PithResult<CapturedActionExecution> {
         self.executions.fetch_add(1, Ordering::Relaxed);
         Err(fixture_error("executor should not be called"))
@@ -352,6 +391,10 @@ impl Executor for NeverExecutor {
 
 #[async_trait::async_trait]
 impl Executor for FailingExecutor {
+    fn identity(&self) -> ExecutorIdentity {
+        fixture_identity()
+    }
+
     async fn execute(&self, _invocation: &ActionInvocation) -> PithResult<CapturedActionExecution> {
         Err(fixture_error("executor failed"))
     }
@@ -1210,7 +1253,7 @@ fn executor_must_report_the_planned_platform() {
 }
 
 #[test]
-fn action_dependencies_are_not_reused_without_a_cache_identity() {
+fn an_identical_action_is_served_from_the_reusable_index() {
     let mut engine = fixture_engine();
     let action_interface = interface(&[Type::Int], Type::Blob);
     let root_interface = interface(&[], Type::Blob);
@@ -1240,17 +1283,21 @@ fn action_dependencies_are_not_reused_without_a_cache_identity() {
     let second_evaluation_result = second_runtime_result.unwrap();
     let second = second_evaluation_result.unwrap();
 
+    // The consumer runs again: a pure key does not carry the action rule's
+    // identity, so decision 0031 keeps it out of the index. It plans the same
+    // contract, and the action is served.
     assert_eq!(first.source, EvaluationSource::Computed);
     assert_eq!(second.source, EvaluationSource::Computed);
     assert_ne!(first.computation, second.computation);
-    assert_eq!(executions.load(Ordering::Relaxed), 2);
+    assert_eq!(first.value, second.value);
+    assert_eq!(executions.load(Ordering::Relaxed), 1);
 
-    let action_computation = engine
-        .query()
-        .dependencies_of(first.computation)
-        .and_then(|dependencies| dependencies.first())
-        .and_then(pith_engine::DependencyEdge::computation_id)
-        .unwrap();
+    let action_computation = action_dependency_of(&engine, first.computation);
+    assert_eq!(
+        action_dependency_of(&engine, second.computation),
+        action_computation,
+        "the second run depends on the action attempt the first one recorded"
+    );
     let action_state = &engine
         .query()
         .computation(action_computation)
@@ -1259,14 +1306,14 @@ fn action_dependencies_are_not_reused_without_a_cache_identity() {
     assert!(matches!(
         action_state,
         AttemptState::Complete {
-            reuse: ReuseDecision::NotReusable(ReuseReason::ActionCachingDisabled),
+            reuse: ReuseDecision::Reusable,
             ..
         }
     ));
     assert!(matches!(
         &engine.query().computation(first.computation).unwrap().state,
         AttemptState::Complete {
-            reuse: ReuseDecision::NotReusable(ReuseReason::DependencyNotReusable {
+            reuse: ReuseDecision::NotReusable(ReuseReason::EffectfulDependency {
                 computation,
             }),
             ..
@@ -1275,7 +1322,66 @@ fn action_dependencies_are_not_reused_without_a_cache_identity() {
 }
 
 #[test]
-fn distinct_parents_do_not_share_action_results() {
+fn an_engine_with_caching_off_executes_every_action() {
+    let mut engine = fixture_engine();
+    engine.set_action_caching(false);
+    let action_interface = interface(&[Type::Int], Type::Blob);
+    let root_interface = interface(&[], Type::Blob);
+    engine.register_action_rule(
+        action_rule("double", action_interface.clone()),
+        DoubleAction,
+    );
+    engine.register_rule(
+        pure_rule("entry", root_interface.clone()),
+        ActionDepRule {
+            dependency: action_request("double", action_interface, [Value::Int(21)]),
+        },
+    );
+    let executions = Arc::new(AtomicUsize::new(0));
+    let executor = CountingExecutor {
+        executions: executions.clone(),
+    };
+    let root_request = pure_request("entry", root_interface, []);
+
+    let first = engine
+        .run(&root_request, &runtime(), &AllowAllActions, &executor)
+        .unwrap()
+        .unwrap();
+    engine
+        .run(&root_request, &runtime(), &AllowAllActions, &executor)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(executions.load(Ordering::Relaxed), 2);
+    let action_computation = action_dependency_of(&engine, first.computation);
+    assert!(matches!(
+        &engine
+            .query()
+            .computation(action_computation)
+            .unwrap()
+            .state,
+        AttemptState::Complete {
+            reuse: ReuseDecision::NotReusable(ReuseReason::ActionCachingDisabled),
+            ..
+        }
+    ));
+}
+
+/// The computation the first action edge of `parent` points at.
+fn action_dependency_of(
+    engine: &Engine,
+    parent: pith_ids::ComputationId,
+) -> pith_ids::ComputationId {
+    engine
+        .query()
+        .dependencies_of(parent)
+        .and_then(|dependencies| dependencies.first())
+        .and_then(pith_engine::DependencyEdge::computation_id)
+        .unwrap_or_else(|| unreachable!("{parent:?} records no action dependency"))
+}
+
+#[test]
+fn distinct_parents_share_one_action_result() {
     let mut engine = fixture_engine();
     let action_interface = interface(&[Type::Int], Type::Blob);
     let boolean_parent_interface = interface(&[Type::Bool], Type::Blob);
@@ -1338,15 +1444,20 @@ fn distinct_parents_do_not_share_action_results() {
         .and_then(pith_engine::DependencyEdge::computation_id)
         .unwrap();
 
+    // The action key comes from the action request and the contract it plans,
+    // so two parents asking for one action share its attempt (decision 0031).
     assert_eq!(boolean_parent.source, EvaluationSource::Computed);
     assert_eq!(text_parent.source, EvaluationSource::Computed);
-    assert_ne!(boolean_action, text_action);
-    assert_eq!(executions.load(Ordering::Relaxed), 2);
+    assert_eq!(boolean_action, text_action);
+    assert_eq!(executions.load(Ordering::Relaxed), 1);
 }
 
 #[test]
-fn unverified_action_dependencies_are_not_reused() {
+fn an_action_below_the_confinement_floor_is_not_reused() {
     let mut engine = fixture_engine();
+    // `UnverifiedCountingExecutor` reports `Unverified`, which this floor
+    // refuses (decision 0031).
+    engine.set_minimum_access_verification(AccessVerification::Observed);
     let action_interface = interface(&[Type::Int], Type::Blob);
     let root_interface = interface(&[], Type::Blob);
     engine.register_action_rule(

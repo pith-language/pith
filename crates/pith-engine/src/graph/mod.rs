@@ -34,14 +34,14 @@ use pith_diag::PithResult;
 use pith_ids::{ComputationArena, ComputationId, ContentId};
 use pith_store::{ContentStore, MemoryContentStore};
 
-use crate::action::{ActionRule, Executor};
+use crate::action::{AccessVerification, ActionRule, Executor};
 use crate::cancel::{CancelSignal, NeverCancelled};
 use crate::policy::ActionPolicy;
 use crate::runtime::{Runtime, RuntimeError};
 use crate::state::{DurableAttemptId, EngineStateStore, MemoryEngineStateStore};
 use eval::single_evaluation;
 use ir::StopReason;
-use reuse::PureComputationIndex;
+use reuse::{ActionComputationIndex, PureComputationIndex};
 
 pub struct Engine {
     pub(crate) rules: RuleArena<Rule<Pure>>,
@@ -50,6 +50,7 @@ pub struct Engine {
     pub(crate) action_bodies: IndexMap<RuleId, Box<dyn ActionRule>>,
     pub(crate) computations: ComputationArena<ComputationNode>,
     pure_computations: PureComputationIndex,
+    pub(crate) action_computations: ActionComputationIndex,
     pub(crate) store: Box<dyn ContentStore>,
     /// Durable engine metadata. Arena handles never cross this boundary; the
     /// process-local `durable_attempts` side-table maps computation nodes to
@@ -58,6 +59,8 @@ pub struct Engine {
     pub(crate) state_store: Box<dyn EngineStateStore>,
     pub(crate) durable_attempts: IndexMap<ComputationId, DurableAttemptId>,
     action_concurrency: NonZeroUsize,
+    action_caching: bool,
+    minimum_access_verification: AccessVerification,
 }
 
 /// How many actions a run keeps in flight when the caller does not say.
@@ -94,11 +97,51 @@ impl Engine {
             action_bodies: IndexMap::new(),
             computations: ComputationArena::new(),
             pure_computations: IndexMap::new(),
+            action_computations: IndexMap::new(),
             store: Box::new(store),
             state_store: Box::new(state_store),
             durable_attempts: IndexMap::new(),
             action_concurrency: default_action_concurrency(),
+            action_caching: true,
+            minimum_access_verification: AccessVerification::Unverified,
         }
+    }
+
+    /// Whether a completed action may be recorded as reusable and served to a
+    /// later matching request (decision 0031).
+    #[must_use]
+    pub fn action_caching(&self) -> bool {
+        self.action_caching
+    }
+
+    /// Turn action caching off, so every action executes.
+    ///
+    /// An action recorded while this is off is published
+    /// `NotReusable(ActionCachingDisabled)` and never enters the reusable
+    /// index. The reason describes this engine, not the computation. Turning
+    /// caching back on leaves those attempts where they are: a durable record
+    /// does not change its mind.
+    pub fn set_action_caching(&mut self, caching: bool) {
+        self.action_caching = caching;
+    }
+
+    /// The weakest confinement this engine accepts from a recorded action
+    /// attempt before reusing it (decision 0031). `Unverified` — the default —
+    /// accepts any recorded attempt.
+    #[must_use]
+    pub fn minimum_access_verification(&self) -> AccessVerification {
+        self.minimum_access_verification
+    }
+
+    /// Refuse to reuse an action attempt that was recorded under weaker
+    /// confinement than `minimum`.
+    ///
+    /// This is a floor on reuse. An action still runs under whatever its
+    /// executor installs, and the report says which. Raising the floor makes
+    /// weakly confined results unacceptable, and they stay findable, so
+    /// lowering it again serves them.
+    pub fn set_minimum_access_verification(&mut self, minimum: AccessVerification) {
+        self.minimum_access_verification = minimum;
     }
 
     /// How many actions a run keeps in flight at once.

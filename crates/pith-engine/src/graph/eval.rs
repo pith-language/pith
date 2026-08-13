@@ -340,7 +340,7 @@ impl Engine {
         }
         let (reuse, capabilities) = match self.computations.get(completed.computation) {
             Some(node) => (
-                self.pure_reuse_decision(&node.dependencies),
+                self.reuse_decision(&node.dependencies),
                 self.effective_capabilities(&node.dependencies),
             ),
             None => return Err(internal_diag(InternalInvariant::PureLostComputationNode)),

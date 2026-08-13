@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use pith_core::{
-    ActionOutput, ActionSpec, CapabilityRequirement, Content, Interface, OutputKind,
-    PureComputationKey, Request, Rule, RuleIdentity, RuleRevision, Type, Value,
+    ActionComputationKey, ActionOutput, ActionSpec, CapabilityRequirement, Content, Interface,
+    OutputKind, PureComputationKey, Request, Rule, RuleIdentity, RuleRevision, Type, Value,
 };
 use pith_diag::{Diag, EngineCode, Span};
 use pith_engine::state::{
@@ -17,7 +17,7 @@ use pith_engine::{
     AccessVerification, ActionAuthorization, CapturedExecutionReport, CapturedOutput,
     ExecutionPlatform, ExecutionReport, ProducedOutput,
 };
-use pith_ids::ContentId;
+use pith_ids::{ActionComputationDigest, ContentId};
 
 fn pure_computation(declaration: &str, input: i64) -> PureComputationKey {
     let identity = RuleIdentity::of_module_declaration("engine-state-tests", declaration);
@@ -50,6 +50,22 @@ fn action_plan(declaration: &str) -> Result<DurableActionPlan, Diag> {
     }]);
     spec.capabilities = Box::new([network_capability()]);
     DurableActionPlan::new(DurableRule::new(revision), spec)
+}
+
+/// The digest half of the reusable-index key for the action `action_plan`
+/// builds. The rule halves come from the plan, so only this varies per fixture.
+fn action_digest(declaration: &str) -> ActionComputationDigest {
+    ActionComputationDigest::of_manifest(declaration.as_bytes())
+}
+
+/// The whole key for one of those actions, for reading the reusable index back.
+fn action_key(declaration: &str) -> Result<ActionComputationKey, Diag> {
+    let plan = action_plan(declaration)?;
+    Ok(ActionComputationKey {
+        rule_identity: plan.rule().identity(),
+        rule_revision: plan.rule().revision(),
+        digest: action_digest(declaration),
+    })
 }
 
 fn network_capability() -> CapabilityRequirement {
@@ -245,6 +261,7 @@ fn pending_action_retains_durable_plan_authorization_and_observed_report()
         policy: "fixture-policy".into(),
     };
     let attempt = store.create_pending_attempt(DurableComputation::Action {
+        computation_digest: action_digest("action"),
         plan: plan.clone(),
         authorization: authorization.clone(),
     })?;
@@ -260,9 +277,12 @@ fn pending_action_retains_durable_plan_authorization_and_observed_report()
     assert!(matches!(
         &pending_action.computation,
         DurableComputation::Action {
+            computation_digest: stored_digest,
             plan: stored_plan,
             authorization: stored_authorization,
-        } if stored_plan == &plan && stored_authorization == &authorization
+        } if stored_digest == &action_digest("action")
+            && stored_plan == &plan
+            && stored_authorization == &authorization
     ));
     assert_eq!(plan.rule().identity(), identity);
     assert_eq!(plan.rule().revision(), revision);
@@ -288,6 +308,9 @@ fn pending_action_retains_durable_plan_authorization_and_observed_report()
         })
     );
 
+    // Capability-use edges are the only edges an action attempt carries, and
+    // they never block reuse, so these dependencies support `Reusable` and
+    // nothing else.
     let invalid_completion = store.publish_complete(
         attempt,
         CompletedAttempt {
@@ -298,14 +321,16 @@ fn pending_action_retains_durable_plan_authorization_and_observed_report()
             provenance: DurableProvenance::Action(DurableActionProvenance::Imported {
                 imported_report: imported_report.clone(),
             }),
-            reuse: DurableReuseDecision::Reusable,
+            reuse: DurableReuseDecision::NotReusable(DurableReuseReason::DependencyNotReusable {
+                attempt: DurableAttemptId::from_raw(u64::MAX),
+            }),
         },
     );
     assert_eq!(
         invalid_completion,
         Err(EngineStateError::InvalidReuseDecision {
             attempt,
-            expected: ExpectedReuseDecision::ActionCachingDisabled,
+            expected: ExpectedReuseDecision::Reusable,
         })
     );
 
@@ -317,9 +342,22 @@ fn pending_action_retains_durable_plan_authorization_and_observed_report()
             provenance: DurableProvenance::Action(DurableActionProvenance::Imported {
                 imported_report: imported_report.clone(),
             }),
-            reuse: DurableReuseDecision::NotReusable(DurableReuseReason::ActionCachingDisabled),
+            reuse: DurableReuseDecision::Reusable,
         },
     )?;
+    // A completed reusable action is findable under its own key, and only
+    // there (decision 0031).
+    assert_eq!(
+        store
+            .latest_completed_reusable_action_attempt(action_key("action")?)?
+            .map(|found| found.id),
+        Some(attempt)
+    );
+    assert!(
+        store
+            .latest_completed_reusable_action_attempt(action_key("other-action")?)?
+            .is_none()
+    );
 
     let Some(completed) = store.attempt(attempt)? else {
         return Err(EngineStateError::AttemptNotFound { attempt }.into());
@@ -500,6 +538,7 @@ fn invalid_dependency_edges_do_not_publish() -> Result<(), Box<dyn std::error::E
 fn pure_reuse_is_derived_from_ordered_dependencies() -> Result<(), Box<dyn std::error::Error>> {
     let store = MemoryEngineStateStore::default();
     let action_attempt = store.create_pending_attempt(DurableComputation::Action {
+        computation_digest: action_digest("reuse-dependency"),
         plan: action_plan("reuse-dependency")?,
         authorization: ActionAuthorization::Allowed {
             policy: "fixture-policy".into(),
@@ -573,6 +612,7 @@ fn denied_actions_cannot_complete_or_retain_execution_reports()
 -> Result<(), Box<dyn std::error::Error>> {
     let store = MemoryEngineStateStore::default();
     let attempt = store.create_pending_attempt(DurableComputation::Action {
+        computation_digest: action_digest("denied-action"),
         plan: action_plan("denied-action")?,
         authorization: ActionAuthorization::Denied {
             policy: "fixture-policy".into(),
@@ -635,6 +675,7 @@ fn captured_report_metadata_survives_output_import_failure()
 -> Result<(), Box<dyn std::error::Error>> {
     let store = MemoryEngineStateStore::default();
     let attempt = store.create_pending_attempt(DurableComputation::Action {
+        computation_digest: action_digest("failed-import"),
         plan: action_plan("failed-import")?,
         authorization: ActionAuthorization::Allowed {
             policy: "fixture-policy".into(),
