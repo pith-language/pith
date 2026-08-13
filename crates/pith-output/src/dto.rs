@@ -10,6 +10,10 @@ pub enum ValueRepr {
     Text { s: Box<str> },
     Bytes { len: u64 },
     Blob { digest: Box<str> },
+    Nominal {
+        name: Box<str>,
+        representation: Box<ValueRepr>,
+    },
 }
 
 #[derive(Clone, Debug, serde::Serialize)]

@@ -178,6 +178,14 @@ the merge operator becomes the value-level composition tool. it is library-visib
 
 the uncertainty types and the effect categories compose. an `Observation` of a managed object that has become stale carries its `Stale<T>` state structurally; the scheduler reads it; the cache invalidates on it; provenance records it. no library convention is needed for the engine to do the right thing, and no library can accidentally do the wrong thing because the type says what the value is.
 
+## landed ahead of the calculus
+
+the `Value::Nominal { name, representation: Box<Value> }` constructor landed before the rest of the constructor set above. the rest of the calculus — records, declared sums, parametric generics, effect and uncertainty constructors — is not built; only the one constructor that unblocks rule dispatch (0015) is. without an inhabiting value, `Type::Nominal` was declared, canonically encoded, and digested into computation keys (0023) but never matched: `Value::is_type` returned `false` for every value against it, so any rule declaring a nominal output failed `ResultTypeMismatch` and any request declaring a nominal input failed `RequestInputsMismatch`. every content-producing rule collapsed to `(...) -> Blob`, and any two of them collided as `E-1102` ambiguity.
+
+the slice that landed carries the 0026 semantics in miniature: a nominal value matches its own name only, and is not interchangeable with its representation. `value_type` returns `Type::Nominal { name }`; `is_type` accepts the value against `Type::Nominal { name }` when the names agree and rejects the representation's own type. `Type::Nominal` still carries only a name, not its declared representation, because the declaration site that would carry one does not exist yet; checking the name is what is checkable today. when the declaration lands, the representation type it carries becomes the second thing `is_type` verifies.
+
+the canonical codec's reserved `TAG_NOMINAL = 6`, which the comment in `value_codec.rs` held "`Type`-only," now carries a value payload: the name, then the recursively-encoded representation. `RECORD_ENCODING_VERSION` (0024) moves to 2; the byte-level `ENCODING_VERSION` stays at 1 because no existing byte sequence changed meaning — no prior build could emit a nominal value. a pre-release database recorded under version 1 is moved aside and rebuilt, which the existing test at `durable_engine_state::an_incompatible_database_is_moved_aside_and_rebuilt` already asserts.
+
 ## unresolved
 
 the exact surface syntax for declaring nominal types, records, and sums is open. the mechanism is settled by this record and by 0017; the surface is not, and belongs to the future module-and-syntax work alongside schema evolution and module compatibility (both still open from 0010).
