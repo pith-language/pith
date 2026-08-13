@@ -140,7 +140,8 @@ pub enum EngineCode {
     /// `E-1213` — the action policy denied the planned action.
     PolicyDenied = 213,
     /// `E-1214` — an attempt was left `Pending` when its owner stopped, and was
-    /// marked failed on reopen rather than resumed.
+    /// marked cancelled on reopen rather than resumed. Not a fault: it records
+    /// why the attempt has no result, not that computing one would fail.
     InterruptedAttempt = 214,
     /// `E-1215` — the caller cancelled the run. Not a fault: the work that was
     /// in flight is recorded as cancelled, and re-running it is reasonable.

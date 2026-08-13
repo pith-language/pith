@@ -263,10 +263,12 @@ fn records_survive_closing_and_reopening_the_database() {
 }
 
 #[test]
-fn an_interrupted_pending_attempt_is_marked_failed_on_reopen() {
-    // Decision 0024: after interruption, attempts left `Pending` are marked
-    // failed rather than resumed. Reopening the database performs that
-    // recovery, so a later reader finds a failed attempt, not a pending one.
+fn an_interrupted_pending_attempt_is_cancelled_on_reopen() {
+    // Decision 0024: after interruption, attempts left `Pending` are given a
+    // terminal state rather than resumed. Reopening the database performs that
+    // recovery, so a later reader finds a terminated attempt, not a pending
+    // one. The state is `Cancelled` because the attempt was stopped, not
+    // broken; 0022 added that distinction after 0024 was written.
     let scratch = Scratch::new("pending");
     let database = scratch.database();
 
@@ -296,15 +298,15 @@ fn an_interrupted_pending_attempt_is_marked_failed_on_reopen() {
         Ok(None) => unreachable!("the interrupted attempt vanished"),
         Err(error) => unreachable!("the interrupted attempt is unreadable: {error}"),
     };
-    let DurableAttemptState::Failed(failure) = &restored.state else {
-        unreachable!("the interrupted attempt was not marked failed");
+    let DurableAttemptState::Cancelled(stopped) = &restored.state else {
+        unreachable!("the interrupted attempt was not marked cancelled");
     };
     assert!(
-        failure
+        stopped
             .diagnostics
             .iter()
             .any(|diagnostic| { diagnostic.code == pith_diag::StableCode(1214) }),
-        "the failure does not carry an interrupted diagnostic"
+        "the cancellation does not carry an interrupted diagnostic"
     );
     // An interrupted attempt never produced a result, so it is not reusable.
     assert_eq!(
@@ -510,6 +512,37 @@ fn an_empty_database_adopts_the_current_versions() {
     let scratch = Scratch::new("fresh");
     let state = open(&scratch.database());
     assert_eq!(state.versions(), SqliteEngineStateStore::current_versions());
+}
+
+/// Decision 0027 asks for incremental auto-vacuum at creation time, because
+/// sqlite ignores the pragma once the database holds tables and recovering it
+/// then costs a full `VACUUM`. The failure is silent, so it is asserted rather
+/// than assumed.
+#[test]
+fn a_fresh_database_is_created_with_incremental_auto_vacuum() {
+    use diesel::RunQueryDsl as _;
+
+    let scratch = Scratch::new("auto-vacuum");
+    let database = scratch.database();
+    let _state = open(&database);
+
+    let mut connection = match diesel::SqliteConnection::establish(database_url(&database)) {
+        Ok(connection) => connection,
+        Err(error) => unreachable!("could not reopen the database: {error}"),
+    };
+    let mode: i32 = match diesel::select(diesel::dsl::sql::<diesel::sql_types::Integer>(
+        "(select * from pragma_auto_vacuum)",
+    ))
+    .get_result(&mut connection)
+    {
+        Ok(mode) => mode,
+        Err(error) => unreachable!("could not read the auto_vacuum mode: {error}"),
+    };
+    // 0 is NONE, 1 is FULL, 2 is INCREMENTAL.
+    assert_eq!(
+        mode, 2,
+        "the database was not created with incremental auto-vacuum"
+    );
 }
 
 fn content_id(seed: u8) -> ContentId {
