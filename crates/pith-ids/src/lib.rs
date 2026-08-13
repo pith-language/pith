@@ -255,6 +255,39 @@ impl std::fmt::Debug for PureComputationDigest {
     }
 }
 
+/// Stable digest of a canonical action rule application: the request that was
+/// asked for and the contract the rule planned from it (decision 0031).
+///
+/// The request half of action identity. What the executor resolved — the
+/// platform it ran on, the confinement it installed, the content it produced —
+/// is knowable only after execution, so decision 0031 tests those facts when a
+/// recorded attempt is considered for reuse and keeps them out of this digest.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ActionComputationDigest(ContentDigest);
+
+impl ActionComputationDigest {
+    pub fn of_manifest(manifest: &[u8]) -> Self {
+        Self(ContentId::with_domain(domain::ACTION_COMPUTATION, manifest))
+    }
+
+    /// Restore a digest read back from a persistence adapter. See
+    /// [`ActionSpecDigest::from_digest`] for why restoration is distinct from
+    /// derivation.
+    pub const fn from_digest(digest: ContentDigest) -> Self {
+        Self(digest)
+    }
+
+    pub fn digest(self) -> ContentDigest {
+        self.0
+    }
+}
+
+impl std::fmt::Debug for ActionComputationDigest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ActionComputationDigest({:?})", self.0)
+    }
+}
+
 /// Domain-separation prefixes for blake3 hashing. Each prefix is a NUL-terminated
 /// byte literal of the form `pith:<kind>:<version>\0`, where every prefix shares
 /// the same `<version>` segment (`v1` today).
@@ -271,6 +304,21 @@ mod domain {
     pub const RULE_IDENTITY: &[u8] = b"pith:rule-identity:v1\0";
     pub const RULE_REVISION: &[u8] = b"pith:rule-revision:v1\0";
     pub const PURE_COMPUTATION: &[u8] = b"pith:pure-computation:v1\0";
+    pub const ACTION_COMPUTATION: &[u8] = b"pith:action-computation:v1\0";
+
+    /// Every prefix above. Distinctness and a shared version segment are
+    /// checked over this one slice, so a new digest kind is covered by adding
+    /// it here.
+    #[cfg(test)]
+    pub const ALL: &[&[u8]] = &[
+        CONTENT_BLOB,
+        CONTENT_TREE,
+        ACTION_SPEC,
+        RULE_IDENTITY,
+        RULE_REVISION,
+        PURE_COMPUTATION,
+        ACTION_COMPUTATION,
+    ];
 }
 
 #[cfg(test)]
@@ -360,6 +408,25 @@ mod tests {
     }
 
     #[test]
+    fn action_computation_digest_is_separated_from_the_other_action_digest() {
+        // `ActionSpecDigest` identifies the contract; `ActionComputationDigest`
+        // identifies the rule application that planned it. The same manifest
+        // under both must not collide.
+        let computation = ActionComputationDigest::of_manifest(b"same");
+
+        assert_eq!(computation, ActionComputationDigest::of_manifest(b"same"));
+        assert_ne!(
+            computation.digest(),
+            ActionSpecDigest::of_manifest(b"same").digest()
+        );
+        assert_ne!(
+            computation.digest(),
+            PureComputationDigest::of_manifest(b"same").digest()
+        );
+        assert_ne!(computation.digest(), ContentDigest::of_bytes(b"same"));
+    }
+
+    #[test]
     fn rule_identity_encodes_module_and_declaration_boundaries() {
         assert_eq!(
             RuleIdentity::of_module_declaration("module", "rule"),
@@ -412,14 +479,7 @@ mod tests {
     fn domain_prefixes_are_distinct() {
         // A collision here would mean two digest kinds hash into the same
         // namespace, silently breaking domain separation.
-        let prefixes: &[&[u8]] = &[
-            domain::CONTENT_BLOB,
-            domain::CONTENT_TREE,
-            domain::ACTION_SPEC,
-            domain::RULE_IDENTITY,
-            domain::RULE_REVISION,
-            domain::PURE_COMPUTATION,
-        ];
+        let prefixes = domain::ALL;
         for (i, a) in prefixes.iter().enumerate() {
             for b in prefixes.iter().skip(i + 1) {
                 assert_ne!(a, b, "two domain prefixes collide");
@@ -429,14 +489,7 @@ mod tests {
 
     #[test]
     fn prefixes_follow_the_version_template() {
-        let prefixes: [&[u8]; 6] = [
-            domain::CONTENT_BLOB,
-            domain::CONTENT_TREE,
-            domain::ACTION_SPEC,
-            domain::RULE_IDENTITY,
-            domain::RULE_REVISION,
-            domain::PURE_COMPUTATION,
-        ];
+        let prefixes = domain::ALL;
 
         let version_of = |prefix: &[u8]| -> String {
             let s = std::str::from_utf8(prefix).expect("prefixes are ASCII + NUL");
@@ -449,15 +502,15 @@ mod tests {
             version.to_string()
         };
 
-        let first = version_of(prefixes[0]);
+        let mut versions = prefixes.iter().map(|prefix| version_of(prefix));
+        let first = versions.next().expect("there is at least one prefix");
         assert_eq!(
             first, "v1",
             "version segment is no longer v1; update this test deliberately"
         );
-        for prefix in &prefixes[1..] {
+        for version in versions {
             assert_eq!(
-                version_of(prefix),
-                first,
+                version, first,
                 "a prefix carries a different version segment"
             );
         }
