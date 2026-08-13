@@ -10,6 +10,7 @@ members = [
     "crates/pith-engine",
     "crates/pith-executor-local",
     "crates/pith-state-sqlite",
+    "crates/xylem",
     "crates/pith-cli",
     "xtask",
 ]
@@ -69,6 +70,8 @@ pith-arena = { path = "crates/pith-arena", version = "0.1.0" }
 pith-core = { path = "crates/pith-core", version = "0.1.0" }
 pith-engine = { path = "crates/pith-engine", version = "0.1.0" }
 pith-state-sqlite = { path = "crates/pith-state-sqlite", version = "0.1.0" }
+pith-executor-local = { path = "crates/pith-executor-local", version = "0.1.0" }
+xylem = { path = "crates/xylem", version = "0.1.0" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"
