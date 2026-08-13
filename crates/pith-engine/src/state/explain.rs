@@ -213,6 +213,7 @@ mod tests {
                 result: EncodedValue::from_value(&Value::Unit),
                 provenance: DurableProvenance::Pure,
                 reuse,
+                capabilities: Box::new([]),
             }),
         })
     }

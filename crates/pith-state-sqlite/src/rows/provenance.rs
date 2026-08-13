@@ -11,7 +11,7 @@ use pith_ids::ContentId;
 use crate::columns::{
     ProvenanceKind, StoredAccess, StoredAttemptId, StoredContentId, StoredOutputKind,
 };
-use crate::schema::{produced_outputs, report_capabilities};
+use crate::schema::{produced_outputs, report_capabilities, required_capabilities};
 
 use super::attempt::AttemptRow;
 use super::{corrupt, position};
@@ -24,6 +24,19 @@ use super::Failure;
 #[diesel(table_name = report_capabilities)]
 #[diesel(check_for_backend(Sqlite))]
 struct CapabilityRow {
+    attempt: StoredAttemptId,
+    position: i32,
+    name: String,
+    scope: String,
+}
+
+/// The same three columns as [`CapabilityRow`] against a different table:
+/// what a completed attempt requires, rather than what its executor used.
+/// Diesel binds a row type to one table, so the shape is spelled twice.
+#[derive(Insertable, Queryable, Selectable)]
+#[diesel(table_name = required_capabilities)]
+#[diesel(check_for_backend(Sqlite))]
+struct RequiredCapabilityRow {
     attempt: StoredAttemptId,
     position: i32,
     name: String,
@@ -287,4 +300,45 @@ fn load_access(row: &AttemptRow) -> Result<pith_engine::AccessVerification, Fail
         .access
         .ok_or_else(|| corrupt("an executor report retains no access verification"))?
         .0)
+}
+
+pub(super) fn write_required_capabilities(
+    connection: &mut SqliteConnection,
+    attempt: StoredAttemptId,
+    capabilities: &[CapabilityRequirement],
+) -> Result<(), Failure> {
+    if capabilities.is_empty() {
+        return Ok(());
+    }
+    let mut rows = Vec::with_capacity(capabilities.len());
+    for (index, capability) in capabilities.iter().enumerate() {
+        rows.push(RequiredCapabilityRow {
+            attempt,
+            position: position(index)?,
+            name: capability.name.to_string(),
+            scope: capability.scope.to_string(),
+        });
+    }
+    diesel::insert_into(required_capabilities::table)
+        .values(rows)
+        .execute(connection)?;
+    Ok(())
+}
+
+pub(super) fn load_required_capabilities(
+    connection: &mut SqliteConnection,
+    attempt: StoredAttemptId,
+) -> Result<Box<[CapabilityRequirement]>, Failure> {
+    let rows: Vec<RequiredCapabilityRow> = required_capabilities::table
+        .filter(required_capabilities::attempt.eq(attempt))
+        .order(required_capabilities::position.asc())
+        .select(RequiredCapabilityRow::as_select())
+        .load(connection)?;
+    Ok(rows
+        .into_iter()
+        .map(|row| CapabilityRequirement {
+            name: row.name.into(),
+            scope: row.scope.into(),
+        })
+        .collect())
 }

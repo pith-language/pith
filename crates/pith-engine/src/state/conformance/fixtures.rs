@@ -1,18 +1,18 @@
 //! The rules, contracts, and reports a generated step is built from.
 
 use pith_core::{
-    ActionSpec, CapabilityRequirement, Content, PureComputationKey, RuleIdentity, RuleRevision,
+    ActionComputationKey, ActionSpec, CapabilityRequirement, Content, Interface,
+    PureComputationKey, RuleIdentity, RuleRevision, Type, Value,
 };
 use pith_diag::{Severity, Span, StableCode};
-use pith_ids::{
-    ActionComputationDigest, ContentDigest, ContentId, DIGEST_LEN, PureComputationDigest,
-};
+use pith_ids::{ContentDigest, ContentId, DIGEST_LEN, PureComputationDigest};
 
 use crate::AccessVerification;
 use crate::action::{ExecutionPlatform, ExecutionReport, ProducedOutput};
 use crate::policy::ActionAuthorization;
 use crate::state::{
-    DurableActionPlan, DurableComputation, DurableDiagnostic, DurableDiagnosticNote, DurableRule,
+    DurableActionPlan, DurableActionRequest, DurableComputation, DurableDiagnostic,
+    DurableDiagnosticNote, DurableRule, EncodedValue,
 };
 
 pub(super) fn diagnostics(message_len: u8, notes: u8) -> Box<[DurableDiagnostic]> {
@@ -57,12 +57,27 @@ pub(super) fn action_computation(
     spec.capabilities = capabilities.iter().copied().map(capability).collect();
     let revision = RuleRevision::of_manifest(identity, &[rule]);
     let plan = DurableActionPlan::new(DurableRule::new(revision), spec).ok()?;
-    // Stands in for a digest derived from a request and a planned contract.
-    // Distinct generated actions need distinct digests; nothing else here
-    // depends on how one is built.
-    let mut key_manifest = vec![rule, executable];
-    key_manifest.extend_from_slice(capabilities);
-    let computation_digest = ActionComputationDigest::of_manifest(&key_manifest);
+    // The digest is derived from the retained request the way a real one is,
+    // because the publication validator rederives it (decision 0033). Distinct
+    // generated actions differ in the rule, the contract, or the input, so
+    // their keys differ without anything here arranging it.
+    let interface = Interface {
+        inputs: Box::new([Type::Int]),
+        output: Type::Blob,
+    };
+    let inputs = [Value::Int(i64::from(executable))];
+    let computation_digest = ActionComputationKey::from_parts(
+        identity,
+        revision,
+        &interface,
+        &inputs,
+        plan.spec_digest(),
+    )
+    .digest;
+    let request = DurableActionRequest {
+        interface,
+        inputs: inputs.iter().map(EncodedValue::from_value).collect(),
+    };
     let authorization = if denied {
         ActionAuthorization::Denied {
             policy: "conformance".into(),
@@ -75,7 +90,8 @@ pub(super) fn action_computation(
     };
     Some(DurableComputation::Action {
         computation_digest,
-        plan,
+        request,
+        plan: Box::new(plan),
         authorization,
     })
 }

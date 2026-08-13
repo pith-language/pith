@@ -12,7 +12,7 @@
 //! reuse check. The synchronous pure evaluator's rule step never touches the
 //! store.
 
-use pith_core::{ActionComputationKey, PureComputationKey};
+use pith_core::{ActionComputationKey, CapabilityRequirement, PureComputationKey};
 use pith_diag::{DiagnosticSink, PithResult};
 use pith_ids::ComputationId;
 
@@ -76,6 +76,7 @@ impl Engine {
             result: EncodedValue::from_value(&result),
             provenance: DurableProvenance::Pure,
             reuse: reuse_decision,
+            capabilities: self.node_capabilities(computation),
         };
         let attempt = self.require_durable_attempt(computation)?;
         self.state_store
@@ -169,6 +170,7 @@ impl Engine {
                 crate::state::DurableActionProvenance::Imported { imported_report },
             ),
             reuse,
+            capabilities: self.node_capabilities(computation),
         };
         let attempt = self.require_durable_attempt(computation)?;
         self.state_store
@@ -222,6 +224,16 @@ impl Engine {
             .get(&computation)
             .copied()
             .ok_or_else(|| internal_diag(InternalInvariant::DurableAttemptMissingForComputation))
+    }
+
+    /// The capability requirements the arena propagated onto a node, which the
+    /// completed record retains so a hydrated node does not have to re-derive
+    /// them without a subgraph (decision 0033).
+    fn node_capabilities(&self, computation: ComputationId) -> Box<[CapabilityRequirement]> {
+        self.computations
+            .get(computation)
+            .map(|node| node.capabilities.clone())
+            .unwrap_or_default()
     }
 
     fn dependencies_of(&self, computation: ComputationId) -> Box<[DependencyEdge]> {

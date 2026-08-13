@@ -12,15 +12,15 @@ use pith_core::{
 };
 use pith_diag::{PithResult, Severity, Span, StableCode};
 use pith_engine::state::{
-    CompletedAttempt, DurableActionProvenance, DurableAttemptState, DurableComputation,
-    DurableDependency, DurableDiagnostic, DurableProvenance, DurableReuseDecision,
-    DurableRule, EncodedValue, EngineStateStore, StoppedAttempt,
+    CompletedAttempt, DurableActionProvenance, DurableActionRequest, DurableAttemptState,
+    DurableComputation, DurableDependency, DurableDiagnostic, DurableProvenance,
+    DurableReuseDecision, DurableRule, EncodedValue, EngineStateStore, StoppedAttempt,
 };
 use pith_engine::{
     AccessVerification, ActionAuthorization, Engine, EvaluationSource, ExecutionPlatform,
     ExecutionReport, ProducedOutput, PureRule, PureRuleFrame, PureStep, Resumption,
 };
-use pith_ids::{ActionComputationDigest, ContentDigest, ContentId};
+use pith_ids::{ContentDigest, ContentId};
 use pith_state_sqlite::SqliteEngineStateStore;
 
 fn database_url(path: &Path) -> &str {
@@ -200,6 +200,7 @@ fn a_dependency_changed_by_another_process_makes_the_consumer_dirty() {
             result: EncodedValue::from_value(&Value::Int(42)),
             provenance: DurableProvenance::Pure,
             reuse: DurableReuseDecision::Reusable,
+            capabilities: Box::new([]),
         };
         if let Err(error) = state.publish_complete(attempt, completion) {
             unreachable!("could not publish: {error}");
@@ -241,6 +242,7 @@ fn records_survive_closing_and_reopening_the_database() {
             result: EncodedValue::from_value(&Value::Int(5)),
             provenance: DurableProvenance::Pure,
             reuse: DurableReuseDecision::Reusable,
+            capabilities: Box::new([]),
         };
         if let Err(error) = state.publish_complete(attempt, completion) {
             unreachable!("could not publish: {error}");
@@ -342,15 +344,30 @@ fn an_action_attempt_round_trips_its_plan_and_provenance() {
         Ok(plan) => plan,
         Err(error) => unreachable!("the fixture contract is invalid: {error:?}"),
     };
-    let computation_digest = ActionComputationDigest::of_manifest(b"compile-request");
-    let key = ActionComputationKey {
-        rule_identity: identity,
-        rule_revision: revision,
-        digest: computation_digest,
+    let interface = Interface {
+        inputs: [Type::Text].into(),
+        output: Type::Blob,
     };
+    let request_inputs = [Value::Text("a.c".into())];
+    // Derived, not invented: publication rebuilds the digest from the retained
+    // request and rejects a record whose stored one disagrees (decision 0033).
+    let key = ActionComputationKey::from_parts(
+        identity,
+        revision,
+        &interface,
+        &request_inputs,
+        plan.spec_digest(),
+    );
     let computation = DurableComputation::Action {
-        computation_digest,
-        plan: plan.clone(),
+        computation_digest: key.digest,
+        request: DurableActionRequest {
+            interface,
+            inputs: request_inputs
+                .iter()
+                .map(EncodedValue::from_value)
+                .collect(),
+        },
+        plan: Box::new(plan.clone()),
         authorization: ActionAuthorization::Allowed {
             policy: "allow-all-actions".into(),
         },
@@ -379,10 +396,11 @@ fn an_action_attempt_round_trips_its_plan_and_provenance() {
                     content: Content::Blob(content_id(2)),
                 }]
                 .into(),
-                capabilities_used: [capability].into(),
+                capabilities_used: [capability.clone()].into(),
             },
         }),
         reuse: DurableReuseDecision::Reusable,
+        capabilities: [capability].into(),
     };
     if let Err(error) = state.publish_complete(attempt, completion.clone()) {
         unreachable!("could not publish the action attempt: {error}");
@@ -472,6 +490,7 @@ fn an_incompatible_database_is_moved_aside_and_rebuilt() {
             result: EncodedValue::from_value(&Value::Int(3)),
             provenance: DurableProvenance::Pure,
             reuse: DurableReuseDecision::Reusable,
+            capabilities: Box::new([]),
         };
         if let Err(error) = state.publish_complete(attempt, completion) {
             unreachable!("could not publish: {error}");

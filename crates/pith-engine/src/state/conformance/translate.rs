@@ -52,6 +52,7 @@ pub(super) fn translate_attempt(
                             ))
                         }
                     },
+                    capabilities: completion.capabilities.clone(),
                 })
             }
             DurableAttemptState::Failed(stopped) => {
@@ -166,6 +167,16 @@ pub(super) fn translate_error(
         }
         EngineStateError::CapabilityDependenciesMismatch { attempt } => {
             EngineStateError::CapabilityDependenciesMismatch {
+                attempt: translate(*attempt, translation),
+            }
+        }
+        EngineStateError::CapabilityRequirementsMismatch { attempt } => {
+            EngineStateError::CapabilityRequirementsMismatch {
+                attempt: translate(*attempt, translation),
+            }
+        }
+        EngineStateError::ActionComputationDigestMismatch { attempt } => {
+            EngineStateError::ActionComputationDigestMismatch {
                 attempt: translate(*attempt, translation),
             }
         }

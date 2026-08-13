@@ -33,6 +33,16 @@ pub enum EngineStateError {
     CapabilityDependenciesMismatch {
         attempt: DurableAttemptId,
     },
+    /// The recorded capability requirements do not match what the recorded
+    /// dependencies require (decision 0033).
+    CapabilityRequirementsMismatch {
+        attempt: DurableAttemptId,
+    },
+    /// The action computation's stored digest is not the one its retained
+    /// request, rule, and contract digest produce (decision 0033).
+    ActionComputationDigestMismatch {
+        attempt: DurableAttemptId,
+    },
     ProvenanceCategoryMismatch {
         attempt: DurableAttemptId,
     },
@@ -77,6 +87,14 @@ impl std::fmt::Display for EngineStateError {
             Self::CapabilityDependenciesMismatch { attempt } => write!(
                 formatter,
                 "engine-state action attempt {attempt} has capability-use edges inconsistent with its executor report"
+            ),
+            Self::CapabilityRequirementsMismatch { attempt } => write!(
+                formatter,
+                "engine-state attempt {attempt} records capability requirements its dependencies do not support"
+            ),
+            Self::ActionComputationDigestMismatch { attempt } => write!(
+                formatter,
+                "engine-state action attempt {attempt} has a computation digest its retained request does not produce"
             ),
             Self::ProvenanceCategoryMismatch { attempt } => write!(
                 formatter,

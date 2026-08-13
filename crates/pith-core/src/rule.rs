@@ -107,13 +107,35 @@ impl ActionComputationKey {
         request: &Request<Action>,
         spec_digest: ActionSpecDigest,
     ) -> Self {
-        let mut computation_manifest = encode_application(rule, request);
-        computation_manifest.extend_from_slice(spec_digest.digest().as_bytes());
+        Self::from_parts(
+            rule.identity,
+            rule.revision,
+            &request.interface,
+            &request.inputs,
+            spec_digest,
+        )
+    }
 
+    /// The same key, derived from material a durable record holds rather than
+    /// from a live [`Rule`] and [`Request`].
+    ///
+    /// Decision 0033 has an action computation retain the interface and inputs
+    /// its key was built over, so a store can rebuild the key it filed the
+    /// record under and check it instead of trusting the digest beside it.
+    pub fn from_parts(
+        rule_identity: RuleIdentity,
+        rule_revision: RuleRevision,
+        interface: &Interface,
+        inputs: &[Value],
+        spec_digest: ActionSpecDigest,
+    ) -> Self {
+        let mut manifest =
+            encode_application_parts(rule_identity, rule_revision, interface, inputs);
+        manifest.extend_from_slice(spec_digest.digest().as_bytes());
         Self {
-            rule_identity: rule.identity,
-            rule_revision: rule.revision,
-            digest: ActionComputationDigest::of_manifest(&computation_manifest),
+            rule_identity,
+            rule_revision,
+            digest: ActionComputationDigest::of_manifest(&manifest),
         }
     }
 }
@@ -123,13 +145,26 @@ impl ActionComputationKey {
 /// what it needs and hashes under its own domain prefix, so two keys over
 /// identical material cannot collide.
 fn encode_application<K: EffectCategory>(rule: &Rule<K>, request: &Request<K>) -> Vec<u8> {
+    encode_application_parts(
+        rule.identity,
+        rule.revision,
+        &request.interface,
+        &request.inputs,
+    )
+}
+
+fn encode_application_parts(
+    rule_identity: RuleIdentity,
+    rule_revision: RuleRevision,
+    interface: &Interface,
+    inputs: &[Value],
+) -> Vec<u8> {
     let mut manifest = Vec::new();
-    manifest.extend_from_slice(rule.identity.digest().as_bytes());
-    manifest.extend_from_slice(rule.revision.digest().as_bytes());
-    encode_interface(&mut manifest, &request.interface);
-    encode_length(&mut manifest, request.inputs.len());
-    request
-        .inputs
+    manifest.extend_from_slice(rule_identity.digest().as_bytes());
+    manifest.extend_from_slice(rule_revision.digest().as_bytes());
+    encode_interface(&mut manifest, interface);
+    encode_length(&mut manifest, inputs.len());
+    inputs
         .iter()
         .for_each(|value| encode_value_payload(&mut manifest, value));
     manifest
@@ -520,15 +555,15 @@ mod tests {
         let signature = interface([Type::Int], Type::Text);
         let identity = RuleIdentity::of_module_declaration("example.module", "provider");
         let revision = RuleRevision::of_manifest(identity, b"provider-v1");
-        let pure_rule: Rule<Pure> = Rule::new(revision, "provider", signature.clone(), Span::none());
+        let pure_rule: Rule<Pure> =
+            Rule::new(revision, "provider", signature.clone(), Span::none());
         let action_rule: Rule<Action> =
             Rule::new(revision, "provider", signature.clone(), Span::none());
         let pure_request = request("value", signature.clone(), [Value::Int(7)]);
         let action_request = action_request("value", signature, [Value::Int(7)]);
 
         let pure = PureComputationKey::new(&pure_rule, &pure_request);
-        let action =
-            ActionComputationKey::new(&action_rule, &action_request, planned(b"contract"));
+        let action = ActionComputationKey::new(&action_rule, &action_request, planned(b"contract"));
 
         assert_eq!(pure.rule_identity, action.rule_identity);
         assert_ne!(pure.digest.digest(), action.digest.digest());

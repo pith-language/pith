@@ -21,9 +21,8 @@ use super::ir::{
 use crate::action::{
     ActionExecution, ActionInvocation, CapturedFileContent, CapturedOutputContent,
     CapturedTreeEntryContent, ExecutionReport, ExecutorIdentity, MaterializedActionInput,
-    MaterializedBlob,
-    MaterializedContent, MaterializedFileContent, MaterializedTree, MaterializedTreeEntryContent,
-    ProducedOutput,
+    MaterializedBlob, MaterializedContent, MaterializedFileContent, MaterializedTree,
+    MaterializedTreeEntryContent, ProducedOutput,
 };
 use crate::graph::capabilities::canonical_capabilities;
 use crate::graph::diagnostics::{
@@ -168,7 +167,8 @@ impl Engine {
         };
         let durable_computation = crate::state::DurableComputation::Action {
             computation_digest: key.digest,
-            plan: durable_plan,
+            request: durable_action_request(request),
+            plan: Box::new(durable_plan),
             authorization,
         };
         if let Err(diagnostics) =
@@ -553,5 +553,18 @@ impl Engine {
                 diagnostics: diagnostics.iter().cloned().collect(),
             };
         }
+    }
+}
+
+/// The durable half of an action request: what the computation key was built
+/// over, without the label and span that never participate in it.
+fn durable_action_request(request: &Request<Action>) -> crate::state::DurableActionRequest {
+    crate::state::DurableActionRequest {
+        interface: request.interface.clone(),
+        inputs: request
+            .inputs
+            .iter()
+            .map(crate::state::EncodedValue::from_value)
+            .collect(),
     }
 }

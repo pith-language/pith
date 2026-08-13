@@ -5,7 +5,7 @@
 //! identifiers. The same generated record has to reach both stores, and each
 //! names its own attempts.
 
-use pith_core::PureComputationKey;
+use pith_core::{CapabilityRequirement, PureComputationKey};
 use pith_ids::ContentId;
 
 use crate::graph::canonical_capabilities;
@@ -123,6 +123,36 @@ pub(super) fn materialize(
         .collect()
 }
 
+/// The capability requirements a completed record carries (decision 0033):
+/// an action's own declared contract, or the union of what the dependencies of
+/// a pure computation carry. Derived rather than generated, because shared
+/// validation rederives it the same way.
+pub(super) fn required_capabilities(
+    computation: &DurableComputation,
+    resolved: &[ResolvedDependency],
+    tracked: &[Tracked],
+) -> Box<[CapabilityRequirement]> {
+    match computation {
+        DurableComputation::Action { plan, .. } => {
+            canonical_capabilities(plan.spec().capabilities.iter())
+        }
+        DurableComputation::Pure(_) => canonical_capabilities(
+            resolved
+                .iter()
+                .filter_map(|dependency| match dependency {
+                    ResolvedDependency::Pure {
+                        tracked: position, ..
+                    }
+                    | ResolvedDependency::Action {
+                        tracked: position, ..
+                    } => tracked.get(*position),
+                    ResolvedDependency::Blob { .. } => None,
+                })
+                .flat_map(|entry| entry.capabilities.iter()),
+        ),
+    }
+}
+
 /// Shared validation compares capability-use edges against the executor report
 /// canonically, so they are derived from the report rather than generated.
 pub(super) fn with_capability_edges(
@@ -199,9 +229,7 @@ pub(super) fn reuse_decision(
         ResolvedDependency::Pure { .. } | ResolvedDependency::Blob { .. } => None,
     });
     let honest = match (first_non_reusable, first_action) {
-        (Some(tracked), _) => ReuseOutcome::NotReusable(Refusal::DependencyNotReusable {
-            tracked,
-        }),
+        (Some(tracked), _) => ReuseOutcome::NotReusable(Refusal::DependencyNotReusable { tracked }),
         (None, Some(tracked)) => {
             ReuseOutcome::NotReusable(Refusal::EffectfulDependency { tracked })
         }
@@ -218,7 +246,9 @@ pub(super) fn reuse_decision(
             ReuseOutcome::NotReusable(Refusal::ActionCachingDisabled)
         }
         (true, ReuseOutcome::Reusable) => {
-            ReuseOutcome::NotReusable(Refusal::DependencyNotReusable { tracked: usize::MAX })
+            ReuseOutcome::NotReusable(Refusal::DependencyNotReusable {
+                tracked: usize::MAX,
+            })
         }
         (true, ReuseOutcome::NotReusable(_)) => ReuseOutcome::Reusable,
     }

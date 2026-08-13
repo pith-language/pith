@@ -7,11 +7,11 @@ use pith_core::{
 use pith_diag::{Diag, EngineCode, Span};
 use pith_engine::state::{
     CURRENT_ENGINE_STATE_VERSIONS, CompletedAttempt, DurableActionPlan, DurableActionProvenance,
-    DurableAttemptId, DurableAttemptState, DurableAttemptStatus, DurableCapturedExecutionReport,
-    DurableCapturedOutput, DurableComputation, DurableDependency, DurableDiagnostic,
-    DurableProvenance, DurableReuseDecision, DurableReuseReason, DurableRule, EncodedValue,
-    EngineStateError, EngineStateStore, ExpectedReuseDecision, InvalidActionLifecycleReason,
-    InvalidDependencyReason, MemoryEngineStateStore, StoppedAttempt,
+    DurableActionRequest, DurableAttemptId, DurableAttemptState, DurableAttemptStatus,
+    DurableCapturedExecutionReport, DurableCapturedOutput, DurableComputation, DurableDependency,
+    DurableDiagnostic, DurableProvenance, DurableReuseDecision, DurableReuseReason, DurableRule,
+    EncodedValue, EngineStateError, EngineStateStore, ExpectedReuseDecision,
+    InvalidActionLifecycleReason, InvalidDependencyReason, MemoryEngineStateStore, StoppedAttempt,
 };
 use pith_engine::{
     AccessVerification, ActionAuthorization, CapturedExecutionReport, CapturedOutput,
@@ -52,20 +52,45 @@ fn action_plan(declaration: &str) -> Result<DurableActionPlan, Diag> {
     DurableActionPlan::new(DurableRule::new(revision), spec)
 }
 
-/// The digest half of the reusable-index key for the action `action_plan`
-/// builds. The rule halves come from the plan, so only this varies per fixture.
-fn action_digest(declaration: &str) -> ActionComputationDigest {
-    ActionComputationDigest::of_manifest(declaration.as_bytes())
+fn action_interface() -> Interface {
+    Interface {
+        inputs: Box::new([Type::Text]),
+        output: Type::Blob,
+    }
+}
+
+/// The request an action fixture is made from. Distinct declarations differ in
+/// their input, so their keys differ.
+fn action_request(declaration: &str) -> DurableActionRequest {
+    DurableActionRequest {
+        interface: action_interface(),
+        inputs: action_inputs(declaration)
+            .iter()
+            .map(EncodedValue::from_value)
+            .collect(),
+    }
+}
+
+fn action_inputs(declaration: &str) -> [Value; 1] {
+    [Value::Text(declaration.into())]
 }
 
 /// The whole key for one of those actions, for reading the reusable index back.
+/// Derived the way the engine derives it, because publication rederives it and
+/// rejects a record whose stored digest disagrees (decision 0033).
 fn action_key(declaration: &str) -> Result<ActionComputationKey, Diag> {
     let plan = action_plan(declaration)?;
-    Ok(ActionComputationKey {
-        rule_identity: plan.rule().identity(),
-        rule_revision: plan.rule().revision(),
-        digest: action_digest(declaration),
-    })
+    Ok(ActionComputationKey::from_parts(
+        plan.rule().identity(),
+        plan.rule().revision(),
+        &action_interface(),
+        &action_inputs(declaration),
+        plan.spec_digest(),
+    ))
+}
+
+fn action_digest(declaration: &str) -> Result<ActionComputationDigest, Diag> {
+    Ok(action_key(declaration)?.digest)
 }
 
 fn network_capability() -> CapabilityRequirement {
@@ -113,11 +138,23 @@ fn pure_completion(
     dependencies: Box<[DurableDependency]>,
     reuse: DurableReuseDecision,
 ) -> CompletedAttempt {
+    pure_completion_requiring(value, dependencies, reuse, Box::new([]))
+}
+
+/// A pure completion whose dependencies carry capability requirements, which
+/// the publication validator expects to see propagated (decision 0033).
+fn pure_completion_requiring(
+    value: Value,
+    dependencies: Box<[DurableDependency]>,
+    reuse: DurableReuseDecision,
+    capabilities: Box<[CapabilityRequirement]>,
+) -> CompletedAttempt {
     CompletedAttempt {
         dependencies,
         result: EncodedValue::from_value(&value),
         provenance: DurableProvenance::Pure,
         reuse,
+        capabilities,
     }
 }
 
@@ -261,8 +298,9 @@ fn pending_action_retains_durable_plan_authorization_and_observed_report()
         policy: "fixture-policy".into(),
     };
     let attempt = store.create_pending_attempt(DurableComputation::Action {
-        computation_digest: action_digest("action"),
-        plan: plan.clone(),
+        computation_digest: action_digest("action")?,
+        request: action_request("action"),
+        plan: Box::new(plan.clone()),
         authorization: authorization.clone(),
     })?;
 
@@ -278,10 +316,12 @@ fn pending_action_retains_durable_plan_authorization_and_observed_report()
         &pending_action.computation,
         DurableComputation::Action {
             computation_digest: stored_digest,
+            request: stored_request,
             plan: stored_plan,
             authorization: stored_authorization,
-        } if stored_digest == &action_digest("action")
-            && stored_plan == &plan
+        } if stored_digest == &action_digest("action")?
+            && stored_request == &action_request("action")
+            && stored_plan.as_ref() == &plan
             && stored_authorization == &authorization
     ));
     assert_eq!(plan.rule().identity(), identity);
@@ -298,6 +338,7 @@ fn pending_action_retains_durable_plan_authorization_and_observed_report()
             result: EncodedValue::from_value(&Value::Blob(output)),
             provenance: DurableProvenance::Action(DurableActionProvenance::NotExecuted),
             reuse: DurableReuseDecision::NotReusable(DurableReuseReason::ActionCachingDisabled),
+            capabilities: Box::new([network_capability()]),
         },
     );
     assert_eq!(
@@ -324,6 +365,7 @@ fn pending_action_retains_durable_plan_authorization_and_observed_report()
             reuse: DurableReuseDecision::NotReusable(DurableReuseReason::DependencyNotReusable {
                 attempt: DurableAttemptId::from_raw(u64::MAX),
             }),
+            capabilities: Box::new([capability.clone()]),
         },
     );
     assert_eq!(
@@ -343,6 +385,7 @@ fn pending_action_retains_durable_plan_authorization_and_observed_report()
                 imported_report: imported_report.clone(),
             }),
             reuse: DurableReuseDecision::Reusable,
+            capabilities: Box::new([network_capability()]),
         },
     )?;
     // A completed reusable action is findable under its own key, and only
@@ -415,6 +458,7 @@ fn mismatched_provenance_does_not_partially_publish() -> Result<(), Box<dyn std:
             result: EncodedValue::from_value(&Value::Int(1)),
             provenance: DurableProvenance::Action(DurableActionProvenance::NotExecuted),
             reuse: DurableReuseDecision::Reusable,
+            capabilities: Box::new([]),
         },
     );
 
@@ -538,8 +582,9 @@ fn invalid_dependency_edges_do_not_publish() -> Result<(), Box<dyn std::error::E
 fn pure_reuse_is_derived_from_ordered_dependencies() -> Result<(), Box<dyn std::error::Error>> {
     let store = MemoryEngineStateStore::default();
     let action_attempt = store.create_pending_attempt(DurableComputation::Action {
-        computation_digest: action_digest("reuse-dependency"),
-        plan: action_plan("reuse-dependency")?,
+        computation_digest: action_digest("reuse-dependency")?,
+        request: action_request("reuse-dependency"),
+        plan: Box::new(action_plan("reuse-dependency")?),
         authorization: ActionAuthorization::Allowed {
             policy: "fixture-policy".into(),
         },
@@ -556,6 +601,7 @@ fn pure_reuse_is_derived_from_ordered_dependencies() -> Result<(), Box<dyn std::
                 imported_report: imported_report(output),
             }),
             reuse: DurableReuseDecision::NotReusable(DurableReuseReason::ActionCachingDisabled),
+            capabilities: Box::new([network_capability()]),
         },
     )?;
 
@@ -574,12 +620,13 @@ fn pure_reuse_is_derived_from_ordered_dependencies() -> Result<(), Box<dyn std::
     for reuse in invalid_decisions {
         let result = store.publish_complete(
             pure_attempt,
-            pure_completion(
+            pure_completion_requiring(
                 Value::Int(1),
                 Box::new([DurableDependency::Action {
                     attempt: action_attempt,
                 }]),
                 reuse,
+                Box::new([network_capability()]),
             ),
         );
         assert_eq!(
@@ -595,12 +642,13 @@ fn pure_reuse_is_derived_from_ordered_dependencies() -> Result<(), Box<dyn std::
 
     store.publish_complete(
         pure_attempt,
-        pure_completion(
+        pure_completion_requiring(
             Value::Int(1),
             Box::new([DurableDependency::Action {
                 attempt: action_attempt,
             }]),
             expected_reuse,
+            Box::new([network_capability()]),
         ),
     )?;
     assert!(store.latest_completed_reusable_attempt(pure_key)?.is_none());
@@ -612,8 +660,9 @@ fn denied_actions_cannot_complete_or_retain_execution_reports()
 -> Result<(), Box<dyn std::error::Error>> {
     let store = MemoryEngineStateStore::default();
     let attempt = store.create_pending_attempt(DurableComputation::Action {
-        computation_digest: action_digest("denied-action"),
-        plan: action_plan("denied-action")?,
+        computation_digest: action_digest("denied-action")?,
+        request: action_request("denied-action"),
+        plan: Box::new(action_plan("denied-action")?),
         authorization: ActionAuthorization::Denied {
             policy: "fixture-policy".into(),
             reason: "fixture denial".into(),
@@ -631,6 +680,7 @@ fn denied_actions_cannot_complete_or_retain_execution_reports()
                 imported_report: imported_report.clone(),
             }),
             reuse: DurableReuseDecision::NotReusable(DurableReuseReason::ActionCachingDisabled),
+            capabilities: Box::new([network_capability()]),
         },
     );
     assert_eq!(
@@ -675,8 +725,9 @@ fn captured_report_metadata_survives_output_import_failure()
 -> Result<(), Box<dyn std::error::Error>> {
     let store = MemoryEngineStateStore::default();
     let attempt = store.create_pending_attempt(DurableComputation::Action {
-        computation_digest: action_digest("failed-import"),
-        plan: action_plan("failed-import")?,
+        computation_digest: action_digest("failed-import")?,
+        request: action_request("failed-import"),
+        plan: Box::new(action_plan("failed-import")?),
         authorization: ActionAuthorization::Allowed {
             policy: "fixture-policy".into(),
         },
@@ -735,6 +786,84 @@ fn captured_report_metadata_survives_output_import_failure()
         DurableProvenance::Action(DurableActionProvenance::Captured {
             executor_report: captured_report,
         })
+    );
+    Ok(())
+}
+
+#[test]
+fn an_action_digest_its_request_does_not_produce_is_rejected()
+-> Result<(), Box<dyn std::error::Error>> {
+    // The record retains the key's preimage, so the digest beside it is
+    // checkable (decision 0033). A record filed under a digest its own request
+    // does not produce would be findable in the index under a key that names a
+    // different rule application.
+    let store = MemoryEngineStateStore::default();
+    let attempt = store.create_pending_attempt(DurableComputation::Action {
+        // The digest of a different action, over this action's request.
+        computation_digest: action_digest("other-action")?,
+        request: action_request("action"),
+        plan: Box::new(action_plan("action")?),
+        authorization: ActionAuthorization::Allowed {
+            policy: "fixture-policy".into(),
+        },
+    })?;
+
+    let output = ContentId::of_blob(b"output");
+    let result = store.publish_complete(
+        attempt,
+        CompletedAttempt {
+            dependencies: Box::new([DurableDependency::CapabilityUse {
+                capability: network_capability(),
+            }]),
+            result: EncodedValue::from_value(&Value::Blob(output)),
+            provenance: DurableProvenance::Action(DurableActionProvenance::Imported {
+                imported_report: imported_report(output),
+            }),
+            reuse: DurableReuseDecision::Reusable,
+            capabilities: Box::new([network_capability()]),
+        },
+    );
+
+    assert_eq!(
+        result,
+        Err(EngineStateError::ActionComputationDigestMismatch { attempt })
+    );
+    Ok(())
+}
+
+#[test]
+fn capability_requirements_a_dependency_does_not_carry_are_rejected()
+-> Result<(), Box<dyn std::error::Error>> {
+    // A completed attempt records what it requires so a hydrated node can
+    // restore it without the arena subgraph that propagated it (decision
+    // 0033). Recording more than the dependencies carry would grant a
+    // capability nothing in the graph asked for.
+    let store = MemoryEngineStateStore::default();
+    let dependency_key = pure_computation("capability-free", 1);
+    let dependency = store.create_pending_attempt(DurableComputation::Pure(dependency_key))?;
+    store.publish_complete(
+        dependency,
+        pure_completion(Value::Int(1), Box::new([]), DurableReuseDecision::Reusable),
+    )?;
+
+    let parent_key = pure_computation("capability-claiming", 1);
+    let parent = store.create_pending_attempt(DurableComputation::Pure(parent_key))?;
+    let result = store.publish_complete(
+        parent,
+        pure_completion_requiring(
+            Value::Int(2),
+            Box::new([DurableDependency::Pure {
+                computation: dependency_key,
+                attempt: dependency,
+            }]),
+            DurableReuseDecision::Reusable,
+            Box::new([network_capability()]),
+        ),
+    );
+
+    assert_eq!(
+        result,
+        Err(EngineStateError::CapabilityRequirementsMismatch { attempt: parent })
     );
     Ok(())
 }

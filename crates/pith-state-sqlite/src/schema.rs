@@ -43,9 +43,20 @@ pub const CREATE_SCHEMA: &str = "
         action_digest blob,
         action_spec_digest blob,
         action_spec blob,
+        action_interface blob,
         authorization_denied integer,
         authorization_policy text,
         authorization_reason text
+    ) strict;
+
+    -- The inputs of the request an action computation was made from, in
+    -- request order (decision 0033). Each is the canonical bytes of one typed
+    -- value, because rebuilding the computation digest has to reproduce them.
+    create table if not exists action_request_inputs (
+        computation integer not null references computations (id),
+        position integer not null,
+        value blob not null,
+        primary key (computation, position)
     ) strict;
 
     create unique index if not exists computations_pure_key
@@ -94,6 +105,17 @@ pub const CREATE_SCHEMA: &str = "
         where dependency_attempt is not null;
 
     create table if not exists report_capabilities (
+        attempt integer not null references attempts (id),
+        position integer not null,
+        name text not null,
+        scope text not null,
+        primary key (attempt, position)
+    ) strict;
+
+    -- What a completed attempt requires, as opposed to what its executor
+    -- reported using (decision 0033). Separate from `report_capabilities`
+    -- because a pure attempt has requirements and no report.
+    create table if not exists required_capabilities (
         attempt integer not null references attempts (id),
         position integer not null,
         name text not null,
@@ -155,6 +177,7 @@ diesel::table! {
         action_digest -> Nullable<Binary>,
         action_spec_digest -> Nullable<Binary>,
         action_spec -> Nullable<Binary>,
+        action_interface -> Nullable<Binary>,
         authorization_denied -> Nullable<Bool>,
         authorization_policy -> Nullable<Text>,
         authorization_reason -> Nullable<Text>,
@@ -188,6 +211,23 @@ diesel::table! {
         content -> Nullable<Binary>,
         capability_name -> Nullable<Text>,
         capability_scope -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    action_request_inputs (computation, position) {
+        computation -> BigInt,
+        position -> Integer,
+        value -> Binary,
+    }
+}
+
+diesel::table! {
+    required_capabilities (attempt, position) {
+        attempt -> BigInt,
+        position -> Integer,
+        name -> Text,
+        scope -> Text,
     }
 }
 
@@ -243,6 +283,7 @@ diesel::table! {
 diesel::joinable!(attempts -> computations (computation));
 diesel::joinable!(reusable_index -> computations (computation));
 diesel::allow_tables_to_appear_in_same_query!(
+    action_request_inputs,
     attempts,
     computations,
     dependencies,
@@ -250,5 +291,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     diagnostics,
     produced_outputs,
     report_capabilities,
+    required_capabilities,
     reusable_index,
 );

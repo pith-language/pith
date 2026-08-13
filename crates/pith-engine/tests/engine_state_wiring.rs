@@ -839,6 +839,7 @@ fn publish_reusable_attempt(
         result: EncodedValue::from_value(result),
         provenance: DurableProvenance::Pure,
         reuse: DurableReuseDecision::Reusable,
+        capabilities: Box::new([]),
     };
     if let Err(error) = state.publish_complete(attempt, completion) {
         unreachable!("shared engine state rejected attempt {attempt}: {error}");
@@ -1152,6 +1153,7 @@ fn durable_reuse_is_valid_until_a_dependency_result_identity_changes() {
                 result: EncodedValue::from_value(&Value::Int(99)),
                 provenance: DurableProvenance::Pure,
                 reuse: DurableReuseDecision::Reusable,
+                capabilities: Box::new([]),
             },
         )
         .unwrap();
@@ -1206,6 +1208,7 @@ fn durable_reuse_remains_valid_when_a_dependency_result_is_canonically_equal() {
                 result: EncodedValue::from_value(&Value::Int(1)),
                 provenance: DurableProvenance::Pure,
                 reuse: DurableReuseDecision::Reusable,
+                capabilities: Box::new([]),
             },
         )
         .unwrap();
@@ -1283,7 +1286,6 @@ fn hydrates_a_completed_pure_result_into_a_fresh_engine() {
     // request inside the same instance takes the in-process path.
     assert!(second.durable_reuse_is_valid(hydrated.computation).unwrap());
 }
-
 
 /// A second engine over the same durable substrate reuses the first engine's
 /// action (decision 0031). The second engine's executor fails when called, so

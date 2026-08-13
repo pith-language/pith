@@ -2,9 +2,9 @@
 //! [`Value`] variants.
 
 use crate::{
-    Type, Value,
+    Interface, Type, Value,
     codec::CanonicalReader,
-    manifest::{encode_bytes, encode_str},
+    manifest::{encode_bytes, encode_length, encode_str},
 };
 
 const ENCODING_VERSION: u8 = 1;
@@ -138,20 +138,60 @@ impl Type {
     pub fn decode_canonical(encoded: &[u8]) -> Result<Self, CanonicalDecodeError> {
         let mut decoder = CanonicalReader::new(encoded);
         decoder.read_version(ENCODING_VERSION)?;
-        let value_type = match decoder.read_byte()? {
-            TAG_UNIT => Self::Unit,
-            TAG_BOOL => Self::Bool,
-            TAG_INT => Self::Int,
-            TAG_TEXT => Self::Text,
-            TAG_BYTES => Self::Bytes,
-            TAG_BLOB => Self::Blob,
-            TAG_NOMINAL => Self::Nominal {
-                name: decoder.read_text()?.into(),
-            },
-            tag => return Err(CanonicalDecodeError::UnknownTypeTag { tag }),
-        };
+        let value_type = decode_type_payload(&mut decoder)?;
         decoder.finish()?;
         Ok(value_type)
+    }
+}
+
+pub(crate) fn decode_type_payload(
+    decoder: &mut CanonicalReader,
+) -> Result<Type, CanonicalDecodeError> {
+    Ok(match decoder.read_byte()? {
+        TAG_UNIT => Type::Unit,
+        TAG_BOOL => Type::Bool,
+        TAG_INT => Type::Int,
+        TAG_TEXT => Type::Text,
+        TAG_BYTES => Type::Bytes,
+        TAG_BLOB => Type::Blob,
+        TAG_NOMINAL => Type::Nominal {
+            name: decoder.read_text()?.into(),
+        },
+        tag => return Err(CanonicalDecodeError::UnknownTypeTag { tag }),
+    })
+}
+
+impl Interface {
+    /// Encode this interface in the current version of Pith's canonical wire
+    /// format.
+    ///
+    /// A durable action computation retains the interface its request was made
+    /// against (decision 0033), because revalidating a consumer's action edge
+    /// re-selects a rule from it.
+    #[must_use]
+    pub fn encode_canonical(&self) -> Vec<u8> {
+        let mut encoded = vec![ENCODING_VERSION];
+        encode_length(&mut encoded, self.inputs.len());
+        for input in &self.inputs {
+            encode_type_payload(&mut encoded, input);
+        }
+        encode_type_payload(&mut encoded, &self.output);
+        encoded
+    }
+
+    /// Decode one interface from Pith's versioned canonical wire format.
+    ///
+    /// # Errors
+    /// Returns an error for unsupported versions, unknown type tags, truncated
+    /// or trailing data, invalid UTF-8, and lengths not representable on the
+    /// current platform.
+    pub fn decode_canonical(encoded: &[u8]) -> Result<Self, CanonicalDecodeError> {
+        let mut decoder = CanonicalReader::new(encoded);
+        decoder.read_version(ENCODING_VERSION)?;
+        let inputs = decoder.read_sequence(decode_type_payload)?;
+        let output = decode_type_payload(&mut decoder)?;
+        decoder.finish()?;
+        Ok(Self { inputs, output })
     }
 }
 

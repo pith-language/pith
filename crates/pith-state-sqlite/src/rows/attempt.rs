@@ -18,7 +18,10 @@ use super::computation::{intern_pure_computation, load_computation, load_pure_ke
 use super::corrupt;
 use super::dependency::{load_dependencies, write_dependencies};
 use super::diagnostic::{load_diagnostics, write_diagnostics};
-use super::provenance::{load_provenance, provenance_kind, report_columns, write_report_rows};
+use super::provenance::{
+    load_provenance, load_required_capabilities, provenance_kind, report_columns,
+    write_report_rows, write_required_capabilities,
+};
 use diesel::prelude::*;
 use diesel::sqlite::Sqlite;
 
@@ -102,6 +105,9 @@ pub fn write_terminal_state(
 
     write_dependencies(connection, stored, terminal_state.dependencies())?;
     write_report_rows(connection, stored, provenance)?;
+    if let TerminalAttemptState::Complete(completion) = terminal_state {
+        write_required_capabilities(connection, stored, &completion.capabilities)?;
+    }
     if let TerminalAttemptState::Failed(stopped) | TerminalAttemptState::Cancelled(stopped) =
         terminal_state
     {
@@ -310,6 +316,7 @@ fn restore_attempt(
             .map_err(|error| corrupt(format!("a stored result is unreadable: {error}")))?,
             provenance: load_provenance(connection, &row)?,
             reuse: load_reuse(connection, &row)?,
+            capabilities: load_required_capabilities(connection, row.id)?,
         }),
         DurableAttemptStatus::Failed => {
             DurableAttemptState::Failed(restore_stopped(connection, &row)?)
