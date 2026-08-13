@@ -24,7 +24,7 @@ pub use rule::{
     SelectOutcome, select_rule,
 };
 pub use value::{Type, Value, ValueArena, ValueId};
-pub use value_codec::CanonicalDecodeError;
+pub use value_codec::{CanonicalDecodeError, MAX_NOMINAL_NESTING};
 
 use pith_output::{IntoOutput, OutputRecord};
 
