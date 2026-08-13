@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use diesel::connection::SimpleConnection;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
-use pith_core::PureComputationKey;
+use pith_core::{ActionComputationKey, PureComputationKey};
 use pith_diag::{Diag, EngineCode, Span};
 use pith_engine::state::validate::{AttemptLookup, TerminalAttemptState, validate_publication};
 use pith_engine::state::{
@@ -18,7 +18,7 @@ use pith_engine::state::{
 use crate::rows::{
     Failure, attempt_computation, attempts_for_computation, find_pure_computation,
     insert_pending_attempt, intern_computation, load_attempt, load_attempts, pending_attempt_rows,
-    publish_reusable, reusable_attempt_row, write_terminal_state,
+    publish_reusable, reusable_action_attempt_row, reusable_attempt_row, write_terminal_state,
 };
 use crate::schema::{CREATE_SCHEMA, CURRENT_VERSIONS, engine_state_versions};
 
@@ -209,7 +209,7 @@ impl SqliteEngineStateStore {
                     let lookup = ConnectionLookup(RefCell::new(connection));
                     validate_publication(&lookup, attempt, &computation, &terminal_state)?;
                 }
-                let reusable = terminal_state.reusable_computation(&computation).is_some();
+                let reusable = terminal_state.is_reusable();
                 write_terminal_state(connection, attempt, &terminal_state)?;
                 if reusable {
                     publish_reusable(connection, computation_id, attempt)?;
@@ -243,9 +243,25 @@ fn establish(path: &Path) -> Result<SqliteConnection, SqliteStateError> {
 /// describes; FULL synchronous keeps a committed transaction durable across
 /// power loss, which is what makes a published attempt a promise rather than a
 /// hint.
+///
+/// `auto_vacuum` comes first and the order is load-bearing. Sqlite honors a
+/// change out of `none` only while the database file has not been written yet,
+/// and setting `journal_mode = wal` writes the header, so the two pragmas in
+/// the other order leave auto-vacuum at `none` with no error to notice.
+/// Recovering it afterwards costs a full `VACUUM`. Decision 0027 asks for
+/// incremental auto-vacuum at creation time because a collector deletes whole
+/// attempts and their edge and diagnostic cascades at once, and incremental
+/// vacuum reclaims those without rewriting the file. On an existing database
+/// the pragma is ignored, and there is no error to notice either way, which is
+/// why the durable-state tests assert the mode on a fresh database rather than
+/// trusting it. The checkpoint and `incremental_vacuum` cadence 0027 also names
+/// belongs with the collector, which does not exist.
 fn configure(connection: &mut SqliteConnection) -> Result<(), SqliteStateError> {
     connection.batch_execute(
-        "pragma journal_mode = wal; pragma synchronous = full; pragma foreign_keys = on;",
+        "pragma auto_vacuum = incremental; \
+         pragma journal_mode = wal; \
+         pragma synchronous = full; \
+         pragma foreign_keys = on;",
     )?;
     Ok(())
 }
@@ -361,10 +377,18 @@ fn quarantine(path: &Path) -> Result<(), SqliteStateError> {
     })
 }
 
-/// Mark every attempt still `Pending` as failed (decision 0024). An interrupted
-/// owner never resumed them, so reopening the database does: each is written as
-/// `Failed` through the same validated transaction a caller-driven failure uses,
-/// with a diagnostic that names it as interrupted work.
+/// Mark every attempt still `Pending` as cancelled (decision 0024, as amended
+/// by the `Cancelled` state 0022 added later). An interrupted owner never
+/// resumed them, so reopening the database does: each is written through the
+/// same validated transaction a caller-driven stop uses, with an `E-1214`
+/// diagnostic naming it as interrupted work.
+///
+/// Cancelled rather than failed because the two answer different questions for
+/// a later reader. A failure says the computation cannot work and re-running it
+/// is not worth the time; a cancellation says nothing about the computation at
+/// all, because it never got to run. An attempt whose owner was killed is the
+/// second, and recording it as the first would tell a reader to give up on work
+/// that was only interrupted.
 fn recover_pending(connection: &mut SqliteConnection) -> Result<(), SqliteStateError> {
     let pending = match pending_attempt_rows(connection) {
         Ok(rows) => rows,
@@ -390,7 +414,7 @@ fn recover_pending(connection: &mut SqliteConnection) -> Result<(), SqliteStateE
             if status != DurableAttemptStatus::Pending {
                 return Ok(());
             }
-            let terminal_state = TerminalAttemptState::Failed(interrupted_failure(&computation));
+            let terminal_state = TerminalAttemptState::Cancelled(interrupted_attempt(&computation));
             {
                 let lookup = ConnectionLookup(RefCell::new(connection));
                 validate_publication(&lookup, attempt, &computation, &terminal_state)?;
@@ -410,7 +434,7 @@ fn recover_pending(connection: &mut SqliteConnection) -> Result<(), SqliteStateE
     Ok(())
 }
 
-fn interrupted_failure(computation: &DurableComputation) -> StoppedAttempt {
+fn interrupted_attempt(computation: &DurableComputation) -> StoppedAttempt {
     let provenance = match computation {
         DurableComputation::Pure(_) => DurableProvenance::Pure,
         DurableComputation::Action { .. } => {
@@ -544,6 +568,18 @@ impl EngineStateStore for SqliteEngineStateStore {
                 return Ok(None);
             };
             let Some(row) = reusable_attempt_row(connection, computation)? else {
+                return Ok(None);
+            };
+            Ok(first(load_attempts(connection, vec![row])?))
+        })
+    }
+
+    fn latest_completed_reusable_action_attempt(
+        &self,
+        computation: ActionComputationKey,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        self.read(|connection| {
+            let Some(row) = reusable_action_attempt_row(connection, computation)? else {
                 return Ok(None);
             };
             Ok(first(load_attempts(connection, vec![row])?))

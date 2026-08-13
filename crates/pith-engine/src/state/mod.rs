@@ -7,7 +7,8 @@
 //! An adapter chooses its own representation of these records and is held to
 //! the in-memory one by the feature-gated `conformance` suite (decision 0025).
 //! The sqlite adapter marks attempts left `Pending` by an interrupted owner as
-//! failed on reopen (decision 0024).
+//! cancelled on reopen (decision 0024): the owner was stopped, which says
+//! nothing about whether the computation works.
 
 /// Cross-adapter conformance suite (decision 0025). Available to other crates
 /// through the `testing` feature; compiled unconditionally for this crate's own

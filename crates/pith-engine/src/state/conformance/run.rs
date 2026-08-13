@@ -1,6 +1,6 @@
 //! Applying a scenario to both stores.
 
-use pith_core::Value;
+use pith_core::{CapabilityRequirement, Value};
 
 use crate::MemoryEngineStateStore;
 use crate::policy::ActionAuthorization;
@@ -12,7 +12,8 @@ use crate::state::{
 use super::compare::{Divergence, DivergenceDetail, compare_outcome};
 use super::fixtures::{action_computation, diagnostics, imported_report, pure_key};
 use super::record::{
-    ReuseOutcome, Space, materialize, resolve_dependencies, reuse_decision, with_capability_edges,
+    ReuseOutcome, Space, materialize, required_capabilities, resolve_dependencies, reuse_decision,
+    with_capability_edges,
 };
 use super::scenario::{GeneratedDependency, Selector, Step};
 #[derive(Clone)]
@@ -21,6 +22,10 @@ pub(super) struct Tracked {
     pub(super) subject: DurableAttemptId,
     pub(super) computation: DurableComputation,
     pub(super) terminal: Option<TerminalKind>,
+    /// What this attempt was published carrying, once it completes. A later
+    /// step's pure computation unions the capabilities of the attempts it
+    /// depends on, the way the engine's arena propagation does.
+    pub(super) capabilities: Box<[CapabilityRequirement]>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -113,6 +118,7 @@ fn create(
                 subject,
                 computation,
                 terminal: None,
+                capabilities: Box::new([]),
             });
             Ok(())
         }
@@ -163,11 +169,13 @@ fn complete(
         }
     };
     let reuse = reuse_decision(&target.computation, &resolved, tracked, corrupt_reuse);
+    let capabilities = required_capabilities(&target.computation, &resolved, tracked);
     let completion = |space: Space| CompletedAttempt {
         dependencies: with_capability_edges(materialize(&resolved, tracked, space), &provenance),
         result: EncodedValue::from_value(&Value::Int(result)),
         provenance: provenance.clone(),
         reuse: reuse.materialize(tracked, space),
+        capabilities: capabilities.clone(),
     };
 
     let model_outcome = model.publish_complete(target.model, completion(Space::Model));
@@ -187,6 +195,7 @@ fn complete(
             ReuseOutcome::Reusable => TerminalKind::CompleteReusable,
             ReuseOutcome::NotReusable(_) => TerminalKind::CompleteNotReusable,
         });
+        entry.capabilities = capabilities;
     }
     Ok(())
 }

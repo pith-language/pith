@@ -2,12 +2,14 @@
 
 use pith_arena::define_arena;
 use pith_diag::{Diag, EngineCode, Span};
-use pith_ids::{PureComputationDigest, RuleIdentity, RuleRevision};
+use pith_ids::{
+    ActionComputationDigest, ActionSpecDigest, PureComputationDigest, RuleIdentity, RuleRevision,
+};
 use smallvec::SmallVec;
 use std::marker::PhantomData;
 
 use crate::{
-    EffectCategory, Pure, Type, Value,
+    Action, EffectCategory, Pure, Type, Value,
     manifest::encode_length,
     value_codec::{encode_type_payload, encode_value_payload},
 };
@@ -67,22 +69,105 @@ pub struct PureComputationKey {
 
 impl PureComputationKey {
     pub fn new(rule: &Rule<Pure>, request: &Request<Pure>) -> Self {
-        let mut computation_manifest = Vec::new();
-        computation_manifest.extend_from_slice(rule.identity.digest().as_bytes());
-        computation_manifest.extend_from_slice(rule.revision.digest().as_bytes());
-        encode_interface(&mut computation_manifest, &request.interface);
-        encode_length(&mut computation_manifest, request.inputs.len());
-        request
-            .inputs
-            .iter()
-            .for_each(|value| encode_value_payload(&mut computation_manifest, value));
-
         Self {
             rule_identity: rule.identity,
             rule_revision: rule.revision,
-            digest: PureComputationDigest::of_manifest(&computation_manifest),
+            digest: PureComputationDigest::of_manifest(&encode_application(rule, request)),
         }
     }
+}
+
+/// Persistent identity for an action rule application (decision 0031).
+///
+/// The request half of action identity: which rule, at which revision, was
+/// applied to which inputs, and what contract it planned from them. The
+/// execution half — resolved platform, installed confinement, produced content
+/// — is knowable only after the action has run, and a key computable only
+/// after running would have nothing to find. Decision 0031 tests those facts
+/// against a recorded attempt when reuse is considered.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ActionComputationKey {
+    pub rule_identity: RuleIdentity,
+    pub rule_revision: RuleRevision,
+    /// Digest of the rule identity, revision, request interface, inputs, and
+    /// the digest of the contract the rule planned from those inputs.
+    pub digest: ActionComputationDigest,
+}
+
+impl ActionComputationKey {
+    /// `spec_digest` is the digest of the contract `rule` planned from
+    /// `request`, which the caller has already computed to validate the plan.
+    ///
+    /// The key commits to it and to the request inputs. An action rule body
+    /// plans a contract from its inputs and completes a result from those same
+    /// inputs and the execution, so two requests that plan one contract can
+    /// still complete to different results.
+    pub fn new(
+        rule: &Rule<Action>,
+        request: &Request<Action>,
+        spec_digest: ActionSpecDigest,
+    ) -> Self {
+        Self::from_parts(
+            rule.identity,
+            rule.revision,
+            &request.interface,
+            &request.inputs,
+            spec_digest,
+        )
+    }
+
+    /// The same key, derived from material a durable record holds rather than
+    /// from a live [`Rule`] and [`Request`].
+    ///
+    /// Decision 0033 has an action computation retain the interface and inputs
+    /// its key was built over, so a store can rebuild the key it filed the
+    /// record under and check it instead of trusting the digest beside it.
+    pub fn from_parts(
+        rule_identity: RuleIdentity,
+        rule_revision: RuleRevision,
+        interface: &Interface,
+        inputs: &[Value],
+        spec_digest: ActionSpecDigest,
+    ) -> Self {
+        let mut manifest =
+            encode_application_parts(rule_identity, rule_revision, interface, inputs);
+        manifest.extend_from_slice(spec_digest.digest().as_bytes());
+        Self {
+            rule_identity,
+            rule_revision,
+            digest: ActionComputationDigest::of_manifest(&manifest),
+        }
+    }
+}
+
+/// The manifest prefix every computation key shares: which rule, at which
+/// revision, was applied to which typed inputs. Each effect category appends
+/// what it needs and hashes under its own domain prefix, so two keys over
+/// identical material cannot collide.
+fn encode_application<K: EffectCategory>(rule: &Rule<K>, request: &Request<K>) -> Vec<u8> {
+    encode_application_parts(
+        rule.identity,
+        rule.revision,
+        &request.interface,
+        &request.inputs,
+    )
+}
+
+fn encode_application_parts(
+    rule_identity: RuleIdentity,
+    rule_revision: RuleRevision,
+    interface: &Interface,
+    inputs: &[Value],
+) -> Vec<u8> {
+    let mut manifest = Vec::new();
+    manifest.extend_from_slice(rule_identity.digest().as_bytes());
+    manifest.extend_from_slice(rule_revision.digest().as_bytes());
+    encode_interface(&mut manifest, interface);
+    encode_length(&mut manifest, inputs.len());
+    inputs
+        .iter()
+        .for_each(|value| encode_value_payload(&mut manifest, value));
+    manifest
 }
 
 impl<K: EffectCategory> Request<K> {
@@ -386,6 +471,102 @@ mod tests {
         assert_eq!(first_key.rule_identity, second_key.rule_identity);
         assert_ne!(first_key.rule_revision, second_key.rule_revision);
         assert_ne!(first_key, second_key);
+    }
+
+    fn action_rule(label: &str, interface: Interface) -> Rule<Action> {
+        let identity = RuleIdentity::of_module_declaration("pith-core.rule-tests", label);
+        let revision = RuleRevision::of_manifest(identity, b"rule-tests-provider-v1");
+        Rule::new(revision, label, interface, Span::none())
+    }
+
+    fn action_request(
+        label: &str,
+        interface: Interface,
+        inputs: impl Into<Box<[Value]>>,
+    ) -> Request<Action> {
+        Request::new(label, interface, inputs, Span::none())
+    }
+
+    fn planned(contract: &[u8]) -> ActionSpecDigest {
+        ActionSpecDigest::of_manifest(contract)
+    }
+
+    #[test]
+    fn action_computation_key_is_stable_for_same_application() {
+        let signature = interface([Type::Int], Type::Text);
+        let identity = RuleIdentity::of_module_declaration("example.module", "compile");
+        let revision = RuleRevision::of_manifest(identity, b"compile-v1");
+        let first_rule = Rule::new(
+            revision,
+            "first diagnostic label",
+            signature.clone(),
+            Span::none(),
+        );
+        let second_rule = Rule::new(
+            revision,
+            "second diagnostic label",
+            signature.clone(),
+            Span::none(),
+        );
+        let first = action_request("first request", signature.clone(), [Value::Int(7)]);
+        let second = action_request("second request", signature, [Value::Int(7)]);
+
+        assert_eq!(
+            ActionComputationKey::new(&first_rule, &first, planned(b"contract")),
+            ActionComputationKey::new(&second_rule, &second, planned(b"contract"))
+        );
+    }
+
+    #[test]
+    fn action_computation_key_distinguishes_planned_contracts() {
+        // The contract is what runs, so equal inputs planning different
+        // contracts are different computations.
+        let signature = interface([Type::Int], Type::Blob);
+        let selected = action_rule("compile", signature.clone());
+        let requested = action_request("object", signature, [Value::Int(7)]);
+
+        assert_ne!(
+            ActionComputationKey::new(&selected, &requested, planned(b"gcc contract")),
+            ActionComputationKey::new(&selected, &requested, planned(b"clang contract"))
+        );
+    }
+
+    #[test]
+    fn action_computation_key_distinguishes_request_inputs_at_one_contract() {
+        // One contract reached from different inputs is still two
+        // computations: the rule body completes its result from the inputs as
+        // well as from the execution.
+        let signature = interface([Type::Int], Type::Blob);
+        let selected = action_rule("compile", signature.clone());
+        let seven = action_request("object", signature.clone(), [Value::Int(7)]);
+        let eight = action_request("object", signature, [Value::Int(8)]);
+
+        assert_ne!(
+            ActionComputationKey::new(&selected, &seven, planned(b"contract")),
+            ActionComputationKey::new(&selected, &eight, planned(b"contract"))
+        );
+    }
+
+    #[test]
+    fn action_and_pure_keys_do_not_collide_over_the_same_application() {
+        // Both keys hash the same rule identity, revision, interface, and
+        // inputs, separated only by the domain prefix. A collision would let an
+        // action attempt answer a pure request.
+        let signature = interface([Type::Int], Type::Text);
+        let identity = RuleIdentity::of_module_declaration("example.module", "provider");
+        let revision = RuleRevision::of_manifest(identity, b"provider-v1");
+        let pure_rule: Rule<Pure> =
+            Rule::new(revision, "provider", signature.clone(), Span::none());
+        let action_rule: Rule<Action> =
+            Rule::new(revision, "provider", signature.clone(), Span::none());
+        let pure_request = request("value", signature.clone(), [Value::Int(7)]);
+        let action_request = action_request("value", signature, [Value::Int(7)]);
+
+        let pure = PureComputationKey::new(&pure_rule, &pure_request);
+        let action = ActionComputationKey::new(&action_rule, &action_request, planned(b"contract"));
+
+        assert_eq!(pure.rule_identity, action.rule_identity);
+        assert_ne!(pure.digest.digest(), action.digest.digest());
     }
 
     #[test]

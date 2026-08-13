@@ -48,6 +48,14 @@ impl From<pith_diag::DiagnosticSink> for RunAbort {
     }
 }
 
+/// What starting an action produces: an execution to wait on, or a chain to
+/// wake with a result an earlier run recorded.
+#[derive(Default)]
+struct StartedActions<'a> {
+    in_flight: Vec<InFlightAction<'a>>,
+    resumed: VecDeque<(ChainId, Value)>,
+}
+
 /// One action handed to an executor, with everything the engine needs to finish
 /// it when the executor returns. The requesting chain is parked meanwhile, so
 /// other chains — including ones with actions of their own — keep running.
@@ -105,16 +113,16 @@ impl Engine {
     /// chains parked and actions in flight. Both are recorded here, under the
     /// terminal state that matches why the run ended, before the diagnostics
     /// propagate.
-    pub(super) async fn drive_run<'a, P: ActionPolicy, E: Executor, C: CancelSignal>(
+    pub(super) async fn drive_run<P: ActionPolicy, E: Executor, C: CancelSignal>(
         &mut self,
         scheduler: &mut Scheduler,
         policy: &P,
-        executor: &'a E,
+        executor: &E,
         cancel: &C,
     ) -> PithResult<()> {
-        let mut in_flight: Vec<InFlightAction<'a>> = Vec::new();
+        let mut started = StartedActions::default();
         let Err(abort) = self
-            .drive_chains(scheduler, policy, executor, cancel, &mut in_flight)
+            .drive_chains(scheduler, policy, executor, cancel, &mut started)
             .await
         else {
             return Ok(());
@@ -122,7 +130,7 @@ impl Engine {
         // An action still running was stopped, not broken: dropping its future
         // is what ends it, and nothing was learned about whether it would have
         // succeeded. That is cancellation whatever ended the run.
-        for action in in_flight {
+        for action in started.in_flight {
             self.cancel_action(action.computation, &abort.diagnostics);
         }
         self.stop_live_frames(scheduler, &abort.diagnostics, abort.reason);
@@ -135,7 +143,7 @@ impl Engine {
         policy: &P,
         executor: &'a E,
         cancel: &C,
-        in_flight: &mut Vec<InFlightAction<'a>>,
+        started: &mut StartedActions<'a>,
     ) -> Result<(), RunAbort> {
         let mut waiting: VecDeque<(ChainId, Request<Action>)> = VecDeque::new();
         loop {
@@ -155,21 +163,30 @@ impl Engine {
                 }
             }
 
-            while in_flight.len() < self.action_concurrency().get() {
+            while started.in_flight.len() < self.action_concurrency().get() {
                 let Some((chain, request)) = waiting.pop_front() else {
                     break;
                 };
-                self.start_action(scheduler, chain, request, policy, executor, in_flight)?;
+                self.start_action(scheduler, chain, request, policy, executor, started)?;
+            }
+            // A reused action has no future to finish, so nothing else will
+            // wake the chain that asked for it.
+            let woke_a_chain = !started.resumed.is_empty();
+            while let Some((chain, value)) = started.resumed.pop_front() {
+                scheduler.resume(chain, Resumption::One(value))?;
             }
 
-            if in_flight.is_empty() {
+            if started.in_flight.is_empty() {
+                if woke_a_chain {
+                    continue;
+                }
                 // Nothing is running, so nothing will free a slot. The queue is
                 // empty too: the loop above starts at least one action while the
                 // limit is non-zero, so a queued action cannot be left here.
                 return Ok(());
             }
-            let (index, captured) = first_finished(in_flight).await;
-            let finished = in_flight.swap_remove(index);
+            let (index, captured) = first_finished(&mut started.in_flight).await;
+            let finished = started.in_flight.swap_remove(index);
             // Checked after the await as well as before stepping a chain: an
             // action can be the only thing a long run is doing, and a caller
             // that cancelled while it ran should not wait for the next one.
@@ -198,10 +215,10 @@ impl Engine {
         request: Request<Action>,
         policy: &P,
         executor: &'a E,
-        in_flight: &mut Vec<InFlightAction<'a>>,
+        started: &mut StartedActions<'a>,
     ) -> PithResult<()> {
         let parent = scheduler.top(chain)?.computation;
-        match self.begin_action(&request, policy) {
+        match self.begin_action(&request, policy, &executor.identity()) {
             ActionStart::PlanningFailed(diagnostics) => Err(diagnostics),
             ActionStart::Refused {
                 computation,
@@ -215,6 +232,17 @@ impl Engine {
                     },
                 )?;
                 Err(diagnostics)
+            }
+            ActionStart::Reused(evaluation) => {
+                self.record_edge(
+                    parent,
+                    DependencyEdge::Action {
+                        computation: evaluation.computation,
+                        request,
+                    },
+                )?;
+                started.resumed.push_back((chain, evaluation.value));
+                Ok(())
             }
             ActionStart::Ready(prepared) => {
                 let PreparedAction {
@@ -230,7 +258,7 @@ impl Engine {
                         request: request.clone(),
                     },
                 )?;
-                in_flight.push(InFlightAction {
+                started.in_flight.push(InFlightAction {
                     chain,
                     computation,
                     request,

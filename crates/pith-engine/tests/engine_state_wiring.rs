@@ -5,9 +5,9 @@
 //! revalidating durable reuse.
 
 use pith_core::{
-    Action, ActionInput, ActionOutput, ActionSpec, CapabilityRequirement, Content, Interface,
-    OutputKind, PlatformRequirement, Pure, PureComputationKey, Request, Rule, RuleIdentity,
-    RuleRevision, Type, Value,
+    Action, ActionComputationKey, ActionInput, ActionOutput, ActionSpec, CapabilityRequirement,
+    Content, Interface, OutputKind, PlatformRequirement, Pure, PureComputationKey, Request, Rule,
+    RuleIdentity, RuleRevision, Type, Value,
 };
 use pith_diag::{DiagnosticSink, PithResult, Severity, Span, StableCode};
 use pith_engine::state::{
@@ -20,7 +20,8 @@ use pith_engine::{
     AccessVerification, ActionAuthorization, ActionExecution, ActionInvocation, ActionRule,
     AllowAllActions, AttemptState, CapturedActionExecution, CapturedExecutionReport,
     CapturedOutput, CapturedOutputContent, ComputationKind, Engine, EvaluationSource,
-    ExecutionPlatform, Executor, PureRule, PureRuleFrame, PureStep, Resumption, TokioRuntime,
+    ExecutionPlatform, Executor, ExecutorIdentity, PureRule, PureRuleFrame, PureStep, Resumption,
+    ReuseDecision, TokioRuntime,
 };
 use pith_ids::ContentId;
 use pith_store::{ContentStore, MemoryContentStore};
@@ -206,6 +207,13 @@ struct FixtureExecutor;
 
 #[async_trait::async_trait]
 impl Executor for FixtureExecutor {
+    fn identity(&self) -> ExecutorIdentity {
+        ExecutorIdentity {
+            executor: "fixture".into(),
+            platform: fixture_platform(),
+        }
+    }
+
     async fn execute(&self, invocation: &ActionInvocation) -> PithResult<CapturedActionExecution> {
         let spec = &invocation.spec;
         let input = invocation
@@ -225,10 +233,11 @@ impl Executor for FixtureExecutor {
             .outputs
             .first()
             .ok_or_else(|| fixture_diag("action fixture requires one declared output"))?;
+        let identity = self.identity();
         Ok(CapturedActionExecution {
             report: CapturedExecutionReport {
-                executor: "fixture".into(),
-                platform: fixture_platform(),
+                executor: identity.executor,
+                platform: identity.platform,
                 access: AccessVerification::Prevented,
                 outputs: [CapturedOutput {
                     path: output.path.clone(),
@@ -343,6 +352,62 @@ fn engine_with_state(state: impl EngineStateStore + 'static) -> Engine {
     let input = put_fixture_blob(&mut content, b"fixture input");
     assert_eq!(input, action_input());
     Engine::with_state_store(content, state)
+}
+
+/// An engine over content *and* engine state that outlive it. Reusing an action
+/// across instances needs both: the index says which attempt, and the content
+/// store still has to hold what that attempt produced (decision 0031).
+fn engine_with_shared_substrate(
+    state: impl EngineStateStore + 'static,
+    content: SharedContentStore,
+) -> Engine {
+    let input = content.put_fixture(b"fixture input");
+    assert_eq!(input, action_input());
+    Engine::with_state_store(content, state)
+}
+
+/// A content store several engines share, the way a filesystem store is shared
+/// by successive runs of a build.
+#[derive(Clone, Default)]
+struct SharedContentStore(Arc<std::sync::Mutex<MemoryContentStore>>);
+
+impl SharedContentStore {
+    fn put_fixture(&self, bytes: &[u8]) -> ContentId {
+        match self.0.lock() {
+            Ok(mut store) => put_fixture_blob(&mut store, bytes),
+            Err(_) => unreachable!("the shared content store was poisoned"),
+        }
+    }
+}
+
+impl ContentStore for SharedContentStore {
+    fn put_blob(&mut self, bytes: &[u8]) -> Result<ContentId, pith_store::StoreError> {
+        match self.0.lock() {
+            Ok(mut store) => store.put_blob(bytes),
+            Err(_) => Err(pith_store::StoreError::new("shared content store poisoned")),
+        }
+    }
+
+    fn get_blob(&self, id: ContentId) -> Result<Option<pith_store::Blob>, pith_store::StoreError> {
+        match self.0.lock() {
+            Ok(store) => store.get_blob(id),
+            Err(_) => Err(pith_store::StoreError::new("shared content store poisoned")),
+        }
+    }
+
+    fn put_tree(&mut self, tree: pith_store::Tree) -> Result<ContentId, pith_store::StoreError> {
+        match self.0.lock() {
+            Ok(mut store) => store.put_tree(tree),
+            Err(_) => Err(pith_store::StoreError::new("shared content store poisoned")),
+        }
+    }
+
+    fn get_tree(&self, id: ContentId) -> Result<Option<pith_store::Tree>, pith_store::StoreError> {
+        match self.0.lock() {
+            Ok(store) => store.get_tree(id),
+            Err(_) => Err(pith_store::StoreError::new("shared content store poisoned")),
+        }
+    }
 }
 
 fn put_fixture_blob(store: &mut MemoryContentStore, bytes: &[u8]) -> ContentId {
@@ -532,6 +597,14 @@ impl EngineStateStore for CreateFailingStore {
         self.inner.latest_completed_reusable_attempt(computation)
     }
 
+    fn latest_completed_reusable_action_attempt(
+        &self,
+        computation: ActionComputationKey,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        self.inner
+            .latest_completed_reusable_action_attempt(computation)
+    }
+
     fn explain_invalidation(
         &self,
         computation: PureComputationKey,
@@ -613,6 +686,13 @@ impl EngineStateStore for ReadFailingStore {
     fn latest_completed_reusable_attempt(
         &self,
         _computation: PureComputationKey,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        Err(Self::failure())
+    }
+
+    fn latest_completed_reusable_action_attempt(
+        &self,
+        _computation: ActionComputationKey,
     ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
         Err(Self::failure())
     }
@@ -724,6 +804,13 @@ impl EngineStateStore for SharedEngineStateStore {
         self.read(|store| store.latest_completed_reusable_attempt(computation))
     }
 
+    fn latest_completed_reusable_action_attempt(
+        &self,
+        computation: ActionComputationKey,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        self.read(|store| store.latest_completed_reusable_action_attempt(computation))
+    }
+
     fn explain_invalidation(
         &self,
         computation: PureComputationKey,
@@ -752,6 +839,7 @@ fn publish_reusable_attempt(
         result: EncodedValue::from_value(result),
         provenance: DurableProvenance::Pure,
         reuse: DurableReuseDecision::Reusable,
+        capabilities: Box::new([]),
     };
     if let Err(error) = state.publish_complete(attempt, completion) {
         unreachable!("shared engine state rejected attempt {attempt}: {error}");
@@ -910,7 +998,7 @@ fn pure_create_failure_reconciles_the_orphaned_arena_node() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn action_dependency_publishes_non_reusable_action_and_not_reusable_parent() {
+fn action_dependency_publishes_a_reusable_action_and_a_non_reusable_parent() {
     let mut engine = engine_with_fixtures();
     let action_interface = interface(&[], Type::Blob);
     let root_interface = interface(&[], Type::Blob);
@@ -940,11 +1028,8 @@ fn action_dependency_publishes_non_reusable_action_and_not_reusable_parent() {
     let action_id = durable_id(&engine, action_computation);
     let action_completion = completed_record(store, action_id);
 
-    // Action attempts are non-reusable: caching is disabled (decision 0023).
-    assert_eq!(
-        action_completion.reuse,
-        DurableReuseDecision::NotReusable(DurableReuseReason::ActionCachingDisabled)
-    );
+    // An action's only edges are capability use, which never blocks reuse.
+    assert_eq!(action_completion.reuse, DurableReuseDecision::Reusable);
     // A completed action retains the imported report (decision 0024).
     match &action_completion.provenance {
         DurableProvenance::Action(DurableActionProvenance::Imported { imported_report }) => {
@@ -961,12 +1046,12 @@ fn action_dependency_publishes_non_reusable_action_and_not_reusable_parent() {
         }]
     );
 
-    // The pure parent of a non-reusable action is itself NotReusable, pointing
-    // at that dependency's durable attempt (cross-cutting invariant).
+    // A pure key does not carry the identity of the action rule that planned
+    // the contract, so the parent stays out of the index (decision 0031).
     let parent_record = completed_record(store, durable_id(&engine, evaluation.computation));
     assert_eq!(
         parent_record.reuse,
-        DurableReuseDecision::NotReusable(DurableReuseReason::DependencyNotReusable {
+        DurableReuseDecision::NotReusable(DurableReuseReason::EffectfulDependency {
             attempt: action_id,
         })
     );
@@ -1068,6 +1153,7 @@ fn durable_reuse_is_valid_until_a_dependency_result_identity_changes() {
                 result: EncodedValue::from_value(&Value::Int(99)),
                 provenance: DurableProvenance::Pure,
                 reuse: DurableReuseDecision::Reusable,
+                capabilities: Box::new([]),
             },
         )
         .unwrap();
@@ -1122,6 +1208,7 @@ fn durable_reuse_remains_valid_when_a_dependency_result_is_canonically_equal() {
                 result: EncodedValue::from_value(&Value::Int(1)),
                 provenance: DurableProvenance::Pure,
                 reuse: DurableReuseDecision::Reusable,
+                capabilities: Box::new([]),
             },
         )
         .unwrap();
@@ -1198,6 +1285,119 @@ fn hydrates_a_completed_pure_result_into_a_fresh_engine() {
     // The hydrated node is terminal and reusable in the new arena, so a third
     // request inside the same instance takes the in-process path.
     assert!(second.durable_reuse_is_valid(hydrated.computation).unwrap());
+}
+
+/// A second engine over the same durable substrate reuses the first engine's
+/// action (decision 0031). The second engine's executor fails when called, so
+/// reaching a value at all proves the result came from engine state.
+#[test]
+fn hydrates_a_completed_action_into_a_fresh_engine() {
+    let state = SharedEngineStateStore::default();
+    let content = SharedContentStore::default();
+    let action_interface = interface(&[], Type::Blob);
+    let root_interface = interface(&[], Type::Blob);
+
+    let mut first = engine_with_shared_substrate(state.clone(), content.clone());
+    register_action_fixtures(&mut first, &action_interface, &root_interface);
+    let computed = first
+        .run(
+            &pure_request("entry", root_interface.clone(), []),
+            &runtime(),
+            &AllowAllActions,
+            &FixtureExecutor,
+        )
+        .unwrap()
+        .unwrap();
+    let original_attempt = durable_id(&first, sole_action_computation(&first).0);
+
+    let mut second = engine_with_shared_substrate(state.clone(), content.clone());
+    register_action_fixtures(&mut second, &action_interface, &root_interface);
+    let hydrated = second
+        .run(
+            &pure_request("entry", root_interface, []),
+            &runtime(),
+            &AllowAllActions,
+            &NeverRunsExecutor,
+        )
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(hydrated.value, computed.value);
+    let (hydrated_action, hydrated_node) = sole_action_computation(&second);
+    // On the terms 0024 set for pure hydration, the node is mapped onto the
+    // attempt it was loaded from and records no new one.
+    assert_eq!(durable_id(&second, hydrated_action), original_attempt);
+    assert!(matches!(
+        hydrated_node.state,
+        AttemptState::Complete {
+            reuse: ReuseDecision::Reusable,
+            ..
+        }
+    ));
+}
+
+/// The same two engines, with an empty content store under the second. The
+/// index still names the attempt, and the bytes it produced are gone, so the
+/// action runs again instead of handing back an unresolvable identity.
+#[test]
+fn an_action_whose_output_content_is_missing_is_not_reused() {
+    let state = SharedEngineStateStore::default();
+    let action_interface = interface(&[], Type::Blob);
+    let root_interface = interface(&[], Type::Blob);
+
+    let mut first = engine_with_shared_substrate(state.clone(), SharedContentStore::default());
+    register_action_fixtures(&mut first, &action_interface, &root_interface);
+    first
+        .run(
+            &pure_request("entry", root_interface.clone(), []),
+            &runtime(),
+            &AllowAllActions,
+            &FixtureExecutor,
+        )
+        .unwrap()
+        .unwrap();
+
+    let mut second = engine_with_shared_substrate(state.clone(), SharedContentStore::default());
+    register_action_fixtures(&mut second, &action_interface, &root_interface);
+    let second_result = second.run(
+        &pure_request("entry", root_interface, []),
+        &runtime(),
+        &AllowAllActions,
+        &NeverRunsExecutor,
+    );
+
+    assert!(matches!(second_result, Ok(Err(_))));
+}
+
+fn register_action_fixtures(
+    engine: &mut Engine,
+    action_interface: &Interface,
+    root_interface: &Interface,
+) {
+    engine.register_action_rule(
+        action_rule("produce", action_interface.clone()),
+        BlobProducingAction,
+    );
+    engine.register_rule(
+        pure_rule("entry", root_interface.clone()),
+        ActionDepRule {
+            dependency: action_request("produce", action_interface.clone(), []),
+        },
+    );
+}
+
+/// An executor that fails if it is called at all.
+struct NeverRunsExecutor;
+
+#[async_trait::async_trait]
+impl Executor for NeverRunsExecutor {
+    fn identity(&self) -> ExecutorIdentity {
+        FixtureExecutor.identity()
+    }
+
+    async fn execute(&self, _invocation: &ActionInvocation) -> PithResult<CapturedActionExecution> {
+        Err(fixture_diag("the executor ran when the result was cached"))
+    }
 }
 
 #[test]

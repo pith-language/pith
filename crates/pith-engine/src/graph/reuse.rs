@@ -11,19 +11,22 @@
 use std::sync::Arc;
 
 use indexmap::IndexMap;
-use pith_core::{Pure, PureComputationKey, Request, RuleId};
+use pith_core::{Action, ActionComputationKey, Content, Pure, PureComputationKey, Request, RuleId};
 use pith_diag::{DiagnosticSink, PithResult};
 use pith_ids::ComputationId;
 use smallvec::SmallVec;
 
 use super::{
-    AttemptState, ComputationKind, ComputationNode, DependencyEdge, Engine, Evaluation,
-    EvaluationSource, ReuseDecision, ReuseReason,
+    ActionPlan, ActionRecord, AttemptState, ComputationKind, ComputationNode, DependencyEdge,
+    Engine, Evaluation, EvaluationSource, ReuseDecision, ReuseReason,
 };
-use crate::graph::diagnostics::{InternalInvariant, internal_diag};
+use crate::action::{ExecutionReport, ExecutorIdentity};
+use crate::graph::capabilities::canonical_capabilities;
+use crate::graph::diagnostics::{InternalInvariant, internal_diag, store_error_diag};
+use crate::policy::ActionAuthorization;
 use crate::state::{
-    CompletedAttempt, DurableAttempt, DurableAttemptId, DurableAttemptState, DurableDependency,
-    DurableReuseDecision,
+    CompletedAttempt, DurableActionProvenance, DurableAttempt, DurableAttemptId,
+    DurableAttemptState, DurableDependency, DurableProvenance, DurableReuseDecision,
 };
 
 impl Engine {
@@ -194,14 +197,18 @@ impl Engine {
             // Content identity is the dependency: retained bytes that still
             // reproduce a `ContentId` cannot have drifted.
             DurableDependency::Blob { .. } => Ok(true),
-            // Action attempts are never reusable, so a reusable pure attempt
-            // cannot depend on one, and capability use is recorded only on
-            // action attempts. The store rejects both on publication, so
-            // reaching either here is a fault rather than a reason to
-            // recompute.
-            DurableDependency::Action { .. } | DurableDependency::CapabilityUse { .. } => Err(
-                internal_diag(InternalInvariant::ReusableAttemptHasEffectfulDependency),
-            ),
+            // A record of what an action used. Nothing to revalidate: whether
+            // the capability may be exercised again is the current policy's
+            // answer, reapplied before any reuse is served.
+            DurableDependency::CapabilityUse { .. } => Ok(true),
+            // A reusable attempt cannot carry an action edge: a pure attempt
+            // that depends on an action is published `EffectfulDependency`
+            // (decision 0031), and an action attempt's own edges are capability
+            // use. The publication validator enforces both, so reaching here is
+            // a fault, not a reason to recompute.
+            DurableDependency::Action { .. } => Err(internal_diag(
+                InternalInvariant::ReusableAttemptHasEffectfulDependency,
+            )),
         }
     }
 
@@ -247,6 +254,217 @@ impl Engine {
             .map_err(read_failed)
     }
 
+    /// Resolve `request` from a completed action attempt instead of executing
+    /// it (decision 0031). The same two sources pure reuse uses, in the same
+    /// order, with one extra gate: a recorded execution is admissible only if
+    /// it happened in the environment this run would execute in.
+    ///
+    /// `Ok(None)` means the action must run. It covers a key nothing has been
+    /// recorded under, a recorded attempt whose dependencies no longer
+    /// revalidate, and a recorded attempt this environment will not accept.
+    ///
+    /// # Errors
+    /// `E-1207` (internal invariant) when engine state or the content store
+    /// cannot be read, or a record contradicts the index that produced it.
+    pub(super) fn reusable_action_evaluation(
+        &mut self,
+        key: ActionComputationKey,
+        request: &Request<Action>,
+        plan: &ActionPlan,
+        authorization: &ActionAuthorization,
+        environment: &ExecutorIdentity,
+    ) -> PithResult<Option<Evaluation>> {
+        if !self.action_caching() {
+            return Ok(None);
+        }
+        if let Some(evaluation) = self.live_action_reuse(key, environment)? {
+            return Ok(Some(evaluation));
+        }
+        self.hydrate_action_computation(key, request, plan, authorization, environment)
+    }
+
+    fn live_action_reuse(
+        &self,
+        key: ActionComputationKey,
+        environment: &ExecutorIdentity,
+    ) -> PithResult<Option<Evaluation>> {
+        let Some(computation) = self.action_computations.get(&key).copied() else {
+            return Ok(None);
+        };
+        let Some(node) = self.computations.get(computation) else {
+            return Ok(None);
+        };
+        let AttemptState::Complete { result, reuse } = &node.state else {
+            return Ok(None);
+        };
+        if reuse != &ReuseDecision::Reusable {
+            return Ok(None);
+        }
+        let Some(report) = node
+            .action
+            .as_ref()
+            .and_then(|action| action.imported_report.as_ref())
+        else {
+            return Ok(None);
+        };
+        if !self.execution_matches_environment(report, environment)
+            || !self.execution_is_admissible(report)?
+        {
+            return Ok(None);
+        }
+        let result = result.clone();
+        if !self.durable_reuse_is_valid(computation)? {
+            return Ok(None);
+        }
+        Ok(Some(Evaluation {
+            value: result,
+            computation,
+            source: EvaluationSource::Reused,
+        }))
+    }
+
+    /// Load a completed action attempt recorded by an earlier engine instance
+    /// into a fresh arena node, on the terms decision 0024 set for pure
+    /// hydration: the node arrives terminal, mapped onto the attempt it came
+    /// from, and allocates no new one.
+    ///
+    /// The node keeps the contract and authorization this run planned and
+    /// obtained. What is reused is the recorded execution; permission is the
+    /// current policy's answer, which is reapplied before reuse is served.
+    fn hydrate_action_computation(
+        &mut self,
+        key: ActionComputationKey,
+        request: &Request<Action>,
+        plan: &ActionPlan,
+        authorization: &ActionAuthorization,
+        environment: &ExecutorIdentity,
+    ) -> PithResult<Option<Evaluation>> {
+        let Some(attempt) = self
+            .state_store
+            .latest_completed_reusable_action_attempt(key)
+            .map_err(read_failed)?
+        else {
+            return Ok(None);
+        };
+        if attempt.computation.action_key() != Some(key) {
+            return Err(internal_diag(
+                InternalInvariant::ReusableIndexEntryKeyMismatch,
+            ));
+        }
+        let DurableAttemptState::Complete(completion) = &attempt.state else {
+            return Err(internal_diag(
+                InternalInvariant::ReusableIndexEntryNotComplete,
+            ));
+        };
+        if completion.reuse != DurableReuseDecision::Reusable {
+            return Err(internal_diag(
+                InternalInvariant::ReusableIndexEntryNotReusable,
+            ));
+        }
+        // A completed action attempt always retains an imported report; the
+        // publication validator refuses one that does not.
+        let DurableProvenance::Action(DurableActionProvenance::Imported { imported_report }) =
+            &completion.provenance
+        else {
+            return Err(internal_diag(
+                InternalInvariant::CompletedActionMissingImportedReport,
+            ));
+        };
+        if !self.execution_matches_environment(imported_report, environment)
+            || !self.execution_is_admissible(imported_report)?
+            || !self.durable_completion_is_valid(completion)?
+        {
+            return Ok(None);
+        }
+        let value = completion
+            .result
+            .decode()
+            .map_err(|error| internal_diag(InternalInvariant::HydratedResultUndecodable(error)))?;
+        if !value.is_type(&request.interface.output) {
+            return Err(internal_diag(
+                InternalInvariant::HydratedResultTypeMismatch {
+                    expected: request.interface.output.clone(),
+                    actual: value.value_type(),
+                },
+            ));
+        }
+
+        let computation = self.computations.push(ComputationNode {
+            kind: ComputationKind::Action(request.clone()),
+            rule: plan.rule,
+            dependencies: SmallVec::new(),
+            state: AttemptState::Complete {
+                result: value.clone(),
+                reuse: ReuseDecision::Reusable,
+            },
+            action: Some(ActionRecord {
+                key,
+                spec_digest: plan.spec_digest,
+                spec: plan.spec.clone(),
+                authorization: authorization.clone(),
+                // Nothing executed here, so there is no executor observation
+                // from this run. The imported report is the one being reused.
+                executor_report: None,
+                imported_report: Some(imported_report.clone()),
+            }),
+            capabilities: canonical_capabilities(&plan.spec.capabilities),
+        });
+        self.index_action_computation(key, computation);
+        self.durable_attempts.insert(computation, attempt.id);
+        Ok(Some(Evaluation {
+            value,
+            computation,
+            source: EvaluationSource::Hydrated,
+        }))
+    }
+
+    /// Whether a recorded execution belongs to the environment this run would
+    /// execute in. A result produced by another executor, or on another
+    /// platform, answers a different question.
+    fn execution_matches_environment(
+        &self,
+        report: &ExecutionReport,
+        environment: &ExecutorIdentity,
+    ) -> bool {
+        report.executor == environment.executor && report.platform == environment.platform
+    }
+
+    /// Whether a recorded execution is still good enough to serve: its
+    /// confinement meets this engine's floor, and the content it produced is
+    /// still in the store. Reuse hands back those bytes, so a record whose
+    /// content has been collected answers nothing.
+    fn execution_is_admissible(&self, report: &ExecutionReport) -> PithResult<bool> {
+        if !report.access.satisfies(self.minimum_access_verification()) {
+            return Ok(false);
+        }
+        for output in &report.outputs {
+            let present = match &output.content {
+                Content::Blob(id) => self
+                    .store
+                    .get_blob(*id)
+                    .map_err(store_error_diag)?
+                    .is_some(),
+                Content::Tree(id) => self
+                    .store
+                    .get_tree(*id)
+                    .map_err(store_error_diag)?
+                    .is_some(),
+            };
+            if !present {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    pub(super) fn index_action_computation(
+        &mut self,
+        key: ActionComputationKey,
+        computation: ComputationId,
+    ) {
+        self.action_computations.insert(key, computation);
+    }
+
     pub(super) fn index_pure_computation(
         &mut self,
         key: PureComputationKey,
@@ -255,12 +473,23 @@ impl Engine {
         self.pure_computations.insert(key, computation);
     }
 
-    pub(super) fn pure_reuse_decision(&self, dependencies: &[DependencyEdge]) -> ReuseDecision {
+    /// The reuse decision a completed node's dependencies support.
+    ///
+    /// A dependency that is not itself reusable is reported ahead of a merely
+    /// effectful one, since both stop reuse and the first is the more specific
+    /// answer. An action edge stops reuse even when the action it names is
+    /// reusable, because this node's key does not carry the identity of the
+    /// action rule that planned it (decision 0031).
+    pub(super) fn reuse_decision(&self, dependencies: &[DependencyEdge]) -> ReuseDecision {
+        let mut first_action = None;
         for dependency in dependencies {
             let computation = match dependency {
                 DependencyEdge::Blob { .. } | DependencyEdge::CapabilityUse { .. } => continue,
-                DependencyEdge::Request { computation, .. }
-                | DependencyEdge::Action { computation, .. } => *computation,
+                DependencyEdge::Action { computation, .. } => {
+                    first_action = first_action.or(Some(*computation));
+                    *computation
+                }
+                DependencyEdge::Request { computation, .. } => *computation,
             };
             let Some(node) = self.computations.get(computation) else {
                 return ReuseDecision::NotReusable(ReuseReason::DependencyMissing { computation });
@@ -287,7 +516,12 @@ impl Engine {
                 }
             }
         }
-        ReuseDecision::Reusable
+        match first_action {
+            Some(computation) => {
+                ReuseDecision::NotReusable(ReuseReason::EffectfulDependency { computation })
+            }
+            None => ReuseDecision::Reusable,
+        }
     }
 }
 
@@ -323,3 +557,4 @@ fn read_failed(error: crate::state::EngineStateError) -> DiagnosticSink {
 }
 
 pub(super) type PureComputationIndex = IndexMap<PureComputationKey, ComputationId>;
+pub(super) type ActionComputationIndex = IndexMap<ActionComputationKey, ComputationId>;

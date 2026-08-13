@@ -4,10 +4,11 @@
 //! handles never cross this boundary.
 
 use pith_core::{
-    ActionSpec, CanonicalDecodeError, CapabilityRequirement, OutputKind, PureComputationKey, Value,
+    ActionComputationKey, ActionSpec, CanonicalDecodeError, CapabilityRequirement, Interface,
+    OutputKind, PureComputationKey, Value,
 };
 use pith_diag::{Diag, Severity, Span, StableCode};
-use pith_ids::{ActionSpecDigest, ContentId, RuleIdentity, RuleRevision};
+use pith_ids::{ActionComputationDigest, ActionSpecDigest, ContentId, RuleIdentity, RuleRevision};
 
 use crate::{
     AccessVerification, ActionAuthorization, CapturedExecutionReport, ExecutionPlatform,
@@ -18,7 +19,7 @@ use crate::{
 /// [`Value`] result and an [`ActionSpec`] contract. Reported as the
 /// `semantic_encoding` half of an adapter's [`EngineStateVersions`]. Adapters
 /// choose their own table layout and report it as `schema` (decision 0025).
-pub const RECORD_ENCODING_VERSION: SemanticEncodingVersion = SemanticEncodingVersion::new(1);
+pub const RECORD_ENCODING_VERSION: SemanticEncodingVersion = SemanticEncodingVersion::new(2);
 
 pub const CURRENT_ENGINE_STATE_VERSIONS: EngineStateVersions = EngineStateVersions {
     schema: SchemaVersion::new(1),
@@ -169,9 +170,43 @@ impl std::fmt::Display for DurableAttemptId {
 pub enum DurableComputation {
     Pure(PureComputationKey),
     Action {
-        plan: DurableActionPlan,
+        /// The digest half of the reusable-index key (decision 0031). The rule
+        /// identity and revision the key also carries belong to the plan, and
+        /// [`Self::action_key`] rebuilds the whole key from both halves.
+        computation_digest: ActionComputationDigest,
+        /// The request the key was built over. Retained because revalidating a
+        /// consumer's action edge re-selects a rule from the interface and
+        /// re-plans from the inputs (decision 0033), and because it makes
+        /// `computation_digest` derivable from the rest of the record instead
+        /// of a value the store takes on trust.
+        request: DurableActionRequest,
+        /// Boxed because a declared contract is by far the largest thing a
+        /// durable computation holds, and every pure attempt would otherwise
+        /// carry room for one.
+        plan: Box<DurableActionPlan>,
         authorization: ActionAuthorization,
     },
+}
+
+/// The typed request one action computation was made from, without the
+/// diagnostic label and span a [`Request`](pith_core::Request) also carries.
+/// Neither participates in the key, and neither survives a store round trip in
+/// any other record.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DurableActionRequest {
+    pub interface: Interface,
+    pub inputs: Box<[EncodedValue]>,
+}
+
+impl DurableActionRequest {
+    /// Decode the request inputs so the key they were digested under can be
+    /// rebuilt.
+    ///
+    /// # Errors
+    /// Returns a canonical decoding error if a retained input is unsupported.
+    pub fn decoded_inputs(&self) -> Result<Box<[Value]>, CanonicalDecodeError> {
+        self.inputs.iter().map(EncodedValue::decode).collect()
+    }
 }
 
 impl DurableComputation {
@@ -179,6 +214,23 @@ impl DurableComputation {
         match self {
             Self::Pure(key) => Some(*key),
             Self::Action { .. } => None,
+        }
+    }
+
+    /// The key the reusable action index is read and written under. Rebuilt
+    /// from the plan's rule and the stored digest rather than stored whole.
+    pub fn action_key(&self) -> Option<ActionComputationKey> {
+        match self {
+            Self::Action {
+                computation_digest,
+                plan,
+                ..
+            } => Some(ActionComputationKey {
+                rule_identity: plan.rule().identity(),
+                rule_revision: plan.rule().revision(),
+                digest: *computation_digest,
+            }),
+            Self::Pure(_) => None,
         }
     }
 }
@@ -310,10 +362,24 @@ pub enum DurableReuseDecision {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DurableReuseReason {
+    /// The engine that published this attempt had action caching switched off
+    /// (decision 0031).
     ActionCachingDisabled,
-    DependencyPending { attempt: DurableAttemptId },
-    DependencyNotReusable { attempt: DurableAttemptId },
-    DependencyMissing { computation: PureComputationKey },
+    /// A pure attempt that depends on an action. A pure key does not carry the
+    /// action rule's identity, so decision 0031 keeps the consumer out of the
+    /// reusable index even when the action itself is in it.
+    EffectfulDependency {
+        attempt: DurableAttemptId,
+    },
+    DependencyPending {
+        attempt: DurableAttemptId,
+    },
+    DependencyNotReusable {
+        attempt: DurableAttemptId,
+    },
+    DependencyMissing {
+        computation: PureComputationKey,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -322,6 +388,15 @@ pub struct CompletedAttempt {
     pub result: EncodedValue,
     pub provenance: DurableProvenance,
     pub reuse: DurableReuseDecision,
+    /// The capability requirements this computation carries, canonically
+    /// ordered: an action's own declared requirements, or the union of what a
+    /// pure computation's dependencies require.
+    ///
+    /// Propagation happens over the arena, which a hydrated node does not have
+    /// (decision 0033). Recorded rather than walked back out of the store on
+    /// every hydration, and checked against the recorded dependencies when the
+    /// attempt is published so the two cannot disagree.
+    pub capabilities: Box<[CapabilityRequirement]>,
 }
 
 /// What an attempt that stopped without a result retains. `Failed` and

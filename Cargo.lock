@@ -1498,6 +1498,20 @@ name = "xtask"
 version = "0.1.0"
 
 [[package]]
+name = "xylem"
+version = "0.1.0"
+dependencies = [
+ "pith-core",
+ "pith-diag",
+ "pith-engine",
+ "pith-executor-local",
+ "pith-ids",
+ "pith-store",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "zerocopy"
 version = "0.8.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -12,7 +12,7 @@
 //! reuse check. The synchronous pure evaluator's rule step never touches the
 //! store.
 
-use pith_core::PureComputationKey;
+use pith_core::{ActionComputationKey, CapabilityRequirement, PureComputationKey};
 use pith_diag::{DiagnosticSink, PithResult};
 use pith_ids::ComputationId;
 
@@ -70,12 +70,13 @@ impl Engine {
             None => return Err(internal_diag(InternalInvariant::PureLostComputationNode)),
         };
         let reuse_decision =
-            self.translate_pure_reuse_decision(&reuse, &self.dependencies_of(computation))?;
+            self.translate_reuse_decision(&reuse, &self.dependencies_of(computation))?;
         let completion = CompletedAttempt {
             dependencies,
             result: EncodedValue::from_value(&result),
             provenance: DurableProvenance::Pure,
             reuse: reuse_decision,
+            capabilities: self.node_capabilities(computation),
         };
         let attempt = self.require_durable_attempt(computation)?;
         self.state_store
@@ -143,9 +144,11 @@ impl Engine {
             Some(node) => self.translate_dependencies(&node.dependencies)?,
             None => return Err(internal_diag(InternalInvariant::ActionLostComputationNode)),
         };
-        let (result, action) = match self.computations.get(computation) {
+        let (result, reuse, action) = match self.computations.get(computation) {
             Some(node) => match (&node.state, node.action.as_ref()) {
-                (AttemptState::Complete { result, .. }, Some(action)) => (result.clone(), action),
+                (AttemptState::Complete { result, reuse }, Some(action)) => {
+                    (result.clone(), reuse.clone(), action)
+                }
                 _ => {
                     return Err(internal_diag(
                         InternalInvariant::DurablePublicationForNonCompleteAttempt,
@@ -159,13 +162,15 @@ impl Engine {
                 InternalInvariant::CompletedActionMissingImportedReport,
             ));
         };
+        let reuse = self.translate_reuse_decision(&reuse, &self.dependencies_of(computation))?;
         let completion = CompletedAttempt {
             dependencies,
             result: EncodedValue::from_value(&result),
             provenance: DurableProvenance::Action(
                 crate::state::DurableActionProvenance::Imported { imported_report },
             ),
-            reuse: DurableReuseDecision::NotReusable(DurableReuseReason::ActionCachingDisabled),
+            reuse,
+            capabilities: self.node_capabilities(computation),
         };
         let attempt = self.require_durable_attempt(computation)?;
         self.state_store
@@ -221,6 +226,16 @@ impl Engine {
             .ok_or_else(|| internal_diag(InternalInvariant::DurableAttemptMissingForComputation))
     }
 
+    /// The capability requirements the arena propagated onto a node, which the
+    /// completed record retains so a hydrated node does not have to re-derive
+    /// them without a subgraph (decision 0033).
+    fn node_capabilities(&self, computation: ComputationId) -> Box<[CapabilityRequirement]> {
+        self.computations
+            .get(computation)
+            .map(|node| node.capabilities.clone())
+            .unwrap_or_default()
+    }
+
     fn dependencies_of(&self, computation: ComputationId) -> Box<[DependencyEdge]> {
         self.computations
             .get(computation)
@@ -270,10 +285,10 @@ impl Engine {
         Ok(DurableDependency::Action { attempt })
     }
 
-    /// The durable reuse decision for a pure attempt. Pure parents derive their
-    /// reuse from their dependencies; the memory adapter validates this, so the
-    /// reason's durable attempt id must match the first non-reusable edge.
-    fn translate_pure_reuse_decision(
+    /// The durable reuse decision for a completed attempt. Both categories
+    /// derive reuse from their dependencies; every adapter validates this, so
+    /// the reason's durable attempt id must match the first non-reusable edge.
+    fn translate_reuse_decision(
         &self,
         decision: &ReuseDecision,
         dependencies: &[DependencyEdge],
@@ -284,7 +299,8 @@ impl Engine {
                 ReuseReason::ActionCachingDisabled => Ok(DurableReuseDecision::NotReusable(
                     DurableReuseReason::ActionCachingDisabled,
                 )),
-                ReuseReason::DependencyPending { computation }
+                ReuseReason::EffectfulDependency { computation }
+                | ReuseReason::DependencyPending { computation }
                 | ReuseReason::DependencyNotReusable { computation }
                 | ReuseReason::DependencyMissing { computation } => {
                     let attempt = dependencies
@@ -303,6 +319,11 @@ impl Engine {
                         .and_then(|target| self.durable_attempts.get(&target).copied());
                     match attempt {
                         Some(attempt) => match reason {
+                            ReuseReason::EffectfulDependency { .. } => {
+                                Ok(DurableReuseDecision::NotReusable(
+                                    DurableReuseReason::EffectfulDependency { attempt },
+                                ))
+                            }
                             ReuseReason::DependencyPending { .. } => {
                                 Ok(DurableReuseDecision::NotReusable(
                                     DurableReuseReason::DependencyPending { attempt },
@@ -349,6 +370,23 @@ impl Engine {
         };
         let rule = self.rules.get(node.rule)?;
         Some(PureComputationKey::new(rule, request))
+    }
+
+    /// The key the reusable action index is written and read under (decision
+    /// 0031). Derived from the same rule metadata `durable_action_plan` uses and
+    /// the digest of the contract that rule planned.
+    pub(super) fn action_computation_key(
+        &self,
+        rule: pith_core::RuleId,
+        request: &pith_core::Request<pith_core::Action>,
+        spec_digest: pith_ids::ActionSpecDigest,
+    ) -> PithResult<ActionComputationKey> {
+        let Some(action_rule) = self.action_rules.get(rule) else {
+            return Err(internal_diag(
+                InternalInvariant::SelectedActionRuleHasNoMetadata,
+            ));
+        };
+        Ok(ActionComputationKey::new(action_rule, request, spec_digest))
     }
 
     /// Build a durable action plan from the selected action rule's revision and

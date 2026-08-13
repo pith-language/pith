@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use pith_core::PureComputationKey;
+use pith_core::{ActionComputationKey, PureComputationKey};
 
 use super::{
     CompletedAttempt, DurableAttempt, DurableAttemptId, DurableAttemptStatus, DurableComputation,
@@ -31,6 +31,16 @@ pub enum EngineStateError {
         expected: ExpectedReuseDecision,
     },
     CapabilityDependenciesMismatch {
+        attempt: DurableAttemptId,
+    },
+    /// The recorded capability requirements do not match what the recorded
+    /// dependencies require (decision 0033).
+    CapabilityRequirementsMismatch {
+        attempt: DurableAttemptId,
+    },
+    /// The action computation's stored digest is not the one its retained
+    /// request, rule, and contract digest produce (decision 0033).
+    ActionComputationDigestMismatch {
         attempt: DurableAttemptId,
     },
     ProvenanceCategoryMismatch {
@@ -77,6 +87,14 @@ impl std::fmt::Display for EngineStateError {
             Self::CapabilityDependenciesMismatch { attempt } => write!(
                 formatter,
                 "engine-state action attempt {attempt} has capability-use edges inconsistent with its executor report"
+            ),
+            Self::CapabilityRequirementsMismatch { attempt } => write!(
+                formatter,
+                "engine-state attempt {attempt} records capability requirements its dependencies do not support"
+            ),
+            Self::ActionComputationDigestMismatch { attempt } => write!(
+                formatter,
+                "engine-state action attempt {attempt} has a computation digest its retained request does not produce"
             ),
             Self::ProvenanceCategoryMismatch { attempt } => write!(
                 formatter,
@@ -126,10 +144,13 @@ pub enum InvalidActionLifecycleReason {
     CompletedActionMissingImportedReport,
 }
 
+/// The decision a completed attempt's dependencies support. An action attempt
+/// may also record `ActionCachingDisabled`, which the dependencies never imply
+/// and the validator always accepts, so it never appears here.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ExpectedReuseDecision {
     Reusable,
-    ActionCachingDisabled,
+    EffectfulDependency { attempt: DurableAttemptId },
     DependencyNotReusable { attempt: DurableAttemptId },
 }
 
@@ -137,8 +158,8 @@ impl std::fmt::Display for ExpectedReuseDecision {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Reusable => formatter.write_str("Reusable"),
-            Self::ActionCachingDisabled => {
-                formatter.write_str("NotReusable(ActionCachingDisabled)")
+            Self::EffectfulDependency { attempt } => {
+                write!(formatter, "NotReusable(EffectfulDependency({attempt}))")
             }
             Self::DependencyNotReusable { attempt } => {
                 write!(formatter, "NotReusable(DependencyNotReusable({attempt}))")
@@ -245,6 +266,21 @@ pub trait EngineStateStore: Send + Sync {
     fn latest_completed_reusable_attempt(
         &self,
         computation: PureComputationKey,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError>;
+
+    /// Return the newest completed attempt marked reusable for the exact action
+    /// key (decision 0031). The action mirror of
+    /// [`Self::latest_completed_reusable_attempt`].
+    ///
+    /// Dependency revalidation remains the engine's responsibility, and so does
+    /// the admission test over the recorded execution. An adapter answers only
+    /// which reusable attempt a key has.
+    ///
+    /// # Errors
+    /// Returns an adapter error when the reusable index cannot be read.
+    fn latest_completed_reusable_action_attempt(
+        &self,
+        computation: ActionComputationKey,
     ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError>;
 
     /// Explain why the latest completed attempt for `computation` is not

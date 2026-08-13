@@ -12,6 +12,8 @@
 
 use std::sync::Arc;
 
+use pith_core::{ActionComputationKey, CapabilityRequirement};
+
 use crate::ActionAuthorization;
 use crate::graph::canonical_capabilities;
 
@@ -60,23 +62,19 @@ impl TerminalAttemptState {
         }
     }
 
-    /// The computation key to index as reusable, if this publication earns a
-    /// place in the reusable index: a pure attempt completing as `Reusable`.
+    /// Whether this publication earns a place in the reusable index: a
+    /// completed attempt whose recorded decision is `Reusable`. Which index it
+    /// lands in follows from the computation, since decision 0031 gives action
+    /// applications an index of their own.
     #[must_use]
-    pub fn reusable_computation(
-        &self,
-        computation: &DurableComputation,
-    ) -> Option<pith_core::PureComputationKey> {
-        match (computation, self) {
-            (
-                DurableComputation::Pure(key),
-                Self::Complete(CompletedAttempt {
-                    reuse: DurableReuseDecision::Reusable,
-                    ..
-                }),
-            ) => Some(*key),
-            _ => None,
-        }
+    pub const fn is_reusable(&self) -> bool {
+        matches!(
+            self,
+            Self::Complete(CompletedAttempt {
+                reuse: DurableReuseDecision::Reusable,
+                ..
+            })
+        )
     }
 }
 
@@ -106,11 +104,24 @@ pub fn validate_publication(
     terminal_state: &TerminalAttemptState,
 ) -> Result<(), EngineStateError> {
     validate_provenance_category(attempt, computation, terminal_state.provenance())?;
+    validate_action_computation_digest(attempt, computation)?;
     validate_action_lifecycle(attempt, computation, terminal_state)?;
 
     let mut first_non_reusable_dependency = None;
+    let mut first_action_dependency = None;
+    let mut required_capabilities = Vec::new();
     for dependency in terminal_state.dependencies() {
         let dependency_record = validate_dependency(lookup, attempt, terminal_state, dependency)?;
+        if first_action_dependency.is_none()
+            && let DurableDependency::Action { attempt } = dependency
+        {
+            first_action_dependency = Some(*attempt);
+        }
+        if let Some(dependency_record) = &dependency_record
+            && let DurableAttemptState::Complete(completion) = &dependency_record.state
+        {
+            required_capabilities.extend(completion.capabilities.iter().cloned());
+        }
         if first_non_reusable_dependency.is_none()
             && let Some(dependency_record) = dependency_record
             && !matches!(
@@ -129,11 +140,13 @@ pub fn validate_publication(
         terminal_state.provenance(),
         terminal_state.dependencies(),
     )?;
+    validate_capability_requirements(attempt, computation, terminal_state, &required_capabilities)?;
     validate_reuse_decision(
         attempt,
         computation,
         terminal_state,
         first_non_reusable_dependency,
+        first_action_dependency,
     )?;
     Ok(())
 }
@@ -199,6 +212,64 @@ fn validate_dependency(
             }
         },
         DurableDependency::Blob { .. } | DurableDependency::CapabilityUse { .. } => Ok(None),
+    }
+}
+
+/// An action computation's stored digest has to be the one its own retained
+/// material produces. The record holds the key's preimage (decision 0033), so
+/// the digest beside it is checkable rather than something an adapter asserts.
+fn validate_action_computation_digest(
+    attempt: DurableAttemptId,
+    computation: &DurableComputation,
+) -> Result<(), EngineStateError> {
+    let DurableComputation::Action {
+        computation_digest,
+        request,
+        plan,
+        ..
+    } = computation
+    else {
+        return Ok(());
+    };
+    let mismatch = EngineStateError::ActionComputationDigestMismatch { attempt };
+    let inputs = request.decoded_inputs().map_err(|_| mismatch.clone())?;
+    let derived = ActionComputationKey::from_parts(
+        plan.rule().identity(),
+        plan.rule().revision(),
+        &request.interface,
+        &inputs,
+        plan.spec_digest(),
+    );
+    if derived.digest == *computation_digest {
+        Ok(())
+    } else {
+        Err(mismatch)
+    }
+}
+
+/// The capability requirements a completed attempt records. An action carries
+/// what its own contract declares; a pure computation carries the union of what
+/// its dependencies carry, which is the propagation the arena does over live
+/// nodes and a hydrated node has no subgraph to redo (decision 0033).
+fn validate_capability_requirements(
+    attempt: DurableAttemptId,
+    computation: &DurableComputation,
+    terminal_state: &TerminalAttemptState,
+    dependency_capabilities: &[CapabilityRequirement],
+) -> Result<(), EngineStateError> {
+    let TerminalAttemptState::Complete(completion) = terminal_state else {
+        return Ok(());
+    };
+    let expected = match computation {
+        DurableComputation::Action { plan, .. } => {
+            canonical_capabilities(plan.spec().capabilities.iter())
+        }
+        DurableComputation::Pure(_) => canonical_capabilities(dependency_capabilities),
+    };
+    if expected == completion.capabilities {
+        Ok(())
+    } else {
+        Err(EngineStateError::CapabilityRequirementsMismatch { attempt })
     }
 }
 
@@ -291,24 +362,40 @@ fn validate_reuse_decision(
     computation: &DurableComputation,
     terminal_state: &TerminalAttemptState,
     first_non_reusable_dependency: Option<DurableAttemptId>,
+    first_action_dependency: Option<DurableAttemptId>,
 ) -> Result<(), EngineStateError> {
     let TerminalAttemptState::Complete(completion) = terminal_state else {
         return Ok(());
     };
-    let expected = match computation {
-        DurableComputation::Pure(_) => match first_non_reusable_dependency {
-            Some(attempt) => ExpectedReuseDecision::DependencyNotReusable { attempt },
-            None => ExpectedReuseDecision::Reusable,
-        },
-        DurableComputation::Action { .. } => ExpectedReuseDecision::ActionCachingDisabled,
+    // Refusing to index a result is always sound, so an action attempt may
+    // record `ActionCachingDisabled` whatever its dependencies say. The reason
+    // describes the engine that published it, and is meaningless on a pure
+    // attempt. Claiming reuse the dependencies do not support stays rejected.
+    if matches!(
+        (computation, &completion.reuse),
+        (
+            DurableComputation::Action { .. },
+            DurableReuseDecision::NotReusable(DurableReuseReason::ActionCachingDisabled)
+        )
+    ) {
+        return Ok(());
+    }
+    // A non-reusable dependency is reported ahead of a merely effectful one,
+    // since both stop reuse and the first is the more specific answer.
+    let expected = match (first_non_reusable_dependency, first_action_dependency) {
+        (Some(attempt), _) => ExpectedReuseDecision::DependencyNotReusable { attempt },
+        (None, Some(attempt)) => ExpectedReuseDecision::EffectfulDependency { attempt },
+        (None, None) => ExpectedReuseDecision::Reusable,
     };
     let matches_expected = match (&completion.reuse, expected) {
-        (DurableReuseDecision::Reusable, ExpectedReuseDecision::Reusable)
-        | (
-            DurableReuseDecision::NotReusable(DurableReuseReason::ActionCachingDisabled),
-            ExpectedReuseDecision::ActionCachingDisabled,
-        ) => true,
+        (DurableReuseDecision::Reusable, ExpectedReuseDecision::Reusable) => true,
         (
+            DurableReuseDecision::NotReusable(DurableReuseReason::EffectfulDependency {
+                attempt: actual,
+            }),
+            ExpectedReuseDecision::EffectfulDependency { attempt: expected },
+        )
+        | (
             DurableReuseDecision::NotReusable(DurableReuseReason::DependencyNotReusable {
                 attempt: actual,
             }),

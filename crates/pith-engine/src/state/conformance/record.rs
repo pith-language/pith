@@ -5,7 +5,7 @@
 //! identifiers. The same generated record has to reach both stores, and each
 //! names its own attempts.
 
-use pith_core::PureComputationKey;
+use pith_core::{CapabilityRequirement, PureComputationKey};
 use pith_ids::ContentId;
 
 use crate::graph::canonical_capabilities;
@@ -123,6 +123,36 @@ pub(super) fn materialize(
         .collect()
 }
 
+/// The capability requirements a completed record carries (decision 0033):
+/// an action's own declared contract, or the union of what the dependencies of
+/// a pure computation carry. Derived rather than generated, because shared
+/// validation rederives it the same way.
+pub(super) fn required_capabilities(
+    computation: &DurableComputation,
+    resolved: &[ResolvedDependency],
+    tracked: &[Tracked],
+) -> Box<[CapabilityRequirement]> {
+    match computation {
+        DurableComputation::Action { plan, .. } => {
+            canonical_capabilities(plan.spec().capabilities.iter())
+        }
+        DurableComputation::Pure(_) => canonical_capabilities(
+            resolved
+                .iter()
+                .filter_map(|dependency| match dependency {
+                    ResolvedDependency::Pure {
+                        tracked: position, ..
+                    }
+                    | ResolvedDependency::Action {
+                        tracked: position, ..
+                    } => tracked.get(*position),
+                    ResolvedDependency::Blob { .. } => None,
+                })
+                .flat_map(|entry| entry.capabilities.iter()),
+        ),
+    }
+}
+
 /// Shared validation compares capability-use edges against the executor report
 /// canonically, so they are derived from the report rather than generated.
 pub(super) fn with_capability_edges(
@@ -140,12 +170,13 @@ pub(super) fn with_capability_edges(
 #[derive(Clone, Copy)]
 pub(super) enum ReuseOutcome {
     Reusable,
-    NotReusable(NotReusable),
+    NotReusable(Refusal),
 }
 
 #[derive(Clone, Copy)]
-pub(super) enum NotReusable {
+pub(super) enum Refusal {
     ActionCachingDisabled,
+    EffectfulDependency { tracked: usize },
     DependencyNotReusable { tracked: usize },
 }
 
@@ -153,10 +184,18 @@ impl ReuseOutcome {
     pub(super) fn materialize(self, tracked: &[Tracked], space: Space) -> DurableReuseDecision {
         let reason = match self {
             Self::Reusable => return DurableReuseDecision::Reusable,
-            Self::NotReusable(NotReusable::ActionCachingDisabled) => {
+            Self::NotReusable(Refusal::ActionCachingDisabled) => {
                 DurableReuseReason::ActionCachingDisabled
             }
-            Self::NotReusable(NotReusable::DependencyNotReusable { tracked: position }) => {
+            Self::NotReusable(Refusal::EffectfulDependency { tracked: position }) => {
+                match tracked.get(position) {
+                    Some(entry) => DurableReuseReason::EffectfulDependency {
+                        attempt: space.identifier(entry),
+                    },
+                    None => return DurableReuseDecision::Reusable,
+                }
+            }
+            Self::NotReusable(Refusal::DependencyNotReusable { tracked: position }) => {
                 match tracked.get(position) {
                     Some(entry) => DurableReuseReason::DependencyNotReusable {
                         attempt: space.identifier(entry),
@@ -175,13 +214,6 @@ pub(super) fn reuse_decision(
     tracked: &[Tracked],
     corrupt: bool,
 ) -> ReuseOutcome {
-    if matches!(computation, DurableComputation::Action { .. }) {
-        return if corrupt {
-            ReuseOutcome::Reusable
-        } else {
-            ReuseOutcome::NotReusable(NotReusable::ActionCachingDisabled)
-        };
-    }
     let first_non_reusable = dependencies.iter().find_map(|dependency| {
         let position = match dependency {
             ResolvedDependency::Pure { tracked, .. } | ResolvedDependency::Action { tracked } => {
@@ -192,14 +224,31 @@ pub(super) fn reuse_decision(
         let entry = tracked.get(position)?;
         (entry.terminal != Some(TerminalKind::CompleteReusable)).then_some(position)
     });
-    let honest = match first_non_reusable {
-        Some(tracked) => ReuseOutcome::NotReusable(NotReusable::DependencyNotReusable { tracked }),
-        None => ReuseOutcome::Reusable,
+    let first_action = dependencies.iter().find_map(|dependency| match dependency {
+        ResolvedDependency::Action { tracked } => Some(*tracked),
+        ResolvedDependency::Pure { .. } | ResolvedDependency::Blob { .. } => None,
+    });
+    let honest = match (first_non_reusable, first_action) {
+        (Some(tracked), _) => ReuseOutcome::NotReusable(Refusal::DependencyNotReusable { tracked }),
+        (None, Some(tracked)) => {
+            ReuseOutcome::NotReusable(Refusal::EffectfulDependency { tracked })
+        }
+        (None, None) => ReuseOutcome::Reusable,
     };
     match (corrupt, honest) {
         (false, honest) => honest,
+        // Refusing to index is sound for an action, so the corrupt flag reaches
+        // a second valid decision here, which both adapters must accept. This
+        // is the generated path that records `ActionCachingDisabled`.
+        (true, ReuseOutcome::Reusable)
+            if matches!(computation, DurableComputation::Action { .. }) =>
+        {
+            ReuseOutcome::NotReusable(Refusal::ActionCachingDisabled)
+        }
         (true, ReuseOutcome::Reusable) => {
-            ReuseOutcome::NotReusable(NotReusable::ActionCachingDisabled)
+            ReuseOutcome::NotReusable(Refusal::DependencyNotReusable {
+                tracked: usize::MAX,
+            })
         }
         (true, ReuseOutcome::NotReusable(_)) => ReuseOutcome::Reusable,
     }

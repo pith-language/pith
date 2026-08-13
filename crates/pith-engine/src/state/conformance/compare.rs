@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use pith_core::PureComputationKey;
+use pith_core::{ActionComputationKey, PureComputationKey};
 
 use crate::MemoryEngineStateStore;
 use crate::state::{DurableAttempt, EngineStateError, EngineStateStore, InvalidationExplanation};
@@ -167,6 +167,28 @@ pub(super) fn compare_reads(
             &read(step, "explain_invalidation", || {
                 subject.explain_invalidation(key)
             })?,
+            &translation,
+        )?;
+    }
+
+    let mut action_keys: Vec<ActionComputationKey> = tracked
+        .iter()
+        .filter_map(|entry| entry.computation.action_key())
+        .collect();
+    action_keys.sort_by_key(|key| *key.digest.digest().as_bytes());
+    action_keys.dedup();
+    for key in action_keys {
+        let expected = read(step, "latest_completed_reusable_action_attempt", || {
+            model.latest_completed_reusable_action_attempt(key)
+        })?;
+        let actual = read(step, "latest_completed_reusable_action_attempt", || {
+            subject.latest_completed_reusable_action_attempt(key)
+        })?;
+        compare_records(
+            step,
+            "latest_completed_reusable_action_attempt",
+            expected.as_deref(),
+            actual.as_deref(),
             &translation,
         )?;
     }

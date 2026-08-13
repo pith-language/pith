@@ -12,8 +12,8 @@
 //! `fuzz_action_spec.rs`.
 
 use pith_core::{
-    ActionInput, ActionOutput, ActionSpec, CapabilityRequirement, Content, EnvironmentVariable,
-    NetworkPolicy, OutputKind, PlatformRequirement, Type, Value,
+    ActionInput, ActionOutput, ActionSpec, CanonicalDecodeError, CapabilityRequirement, Content,
+    EnvironmentVariable, NetworkPolicy, OutputKind, PlatformRequirement, Type, Value,
 };
 use pith_ids::ContentId;
 use proptest::prelude::*;
@@ -42,6 +42,19 @@ fn type_strategy() -> impl Strategy<Value = Type> {
     ]
 }
 
+/// Scalar-only generators used both directly and as the bounded
+/// representation inside a nominal value, so `value_strategy` stays finite.
+fn scalar_value_strategy() -> impl Strategy<Value = Value> {
+    prop_oneof![
+        Just(Value::Unit),
+        any::<bool>().prop_map(Value::Bool),
+        any::<i64>().prop_map(Value::Int),
+        bounded_string(24).prop_map(|s| Value::Text(s.into_boxed_str())),
+        bounded_bytes(32).prop_map(|b| Value::Bytes(b.into_boxed_slice())),
+        bounded_bytes(32).prop_map(|b| Value::Blob(ContentId::of_blob(&b))),
+    ]
+}
+
 fn value_strategy() -> impl Strategy<Value = Value> {
     prop_oneof![
         Just(Value::Unit),
@@ -50,6 +63,12 @@ fn value_strategy() -> impl Strategy<Value = Value> {
         bounded_string(24).prop_map(|s| Value::Text(s.into_boxed_str())),
         bounded_bytes(32).prop_map(|b| Value::Bytes(b.into_boxed_slice())),
         bounded_bytes(32).prop_map(|b| Value::Blob(ContentId::of_blob(&b))),
+        (bounded_string(16), scalar_value_strategy()).prop_map(|(name, representation)| {
+            Value::Nominal {
+                name: name.into_boxed_str(),
+                representation: Box::new(representation),
+            }
+        }),
     ]
 }
 
@@ -234,4 +253,62 @@ proptest! {
         let result = ActionSpec::decode_stored(&bytes);
         prop_assert!(result.is_ok() || result.is_err());
     }
+}
+
+/// The property above bounds its input at 256 bytes, which caps nominal nesting
+/// at about 28 levels and cannot reach the depth that overflows the stack. A
+/// stored row is not bounded that way: `Nominal` is the calculus's only
+/// recursive constructor, so a long run of its tag recurses once per tag, and
+/// before the depth limit a few megabytes of them aborted the process instead
+/// of returning an error. That is not a panic a property test can catch, since
+/// a stack overflow is not unwindable — it is the one failure mode the
+/// "decoding arbitrary bytes never panics" invariant at the top of this file
+/// most needs to exclude, so it is asserted directly.
+#[test]
+fn decoding_deeply_nested_nominal_values_fails_rather_than_overflowing() {
+    // Each level is the nominal tag plus an empty name: one recursion per nine
+    // bytes. Enough levels to have overflowed a real stack.
+    let mut encoded = vec![1u8];
+    for _ in 0..400_000 {
+        encoded.push(6);
+        encoded.extend_from_slice(&0u64.to_le_bytes());
+    }
+    encoded.push(0);
+
+    assert_eq!(
+        Value::decode_canonical(&encoded),
+        Err(CanonicalDecodeError::NestingTooDeep {
+            limit: pith_core::MAX_NOMINAL_NESTING,
+        })
+    );
+}
+
+/// The limit refuses a chain one level past it and accepts one at it, so it
+/// bounds rather than forbids.
+#[test]
+fn nesting_is_accepted_up_to_the_limit() {
+    fn nest(levels: u32) -> Value {
+        let mut value = Value::Unit;
+        for _ in 0..levels {
+            value = Value::Nominal {
+                name: "N".into(),
+                representation: Box::new(value),
+            };
+        }
+        value
+    }
+
+    let at_limit = nest(pith_core::MAX_NOMINAL_NESTING);
+    assert_eq!(
+        Value::decode_canonical(&at_limit.encode_canonical()),
+        Ok(at_limit)
+    );
+
+    let past_limit = nest(pith_core::MAX_NOMINAL_NESTING + 1);
+    assert_eq!(
+        Value::decode_canonical(&past_limit.encode_canonical()),
+        Err(CanonicalDecodeError::NestingTooDeep {
+            limit: pith_core::MAX_NOMINAL_NESTING,
+        })
+    );
 }

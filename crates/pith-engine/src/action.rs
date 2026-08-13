@@ -27,11 +27,26 @@ pub trait ActionRule: Send + Sync {
 /// Adapter boundary for local, remote, or test action execution.
 #[async_trait]
 pub trait Executor: Send + Sync {
+    /// Who this executor is and where it runs, before it has run anything.
+    ///
+    /// The engine asks this before consulting the reusable action index
+    /// (decision 0031): an attempt recorded by a different executor, or on a
+    /// different platform, does not answer this run's question. Every report
+    /// this executor produces carries the same two values.
+    fn identity(&self) -> ExecutorIdentity;
+
     /// Execute `invocation` and return captured output bytes and a report.
     ///
     /// # Errors
     /// Returns structured diagnostics when the action cannot be executed.
     async fn execute(&self, invocation: &ActionInvocation) -> PithResult<CapturedActionExecution>;
+}
+
+/// The executor half of an execution report, knowable before execution.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExecutorIdentity {
+    pub executor: Box<str>,
+    pub platform: ExecutionPlatform,
 }
 
 /// Least-authority input view passed to an executor for one action.
@@ -111,6 +126,26 @@ pub enum AccessVerification {
     Observed,
     /// The executor did not verify access.
     Unverified,
+}
+
+impl AccessVerification {
+    /// Whether this level is at least as strong a claim as `minimum`. Used to
+    /// decide whether a recorded attempt's confinement is good enough for a run
+    /// that demands more (decision 0031).
+    #[must_use]
+    pub const fn satisfies(self, minimum: Self) -> bool {
+        self.strength() >= minimum.strength()
+    }
+
+    /// Ordering of the three claims. The variants are declared strongest
+    /// first, so a derived `Ord` would mean the opposite of this.
+    const fn strength(self) -> u8 {
+        match self {
+            Self::Unverified => 0,
+            Self::Observed => 1,
+            Self::Prevented => 2,
+        }
+    }
 }
 
 /// Concrete platform selected by an executor for one execution.

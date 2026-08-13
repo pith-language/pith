@@ -2,17 +2,18 @@
 //! [`Value`] variants.
 
 use crate::{
-    Type, Value,
+    Interface, Type, Value,
     codec::CanonicalReader,
-    manifest::{encode_bytes, encode_str},
+    manifest::{encode_bytes, encode_length, encode_str},
 };
 
 const ENCODING_VERSION: u8 = 1;
 
 /// Discriminant tags for `Type`/`Value` variants. `Type` and `Value`
 /// deliberately share numbering for their overlapping variants so a value and
-/// its type encode under the same tag; `Nominal` is `Type`-only. These tags are
-/// already part of the stable pure-computation digest format.
+/// its type encode under the same tag; `Nominal` is shared: a nominal type
+/// encodes its name, a nominal value encodes its name and representation. These
+/// tags are already part of the stable pure-computation digest format.
 pub(crate) const TAG_UNIT: u8 = 0;
 pub(crate) const TAG_BOOL: u8 = 1;
 pub(crate) const TAG_INT: u8 = 2;
@@ -59,6 +60,14 @@ pub(crate) fn encode_value_payload(encoded: &mut Vec<u8>, value: &Value) {
             encoded.push(TAG_BLOB);
             encoded.extend_from_slice(value.digest().as_bytes());
         }
+        Value::Nominal {
+            name,
+            representation,
+        } => {
+            encoded.push(TAG_NOMINAL);
+            encode_str(encoded, name);
+            encode_value_payload(encoded, representation);
+        }
     }
 }
 
@@ -73,6 +82,7 @@ pub enum CanonicalDecodeError {
     TrailingBytes,
     InvalidUtf8,
     LengthOutOfRange { length: u64 },
+    NestingTooDeep { limit: u32 },
 }
 
 impl std::fmt::Display for CanonicalDecodeError {
@@ -100,6 +110,10 @@ impl std::fmt::Display for CanonicalDecodeError {
                 formatter,
                 "canonical encoding length {length} is not representable"
             ),
+            Self::NestingTooDeep { limit } => write!(
+                formatter,
+                "canonical encoding nests nominal values deeper than {limit}"
+            ),
         }
     }
 }
@@ -124,20 +138,60 @@ impl Type {
     pub fn decode_canonical(encoded: &[u8]) -> Result<Self, CanonicalDecodeError> {
         let mut decoder = CanonicalReader::new(encoded);
         decoder.read_version(ENCODING_VERSION)?;
-        let value_type = match decoder.read_byte()? {
-            TAG_UNIT => Self::Unit,
-            TAG_BOOL => Self::Bool,
-            TAG_INT => Self::Int,
-            TAG_TEXT => Self::Text,
-            TAG_BYTES => Self::Bytes,
-            TAG_BLOB => Self::Blob,
-            TAG_NOMINAL => Self::Nominal {
-                name: decoder.read_text()?.into(),
-            },
-            tag => return Err(CanonicalDecodeError::UnknownTypeTag { tag }),
-        };
+        let value_type = decode_type_payload(&mut decoder)?;
         decoder.finish()?;
         Ok(value_type)
+    }
+}
+
+pub(crate) fn decode_type_payload(
+    decoder: &mut CanonicalReader,
+) -> Result<Type, CanonicalDecodeError> {
+    Ok(match decoder.read_byte()? {
+        TAG_UNIT => Type::Unit,
+        TAG_BOOL => Type::Bool,
+        TAG_INT => Type::Int,
+        TAG_TEXT => Type::Text,
+        TAG_BYTES => Type::Bytes,
+        TAG_BLOB => Type::Blob,
+        TAG_NOMINAL => Type::Nominal {
+            name: decoder.read_text()?.into(),
+        },
+        tag => return Err(CanonicalDecodeError::UnknownTypeTag { tag }),
+    })
+}
+
+impl Interface {
+    /// Encode this interface in the current version of Pith's canonical wire
+    /// format.
+    ///
+    /// A durable action computation retains the interface its request was made
+    /// against (decision 0033), because revalidating a consumer's action edge
+    /// re-selects a rule from it.
+    #[must_use]
+    pub fn encode_canonical(&self) -> Vec<u8> {
+        let mut encoded = vec![ENCODING_VERSION];
+        encode_length(&mut encoded, self.inputs.len());
+        for input in &self.inputs {
+            encode_type_payload(&mut encoded, input);
+        }
+        encode_type_payload(&mut encoded, &self.output);
+        encoded
+    }
+
+    /// Decode one interface from Pith's versioned canonical wire format.
+    ///
+    /// # Errors
+    /// Returns an error for unsupported versions, unknown type tags, truncated
+    /// or trailing data, invalid UTF-8, and lengths not representable on the
+    /// current platform.
+    pub fn decode_canonical(encoded: &[u8]) -> Result<Self, CanonicalDecodeError> {
+        let mut decoder = CanonicalReader::new(encoded);
+        decoder.read_version(ENCODING_VERSION)?;
+        let inputs = decoder.read_sequence(decode_type_payload)?;
+        let output = decode_type_payload(&mut decoder)?;
+        decoder.finish()?;
+        Ok(Self { inputs, output })
     }
 }
 
@@ -159,17 +213,52 @@ impl Value {
     pub fn decode_canonical(encoded: &[u8]) -> Result<Self, CanonicalDecodeError> {
         let mut decoder = CanonicalReader::new(encoded);
         decoder.read_version(ENCODING_VERSION)?;
-        let value = match decoder.read_byte()? {
-            TAG_UNIT => Self::Unit,
-            TAG_BOOL => Self::Bool(decoder.read_bool()?),
-            TAG_INT => Self::Int(decoder.read_int()?),
-            TAG_TEXT => Self::Text(decoder.read_text()?.into()),
-            TAG_BYTES => Self::Bytes(decoder.read_bytes()?.into()),
-            TAG_BLOB => Self::Blob(decoder.read_content_id()?),
-            tag => return Err(CanonicalDecodeError::UnknownValueTag { tag }),
-        };
+        let value = decode_value_payload(&mut decoder, 0)?;
         decoder.finish()?;
         Ok(value)
+    }
+}
+
+/// How deeply a nominal value may nest inside another before decoding refuses.
+///
+/// `Nominal` is the only recursive constructor in the calculus, so it is the
+/// only thing that can make decoding recurse. The decoder reads bytes an
+/// adapter hands it, and those bytes are whatever the database holds: a row of
+/// repeated `TAG_NOMINAL` recurses once per byte and overflows the stack, which
+/// aborts the process rather than returning the adapter error decision 0024
+/// requires of corrupt state. Bounding the depth turns that into an ordinary
+/// decode failure.
+///
+/// The limit is far above any real value. A nominal over a nominal is legal and
+/// occasionally useful; a chain dozens deep is not something the calculus in
+/// decision 0026 describes writing.
+pub const MAX_NOMINAL_NESTING: u32 = 32;
+
+fn decode_value_payload(
+    decoder: &mut CanonicalReader,
+    depth: u32,
+) -> Result<Value, CanonicalDecodeError> {
+    match decoder.read_byte()? {
+        TAG_UNIT => Ok(Value::Unit),
+        TAG_BOOL => Ok(Value::Bool(decoder.read_bool()?)),
+        TAG_INT => Ok(Value::Int(decoder.read_int()?)),
+        TAG_TEXT => Ok(Value::Text(decoder.read_text()?.into())),
+        TAG_BYTES => Ok(Value::Bytes(decoder.read_bytes()?.into())),
+        TAG_BLOB => Ok(Value::Blob(decoder.read_content_id()?)),
+        TAG_NOMINAL => {
+            if depth >= MAX_NOMINAL_NESTING {
+                return Err(CanonicalDecodeError::NestingTooDeep {
+                    limit: MAX_NOMINAL_NESTING,
+                });
+            }
+            let name = decoder.read_text()?.into();
+            let representation = Box::new(decode_value_payload(decoder, depth.saturating_add(1))?);
+            Ok(Value::Nominal {
+                name,
+                representation,
+            })
+        }
+        tag => Err(CanonicalDecodeError::UnknownValueTag { tag }),
     }
 }
 
@@ -215,9 +304,20 @@ mod tests {
             Value::Text("Pith \u{03bb}".into()),
             Value::Bytes(vec![0x00, 0x80, 0xff].into_boxed_slice()),
             Value::Blob(fixture_content_id()),
+            Value::Nominal {
+                name: "Machine".into(),
+                representation: Box::new(Value::Text("id-7".into())),
+            },
+            Value::Nominal {
+                name: "Nested".into(),
+                representation: Box::new(Value::Nominal {
+                    name: "Inner".into(),
+                    representation: Box::new(Value::Int(1)),
+                }),
+            },
         ] {
             let encoded = value.encode_canonical();
-            assert_eq!(Value::decode_canonical(&encoded), Ok(value));
+            assert_eq!(Value::decode_canonical(&encoded), Ok(value.clone()));
         }
     }
 
@@ -245,7 +345,7 @@ mod tests {
 
     #[test]
     fn version_one_value_bytes_are_stable() {
-        let fixtures: [(Value, &[u8]); 7] = [
+        let fixtures: [(Value, &[u8]); 8] = [
             (Value::Unit, &[0x01, 0x00]),
             (Value::Bool(false), &[0x01, 0x01, 0x00]),
             (Value::Bool(true), &[0x01, 0x01, 0x01]),
@@ -273,6 +373,15 @@ mod tests {
                     0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
                 ],
             ),
+            (
+                Value::Nominal {
+                    name: "N".into(),
+                    representation: Box::new(Value::Unit),
+                },
+                &[
+                    0x01, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'N', 0x00,
+                ],
+            ),
         ];
 
         for (value, expected) in fixtures {
@@ -294,8 +403,8 @@ mod tests {
             Err(CanonicalDecodeError::UnknownTypeTag { tag: 0xff })
         );
         assert_eq!(
-            Value::decode_canonical(&[ENCODING_VERSION, TAG_NOMINAL]),
-            Err(CanonicalDecodeError::UnknownValueTag { tag: TAG_NOMINAL })
+            Value::decode_canonical(&[ENCODING_VERSION, 0xff]),
+            Err(CanonicalDecodeError::UnknownValueTag { tag: 0xff })
         );
     }
 
@@ -323,6 +432,10 @@ mod tests {
             Value::Text("x".into()),
             Value::Bytes(vec![1].into_boxed_slice()),
             Value::Blob(fixture_content_id()),
+            Value::Nominal {
+                name: "N".into(),
+                representation: Box::new(Value::Unit),
+            },
         ] {
             let mut encoded = value.encode_canonical();
             let _ = encoded.pop();

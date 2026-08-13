@@ -7,14 +7,14 @@ use std::process::Command;
 
 use diesel::Connection as _;
 use pith_core::{
-    ActionSpec, CapabilityRequirement, Content, Interface, Pure, PureComputationKey, Request, Rule,
-    RuleIdentity, RuleRevision, Type, Value,
+    ActionComputationKey, ActionSpec, CapabilityRequirement, Content, Interface, Pure,
+    PureComputationKey, Request, Rule, RuleIdentity, RuleRevision, Type, Value,
 };
 use pith_diag::{PithResult, Severity, Span, StableCode};
 use pith_engine::state::{
-    CompletedAttempt, DurableActionProvenance, DurableAttemptState, DurableComputation,
-    DurableDependency, DurableDiagnostic, DurableProvenance, DurableReuseDecision,
-    DurableReuseReason, DurableRule, EncodedValue, EngineStateStore, StoppedAttempt,
+    CompletedAttempt, DurableActionProvenance, DurableActionRequest, DurableAttemptState,
+    DurableComputation, DurableDependency, DurableDiagnostic, DurableProvenance,
+    DurableReuseDecision, DurableRule, EncodedValue, EngineStateStore, StoppedAttempt,
 };
 use pith_engine::{
     AccessVerification, ActionAuthorization, Engine, EvaluationSource, ExecutionPlatform,
@@ -200,6 +200,7 @@ fn a_dependency_changed_by_another_process_makes_the_consumer_dirty() {
             result: EncodedValue::from_value(&Value::Int(42)),
             provenance: DurableProvenance::Pure,
             reuse: DurableReuseDecision::Reusable,
+            capabilities: Box::new([]),
         };
         if let Err(error) = state.publish_complete(attempt, completion) {
             unreachable!("could not publish: {error}");
@@ -241,6 +242,7 @@ fn records_survive_closing_and_reopening_the_database() {
             result: EncodedValue::from_value(&Value::Int(5)),
             provenance: DurableProvenance::Pure,
             reuse: DurableReuseDecision::Reusable,
+            capabilities: Box::new([]),
         };
         if let Err(error) = state.publish_complete(attempt, completion) {
             unreachable!("could not publish: {error}");
@@ -263,10 +265,12 @@ fn records_survive_closing_and_reopening_the_database() {
 }
 
 #[test]
-fn an_interrupted_pending_attempt_is_marked_failed_on_reopen() {
-    // Decision 0024: after interruption, attempts left `Pending` are marked
-    // failed rather than resumed. Reopening the database performs that
-    // recovery, so a later reader finds a failed attempt, not a pending one.
+fn an_interrupted_pending_attempt_is_cancelled_on_reopen() {
+    // Decision 0024: after interruption, attempts left `Pending` are given a
+    // terminal state rather than resumed. Reopening the database performs that
+    // recovery, so a later reader finds a terminated attempt, not a pending
+    // one. The state is `Cancelled` because the attempt was stopped, not
+    // broken; 0022 added that distinction after 0024 was written.
     let scratch = Scratch::new("pending");
     let database = scratch.database();
 
@@ -296,15 +300,15 @@ fn an_interrupted_pending_attempt_is_marked_failed_on_reopen() {
         Ok(None) => unreachable!("the interrupted attempt vanished"),
         Err(error) => unreachable!("the interrupted attempt is unreadable: {error}"),
     };
-    let DurableAttemptState::Failed(failure) = &restored.state else {
-        unreachable!("the interrupted attempt was not marked failed");
+    let DurableAttemptState::Cancelled(stopped) = &restored.state else {
+        unreachable!("the interrupted attempt was not marked cancelled");
     };
     assert!(
-        failure
+        stopped
             .diagnostics
             .iter()
             .any(|diagnostic| { diagnostic.code == pith_diag::StableCode(1214) }),
-        "the failure does not carry an interrupted diagnostic"
+        "the cancellation does not carry an interrupted diagnostic"
     );
     // An interrupted attempt never produced a result, so it is not reusable.
     assert_eq!(
@@ -340,8 +344,30 @@ fn an_action_attempt_round_trips_its_plan_and_provenance() {
         Ok(plan) => plan,
         Err(error) => unreachable!("the fixture contract is invalid: {error:?}"),
     };
+    let interface = Interface {
+        inputs: [Type::Text].into(),
+        output: Type::Blob,
+    };
+    let request_inputs = [Value::Text("a.c".into())];
+    // Derived, not invented: publication rebuilds the digest from the retained
+    // request and rejects a record whose stored one disagrees (decision 0033).
+    let key = ActionComputationKey::from_parts(
+        identity,
+        revision,
+        &interface,
+        &request_inputs,
+        plan.spec_digest(),
+    );
     let computation = DurableComputation::Action {
-        plan: plan.clone(),
+        computation_digest: key.digest,
+        request: DurableActionRequest {
+            interface,
+            inputs: request_inputs
+                .iter()
+                .map(EncodedValue::from_value)
+                .collect(),
+        },
+        plan: Box::new(plan.clone()),
         authorization: ActionAuthorization::Allowed {
             policy: "allow-all-actions".into(),
         },
@@ -370,10 +396,11 @@ fn an_action_attempt_round_trips_its_plan_and_provenance() {
                     content: Content::Blob(content_id(2)),
                 }]
                 .into(),
-                capabilities_used: [capability].into(),
+                capabilities_used: [capability.clone()].into(),
             },
         }),
-        reuse: DurableReuseDecision::NotReusable(DurableReuseReason::ActionCachingDisabled),
+        reuse: DurableReuseDecision::Reusable,
+        capabilities: [capability].into(),
     };
     if let Err(error) = state.publish_complete(attempt, completion.clone()) {
         unreachable!("could not publish the action attempt: {error}");
@@ -390,8 +417,12 @@ fn an_action_attempt_round_trips_its_plan_and_provenance() {
         DurableAttemptState::Complete(completion),
         "an action attempt did not survive its round trip through sqlite"
     );
-    // An action is never reusable, so it never enters the reusable index.
-    assert!(state.pending_attempts().is_ok());
+    // A reusable action is findable under its own key (decision 0031).
+    match state.latest_completed_reusable_action_attempt(key) {
+        Ok(Some(found)) => assert_eq!(found.id, attempt),
+        Ok(None) => unreachable!("the reusable action index did not answer for its own key"),
+        Err(error) => unreachable!("the reusable action index is unreadable: {error}"),
+    }
 }
 
 #[test]
@@ -459,6 +490,7 @@ fn an_incompatible_database_is_moved_aside_and_rebuilt() {
             result: EncodedValue::from_value(&Value::Int(3)),
             provenance: DurableProvenance::Pure,
             reuse: DurableReuseDecision::Reusable,
+            capabilities: Box::new([]),
         };
         if let Err(error) = state.publish_complete(attempt, completion) {
             unreachable!("could not publish: {error}");
@@ -499,6 +531,37 @@ fn an_empty_database_adopts_the_current_versions() {
     let scratch = Scratch::new("fresh");
     let state = open(&scratch.database());
     assert_eq!(state.versions(), SqliteEngineStateStore::current_versions());
+}
+
+/// Decision 0027 asks for incremental auto-vacuum at creation time, because
+/// sqlite ignores the pragma once the database holds tables and recovering it
+/// then costs a full `VACUUM`. The failure is silent, so it is asserted rather
+/// than assumed.
+#[test]
+fn a_fresh_database_is_created_with_incremental_auto_vacuum() {
+    use diesel::RunQueryDsl as _;
+
+    let scratch = Scratch::new("auto-vacuum");
+    let database = scratch.database();
+    let _state = open(&database);
+
+    let mut connection = match diesel::SqliteConnection::establish(database_url(&database)) {
+        Ok(connection) => connection,
+        Err(error) => unreachable!("could not reopen the database: {error}"),
+    };
+    let mode: i32 = match diesel::select(diesel::dsl::sql::<diesel::sql_types::Integer>(
+        "(select * from pragma_auto_vacuum)",
+    ))
+    .get_result(&mut connection)
+    {
+        Ok(mode) => mode,
+        Err(error) => unreachable!("could not read the auto_vacuum mode: {error}"),
+    };
+    // 0 is NONE, 1 is FULL, 2 is INCREMENTAL.
+    assert_eq!(
+        mode, 2,
+        "the database was not created with incremental auto-vacuum"
+    );
 }
 
 fn content_id(seed: u8) -> ContentId {

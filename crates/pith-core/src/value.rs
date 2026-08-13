@@ -21,6 +21,14 @@ pub enum Value {
     /// A reference to content-addressed storage by identity. Carries no bytes;
     /// a rule that needs the bytes requests them via the engine.
     Blob(ContentId),
+    /// A value of a declared nominal type (decision 0026). The name identifies
+    /// the declaration; the representation is the underlying value. A nominal
+    /// value is not interchangeable with its representation: a `MachineId` over
+    /// `Text` is a distinct type from `Text`.
+    Nominal {
+        name: Box<str>,
+        representation: Box<Value>,
+    },
 }
 
 impl Value {
@@ -32,12 +40,15 @@ impl Value {
             Self::Text(_) => Type::Text,
             Self::Bytes(_) => Type::Bytes,
             Self::Blob(_) => Type::Blob,
+            Self::Nominal { name, .. } => Type::Nominal { name: name.clone() },
         }
     }
 
     /// Whether this value inhabits `expected`. Equivalent to
     /// `self.value_type() == *expected` but avoids allocating the intermediate
     /// `Type`; use it at result-type checks where only the comparison matters.
+    /// A nominal value matches its own name only; its representation does not
+    /// match the representation's type (decision 0026).
     #[must_use]
     pub fn is_type(&self, expected: &Type) -> bool {
         match (self, expected) {
@@ -47,12 +58,19 @@ impl Value {
             | (Self::Text(_), Type::Text)
             | (Self::Bytes(_), Type::Bytes)
             | (Self::Blob(_), Type::Blob) => true,
+            (
+                Self::Nominal { name, .. },
+                Type::Nominal {
+                    name: expected_name,
+                },
+            ) => name == expected_name,
             (Self::Unit, _)
             | (Self::Bool(_), _)
             | (Self::Int(_), _)
             | (Self::Text(_), _)
             | (Self::Bytes(_), _)
-            | (Self::Blob(_), _) => false,
+            | (Self::Blob(_), _)
+            | (Self::Nominal { .. }, _) => false,
         }
     }
 
@@ -64,6 +82,10 @@ impl Value {
             Value::Text(s) => s.as_ref().to_string(),
             Value::Bytes(b) => format!("bytes({})", b.len()),
             Value::Blob(id) => format!("blob({})", hex_digest(id)),
+            Value::Nominal {
+                name,
+                representation,
+            } => format!("{}({})", name, representation.describe()),
         }
     }
 }
@@ -89,6 +111,13 @@ impl From<&Value> for ValueRepr {
             },
             Value::Blob(id) => ValueRepr::Blob {
                 digest: hex_digest(id).into_boxed_str(),
+            },
+            Value::Nominal {
+                name,
+                representation,
+            } => ValueRepr::Nominal {
+                name: name.clone(),
+                representation: Box::new(representation.as_ref().into()),
             },
         }
     }
@@ -146,6 +175,10 @@ mod tests {
             Value::Text("x".into()),
             Value::Bytes(vec![0, 1, 2].into_boxed_slice()),
             Value::Blob(ContentId::of_blob(b"y")),
+            Value::Nominal {
+                name: "MachineId".into(),
+                representation: Box::new(Value::Text("m-1".into())),
+            },
         ] {
             let repr: ValueRepr = (&v).into();
             let _ = format!("{repr:?}");
@@ -197,6 +230,15 @@ mod tests {
             (Value::Text("x".into()), Type::Text),
             (Value::Bytes(b"y".to_vec().into_boxed_slice()), Type::Bytes),
             (Value::Blob(ContentId::of_blob(b"z")), Type::Blob),
+            (
+                Value::Nominal {
+                    name: "MachineId".into(),
+                    representation: Box::new(Value::Text("m-1".into())),
+                },
+                Type::Nominal {
+                    name: "MachineId".into(),
+                },
+            ),
         ];
         let all_types = [
             Type::Unit,
@@ -205,6 +247,9 @@ mod tests {
             Type::Text,
             Type::Bytes,
             Type::Blob,
+            Type::Nominal {
+                name: "MachineId".into(),
+            },
         ];
         for (value, own_type) in &values {
             for candidate in &all_types {
@@ -217,5 +262,23 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn nominal_value_is_not_interchangeable_with_its_representation() {
+        // Decision 0026: a nominal value matches its own name only. It does not
+        // match the representation's type, and a different nominal name is a
+        // different type.
+        let machine_id = Value::Nominal {
+            name: "MachineId".into(),
+            representation: Box::new(Value::Text("m-1".into())),
+        };
+        assert!(machine_id.is_type(&Type::Nominal {
+            name: "MachineId".into(),
+        }));
+        assert!(!machine_id.is_type(&Type::Text));
+        assert!(!machine_id.is_type(&Type::Nominal {
+            name: "OtherId".into(),
+        }));
     }
 }

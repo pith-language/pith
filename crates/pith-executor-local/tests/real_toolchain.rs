@@ -334,8 +334,38 @@ fn a_c_compiler_produces_an_object_file_through_the_engine() {
     );
 }
 
+/// Determinism is a separate claim from reuse (decision 0014), and reuse hides
+/// it: a served result is identical for being the same bytes, and says nothing
+/// about what the tool would produce a second time. Switching caching off makes
+/// the compiler run twice, which is what the claim needs.
 #[test]
-fn the_same_compile_runs_again_because_action_caching_is_disabled() {
+fn the_same_compile_run_twice_produces_identical_objects() {
+    let Some(compiler) = HostCompiler::discover() else {
+        return;
+    };
+    let root = match tempfile::tempdir() {
+        Ok(root) => root,
+        Err(error) => unreachable!("could not create a content-store root: {error:?}"),
+    };
+    let (mut engine, request) = compile_engine(root.path(), &compiler);
+    engine.set_action_caching(false);
+
+    let first = compile(&mut engine, &request);
+    let second = compile(&mut engine, &request);
+
+    assert_eq!(
+        action_computations(&engine),
+        2,
+        "caching is off, so both compiles should have run"
+    );
+    assert_eq!(
+        first, second,
+        "two runs of the same tool over the same input produced different objects"
+    );
+}
+
+#[test]
+fn the_same_compile_is_served_from_the_reusable_index() {
     let Some(compiler) = HostCompiler::discover() else {
         return;
     };
@@ -348,20 +378,15 @@ fn the_same_compile_runs_again_because_action_caching_is_disabled() {
     let first = compile(&mut engine, &request);
     let second = compile(&mut engine, &request);
 
-    // Nothing about the request, the source, or the compiler changed, and the
-    // action ran anyway: `finish_action` records every action
-    // `NotReusable(ActionCachingDisabled)` until its identity covers the
-    // resolved platform and complete execution semantics (M-2). This is the
-    // measurement of that gap — a fine-grained rebuild cannot be demonstrated
-    // while it holds, and this assertion flips when caching lands.
+    // Nothing about the request, the source, or the compiler changed, so the
+    // second run plans the same contract and computes the same action key.
     assert_eq!(
         action_computations(&engine),
-        2,
-        "the second run should have reused the first compile, and did not"
+        1,
+        "the second run compiled again instead of reusing the first attempt"
     );
-    // The compile is at least deterministic: two runs of the same tool over the
-    // same input in different scratch roots produced the same bytes, so the
-    // reuse that caching would give is reuse of an identical result rather than
-    // a merely equivalent one.
-    assert_eq!(first, second, "the same compile produced different objects");
+    assert_eq!(
+        first, second,
+        "the reused result is not the object the first compile produced"
+    );
 }

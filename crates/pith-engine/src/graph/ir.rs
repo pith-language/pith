@@ -2,7 +2,8 @@
 //! evaluator's private frame. Pure data; no engine logic.
 
 use pith_core::{
-    Action, ActionSpec, CapabilityRequirement, Interface, Pure, Request, RuleId, Value,
+    Action, ActionComputationKey, ActionSpec, CapabilityRequirement, Interface, Pure, Request,
+    RuleId, Value,
 };
 use pith_diag::{Diag, PithResult};
 use pith_ids::{ActionSpecDigest, ComputationId, ContentId};
@@ -121,6 +122,8 @@ pub struct ActionPlan {
 
 /// Declared contract, authorization, and executor reports retained as action provenance.
 pub struct ActionRecord {
+    /// The reusable index key for this rule application (decision 0031).
+    pub key: ActionComputationKey,
     pub spec_digest: ActionSpecDigest,
     pub spec: ActionSpec,
     pub authorization: crate::ActionAuthorization,
@@ -180,10 +183,25 @@ pub enum ReuseDecision {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReuseReason {
+    /// This engine has action caching switched off, so the completed action was
+    /// not indexed (decision 0031).
     ActionCachingDisabled,
-    DependencyPending { computation: ComputationId },
-    DependencyNotReusable { computation: ComputationId },
-    DependencyMissing { computation: ComputationId },
+    /// A pure computation depends on an action. A pure computation key does not
+    /// carry the identity of the action rule that will be selected, so a result
+    /// recorded before that rule was revised could be served after it
+    /// (decision 0031).
+    EffectfulDependency {
+        computation: ComputationId,
+    },
+    DependencyPending {
+        computation: ComputationId,
+    },
+    DependencyNotReusable {
+        computation: ComputationId,
+    },
+    DependencyMissing {
+        computation: ComputationId,
+    },
 }
 
 /// One rule application in the in-memory graph.
