@@ -7,7 +7,8 @@
 //! types decision 0026 names and the action cache 0031 serves from.
 //!
 //! A caller discovers a [`Toolchain`] before the run (decision 0007 forbids
-//! discovery during evaluation), registers xylem's rules on an [`Engine`], and
+//! discovery during evaluation), registers xylem's rules on an
+//! [`Engine`](pith_engine::Engine), and
 //! drives the graph with the request constructors in [`types`].
 
 pub mod build;
