@@ -15,8 +15,8 @@ use std::process::Command;
 
 use pith_core::{
     Action, ActionInput, ActionOutput, ActionProgram, ActionSpec, Content, EnvironmentVariable,
-    Interface, NetworkPolicy, OutputKind, PlatformRequirement, Pure, Request, Rule, RuleIdentity,
-    RuleRevision, Type, Value,
+    ExitStatusContract, Interface, NetworkPolicy, OutputKind, PlatformRequirement, Pure, Request,
+    Rule, RuleIdentity, RuleRevision, Type, Value,
 };
 use pith_diag::{Diag, DiagnosticSink, PithResult, Severity, Span, StableCode};
 use pith_engine::{
@@ -159,6 +159,7 @@ impl ActionRule for CompileAction {
             },
             capabilities: Box::new([]),
             network: NetworkPolicy::Deny,
+            exit_status: ExitStatusContract::SuccessRequired,
         })
     }
 

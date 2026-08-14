@@ -313,6 +313,7 @@ fn empty_execution() -> CapturedActionExecution {
             outputs: Box::new([]),
             capabilities_used: Box::new([]),
         },
+        exit: None,
     }
 }
 

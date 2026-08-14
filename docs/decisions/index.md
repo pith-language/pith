@@ -63,6 +63,7 @@ when an accepted decision changes, a new record supersedes it. the old record st
 - [0034: header dependencies are discovered by an action and resolved at plan](0034-discovered-header-dependencies.md)
 - [0035: a link is over a list of objects](0035-link-over-a-list-of-objects.md)
 - [0036: a program the graph produced enters an action as content](0036-produced-program-as-content.md)
+- [0037: a contract declares whether an exit status is a failure or a result](0037-exit-status-as-a-declared-outcome.md)
 
 note: 0013 amends 0005 to add a fifth identity type. 0005 stands; the amendment is recorded in 0013.
 
@@ -93,3 +94,5 @@ note: 0034 exercises the license 0007 grants for discovered dependencies inside 
 note: 0035 closes the fixed-arity-two item the link rule's doc comment carried since M-3 began, over the `List` constructor 0034 landed. 0026 stands; the element type keeps nominal identity inside the list, which is what preserves 0015's unambiguous selection now that the link input is no longer positional.
 
 note: 0036 amends 0030 by covering the case 0030's argument does not reach. 0030 stands: a toolchain is not one file, so it enters a contract as a host path and a declared closure. a build product is one file the engine owns, and 0005's separation of content identity from external identity is what makes that a typed sum rather than a path whose meaning depends on its first character.
+
+note: 0037 extends the contract 0003 makes visible to cover how an action ends. it exists because 0032 bars the wrapper that would otherwise answer the question: an action is one invocation of one tool, so what a nonzero exit means has to be declared rather than arranged around.

@@ -231,7 +231,7 @@ impl Engine {
             Ok(execution) => execution,
             Err(diagnostics) => return Err(self.fail_action(computation, diagnostics)),
         };
-        let imported = self.import_execution(&captured.report);
+        let imported = self.import_execution(&captured.report, captured.exit);
         if let Err(diagnostics) = self.record_executor_report(computation, captured.report) {
             return Err(self.fail_action(computation, diagnostics));
         }
@@ -458,6 +458,7 @@ impl Engine {
     fn import_execution(
         &mut self,
         report: &crate::CapturedExecutionReport,
+        exit: Option<crate::ActionExit>,
     ) -> PithResult<ActionExecution> {
         let mut outputs = Vec::with_capacity(report.outputs.len());
         for output in &report.outputs {
@@ -475,6 +476,7 @@ impl Engine {
                 outputs: outputs.into_boxed_slice(),
                 capabilities_used: report.capabilities_used.clone(),
             },
+            exit,
         })
     }
 

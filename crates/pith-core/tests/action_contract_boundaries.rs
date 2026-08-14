@@ -7,7 +7,7 @@
 
 use pith_core::{
     ActionInput, ActionOutput, ActionProgram, ActionSpec, CapabilityRequirement, Content,
-    EnvironmentVariable, NetworkPolicy, OutputKind, PlatformRequirement,
+    EnvironmentVariable, ExitStatusContract, NetworkPolicy, OutputKind, PlatformRequirement,
 };
 use pith_ids::ContentId;
 
@@ -67,6 +67,7 @@ fn valid_spec() -> ActionSpec {
         network: NetworkPolicy::AllowHosts(
             ["registry.example".into(), "mirror.example".into()].into(),
         ),
+        exit_status: ExitStatusContract::SuccessRequired,
     }
 }
 

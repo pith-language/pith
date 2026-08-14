@@ -253,6 +253,7 @@ impl Executor for FixtureExecutor {
                 .into(),
                 capabilities_used: Box::new([]),
             },
+            exit: None,
         })
     }
 }
@@ -298,6 +299,7 @@ impl Executor for UndeclaredCapabilityExecutor {
                 }]
                 .into(),
             },
+            exit: None,
         })
     }
 }

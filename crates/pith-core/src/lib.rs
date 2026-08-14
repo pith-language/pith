@@ -15,8 +15,8 @@ mod value_codec;
 
 pub use action::{
     ActionInput, ActionInputContent, ActionOutput, ActionProgram, ActionSpec,
-    CapabilityRequirement, Content, EnvironmentVariable, NetworkPolicy, OutputKind,
-    PlatformRequirement,
+    CapabilityRequirement, Content, EnvironmentVariable, ExitStatusContract, NetworkPolicy,
+    OutputKind, PlatformRequirement,
 };
 pub use effect::{Action, EffectCategory, Mutation, Observation, Opaque, Pure};
 pub use pith_ids::{RuleIdentity, RuleRevision};

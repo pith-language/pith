@@ -10,7 +10,7 @@
 
 use pith_core::{
     ActionInput, ActionOutput, ActionProgram, ActionSpec, Content, EnvironmentVariable,
-    NetworkPolicy, OutputKind, PlatformRequirement,
+    ExitStatusContract, NetworkPolicy, OutputKind, PlatformRequirement,
 };
 use pith_engine::{
     AccessVerification, ActionInvocation, Executor, MaterializedBlob, MaterializedContent,
@@ -52,6 +52,7 @@ fn invocation(script: &str, operand: &str) -> ActionInvocation {
         platform: PlatformRequirement::Any,
         capabilities: [].into(),
         network: NetworkPolicy::Deny,
+        exit_status: ExitStatusContract::SuccessRequired,
     };
     ActionInvocation {
         spec,

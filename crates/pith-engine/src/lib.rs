@@ -12,12 +12,12 @@ pub mod runtime;
 pub mod state;
 
 pub use action::{
-    AccessVerification, ActionExecution, ActionInvocation, ActionRule, CapturedActionExecution,
-    CapturedExecutionReport, CapturedFileContent, CapturedOutput, CapturedOutputContent,
-    CapturedTree, CapturedTreeEntry, CapturedTreeEntryContent, ExecutionPlatform, ExecutionReport,
-    Executor, ExecutorIdentity, MaterializedActionInput, MaterializedBlob, MaterializedContent,
-    MaterializedFileContent, MaterializedTree, MaterializedTreeEntry, MaterializedTreeEntryContent,
-    ProducedOutput,
+    AccessVerification, ActionExecution, ActionExit, ActionInvocation, ActionRule,
+    CapturedActionExecution, CapturedExecutionReport, CapturedFileContent, CapturedOutput,
+    CapturedOutputContent, CapturedTree, CapturedTreeEntry, CapturedTreeEntryContent,
+    ExecutionPlatform, ExecutionReport, Executor, ExecutorIdentity, MaterializedActionInput,
+    MaterializedBlob, MaterializedContent, MaterializedFileContent, MaterializedTree,
+    MaterializedTreeEntry, MaterializedTreeEntryContent, ProducedOutput,
 };
 pub use cancel::{CancelSignal, NeverCancelled};
 pub use graph::{

@@ -11,10 +11,10 @@ use std::path::Path;
 
 use pith_core::{
     ActionInput, ActionOutput, ActionProgram, ActionSpec, CapabilityRequirement, Content,
-    EnvironmentVariable, NetworkPolicy, OutputKind, PlatformRequirement,
+    EnvironmentVariable, ExitStatusContract, NetworkPolicy, OutputKind, PlatformRequirement,
 };
 use pith_engine::{
-    ActionInvocation, CapturedOutputContent, CapturedTreeEntryContent, Executor,
+    ActionExit, ActionInvocation, CapturedOutputContent, CapturedTreeEntryContent, Executor,
     MaterializedActionInput, MaterializedBlob, MaterializedContent, MaterializedFileContent,
     MaterializedTree, MaterializedTreeEntryContent,
 };
@@ -55,6 +55,7 @@ fn invocation(script: &str) -> Option<ActionInvocation> {
             platform: PlatformRequirement::Any,
             capabilities: Box::new([]),
             network: NetworkPolicy::Deny,
+            exit_status: ExitStatusContract::SuccessRequired,
         },
         inputs: Box::new([]),
         program: None,
@@ -548,6 +549,7 @@ async fn an_executable_path_that_does_not_exist_is_a_spawn_error() {
             platform: PlatformRequirement::Any,
             capabilities: Box::new([]),
             network: NetworkPolicy::Deny,
+            exit_status: ExitStatusContract::SuccessRequired,
         },
         inputs: Box::new([]),
         program: None,
@@ -576,6 +578,50 @@ async fn nonzero_exit_status_is_reported_numerically() {
             .as_ref()
             .is_some_and(|sink| first_diagnostic_message(sink).contains("status 37"))
     );
+}
+
+#[tokio::test]
+async fn a_reported_contract_survives_a_nonzero_exit_and_carries_the_status() {
+    // The same script that fails the action above. Under `Reported` the status
+    // is the result rather than a failure, which is what lets a rule read a
+    // verdict out of a program that exits nonzero to express one (decision 0037).
+    let Some(mut invocation) = invocation("exit 37") else {
+        return;
+    };
+    invocation.spec.exit_status = ExitStatusContract::Reported;
+
+    let captured = LocalExecutor::new()
+        .execute(&invocation)
+        .await
+        .expect("a reported nonzero exit is not a failure");
+
+    assert_eq!(captured.exit, Some(ActionExit::Code(37)));
+}
+
+/// A crashed program and a program reporting failures are different facts, and a
+/// rule turning either into a verdict has to tell them apart, so the reported
+/// status keeps the signal separate from the code.
+///
+/// The signal here is `SIGSYS` from the seccomp filter, because `kill(2)` is
+/// outside the allowlist and the shell has no other way to signal itself. That
+/// makes the case worth asserting for a second reason: under `Reported` a
+/// sandbox kill stops being an executor error and becomes a fact the rule reads,
+/// so a rule that treats every signal as a passing test would call a confinement
+/// violation a success. 0037's "unresolved" section carries that.
+#[cfg(target_arch = "x86_64")]
+#[tokio::test]
+async fn a_reported_contract_distinguishes_a_signal_from_a_status() {
+    let Some(mut invocation) = invocation("kill -0 $$") else {
+        return;
+    };
+    invocation.spec.exit_status = ExitStatusContract::Reported;
+
+    let captured = LocalExecutor::new()
+        .execute(&invocation)
+        .await
+        .expect("a reported signal death is not an executor failure");
+
+    assert_eq!(captured.exit, Some(ActionExit::Signal(libc::SIGSYS)));
 }
 
 #[tokio::test]

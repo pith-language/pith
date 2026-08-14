@@ -13,8 +13,8 @@
 
 use pith_core::{
     ActionInput, ActionOutput, ActionProgram, ActionSpec, CanonicalDecodeError,
-    CapabilityRequirement, Content, EnvironmentVariable, NetworkPolicy, OutputKind,
-    PlatformRequirement, Type, Value,
+    CapabilityRequirement, Content, EnvironmentVariable, ExitStatusContract, NetworkPolicy,
+    OutputKind, PlatformRequirement, Type, Value,
 };
 use pith_ids::ContentId;
 use proptest::prelude::*;
@@ -192,6 +192,10 @@ fn network_strategy() -> impl Strategy<Value = NetworkPolicy> {
 fn spec_strategy() -> impl Strategy<Value = ActionSpec> {
     (
         program_strategy(),
+        prop_oneof![
+            Just(ExitStatusContract::SuccessRequired),
+            Just(ExitStatusContract::Reported),
+        ],
         proptest::collection::vec(bounded_string(16), 0..4),
         proptest::collection::vec(action_input_strategy(), 0..4),
         proptest::collection::vec(action_output_strategy(), 0..4),
@@ -203,6 +207,7 @@ fn spec_strategy() -> impl Strategy<Value = ActionSpec> {
         .prop_map(
             |(
                 executable,
+                exit_status,
                 arguments,
                 inputs,
                 outputs,
@@ -213,6 +218,7 @@ fn spec_strategy() -> impl Strategy<Value = ActionSpec> {
             )| {
                 ActionSpec {
                     executable,
+                    exit_status,
                     toolchain: Box::new([]),
                     arguments: arguments
                         .into_iter()

@@ -9,10 +9,10 @@ use std::path::PathBuf;
 use std::process::Stdio;
 
 use async_trait::async_trait;
-use pith_core::{NetworkPolicy, PlatformRequirement};
+use pith_core::{ExitStatusContract, NetworkPolicy, PlatformRequirement};
 use pith_engine::{
-    AccessVerification, ActionInvocation, CapturedActionExecution, CapturedExecutionReport,
-    ExecutionPlatform, Executor, ExecutorIdentity,
+    AccessVerification, ActionExit, ActionInvocation, CapturedActionExecution,
+    CapturedExecutionReport, ExecutionPlatform, Executor, ExecutorIdentity,
 };
 use tokio::process::Command;
 
@@ -262,7 +262,12 @@ async fn run_in_scratch(
     register_sandbox_hook(&mut command, paths);
 
     let output = run_child(&mut command).await?;
-    if !output.status.success() {
+    // Under `SuccessRequired` a nonzero exit means the declared outputs were
+    // never written, so there is nothing to capture and the action failed. Under
+    // `Reported` the status is the result, and the rule reads it (decision 0037).
+    if invocation.spec.exit_status == ExitStatusContract::SuccessRequired
+        && !output.status.success()
+    {
         return Err(crate::executor_diag(format!(
             "the action failed with {}{}",
             exit_description(&output.status),
@@ -285,5 +290,19 @@ async fn run_in_scratch(
             // declared set.
             capabilities_used: invocation.spec.capabilities.clone(),
         },
+        exit: observed_exit(&output.status),
     })
+}
+
+/// How the child stopped, as an [`ActionExit`]. A status carrying neither a code
+/// nor a signal is not something this platform produces, and reporting `None`
+/// says so rather than inventing a zero.
+fn observed_exit(status: &std::process::ExitStatus) -> Option<ActionExit> {
+    use std::os::unix::process::ExitStatusExt;
+
+    if let Some(code) = status.code() {
+        Some(ActionExit::Code(code))
+    } else {
+        status.signal().map(ActionExit::Signal)
+    }
 }

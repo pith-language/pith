@@ -9,8 +9,8 @@
 //! [`ActionSpecDigest`]: pith_ids::ActionSpecDigest
 
 use crate::action::{
-    ActionInput, ActionOutput, ActionProgram, ActionSpec, EnvironmentVariable, NetworkPolicy,
-    PlatformRequirement,
+    ActionInput, ActionOutput, ActionProgram, ActionSpec, EnvironmentVariable, ExitStatusContract,
+    NetworkPolicy, PlatformRequirement,
 };
 use crate::codec::{
     CanonicalDecodeError, CanonicalReader, encode_capabilities, encode_content, encode_sequence,
@@ -18,12 +18,16 @@ use crate::codec::{
 };
 
 /// Version 2 carries the program as a tagged sum so a contract can name content
-/// the graph produced as well as a host path (decision 0036). The storage format
-/// is versioned independently of the digest manifest for this reason (0024).
+/// the graph produced as well as a host path (decision 0036), and the exit-status
+/// contract a rule reads a verdict from (decision 0037). The storage format is
+/// versioned independently of the digest manifest for this reason (0024).
 const ENCODING_VERSION: u8 = 2;
 
 const TAG_PROGRAM_HOST_PATH: u8 = 0;
 const TAG_PROGRAM_CONTENT: u8 = 1;
+
+const TAG_EXIT_SUCCESS_REQUIRED: u8 = 0;
+const TAG_EXIT_REPORTED: u8 = 1;
 
 const TAG_PLATFORM_ANY: u8 = 0;
 const TAG_PLATFORM_EXACT: u8 = 1;
@@ -68,6 +72,10 @@ impl ActionSpec {
         encode_platform(&mut encoded, &self.platform);
         encode_capabilities(&mut encoded, &self.capabilities);
         encode_network(&mut encoded, &self.network);
+        encoded.push(match self.exit_status {
+            ExitStatusContract::SuccessRequired => TAG_EXIT_SUCCESS_REQUIRED,
+            ExitStatusContract::Reported => TAG_EXIT_REPORTED,
+        });
         encoded
     }
 
@@ -118,6 +126,11 @@ fn read_spec(reader: &mut CanonicalReader<'_>) -> Result<ActionSpec, CanonicalDe
     let platform = read_platform(reader)?;
     let capabilities = read_capabilities(reader)?;
     let network = read_network(reader)?;
+    let exit_status = match reader.read_byte()? {
+        TAG_EXIT_SUCCESS_REQUIRED => ExitStatusContract::SuccessRequired,
+        TAG_EXIT_REPORTED => ExitStatusContract::Reported,
+        tag => return Err(CanonicalDecodeError::UnknownValueTag { tag }),
+    };
     Ok(ActionSpec {
         executable,
         toolchain,
@@ -128,6 +141,7 @@ fn read_spec(reader: &mut CanonicalReader<'_>) -> Result<ActionSpec, CanonicalDe
         platform,
         capabilities,
         network,
+        exit_status,
     })
 }
 
@@ -232,6 +246,7 @@ mod tests {
             }]
             .into(),
             network: NetworkPolicy::AllowHosts(["example.test".into()].into()),
+            exit_status: ExitStatusContract::SuccessRequired,
         }
     }
 

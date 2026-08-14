@@ -116,11 +116,34 @@ pub type MaterializedTreeEntryContent =
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CapturedActionExecution {
     pub report: CapturedExecutionReport,
+    /// How the program ended, when the executor observed it. `None` from an
+    /// executor that does not report one.
+    pub exit: Option<ActionExit>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActionExecution {
     pub report: ExecutionReport,
+    /// How the program ended, carried through from the executor so
+    /// [`ActionRule::complete`] can read a verdict out of it under
+    /// `ExitStatusContract::Reported`.
+    ///
+    /// This rides on the execution envelope rather than on [`ExecutionReport`],
+    /// which is the part that persists: `complete` runs only when an action
+    /// actually executes, and what a later run is served is the value it
+    /// derived. The status is the raw material, and the typed result is the
+    /// record.
+    pub exit: Option<ActionExit>,
+}
+
+/// How a child stopped. A signal is not an exit code, and a rule reading a
+/// verdict needs to tell "the test reported failures" from "the test crashed".
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ActionExit {
+    /// The program returned this status from `main` or `exit`.
+    Code(i32),
+    /// The program was killed by this signal and returned no status.
+    Signal(i32),
 }
 
 /// Access-control mechanism reported by an executor.

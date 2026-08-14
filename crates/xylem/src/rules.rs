@@ -17,8 +17,8 @@
 
 use pith_core::{
     Action, ActionInput, ActionOutput, ActionProgram, ActionSpec, Content, EnvironmentVariable,
-    NetworkPolicy, OutputKind, PlatformRequirement, Pure, Request, Rule, RuleIdentity,
-    RuleRevision, Value,
+    ExitStatusContract, NetworkPolicy, OutputKind, PlatformRequirement, Pure, Request, Rule,
+    RuleIdentity, RuleRevision, Value,
 };
 use pith_diag::{Diag, DiagnosticSink, PithResult, Severity, Span, StableCode};
 use pith_engine::{
@@ -208,6 +208,7 @@ impl ActionRule for HeaderDiscoveryAction {
             },
             capabilities: Box::new([]),
             network: NetworkPolicy::Deny,
+            exit_status: ExitStatusContract::SuccessRequired,
         })
     }
 
@@ -318,6 +319,7 @@ impl ActionRule for CompileAction {
             },
             capabilities: Box::new([]),
             network: NetworkPolicy::Deny,
+            exit_status: ExitStatusContract::SuccessRequired,
         })
     }
 
@@ -412,6 +414,7 @@ impl ActionRule for LinkAction {
             },
             capabilities: Box::new([]),
             network: NetworkPolicy::Deny,
+            exit_status: ExitStatusContract::SuccessRequired,
         })
     }
 

@@ -15,7 +15,7 @@
 
 use pith_core::{
     ActionInput, ActionOutput, ActionProgram, ActionSpec, CapabilityRequirement, Content,
-    EnvironmentVariable, NetworkPolicy, OutputKind, PlatformRequirement,
+    EnvironmentVariable, ExitStatusContract, NetworkPolicy, OutputKind, PlatformRequirement,
 };
 use pith_ids::ContentId;
 use proptest::prelude::*;
@@ -198,6 +198,7 @@ fn build_spec(
         platform,
         capabilities: cap_vec.into_boxed_slice(),
         network,
+        exit_status: ExitStatusContract::SuccessRequired,
     }
 }
 

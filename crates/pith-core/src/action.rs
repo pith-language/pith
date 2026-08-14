@@ -13,6 +13,8 @@ use crate::manifest::{encode_length, encode_str};
 /// renumbering invalidates every persisted `ActionSpecDigest`.
 const TAG_PROGRAM_HOST_PATH: u8 = 0;
 const TAG_PROGRAM_CONTENT: u8 = 1;
+const TAG_EXIT_SUCCESS_REQUIRED: u8 = 0;
+const TAG_EXIT_REPORTED: u8 = 1;
 const TAG_PLATFORM_ANY: u8 = 0;
 const TAG_PLATFORM_EXACT: u8 = 1;
 const TAG_NETWORK_DENY: u8 = 0;
@@ -104,6 +106,25 @@ pub enum NetworkPolicy {
     AllowAll,
 }
 
+/// How an action's exit status is read.
+///
+/// A compiler that exits nonzero wrote no object, so the action failed and there
+/// is nothing worth keeping. A test that exits nonzero produced a verdict, and a
+/// verdict is a result. Nothing about the two invocations tells them apart from
+/// outside, and decision 0032 bars wrapping the program in something that could
+/// report the difference, so the contract states it. Decision 0003 puts what an
+/// action claims in the contract; this is that rule applied to how it ends.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ExitStatusContract {
+    /// A nonzero exit, or a death by signal, fails the action. The default, and
+    /// the right reading for every tool whose output is its purpose.
+    SuccessRequired,
+    /// However the program ended is a fact the rule reads. The action succeeds
+    /// as long as the executor ran it and captured what was declared, and
+    /// `ActionRule::complete` decides what the status means.
+    Reported,
+}
+
 /// The program an action runs.
 ///
 /// The two variants are two of the identity kinds decision 0005 separates, and
@@ -170,6 +191,8 @@ pub struct ActionSpec {
     pub platform: PlatformRequirement,
     pub capabilities: Box<[CapabilityRequirement]>,
     pub network: NetworkPolicy,
+    /// How the program's exit status is read. See [`ExitStatusContract`].
+    pub exit_status: ExitStatusContract,
 }
 
 impl ActionSpec {
@@ -197,6 +220,7 @@ impl ActionSpec {
             platform: PlatformRequirement::Any,
             capabilities: Box::new([]),
             network: NetworkPolicy::Deny,
+            exit_status: ExitStatusContract::SuccessRequired,
         }
     }
 
@@ -451,6 +475,11 @@ impl ActionSpec {
             }
             NetworkPolicy::AllowAll => manifest.push(TAG_NETWORK_ALLOW_ALL),
         }
+
+        manifest.push(match self.exit_status {
+            ExitStatusContract::SuccessRequired => TAG_EXIT_SUCCESS_REQUIRED,
+            ExitStatusContract::Reported => TAG_EXIT_REPORTED,
+        });
 
         manifest
     }

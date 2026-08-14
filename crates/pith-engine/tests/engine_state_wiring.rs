@@ -246,6 +246,7 @@ impl Executor for FixtureExecutor {
                 .into(),
                 capabilities_used: [action_capability()].into(),
             },
+            exit: None,
         })
     }
 }
