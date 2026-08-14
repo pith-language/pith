@@ -290,10 +290,17 @@ pub fn publish_reusable(
     computation: i64,
     attempt: DurableAttemptId,
 ) -> Result<(), Failure> {
-    // The database's publication sequence. Allocated under the store's write
-    // lock inside the caller's transaction, so `max + 1` cannot race, and it
-    // moves on re-publication of the same computation so the pure key's
-    // upsert re-orders too.
+    // The database's publication sequence, allocated as `max + 1` and moved
+    // on re-publication of the same computation so the pure key's upsert
+    // re-orders too. The read-then-insert is safe only under decision 0024's
+    // single-writer arrangement: within a process the store's mutex
+    // serializes writers, and across processes 0024 gives the writable
+    // database one owner at a time — a writer hands the file over by
+    // exiting, never by running beside another writer. Concurrent
+    // multi-process writes are not a supported mode; enabling them needs
+    // SQLite's own guarantee here, not this process's mutex: the allocation
+    // folded into the inserting statement, or a unique index over the
+    // sequence catching a collision.
     let published: i64 = reusable_index::table
         .select(diesel::dsl::max(reusable_index::published))
         .first::<Option<i64>>(connection)?
