@@ -21,9 +21,10 @@
 
 use std::cmp::Ordering;
 
-use pith_core::{RecordField, SumConstructor, Type, Value};
+use pith_core::{SumConstructor, Type, Value};
 use pith_diag::PithResult;
 
+use crate::codec::{field_of, record_type, record_value, sum_value, text_list, text_of};
 use crate::diag;
 use crate::identity::{DomainIdentity, PackageIdentity, VersionScheme};
 
@@ -76,24 +77,19 @@ impl Bound {
         let Value::Record(fields) = value else {
             return Err(bound_error(value));
         };
-        let mut version = None;
-        let mut inclusive = None;
-        for field in fields.iter() {
-            match field.name.as_ref() {
-                VERSION => {
-                    version = Some(text_of(&field.payload, VERSION)?);
-                }
-                INCLUSIVE => {
-                    let Value::Bool(flag) = field.payload else {
-                        return Err(bound_error(value));
-                    };
-                    inclusive = Some(flag);
-                }
-                _ => {}
-            }
-        }
+        let version = field_of(fields, VERSION)
+            .map(|payload| text_of(payload, VERSION))
+            .transpose()?;
+        let inclusive = match field_of(fields, INCLUSIVE) {
+            Some(Value::Bool(flag)) => Some(flag),
+            Some(other) => return Err(bound_error(other)),
+            None => None,
+        };
         match (version, inclusive) {
-            (Some(version), Some(inclusive)) => Ok(Self { version, inclusive }),
+            (Some(version), Some(inclusive)) => Ok(Self {
+                version,
+                inclusive: *inclusive,
+            }),
             _ => Err(bound_error(value)),
         }
     }
@@ -104,32 +100,6 @@ fn bound_error(found: &Value) -> pith_diag::DiagnosticSink {
         "expected a range bound record {{version, inclusive}}, found {}",
         found.describe()
     ))
-}
-
-fn text_of(value: &Value, field: &str) -> PithResult<Box<str>> {
-    match value {
-        Value::Text(text) => Ok(text.clone()),
-        _ => Err(diag(format!(
-            "the {field} field carried {} rather than a text",
-            value.describe()
-        ))),
-    }
-}
-
-fn record_value<const N: usize>(fields: [(&str, Value); N]) -> Value {
-    let record = Value::record(fields.map(|(name, payload)| RecordField {
-        name: name.into(),
-        payload,
-    }));
-    record.unwrap_or_else(|error| unreachable!("{error}"))
-}
-
-fn record_type<const N: usize>(fields: [(&str, Type); N]) -> Type {
-    let record = Type::record(fields.map(|(name, payload)| RecordField {
-        name: name.into(),
-        payload,
-    }));
-    record.unwrap_or_else(|error| unreachable!("{error}"))
 }
 
 fn bound_type() -> Type {
@@ -185,11 +155,12 @@ impl Range {
     #[must_use]
     pub fn to_value(&self) -> Value {
         match self {
-            Self::Any => sum_value(ANY, None),
-            Self::Exactly(version) => sum_value(EXACTLY, Some(Value::Text(version.clone()))),
-            Self::AtLeast(bound) => sum_value(AT_LEAST, Some(bound.to_value())),
-            Self::AtMost(bound) => sum_value(AT_MOST, Some(bound.to_value())),
+            Self::Any => sum_value(RANGE, ANY, None),
+            Self::Exactly(version) => sum_value(RANGE, EXACTLY, Some(Value::Text(version.clone()))),
+            Self::AtLeast(bound) => sum_value(RANGE, AT_LEAST, Some(bound.to_value())),
+            Self::AtMost(bound) => sum_value(RANGE, AT_MOST, Some(bound.to_value())),
             Self::Between { lower, upper } => sum_value(
+                RANGE,
                 BETWEEN,
                 Some(record_value([
                     (LOWER, lower.to_value()),
@@ -247,15 +218,8 @@ impl Range {
                         payload.describe()
                     )));
                 };
-                let mut lower = None;
-                let mut upper = None;
-                for field in fields.iter() {
-                    match field.name.as_ref() {
-                        LOWER => lower = Some(Bound::from_value(&field.payload)?),
-                        UPPER => upper = Some(Bound::from_value(&field.payload)?),
-                        _ => {}
-                    }
-                }
+                let lower = field_of(fields, LOWER).map(Bound::from_value).transpose()?;
+                let upper = field_of(fields, UPPER).map(Bound::from_value).transpose()?;
                 match (lower, upper) {
                     (Some(lower), Some(upper)) => Ok(Self::Between { lower, upper }),
                     _ => Err(diag(format!(
@@ -344,14 +308,6 @@ impl Range {
             Self::AtMost(bound) => (None, Some(bound.clone())),
             Self::Between { lower, upper } => (Some(lower.clone()), Some(upper.clone())),
         }
-    }
-}
-
-fn sum_value(constructor: &str, payload: Option<Value>) -> Value {
-    Value::Sum {
-        type_name: RANGE.into(),
-        constructor: constructor.into(),
-        payload: payload.map(Box::new),
     }
 }
 
@@ -570,20 +526,6 @@ pub fn constraint_set_value(constraints: &[Constraint]) -> Value {
     entries.sort_by(|left, right| left.0.cmp(&right.0));
     entries.dedup_by(|front, back| front.0 == back.0);
     Value::List(entries.into_iter().map(|(_, value)| value).collect())
-}
-
-fn text_list(value: &Value, field: &str) -> PithResult<Vec<Box<str>>> {
-    let Value::List(elements) = value else {
-        return Err(diag(format!(
-            "the {field} field carried {} rather than a list",
-            value.describe()
-        )));
-    };
-    let mut texts = Vec::with_capacity(elements.len());
-    for element in elements.iter() {
-        texts.push(text_of(element, field)?);
-    }
-    Ok(texts)
 }
 
 #[cfg(test)]

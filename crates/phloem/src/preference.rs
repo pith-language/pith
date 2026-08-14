@@ -15,6 +15,7 @@ use std::cmp::Ordering;
 use pith_core::{SumConstructor, Type, Value};
 use pith_diag::PithResult;
 
+use crate::codec::sum_value;
 use crate::diag;
 use crate::identity::VersionScheme;
 
@@ -62,14 +63,11 @@ pub fn preference_list_type() -> Type {
 impl Preference {
     #[must_use]
     pub fn to_value(self) -> Value {
-        Value::Sum {
-            type_name: PREFERENCE.into(),
-            constructor: match self {
-                Self::Newest => NEWEST.into(),
-                Self::Oldest => OLDEST.into(),
-            },
-            payload: None,
-        }
+        let constructor = match self {
+            Self::Newest => NEWEST,
+            Self::Oldest => OLDEST,
+        };
+        sum_value(PREFERENCE, constructor, None)
     }
 
     /// Read one preference from a value.

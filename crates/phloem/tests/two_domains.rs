@@ -12,14 +12,11 @@
 use phloem::constraint::{Bound, Range};
 use phloem::identity::{Debian, NumericSegments, VersionScheme};
 
-/// Assert the whole algebra over one declared ordering, with expectations
-/// derived from position: the i-th spelling of `ordered` is the i-th version
-/// under the scheme's own comparison, and every assertion speaks in those
-/// positions.
-fn algebra_over_the_ordering(scheme: &dyn VersionScheme, ordered: &[&str]) {
+/// `at least` admits exactly the suffix of the ordering, edge included: the
+/// i-th spelling of `ordered` is the i-th version under the scheme's own
+/// comparison, and every assertion speaks in those positions.
+fn at_least_admits_exactly_the_suffix(scheme: &dyn VersionScheme, ordered: &[&str]) {
     for (lower_index, lower) in ordered.iter().enumerate() {
-        // `at least` admits exactly the suffix of the ordering, edge
-        // included.
         let at_least = Range::AtLeast(Bound::new(*lower, true));
         for (candidate_index, candidate) in ordered.iter().enumerate() {
             assert_eq!(
@@ -28,8 +25,12 @@ fn algebra_over_the_ordering(scheme: &dyn VersionScheme, ordered: &[&str]) {
                 "at least {lower} misclassified {candidate}",
             );
         }
+    }
+}
 
-        // `exactly` admits one version, and its negation admits every other.
+/// `exactly` admits one version, and its negation admits every other.
+fn exactly_admits_one_version_and_negates_the_rest(scheme: &dyn VersionScheme, ordered: &[&str]) {
+    for (lower_index, lower) in ordered.iter().enumerate() {
         let exactly = Range::Exactly((*lower).into());
         let negated = exactly.negate();
         for (candidate_index, candidate) in ordered.iter().enumerate() {
@@ -44,7 +45,14 @@ fn algebra_over_the_ordering(scheme: &dyn VersionScheme, ordered: &[&str]) {
             );
         }
     }
+}
 
+/// `between` admits exactly the interval, and its negation is the complement:
+/// everything the interval excludes, and nothing it includes.
+fn between_admits_the_interval_and_negates_the_complement(
+    scheme: &dyn VersionScheme,
+    ordered: &[&str],
+) {
     for (lower_index, lower) in ordered.iter().enumerate() {
         for (upper_index, upper) in ordered.iter().enumerate() {
             // A between with a crossed edge pair is not constructed by
@@ -64,8 +72,6 @@ fn algebra_over_the_ordering(scheme: &dyn VersionScheme, ordered: &[&str]) {
                     inside,
                     "between {lower} and {upper} misclassified {candidate}",
                 );
-                // Negation is the complement: everything the interval
-                // excludes, and nothing it includes.
                 assert_eq!(
                     between
                         .negate()
@@ -76,9 +82,10 @@ fn algebra_over_the_ordering(scheme: &dyn VersionScheme, ordered: &[&str]) {
             }
         }
     }
+}
 
-    // Intersection is the shared interval, and disjoint edges are the empty
-    // set.
+/// Intersection is the shared interval, and disjoint edges are the empty set.
+fn intersection_is_the_shared_interval(scheme: &dyn VersionScheme, ordered: &[&str]) {
     for (lower_index, lower) in ordered.iter().enumerate() {
         for (upper_index, upper) in ordered.iter().enumerate() {
             let at_least = Range::AtLeast(Bound::new(*lower, true));
@@ -107,10 +114,12 @@ fn algebra_over_the_ordering(scheme: &dyn VersionScheme, ordered: &[&str]) {
 fn the_algebra_holds_over_a_semver_shaped_domain() {
     // Ascending under NumericSegments; the spellings are semver-shaped and
     // the ordering numeric, so "1.10" sits above "1.2".
-    algebra_over_the_ordering(
-        &NumericSegments,
-        &["0.9", "1.0", "1.2", "1.10", "2.0", "2.0.1"],
-    );
+    let scheme = &NumericSegments as &dyn VersionScheme;
+    let ordered = &["0.9", "1.0", "1.2", "1.10", "2.0", "2.0.1"];
+    at_least_admits_exactly_the_suffix(scheme, ordered);
+    exactly_admits_one_version_and_negates_the_rest(scheme, ordered);
+    between_admits_the_interval_and_negates_the_complement(scheme, ordered);
+    intersection_is_the_shared_interval(scheme, ordered);
 }
 
 #[test]
@@ -119,12 +128,14 @@ fn the_algebra_holds_over_a_debian_shaped_domain() {
     // `+dfsg` above the bare version, and the epoch dominates everything —
     // the three facts that make this ordering a different animal from the
     // semver-shaped one above.
-    algebra_over_the_ordering(
-        &Debian,
-        &[
-            "0.9~rc1", "0.9", "1.0~rc1", "1.0", "1.0+dfsg", "2.0", "1:0.1", "1:0.2",
-        ],
-    );
+    let scheme = &Debian as &dyn VersionScheme;
+    let ordered = &[
+        "0.9~rc1", "0.9", "1.0~rc1", "1.0", "1.0+dfsg", "2.0", "1:0.1", "1:0.2",
+    ];
+    at_least_admits_exactly_the_suffix(scheme, ordered);
+    exactly_admits_one_version_and_negates_the_rest(scheme, ordered);
+    between_admits_the_interval_and_negates_the_complement(scheme, ordered);
+    intersection_is_the_shared_interval(scheme, ordered);
 }
 
 #[test]

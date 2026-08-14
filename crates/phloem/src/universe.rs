@@ -13,6 +13,7 @@ use pith_core::{Type, Value};
 use pith_diag::PithResult;
 use pith_ids::{ContentDigest, ContentId};
 
+use crate::codec::{field_of, record_type, record_value, text_list, text_of};
 use crate::constraint::{Range, range_type};
 use crate::diag;
 use crate::identity::{DomainIdentity, PackageIdentity};
@@ -53,58 +54,26 @@ pub struct Candidate {
 /// The requirement record type: `{domain, package, range, features}`.
 #[must_use]
 pub fn requirement_type() -> Type {
-    let record = pith_core::Type::record([
-        pith_core::RecordField {
-            name: DOMAIN.into(),
-            payload: Type::Text,
-        },
-        pith_core::RecordField {
-            name: PACKAGE.into(),
-            payload: Type::Text,
-        },
-        pith_core::RecordField {
-            name: crate::constraint::RANGE_FIELD.into(),
-            payload: range_type(),
-        },
-        pith_core::RecordField {
-            name: FEATURES.into(),
-            payload: Type::List(Box::new(Type::Text)),
-        },
-    ]);
-    record.unwrap_or_else(|error| unreachable!("{error}"))
+    record_type([
+        (DOMAIN, Type::Text),
+        (PACKAGE, Type::Text),
+        (crate::constraint::RANGE_FIELD, range_type()),
+        (FEATURES, Type::List(Box::new(Type::Text))),
+    ])
 }
 
 /// The candidate record type: `{domain, package, version, features,
 /// provenance, requires}`.
 #[must_use]
 pub fn candidate_type() -> Type {
-    let record = pith_core::Type::record([
-        pith_core::RecordField {
-            name: DOMAIN.into(),
-            payload: Type::Text,
-        },
-        pith_core::RecordField {
-            name: PACKAGE.into(),
-            payload: Type::Text,
-        },
-        pith_core::RecordField {
-            name: VERSION.into(),
-            payload: Type::Text,
-        },
-        pith_core::RecordField {
-            name: FEATURES.into(),
-            payload: Type::List(Box::new(Type::Text)),
-        },
-        pith_core::RecordField {
-            name: PROVENANCE.into(),
-            payload: source_type(),
-        },
-        pith_core::RecordField {
-            name: REQUIRES.into(),
-            payload: Type::List(Box::new(requirement_type())),
-        },
-    ]);
-    record.unwrap_or_else(|error| unreachable!("{error}"))
+    record_type([
+        (DOMAIN, Type::Text),
+        (PACKAGE, Type::Text),
+        (VERSION, Type::Text),
+        (FEATURES, Type::List(Box::new(Type::Text))),
+        (PROVENANCE, source_type()),
+        (REQUIRES, Type::List(Box::new(requirement_type()))),
+    ])
 }
 
 /// The candidate-universe type: a canonically sorted list of candidates.
@@ -116,38 +85,25 @@ pub fn universe_type() -> Type {
 impl Candidate {
     #[must_use]
     pub fn to_value(&self) -> Value {
-        let record = Value::record([
-            pith_core::RecordField {
-                name: DOMAIN.into(),
-                payload: Value::Text(self.identity.domain().as_str().into()),
-            },
-            pith_core::RecordField {
-                name: PACKAGE.into(),
-                payload: Value::Text(self.identity.name().into()),
-            },
-            pith_core::RecordField {
-                name: VERSION.into(),
-                payload: Value::Text(self.version.clone()),
-            },
-            pith_core::RecordField {
-                name: FEATURES.into(),
-                payload: Value::List(
+        record_value([
+            (DOMAIN, Value::Text(self.identity.domain().as_str().into())),
+            (PACKAGE, Value::Text(self.identity.name().into())),
+            (VERSION, Value::Text(self.version.clone())),
+            (
+                FEATURES,
+                Value::List(
                     self.features
                         .iter()
                         .map(|feature| Value::Text(feature.clone()))
                         .collect(),
                 ),
-            },
-            pith_core::RecordField {
-                name: PROVENANCE.into(),
-                payload: self.provenance.to_value(),
-            },
-            pith_core::RecordField {
-                name: REQUIRES.into(),
-                payload: Value::List(self.requires.iter().map(requirement_value).collect()),
-            },
-        ]);
-        record.unwrap_or_else(|error| unreachable!("{error}"))
+            ),
+            (PROVENANCE, self.provenance.to_value()),
+            (
+                REQUIRES,
+                Value::List(self.requires.iter().map(requirement_value).collect()),
+            ),
+        ])
     }
 
     /// Read a candidate from a value.
@@ -168,41 +124,26 @@ impl Candidate {
                 value.describe()
             )));
         };
-        let mut domain = None;
-        let mut package = None;
-        let mut version = None;
-        let mut features = Vec::new();
-        let mut provenance = None;
+        let domain = field_of(fields, DOMAIN)
+            .map(|payload| text_of(payload, DOMAIN))
+            .transpose()?;
+        let package = field_of(fields, PACKAGE)
+            .map(|payload| text_of(payload, PACKAGE))
+            .transpose()?;
+        let version = field_of(fields, VERSION)
+            .map(|payload| text_of(payload, VERSION))
+            .transpose()?;
+        let features = match field_of(fields, FEATURES) {
+            Some(payload) => text_list(payload, FEATURES)?,
+            None => Vec::new(),
+        };
+        let provenance = field_of(fields, PROVENANCE)
+            .map(SourceBinding::from_value)
+            .transpose()?;
         let mut requires = Vec::new();
-        for field in fields.iter() {
-            match field.name.as_ref() {
-                DOMAIN => domain = Some(text(&field.payload, DOMAIN)?),
-                PACKAGE => package = Some(text(&field.payload, PACKAGE)?),
-                VERSION => version = Some(text(&field.payload, VERSION)?),
-                FEATURES => {
-                    let Value::List(elements) = &field.payload else {
-                        return Err(diag(format!(
-                            "the {FEATURES} field carried {} rather than a list",
-                            field.payload.describe()
-                        )));
-                    };
-                    for element in elements.iter() {
-                        features.push(text(element, FEATURES)?);
-                    }
-                }
-                PROVENANCE => provenance = Some(SourceBinding::from_value(&field.payload)?),
-                REQUIRES => {
-                    let Value::List(elements) = &field.payload else {
-                        return Err(diag(format!(
-                            "the {REQUIRES} field carried {} rather than a list",
-                            field.payload.describe()
-                        )));
-                    };
-                    for element in elements.iter() {
-                        requires.push(read_requirement(element)?);
-                    }
-                }
-                _ => {}
+        if let Some(Value::List(entries)) = field_of(fields, REQUIRES) {
+            for entry in entries.iter() {
+                requires.push(read_requirement(entry)?);
             }
         }
         let (Some(domain), Some(package), Some(version), Some(provenance)) =
@@ -223,31 +164,24 @@ impl Candidate {
 }
 
 fn requirement_value(requirement: &Requirement) -> Value {
-    let record = Value::record([
-        pith_core::RecordField {
-            name: DOMAIN.into(),
-            payload: Value::Text(requirement.subject.domain().as_str().into()),
-        },
-        pith_core::RecordField {
-            name: PACKAGE.into(),
-            payload: Value::Text(requirement.subject.name().into()),
-        },
-        pith_core::RecordField {
-            name: crate::constraint::RANGE_FIELD.into(),
-            payload: requirement.range.to_value(),
-        },
-        pith_core::RecordField {
-            name: FEATURES.into(),
-            payload: Value::List(
+    record_value([
+        (
+            DOMAIN,
+            Value::Text(requirement.subject.domain().as_str().into()),
+        ),
+        (PACKAGE, Value::Text(requirement.subject.name().into())),
+        (crate::constraint::RANGE_FIELD, requirement.range.to_value()),
+        (
+            FEATURES,
+            Value::List(
                 requirement
                     .features
                     .iter()
                     .map(|feature| Value::Text(feature.clone()))
                     .collect(),
             ),
-        },
-    ]);
-    record.unwrap_or_else(|error| unreachable!("{error}"))
+        ),
+    ])
 }
 
 fn read_requirement(value: &Value) -> PithResult<Requirement> {
@@ -263,29 +197,19 @@ fn read_requirement(value: &Value) -> PithResult<Requirement> {
             value.describe()
         )));
     };
-    let mut domain = None;
-    let mut package = None;
-    let mut range = None;
-    let mut features = Vec::new();
-    for field in fields.iter() {
-        match field.name.as_ref() {
-            DOMAIN => domain = Some(text(&field.payload, DOMAIN)?),
-            PACKAGE => package = Some(text(&field.payload, PACKAGE)?),
-            crate::constraint::RANGE_FIELD => range = Some(Range::from_value(&field.payload)?),
-            FEATURES => {
-                let Value::List(elements) = &field.payload else {
-                    return Err(diag(format!(
-                        "the {FEATURES} field carried {} rather than a list",
-                        field.payload.describe()
-                    )));
-                };
-                for element in elements.iter() {
-                    features.push(text(element, FEATURES)?);
-                }
-            }
-            _ => {}
-        }
-    }
+    let domain = field_of(fields, DOMAIN)
+        .map(|payload| text_of(payload, DOMAIN))
+        .transpose()?;
+    let package = field_of(fields, PACKAGE)
+        .map(|payload| text_of(payload, PACKAGE))
+        .transpose()?;
+    let range = field_of(fields, crate::constraint::RANGE_FIELD)
+        .map(Range::from_value)
+        .transpose()?;
+    let features = match field_of(fields, FEATURES) {
+        Some(payload) => text_list(payload, FEATURES)?,
+        None => Vec::new(),
+    };
     let (Some(domain), Some(package), Some(range)) = (domain, package, range) else {
         return Err(diag(
             "the requirement record was missing a domain, package, or range field",
@@ -296,16 +220,6 @@ fn read_requirement(value: &Value) -> PithResult<Requirement> {
         range,
         features: features.into(),
     })
-}
-
-fn text(value: &Value, field: &str) -> PithResult<Box<str>> {
-    match value {
-        Value::Text(text) => Ok(text.clone()),
-        _ => Err(diag(format!(
-            "the {field} field carried {} rather than a text",
-            value.describe()
-        ))),
-    }
 }
 
 /// The candidate universe: every candidate a resolution may choose among,

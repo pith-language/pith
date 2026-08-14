@@ -21,6 +21,9 @@ use pith_core::{Interface, Pure, RecordField, Request, SumConstructor, Type, Val
 use pith_diag::{PithResult, Span};
 use pith_ids::ContentId;
 
+use crate::codec::{
+    blob_field, field_of, int_field, record_type, record_value, sum_value, text_field,
+};
 use crate::constraint::{Constraint, constraint_set_type, constraint_set_value};
 use crate::identity::{DomainIdentity, PackageIdentity, version_scheme_type};
 use crate::preference::{Preference, PreferenceList, preference_list_type, preference_list_value};
@@ -204,22 +207,6 @@ pub fn resolve_request(
     )
 }
 
-fn record_type<const N: usize>(fields: [(&str, Type); N]) -> Type {
-    let record = Type::record(fields.map(|(name, payload)| RecordField {
-        name: name.into(),
-        payload,
-    }));
-    record.unwrap_or_else(|error| unreachable!("{error}"))
-}
-
-fn record_value<const N: usize>(fields: [(&str, Value); N]) -> Value {
-    let record = Value::record(fields.map(|(name, payload)| RecordField {
-        name: name.into(),
-        payload,
-    }));
-    record.unwrap_or_else(|error| unreachable!("{error}"))
-}
-
 fn text_value(content: &str) -> Value {
     Value::Text(content.into())
 }
@@ -258,14 +245,6 @@ fn subject_of(fields: &[RecordField<Value>]) -> Option<PackageIdentity> {
     ))
 }
 
-fn sum_value(constructor: &str, payload: Value) -> Value {
-    Value::Sum {
-        type_name: RESOLUTION.into(),
-        constructor: constructor.into(),
-        payload: Some(Box::new(payload)),
-    }
-}
-
 impl Resolution {
     #[must_use]
     pub fn to_value(&self) -> Value {
@@ -274,86 +253,16 @@ impl Resolution {
                 choice,
                 trail,
                 universe,
-            } => sum_value(
-                SOLVED,
-                record_value([
-                    (
-                        CHOICE,
-                        Value::List(choice.iter().map(|c| c.to_value()).collect()),
-                    ),
-                    (
-                        TRAIL,
-                        Value::List(
-                            trail
-                                .iter()
-                                .map(|entry| {
-                                    let [domain, package] = identity_fields(&entry.subject);
-                                    record_value([
-                                        domain,
-                                        package,
-                                        (CONSIDERED, Value::Int(entry.considered as i64)),
-                                        (DECIDED_BY, text_value(&entry.decided_by)),
-                                    ])
-                                })
-                                .collect(),
-                        ),
-                    ),
-                    (UNIVERSE, Value::Blob(*universe)),
-                ]),
-            ),
-            Self::Unsatisfiable { derivation } => sum_value(
-                UNSATISFIABLE,
-                record_value([(
-                    DERIVATION,
-                    record_value([
-                        (
-                            crate::constraint::DOMAIN,
-                            Value::Text(derivation.subject.domain().as_str().into()),
-                        ),
-                        (
-                            crate::constraint::PACKAGE,
-                            text_value(derivation.subject.name()),
-                        ),
-                        (CONSTRAINTS, constraint_set_value(&derivation.constraints)),
-                        (
-                            CANDIDATES,
-                            Value::List(
-                                derivation
-                                    .candidates
-                                    .iter()
-                                    .map(|version| text_value(version))
-                                    .collect(),
-                            ),
-                        ),
-                    ]),
-                )]),
-            ),
+            } => solved_value(choice, trail, universe),
+            Self::Unsatisfiable { derivation } => unsatisfiable_value(derivation),
             Self::Underdetermined {
                 subject,
                 tied,
                 orderings,
-            } => sum_value(
-                UNDERDETERMINED,
-                record_value([
-                    (
-                        crate::constraint::DOMAIN,
-                        Value::Text(subject.domain().as_str().into()),
-                    ),
-                    (crate::constraint::PACKAGE, text_value(subject.name())),
-                    (
-                        TIED,
-                        Value::List(tied.iter().map(|c| c.to_value()).collect()),
-                    ),
-                    (ORDERINGS, preference_list_value(orderings)),
-                ]),
-            ),
-            Self::BudgetExhausted { budget, decisions } => sum_value(
-                BUDGET_EXHAUSTED,
-                record_value([
-                    (BUDGET, Value::Int(*budget as i64)),
-                    (DECISIONS, Value::Int(*decisions as i64)),
-                ]),
-            ),
+            } => underdetermined_value(subject, tied, orderings),
+            Self::BudgetExhausted { budget, decisions } => {
+                budget_exhausted_value(*budget, *decisions)
+            }
         }
     }
 
@@ -386,94 +295,200 @@ impl Resolution {
             )));
         };
         match constructor.as_ref() {
-            SOLVED => {
-                let fields = record_fields(payload)?;
-                let choice = candidate_list(fields, CHOICE)?;
-                let universe = blob_of(fields, UNIVERSE)?;
-                let mut trail = Vec::new();
-                if let Some(Value::List(entries)) = field_of(fields, TRAIL) {
-                    for entry in entries.iter() {
-                        let entry_fields = record_fields(entry)?;
-                        trail.push(TrailEntry {
-                            subject: subject_of(entry_fields).ok_or_else(missing_subject)?,
-                            considered: int_of(entry_fields, CONSIDERED)? as usize,
-                            decided_by: text_of(entry_fields, DECIDED_BY)?,
-                        });
-                    }
-                }
-                Ok(Self::Solved {
-                    choice: choice.into(),
-                    trail: trail.into(),
-                    universe,
-                })
-            }
-            UNSATISFIABLE => {
-                let outer = record_fields(payload)?;
-                let Some(Value::Record(derivation)) = field_of(outer, DERIVATION) else {
-                    return Err(crate::diag(format!(
-                        "the {DERIVATION} field carried no derivation record"
-                    )));
-                };
-                let mut constraints = Vec::new();
-                if let Some(Value::List(entries)) = field_of(derivation, CONSTRAINTS) {
-                    for entry in entries.iter() {
-                        constraints.push(Constraint::from_value(entry)?);
-                    }
-                }
-                let mut candidates = Vec::new();
-                if let Some(Value::List(entries)) = field_of(derivation, CANDIDATES) {
-                    for entry in entries.iter() {
-                        candidates.push(match entry {
-                            Value::Text(text) => text.clone(),
-                            other => {
-                                return Err(crate::diag(format!(
-                                    "the derivation's candidate list carried {} rather than a text",
-                                    other.describe()
-                                )));
-                            }
-                        });
-                    }
-                }
-                Ok(Self::Unsatisfiable {
-                    derivation: Derivation {
-                        subject: subject_of(derivation).ok_or_else(missing_subject)?,
-                        constraints: constraints.into(),
-                        candidates: candidates.into(),
-                    },
-                })
-            }
-            UNDERDETERMINED => {
-                let fields = record_fields(payload)?;
-                let mut tied = Vec::new();
-                if let Some(Value::List(entries)) = field_of(fields, TIED) {
-                    for entry in entries.iter() {
-                        tied.push(Candidate::from_value(entry)?);
-                    }
-                }
-                let mut orderings = Vec::new();
-                if let Some(Value::List(entries)) = field_of(fields, ORDERINGS) {
-                    for entry in entries.iter() {
-                        orderings.push(Preference::from_value(entry)?);
-                    }
-                }
-                Ok(Self::Underdetermined {
-                    subject: subject_of(fields).ok_or_else(missing_subject)?,
-                    tied: tied.into(),
-                    orderings: PreferenceList(orderings.into()),
-                })
-            }
-            BUDGET_EXHAUSTED => {
-                let fields = record_fields(payload)?;
-                Ok(Self::BudgetExhausted {
-                    budget: int_of(fields, BUDGET)?,
-                    decisions: int_of(fields, DECISIONS)?,
-                })
-            }
+            SOLVED => solved_from(payload),
+            UNSATISFIABLE => unsatisfiable_from(payload),
+            UNDERDETERMINED => underdetermined_from(payload),
+            BUDGET_EXHAUSTED => budget_exhausted_from(payload),
             other => Err(crate::diag(format!(
                 "the {RESOLUTION} sum carried an unknown constructor `{other}`"
             ))),
         }
     }
+}
+
+/// The `Solved` constructor's payload: the choice, the decision trail, and
+/// the universe digest the choice resolved against.
+fn solved_value(choice: &[Candidate], trail: &[TrailEntry], universe: &ContentId) -> Value {
+    sum_value(
+        RESOLUTION,
+        SOLVED,
+        Some(record_value([
+            (
+                CHOICE,
+                Value::List(choice.iter().map(|c| c.to_value()).collect()),
+            ),
+            (
+                TRAIL,
+                Value::List(trail.iter().map(trail_entry_value).collect()),
+            ),
+            (UNIVERSE, Value::Blob(*universe)),
+        ])),
+    )
+}
+
+fn solved_from(payload: &Value) -> PithResult<Resolution> {
+    let fields = record_fields(payload)?;
+    let choice = candidate_list(fields, CHOICE)?;
+    let universe = blob_field(fields, UNIVERSE)?;
+    let mut trail = Vec::new();
+    if let Some(Value::List(entries)) = field_of(fields, TRAIL) {
+        for entry in entries.iter() {
+            let entry_fields = record_fields(entry)?;
+            trail.push(TrailEntry {
+                subject: subject_of(entry_fields).ok_or_else(missing_subject)?,
+                considered: int_field(entry_fields, CONSIDERED)? as usize,
+                decided_by: text_field(entry_fields, DECIDED_BY)?,
+            });
+        }
+    }
+    Ok(Resolution::Solved {
+        choice: choice.into(),
+        trail: trail.into(),
+        universe,
+    })
+}
+
+/// One trail entry as a record: the subject, how many candidates satisfied
+/// the constraints in force, and which declared ordering chose the winner.
+fn trail_entry_value(entry: &TrailEntry) -> Value {
+    let [domain, package] = identity_fields(&entry.subject);
+    record_value([
+        domain,
+        package,
+        (CONSIDERED, Value::Int(entry.considered as i64)),
+        (DECIDED_BY, text_value(&entry.decided_by)),
+    ])
+}
+
+/// The `Unsatisfiable` constructor's payload: the derivation naming the
+/// subject that could not be satisfied, the constraints in force over it,
+/// and the candidate versions that were available.
+fn unsatisfiable_value(derivation: &Derivation) -> Value {
+    let [domain, package] = identity_fields(&derivation.subject);
+    sum_value(
+        RESOLUTION,
+        UNSATISFIABLE,
+        Some(record_value([(
+            DERIVATION,
+            record_value([
+                domain,
+                package,
+                (CONSTRAINTS, constraint_set_value(&derivation.constraints)),
+                (
+                    CANDIDATES,
+                    Value::List(
+                        derivation
+                            .candidates
+                            .iter()
+                            .map(|version| text_value(version))
+                            .collect(),
+                    ),
+                ),
+            ]),
+        )])),
+    )
+}
+
+fn unsatisfiable_from(payload: &Value) -> PithResult<Resolution> {
+    let outer = record_fields(payload)?;
+    let Some(Value::Record(derivation)) = field_of(outer, DERIVATION) else {
+        return Err(crate::diag(format!(
+            "the {DERIVATION} field carried no derivation record"
+        )));
+    };
+    let mut constraints = Vec::new();
+    if let Some(Value::List(entries)) = field_of(derivation, CONSTRAINTS) {
+        for entry in entries.iter() {
+            constraints.push(Constraint::from_value(entry)?);
+        }
+    }
+    let mut candidates = Vec::new();
+    if let Some(Value::List(entries)) = field_of(derivation, CANDIDATES) {
+        for entry in entries.iter() {
+            candidates.push(match entry {
+                Value::Text(text) => text.clone(),
+                other => {
+                    return Err(crate::diag(format!(
+                        "the derivation's candidate list carried {} rather than a text",
+                        other.describe()
+                    )));
+                }
+            });
+        }
+    }
+    Ok(Resolution::Unsatisfiable {
+        derivation: Derivation {
+            subject: subject_of(derivation).ok_or_else(missing_subject)?,
+            constraints: constraints.into(),
+            candidates: candidates.into(),
+        },
+    })
+}
+
+/// The `Underdetermined` constructor's payload: the subject, the tied
+/// candidates no declared ordering separated, and the orderings that failed
+/// to separate them.
+fn underdetermined_value(
+    subject: &PackageIdentity,
+    tied: &[Candidate],
+    orderings: &PreferenceList,
+) -> Value {
+    let [domain, package] = identity_fields(subject);
+    sum_value(
+        RESOLUTION,
+        UNDERDETERMINED,
+        Some(record_value([
+            domain,
+            package,
+            (
+                TIED,
+                Value::List(tied.iter().map(|c| c.to_value()).collect()),
+            ),
+            (ORDERINGS, preference_list_value(orderings)),
+        ])),
+    )
+}
+
+fn underdetermined_from(payload: &Value) -> PithResult<Resolution> {
+    let fields = record_fields(payload)?;
+    let mut tied = Vec::new();
+    if let Some(Value::List(entries)) = field_of(fields, TIED) {
+        for entry in entries.iter() {
+            tied.push(Candidate::from_value(entry)?);
+        }
+    }
+    let mut orderings = Vec::new();
+    if let Some(Value::List(entries)) = field_of(fields, ORDERINGS) {
+        for entry in entries.iter() {
+            orderings.push(Preference::from_value(entry)?);
+        }
+    }
+    Ok(Resolution::Underdetermined {
+        subject: subject_of(fields).ok_or_else(missing_subject)?,
+        tied: tied.into(),
+        orderings: PreferenceList(orderings.into()),
+    })
+}
+
+/// The `BudgetExhausted` constructor's payload: the budget and the decisions
+/// taken, the two facts about the run.
+fn budget_exhausted_value(budget: u64, decisions: u64) -> Value {
+    sum_value(
+        RESOLUTION,
+        BUDGET_EXHAUSTED,
+        Some(record_value([
+            (BUDGET, Value::Int(budget as i64)),
+            (DECISIONS, Value::Int(decisions as i64)),
+        ])),
+    )
+}
+
+fn budget_exhausted_from(payload: &Value) -> PithResult<Resolution> {
+    let fields = record_fields(payload)?;
+    Ok(Resolution::BudgetExhausted {
+        budget: int_field(fields, BUDGET)?,
+        decisions: int_field(fields, DECISIONS)?,
+    })
 }
 
 fn record_fields(value: &Value) -> PithResult<&[RecordField<Value>]> {
@@ -484,13 +499,6 @@ fn record_fields(value: &Value) -> PithResult<&[RecordField<Value>]> {
             value.describe()
         ))),
     }
-}
-
-fn field_of<'a>(fields: &'a [RecordField<Value>], name: &str) -> Option<&'a Value> {
-    fields
-        .iter()
-        .find(|field| field.name.as_ref() == name)
-        .map(|field| &field.payload)
 }
 
 fn candidate_list(fields: &[RecordField<Value>], name: &str) -> PithResult<Vec<Candidate>> {
@@ -504,30 +512,8 @@ fn candidate_list(fields: &[RecordField<Value>], name: &str) -> PithResult<Vec<C
     Ok(candidates)
 }
 
-fn blob_of(fields: &[RecordField<Value>], name: &str) -> PithResult<ContentId> {
-    match field_of(fields, name) {
-        Some(Value::Blob(id)) => Ok(*id),
-        _ => Err(crate::diag(format!("the {name} field carried no blob"))),
-    }
-}
-
-fn int_of(fields: &[RecordField<Value>], name: &str) -> PithResult<u64> {
-    match field_of(fields, name) {
-        Some(Value::Int(n)) => u64::try_from(*n)
-            .map_err(|_| crate::diag(format!("the {name} field carried a negative integer"))),
-        _ => Err(crate::diag(format!("the {name} field carried no integer"))),
-    }
-}
-
 fn missing_subject() -> pith_diag::DiagnosticSink {
     crate::diag("the record carried no domain and package naming a subject")
-}
-
-fn text_of(fields: &[RecordField<Value>], name: &str) -> PithResult<Box<str>> {
-    match field_of(fields, name) {
-        Some(Value::Text(text)) => Ok(text.clone()),
-        _ => Err(crate::diag(format!("the {name} field carried no text"))),
-    }
 }
 
 #[cfg(test)]

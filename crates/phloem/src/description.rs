@@ -10,10 +10,11 @@
 //! constraints record shows a lookup that needs keys, that is the evidence
 //! to bring.
 
-use pith_core::{RecordField, Type, Value};
+use pith_core::{Type, Value};
 use pith_diag::PithResult;
 use pith_ids::{ContentDigest, ContentId};
 
+use crate::codec::{field_of, record_type, record_value, text_field, text_list};
 use crate::diag;
 use crate::source::{SourceBinding, source_type};
 
@@ -31,30 +32,12 @@ const DESCRIPTION_DOMAIN: &[u8] = b"phloem.description-v1\0";
 /// sum, a list of prescribed build inputs, and a list of declared options.
 #[must_use]
 pub fn description_type() -> Type {
-    let record = Type::record([
-        RecordField {
-            name: NAME.into(),
-            payload: Type::Text,
-        },
-        RecordField {
-            name: SOURCE.into(),
-            payload: source_type(),
-        },
-        RecordField {
-            name: INPUTS.into(),
-            payload: Type::List(Box::new(Type::Blob)),
-        },
-        RecordField {
-            name: OPTIONS.into(),
-            payload: Type::List(Box::new(Type::Text)),
-        },
-    ]);
-    match record {
-        Ok(record) => record,
-        // The field names are distinct literals, so the duplicate-name
-        // rejection is unreachable by construction.
-        Err(error) => unreachable!("{error}"),
-    }
+    record_type([
+        (NAME, Type::Text),
+        (SOURCE, source_type()),
+        (INPUTS, Type::List(Box::new(Type::Blob))),
+        (OPTIONS, Type::List(Box::new(Type::Text))),
+    ])
 }
 
 /// A package version's description, as declared.
@@ -75,35 +58,23 @@ impl Description {
     /// The description as a value of the declared record type.
     #[must_use]
     pub fn to_value(&self) -> Value {
-        let record = Value::record([
-            RecordField {
-                name: NAME.into(),
-                payload: Value::Text(self.name.clone()),
-            },
-            RecordField {
-                name: SOURCE.into(),
-                payload: self.source.to_value(),
-            },
-            RecordField {
-                name: INPUTS.into(),
-                payload: Value::List(self.inputs.iter().map(|id| Value::Blob(*id)).collect()),
-            },
-            RecordField {
-                name: OPTIONS.into(),
-                payload: Value::List(
+        record_value([
+            (NAME, Value::Text(self.name.clone())),
+            (SOURCE, self.source.to_value()),
+            (
+                INPUTS,
+                Value::List(self.inputs.iter().map(|id| Value::Blob(*id)).collect()),
+            ),
+            (
+                OPTIONS,
+                Value::List(
                     self.options
                         .iter()
                         .map(|option| Value::Text(option.clone()))
                         .collect(),
                 ),
-            },
-        ]);
-        match record {
-            Ok(record) => record,
-            // The field names are distinct literals, so the duplicate-name
-            // rejection is unreachable by construction.
-            Err(error) => unreachable!("{error}"),
-        }
+            ),
+        ])
     }
 
     /// Read a description from a value, checking inhabitation with
@@ -128,58 +99,26 @@ impl Description {
                 value.describe()
             )));
         };
-        let mut name = None;
-        let mut source = None;
+        let name = text_field(fields, NAME)?;
+        let source = match field_of(fields, SOURCE) {
+            Some(payload) => SourceBinding::from_value(payload)?,
+            None => return Err(diag(format!("the record carried no {SOURCE} binding"))),
+        };
         let mut inputs = Vec::new();
-        let mut options = Vec::new();
-        for field in fields.iter() {
-            match field.name.as_ref() {
-                NAME => name = Some(&field.payload),
-                SOURCE => source = Some(&field.payload),
-                INPUTS => {
-                    let Value::List(elements) = &field.payload else {
-                        return Err(diag(format!(
-                            "the {INPUTS} field carried {} rather than a list",
-                            field.payload.describe()
-                        )));
-                    };
-                    for element in elements.iter() {
-                        let Value::Blob(id) = element else {
-                            return Err(diag(format!(
-                                "the {INPUTS} list carried {} rather than a blob",
-                                element.describe()
-                            )));
-                        };
-                        inputs.push(*id);
-                    }
-                }
-                OPTIONS => {
-                    let Value::List(elements) = &field.payload else {
-                        return Err(diag(format!(
-                            "the {OPTIONS} field carried {} rather than a list",
-                            field.payload.describe()
-                        )));
-                    };
-                    for element in elements.iter() {
-                        let Value::Text(option) = element else {
-                            return Err(diag(format!(
-                                "the {OPTIONS} list carried {} rather than a text",
-                                element.describe()
-                            )));
-                        };
-                        options.push(option.clone());
-                    }
-                }
-                _ => {}
+        if let Some(Value::List(elements)) = field_of(fields, INPUTS) {
+            for element in elements.iter() {
+                let Value::Blob(id) = element else {
+                    return Err(diag(format!(
+                        "the {INPUTS} list carried {} rather than a blob",
+                        element.describe()
+                    )));
+                };
+                inputs.push(*id);
             }
         }
-        let name = match name {
-            Some(Value::Text(name)) => name.clone(),
-            _ => return Err(diag(format!("the record carried no {NAME} text"))),
-        };
-        let source = match source {
-            Some(value) => SourceBinding::from_value(value)?,
-            None => return Err(diag(format!("the record carried no {SOURCE} binding"))),
+        let options = match field_of(fields, OPTIONS) {
+            Some(payload) => text_list(payload, OPTIONS)?,
+            None => Vec::new(),
         };
         Ok(Self {
             name,
@@ -205,6 +144,7 @@ impl Description {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pith_core::RecordField;
 
     fn description() -> Description {
         Description {

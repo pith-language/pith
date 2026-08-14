@@ -163,16 +163,7 @@ impl<'a> Search<'a> {
             self.record_dead_end(&subject, Box::new([]));
             return Step::DeadEnd;
         };
-        let in_force = self.constraints.get(&subject).cloned().unwrap_or_default();
-        let satisfying: Vec<&'a Candidate> = available
-            .iter()
-            .copied()
-            .filter(|candidate| {
-                in_force.iter().all(|constraint| {
-                    constraint.admits(self.scheme, &candidate.version, &candidate.features)
-                })
-            })
-            .collect();
+        let satisfying = self.satisfying(&subject, available);
         if satisfying.is_empty() {
             self.record_dead_end(
                 &subject,
@@ -180,35 +171,94 @@ impl<'a> Search<'a> {
             );
             return Step::DeadEnd;
         }
-        // Candidates best-first under the declared orderings; the sort is
-        // stable over the universe's canonical value order, so candidates the
-        // list does not separate stay adjacent as one group and are refused
-        // below rather than picked apart by iteration order.
-        let mut ordered = satisfying.clone();
-        ordered.sort_by(|left, right| {
-            self.preferences
-                .compare(self.scheme, &right.version, &left.version)
-        });
-        let Some(best) = ordered.first() else {
-            unreachable!("a satisfying candidate exists");
-        };
-        let decided_by: Box<str> = if ordered.len() == 1 {
-            Box::from("sole-candidate")
-        } else {
-            ordered
-                .iter()
-                .skip(1)
-                .find_map(|other| {
-                    self.preferences
-                        .separator(self.scheme, &best.version, &other.version)
-                        .map(Preference::name)
-                })
-                .map_or_else(|| Box::from("sole-candidate"), Box::from)
-        };
+        let ordered = self.ordered_by_preference(satisfying.clone());
+        let decided_by = self.deciding_ordering(&ordered);
         // Candidates in tie groups, best group first. A group of more than
         // one candidate is underdetermination: no declared ordering
         // separates its members, and trying them in order would be picking by
         // search order, so the group is reached only to be refused.
+        for (candidate, group) in self.tie_groups(ordered) {
+            if group.len() > 1 {
+                return Step::Underdetermined {
+                    subject: subject.clone(),
+                    tied: group.iter().map(|c| (*c).clone()).collect(),
+                };
+            }
+            self.decisions = self.decisions.saturating_add(1);
+            if self.decisions > self.budget {
+                return Step::BudgetExhausted;
+            }
+            let outcome = self.descend(
+                &subject,
+                satisfying.len(),
+                &decided_by,
+                &requirements_of(candidate),
+                candidate,
+                assigned,
+            );
+            match outcome {
+                Step::Done => return Step::Done,
+                Step::DeadEnd => {}
+                Step::Underdetermined { .. } | Step::BudgetExhausted => return outcome,
+            }
+        }
+        // Every candidate for this subject was tried and dead-ended below;
+        // the deepest dead end recorded on the way down is the derivation.
+        Step::DeadEnd
+    }
+
+    /// The candidates for `subject` that every constraint in force admits.
+    fn satisfying(
+        &self,
+        subject: &PackageIdentity,
+        available: &[&'a Candidate],
+    ) -> Vec<&'a Candidate> {
+        let in_force = self.constraints.get(subject).cloned().unwrap_or_default();
+        available
+            .iter()
+            .copied()
+            .filter(|candidate| {
+                in_force.iter().all(|constraint| {
+                    constraint.admits(self.scheme, &candidate.version, &candidate.features)
+                })
+            })
+            .collect()
+    }
+
+    /// Candidates best-first under the declared orderings; the sort is
+    /// stable over the universe's canonical value order, so candidates the
+    /// list does not separate stay adjacent as one group and are refused by
+    /// the caller rather than picked apart by iteration order.
+    fn ordered_by_preference(&self, satisfying: Vec<&'a Candidate>) -> Vec<&'a Candidate> {
+        let mut ordered = satisfying;
+        ordered.sort_by(|left, right| {
+            self.preferences
+                .compare(self.scheme, &right.version, &left.version)
+        });
+        ordered
+    }
+
+    /// Which declared ordering separated the best candidate from the rest,
+    /// or `sole-candidate` when none was needed because only one candidate
+    /// satisfied or nothing separated them.
+    fn deciding_ordering(&self, ordered: &[&'a Candidate]) -> Box<str> {
+        let Some(best) = ordered.first() else {
+            unreachable!("a satisfying candidate exists");
+        };
+        ordered
+            .iter()
+            .skip(1)
+            .find_map(|other| {
+                self.preferences
+                    .separator(self.scheme, &best.version, &other.version)
+                    .map(Preference::name)
+            })
+            .map_or_else(|| Box::from("sole-candidate"), Box::from)
+    }
+
+    /// Group best-first candidates by the declared orderings: adjacent
+    /// candidates the orderings do not separate form one group.
+    fn tie_groups(&self, ordered: Vec<&'a Candidate>) -> Vec<(&'a Candidate, Vec<&'a Candidate>)> {
         let mut groups: Vec<(&'a Candidate, Vec<&'a Candidate>)> = Vec::new();
         for candidate in ordered {
             match groups.last_mut() {
@@ -223,86 +273,91 @@ impl<'a> Search<'a> {
                 _ => groups.push((candidate, vec![candidate])),
             }
         }
-        for (head, group) in groups {
-            if group.len() > 1 {
-                return Step::Underdetermined {
-                    subject: subject.clone(),
-                    tied: group.iter().map(|c| (*c).clone()).collect(),
-                };
-            }
-            let candidate = head;
-            self.decisions = self.decisions.saturating_add(1);
-            if self.decisions > self.budget {
-                return Step::BudgetExhausted;
-            }
-            let added: Vec<Constraint> = candidate
-                .requires
+        groups
+    }
+
+    /// Try one candidate for `subject`: put its requirements in force,
+    /// record the trail entry, and continue the walk underneath it. Every
+    /// addition is undone on the way out — here, in one body — unless the
+    /// walk underneath solved the request, because the answer is read from
+    /// the state a solving frame built.
+    fn descend(
+        &mut self,
+        subject: &PackageIdentity,
+        considered: usize,
+        decided_by: &str,
+        added: &[Constraint],
+        candidate: &'a Candidate,
+        assigned: &mut Vec<&'a Candidate>,
+    ) -> Step {
+        self.push_constraints(added);
+        // A requirement may land on a subject already assigned higher in
+        // the walk; a choice that violates it is a dead end exactly like
+        // one that empties a later subject, and the derivation names the
+        // assigned subject with the violated requirement in force.
+        if let Some(violated) = self.violation(added, assigned) {
+            let rejected: Box<[Box<str>]> = assigned
                 .iter()
-                .map(|requirement| Constraint {
-                    subject: requirement.subject.clone(),
-                    range: requirement.range.clone(),
-                    features: requirement.features.clone(),
-                    attribution: attribution_of(candidate),
-                })
-                .collect();
-            for constraint in added.iter() {
-                self.constraints
-                    .entry(constraint.subject.clone())
-                    .or_default()
-                    .push(constraint.clone());
-            }
-            // A requirement may land on a subject already assigned higher in
-            // the walk; a choice that violates it is a dead end exactly like
-            // one that empties a later subject, and the derivation names the
-            // assigned subject with the violated requirement in force.
-            let violation = added.iter().find_map(|constraint| {
-                assigned.iter().find_map(|chosen| {
-                    (chosen.identity == constraint.subject
-                        && !constraint.admits(self.scheme, &chosen.version, &chosen.features))
-                    .then(|| constraint.subject.clone())
-                })
-            });
-            if let Some(subject) = violation {
-                let rejected: Box<[Box<str>]> = assigned
-                    .iter()
-                    .find(|chosen| chosen.identity == subject)
-                    .map_or_else(Vec::new, |chosen| vec![chosen.version.clone()])
-                    .into_boxed_slice();
-                self.record_dead_end(&subject, rejected);
-                for constraint in added.iter() {
-                    if let Some(entries) = self.constraints.get_mut(&constraint.subject) {
-                        entries.pop();
-                    }
-                }
-                return Step::DeadEnd;
-            }
-            self.trail.push((
-                subject.clone(),
-                Trail {
-                    considered: satisfying.len(),
-                    decided_by: decided_by.clone(),
-                },
-            ));
-            self.depth = self.depth.saturating_add(1);
-            assigned.push(candidate);
-            let outcome = self.run(assigned);
-            match outcome {
-                Step::Done => return Step::Done,
-                Step::DeadEnd => {}
-                Step::Underdetermined { .. } | Step::BudgetExhausted => return outcome,
-            }
-            assigned.pop();
-            self.trail.pop();
-            self.depth = self.depth.saturating_sub(1);
-            for constraint in added.iter() {
-                if let Some(entries) = self.constraints.get_mut(&constraint.subject) {
-                    entries.pop();
-                }
+                .find(|chosen| chosen.identity == violated)
+                .map_or_else(Vec::new, |chosen| vec![chosen.version.clone()])
+                .into_boxed_slice();
+            self.record_dead_end(&violated, rejected);
+            self.pop_constraints(added);
+            return Step::DeadEnd;
+        }
+        self.trail.push((
+            subject.clone(),
+            Trail {
+                considered,
+                decided_by: Box::from(decided_by),
+            },
+        ));
+        self.depth = self.depth.saturating_add(1);
+        assigned.push(candidate);
+        let outcome = self.run(assigned);
+        match outcome {
+            Step::Done => outcome,
+            Step::DeadEnd | Step::Underdetermined { .. } | Step::BudgetExhausted => {
+                assigned.pop();
+                self.trail.pop();
+                self.depth = self.depth.saturating_sub(1);
+                self.pop_constraints(added);
+                outcome
             }
         }
-        // Every candidate for this subject was tried and dead-ended below;
-        // the deepest dead end recorded on the way down is the derivation.
-        Step::DeadEnd
+    }
+
+    /// Put one frame's added constraints in force.
+    fn push_constraints(&mut self, added: &[Constraint]) {
+        for constraint in added {
+            self.constraints
+                .entry(constraint.subject.clone())
+                .or_default()
+                .push(constraint.clone());
+        }
+    }
+
+    /// Withdraw one frame's added constraints. Each pop removes the entry
+    /// the paired push added; the two are called only as a pair inside
+    /// `descend`, which is what keeps them balanced.
+    fn pop_constraints(&mut self, added: &[Constraint]) {
+        for constraint in added {
+            if let Some(entries) = self.constraints.get_mut(&constraint.subject) {
+                entries.pop();
+            }
+        }
+    }
+
+    /// The first subject an already-assigned choice violates a requirement
+    /// about, if any.
+    fn violation(&self, added: &[Constraint], assigned: &[&Candidate]) -> Option<PackageIdentity> {
+        added.iter().find_map(|constraint| {
+            assigned.iter().find_map(|chosen| {
+                (chosen.identity == constraint.subject
+                    && !constraint.admits(self.scheme, &chosen.version, &chosen.features))
+                .then(|| constraint.subject.clone())
+            })
+        })
     }
 
     /// Remember the dead end at the greatest depth reached: the derivation
@@ -323,6 +378,21 @@ impl<'a> Search<'a> {
             self.deepest_dead_end = Some((self.depth, derivation));
         }
     }
+}
+
+/// The constraints choosing `candidate` adds: its requirements, attributed
+/// to its coordinates.
+fn requirements_of(candidate: &Candidate) -> Vec<Constraint> {
+    candidate
+        .requires
+        .iter()
+        .map(|requirement| Constraint {
+            subject: requirement.subject.clone(),
+            range: requirement.range.clone(),
+            features: requirement.features.clone(),
+            attribution: attribution_of(candidate),
+        })
+        .collect()
 }
 
 fn attribution_of(candidate: &Candidate) -> Box<str> {

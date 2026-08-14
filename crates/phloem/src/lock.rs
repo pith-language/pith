@@ -16,10 +16,11 @@
 //! 0039's evidence for landing `Record`: a lock line is named fields the
 //! same way a description is.
 
-use pith_core::{RecordField, SumConstructor, Type, Value};
+use pith_core::{SumConstructor, Type, Value};
 use pith_diag::PithResult;
 use pith_ids::{ContentDigest, ContentId};
 
+use crate::codec::{blob_field, field_of, record_type, record_value, sum_value, text_field};
 use crate::diag;
 use crate::identity::PackageVersion;
 
@@ -62,11 +63,7 @@ impl Origin {
             Self::Forge(location) => (FORGE, location),
             Self::LocalPath(location) => (LOCAL_PATH, location),
         };
-        Value::Sum {
-            type_name: ORIGIN.into(),
-            constructor: constructor.into(),
-            payload: Some(Box::new(Value::Text(location.clone()))),
-        }
+        sum_value(ORIGIN, constructor, Some(Value::Text(location.clone())))
     }
 
     /// Read an origin from a value, accepting every declared sum of this
@@ -158,34 +155,13 @@ pub fn origin_type() -> Type {
 /// fact.
 #[must_use]
 pub fn entry_type() -> Type {
-    let record = Type::record([
-        RecordField {
-            name: DOMAIN.into(),
-            payload: Type::Text,
-        },
-        RecordField {
-            name: NAME.into(),
-            payload: Type::Text,
-        },
-        RecordField {
-            name: VERSION.into(),
-            payload: Type::Text,
-        },
-        RecordField {
-            name: SOURCE.into(),
-            payload: Type::Blob,
-        },
-        RecordField {
-            name: ORIGIN_FIELD.into(),
-            payload: origin_type(),
-        },
-    ]);
-    match record {
-        Ok(record) => record,
-        // The field names are distinct literals, so the duplicate-name
-        // rejection is unreachable by construction.
-        Err(error) => unreachable!("{error}"),
-    }
+    record_type([
+        (DOMAIN, Type::Text),
+        (NAME, Type::Text),
+        (VERSION, Type::Text),
+        (SOURCE, Type::Blob),
+        (ORIGIN_FIELD, origin_type()),
+    ])
 }
 
 /// What a lock entry pins: one package version, one content identity for the
@@ -227,34 +203,16 @@ impl LockEntry {
     /// The entry as a value of the declared record type.
     #[must_use]
     pub fn to_value(&self) -> Value {
-        let record = Value::record([
-            RecordField {
-                name: DOMAIN.into(),
-                payload: Value::Text(self.package.identity().domain().as_str().into()),
-            },
-            RecordField {
-                name: NAME.into(),
-                payload: Value::Text(self.package.identity().name().into()),
-            },
-            RecordField {
-                name: VERSION.into(),
-                payload: Value::Text(self.package.version().into()),
-            },
-            RecordField {
-                name: SOURCE.into(),
-                payload: Value::Blob(self.source),
-            },
-            RecordField {
-                name: ORIGIN_FIELD.into(),
-                payload: self.origin.to_value(),
-            },
-        ]);
-        match record {
-            Ok(record) => record,
-            // The field names are distinct literals, so the duplicate-name
-            // rejection is unreachable by construction.
-            Err(error) => unreachable!("{error}"),
-        }
+        record_value([
+            (
+                DOMAIN,
+                Value::Text(self.package.identity().domain().as_str().into()),
+            ),
+            (NAME, Value::Text(self.package.identity().name().into())),
+            (VERSION, Value::Text(self.package.version().into())),
+            (SOURCE, Value::Blob(self.source)),
+            (ORIGIN_FIELD, self.origin.to_value()),
+        ])
     }
 
     /// Read an entry from a value, checking inhabitation with `is_type`
@@ -276,38 +234,12 @@ impl LockEntry {
                 value.describe()
             )));
         };
-        let mut domain = None;
-        let mut name = None;
-        let mut version = None;
-        let mut source = None;
-        let mut origin = None;
-        for field in fields.iter() {
-            match field.name.as_ref() {
-                DOMAIN => domain = Some(&field.payload),
-                NAME => name = Some(&field.payload),
-                VERSION => version = Some(&field.payload),
-                SOURCE => source = Some(&field.payload),
-                ORIGIN_FIELD => origin = Some(&field.payload),
-                _ => {}
-            }
-        }
-        let text_of = |field: Option<&Value>, field_name: &str| -> PithResult<Box<str>> {
-            match field {
-                Some(Value::Text(text)) => Ok(text.clone()),
-                _ => Err(diag(format!(
-                    "the lock entry record carried no {field_name} text"
-                ))),
-            }
-        };
-        let domain = text_of(domain, DOMAIN)?;
-        let name = text_of(name, NAME)?;
-        let version = text_of(version, VERSION)?;
-        let source = match source {
-            Some(Value::Blob(id)) => *id,
-            _ => return Err(diag(format!("the record carried no {SOURCE} blob"))),
-        };
-        let origin = match origin {
-            Some(value) => Origin::from_value(value)?,
+        let domain = text_field(fields, DOMAIN)?;
+        let name = text_field(fields, NAME)?;
+        let version = text_field(fields, VERSION)?;
+        let source = blob_field(fields, SOURCE)?;
+        let origin = match field_of(fields, ORIGIN_FIELD) {
+            Some(payload) => Origin::from_value(payload)?,
             None => return Err(diag(format!("the record carried no {ORIGIN_FIELD}"))),
         };
         Ok(Self {

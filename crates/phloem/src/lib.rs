@@ -18,6 +18,7 @@
 //! environment are later records in the same milestone; nothing here
 //! anticipates them.
 
+pub(crate) mod codec;
 pub mod constraint;
 pub mod description;
 pub mod identity;

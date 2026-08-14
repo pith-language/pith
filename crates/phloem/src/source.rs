@@ -9,10 +9,11 @@
 //! revision carries a record of its revision and tree hash, a local path
 //! carries a record of its path and content identity.
 
-use pith_core::{RecordField, SumConstructor, Type, Value};
+use pith_core::{SumConstructor, Type, Value};
 use pith_diag::PithResult;
 use pith_ids::ContentId;
 
+use crate::codec::{field_of, record_type, record_value, sum_value};
 use crate::diag;
 
 /// The declared sum's name.
@@ -36,26 +37,8 @@ pub const PATH_CONTENT: &str = "content";
 /// Text, tree: Text})`, `Path({path: Text, content: Blob})`.
 #[must_use]
 pub fn source_type() -> Type {
-    let git = Type::record([
-        RecordField {
-            name: GIT_REVISION.into(),
-            payload: Type::Text,
-        },
-        RecordField {
-            name: GIT_TREE.into(),
-            payload: Type::Text,
-        },
-    ]);
-    let path = Type::record([
-        RecordField {
-            name: PATH_PATH.into(),
-            payload: Type::Text,
-        },
-        RecordField {
-            name: PATH_CONTENT.into(),
-            payload: Type::Blob,
-        },
-    ]);
+    let git = record_type([(GIT_REVISION, Type::Text), (GIT_TREE, Type::Text)]);
+    let path = record_type([(PATH_PATH, Type::Text), (PATH_CONTENT, Type::Blob)]);
     // The field and constructor names are distinct literals, so the
     // duplicate-name rejections are unreachable by construction.
     let sum = Type::sum(
@@ -67,11 +50,11 @@ pub fn source_type() -> Type {
             },
             SumConstructor {
                 name: GIT.into(),
-                payload: Some(git.unwrap_or_else(|error| unreachable!("{error}"))),
+                payload: Some(git),
             },
             SumConstructor {
                 name: PATH.into(),
-                payload: Some(path.unwrap_or_else(|error| unreachable!("{error}"))),
+                payload: Some(path),
             },
         ],
     );
@@ -94,21 +77,23 @@ impl SourceBinding {
     #[must_use]
     pub fn to_value(&self) -> Value {
         match self {
-            Self::Archive { archive } => Value::Sum {
-                type_name: SOURCE.into(),
-                constructor: ARCHIVE.into(),
-                payload: Some(Box::new(Value::Blob(*archive))),
-            },
-            Self::Git { revision, tree } => Value::Sum {
-                type_name: SOURCE.into(),
-                constructor: GIT.into(),
-                payload: Some(Box::new(git_value(revision, tree))),
-            },
-            Self::Path { path, content } => Value::Sum {
-                type_name: SOURCE.into(),
-                constructor: PATH.into(),
-                payload: Some(Box::new(path_value(path, *content))),
-            },
+            Self::Archive { archive } => sum_value(SOURCE, ARCHIVE, Some(Value::Blob(*archive))),
+            Self::Git { revision, tree } => sum_value(
+                SOURCE,
+                GIT,
+                Some(record_value([
+                    (GIT_REVISION, Value::Text(revision.clone())),
+                    (GIT_TREE, Value::Text(tree.clone())),
+                ])),
+            ),
+            Self::Path { path, content } => sum_value(
+                SOURCE,
+                PATH,
+                Some(record_value([
+                    (PATH_PATH, Value::Text(path.clone())),
+                    (PATH_CONTENT, Value::Blob(*content)),
+                ])),
+            ),
         }
     }
 
@@ -155,59 +140,15 @@ impl SourceBinding {
     }
 }
 
-fn git_value(revision: &str, tree: &str) -> Value {
-    match Value::record([
-        RecordField {
-            name: GIT_REVISION.into(),
-            payload: Value::Text(revision.into()),
-        },
-        RecordField {
-            name: GIT_TREE.into(),
-            payload: Value::Text(tree.into()),
-        },
-    ]) {
-        Ok(value) => value,
-        Err(error) => unreachable!("{error}"),
-    }
-}
-
-fn path_value(path: &str, content: ContentId) -> Value {
-    match Value::record([
-        RecordField {
-            name: PATH_PATH.into(),
-            payload: Value::Text(path.into()),
-        },
-        RecordField {
-            name: PATH_CONTENT.into(),
-            payload: Value::Blob(content),
-        },
-    ]) {
-        Ok(value) => value,
-        Err(error) => unreachable!("{error}"),
-    }
-}
-
 /// Extract `(revision, tree)` from a git payload record that `is_type` has
 /// already accepted against the declared payload type.
 fn git_fields(record: &Value) -> PithResult<(Box<str>, Box<str>)> {
-    let fields = match record {
-        Value::Record(fields) => fields,
-        other => {
-            return Err(diag(format!(
-                "the {GIT} constructor carried {other:?} rather than a record"
-            )));
-        }
+    let Value::Record(fields) = record else {
+        return Err(diag(format!(
+            "the {GIT} constructor carried {record:?} rather than a record"
+        )));
     };
-    let mut revision = None;
-    let mut tree = None;
-    for field in fields.iter() {
-        match field.name.as_ref() {
-            GIT_REVISION => revision = Some(&field.payload),
-            GIT_TREE => tree = Some(&field.payload),
-            _ => {}
-        }
-    }
-    match (revision, tree) {
+    match (field_of(fields, GIT_REVISION), field_of(fields, GIT_TREE)) {
         (Some(Value::Text(revision)), Some(Value::Text(tree))) => {
             Ok((revision.clone(), tree.clone()))
         }
@@ -218,24 +159,12 @@ fn git_fields(record: &Value) -> PithResult<(Box<str>, Box<str>)> {
 }
 
 fn path_fields(record: &Value) -> PithResult<(Box<str>, ContentId)> {
-    let fields = match record {
-        Value::Record(fields) => fields,
-        other => {
-            return Err(diag(format!(
-                "the {PATH} constructor carried {other:?} rather than a record"
-            )));
-        }
+    let Value::Record(fields) = record else {
+        return Err(diag(format!(
+            "the {PATH} constructor carried {record:?} rather than a record"
+        )));
     };
-    let mut path = None;
-    let mut content = None;
-    for field in fields.iter() {
-        match field.name.as_ref() {
-            PATH_PATH => path = Some(&field.payload),
-            PATH_CONTENT => content = Some(&field.payload),
-            _ => {}
-        }
-    }
-    match (path, content) {
+    match (field_of(fields, PATH_PATH), field_of(fields, PATH_CONTENT)) {
         (Some(Value::Text(path)), Some(Value::Blob(content))) => Ok((path.clone(), *content)),
         _ => Err(diag(format!(
             "the {PATH} payload did not carry {PATH_PATH} text and {PATH_CONTENT} blob"
