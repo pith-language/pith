@@ -189,9 +189,10 @@ impl Engine {
                 if woke_a_chain {
                     continue;
                 }
-                // Nothing is running, so nothing will free a slot. The queue is
-                // empty too: the loop above starts at least one action while the
-                // limit is non-zero, so a queued action cannot be left here.
+                // Nothing is running, so nothing will free a slot. The queue
+                // is empty too: while the concurrency limit is non-zero the
+                // starting loop launches at least one action, so a queued
+                // action cannot be left here.
                 return Ok(());
             }
             let (index, captured) = first_finished(&mut started.in_flight).await;

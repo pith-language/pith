@@ -1,10 +1,11 @@
 //! Nominal type names and value constructors for the xylem build graph.
 //!
 //! Decision 0026 makes nominal identity a declaration attribute. The names
-//! below are the declarations xylem owns: a toolchain, and the content roles a
-//! C build moves through. They are nominal over their content identity so two
-//! rules producing content never collapse to the same `() -> Blob` interface
-//! and collide as `E-1102` ambiguity (the blocker Phase 0 lifted).
+//! in this module are the declarations xylem owns: a toolchain, and the
+//! content roles a C build moves through. They are nominal over their
+//! content identity so two rules producing content never collapse to the
+//! same `() -> Blob` interface and collide as `E-1102` ambiguity (the
+//! blocker Phase 0 lifted).
 //!
 //! The discovered header set is the one input here that is not nominal: it is
 //! a `List<Text>` of include paths as the depfile spelled them, the landed

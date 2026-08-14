@@ -2,9 +2,10 @@
 
 use pith_engine::state::{EngineStateVersions, RECORD_ENCODING_VERSION, SchemaVersion};
 
-/// Version of the table layout below. Independent of the record encoding
-/// version, which belongs to `pith-engine`: the same records can be laid out
-/// differently, and the same layout can hold a new payload encoding.
+/// Version of the table layout this module declares. Independent of the
+/// record encoding version, which belongs to `pith-engine`: the same records
+/// can be laid out differently, and the same layout can hold a new payload
+/// encoding.
 ///
 /// Pinned at 1 until something is released, per decision 0024: nothing has
 /// shipped, so no database outside a working tree needs to survive a change,

@@ -306,9 +306,9 @@ mod domain {
     pub const PURE_COMPUTATION: &[u8] = b"pith:pure-computation:v1\0";
     pub const ACTION_COMPUTATION: &[u8] = b"pith:action-computation:v1\0";
 
-    /// Every prefix above. Distinctness and a shared version segment are
-    /// checked over this one slice, so a new digest kind is covered by adding
-    /// it here.
+    /// Every prefix in this module. Distinctness and a shared version
+    /// segment are checked over this one slice, so a new digest kind is
+    /// covered by adding it here.
     #[cfg(test)]
     pub const ALL: &[&[u8]] = &[
         CONTENT_BLOB,

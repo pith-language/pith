@@ -6,7 +6,7 @@
 //! crate (decision 0016: "`unsafe` is reserved for genuine foreign-function
 //! boundaries where the host cannot express the operation: sandbox setup,
 //! syscall interception"). The crate root denies `unsafe_code`; this module
-//! allows it, and every `unsafe` block below carries a `// SAFETY:` comment
+//! allows it, and every `unsafe` block in it carries a `// SAFETY:` comment
 //! naming the foreign operation it enables. Two blocks remain: loading the
 //! filter, and registering the hook that loads it.
 //!
@@ -16,10 +16,10 @@
 //! measurement its unresolved section records: the original fifteen-entry list
 //! named a third of the forty-five syscalls a traced compile issues, and the
 //! missing part was structural (process creation, because the driver is a
-//! supervisor). The list below starts from that measured union and from the
-//! fixtures that run real children through this executor. Every entry is named
-//! and justified; an addition needs a concrete failure it fixes, never a
-//! broadening for its own sake.
+//! supervisor). The allowlist in this module starts from that measured union
+//! and from the fixtures that run real children through this executor. Every
+//! entry is named and justified; an addition needs a concrete failure it
+//! fixes, never a broadening for its own sake.
 //!
 //! `socket` is allowed only for `AF_UNIX`, which is the form 0028's unresolved
 //! section names for the local name-service lookup glibc performs during an

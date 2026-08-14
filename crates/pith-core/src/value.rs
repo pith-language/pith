@@ -1,7 +1,8 @@
 //! Values and types in the typed semantic IR (decision 0017).
 //!
 //! `pith-core` does not depend on serde. DTO projections live in
-//! `pith_output::dto`; the `From` impls below are the projection sites.
+//! `pith_output::dto`; the `From` impls in this module are the projection
+//! sites.
 
 use pith_arena::define_arena;
 use pith_ids::ContentId;
@@ -31,9 +32,9 @@ pub enum Value {
     },
     /// An ordered sequence of values, the landed slice of the `List<T>`
     /// constructor 0026 names in the calculus constructor set. Homogeneous in
-    /// use: the request and result checks below treat a list as inhabiting
-    /// `List<T>` when every element inhabits `T`, and an empty list as
-    /// inhabiting every `List<T>`.
+    /// use: the request and result checks in this crate treat a list as
+    /// inhabiting `List<T>` when every element inhabits `T`, and an empty
+    /// list as inhabiting every `List<T>`.
     List(Box<[Value]>),
     /// Named fields, the landed slice of the closed record constructor 0026
     /// names in the calculus constructor set. Closed: a record inhabits a

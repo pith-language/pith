@@ -32,7 +32,7 @@ use std::path::Path;
 use rustix::fs::{CWD, FileType, Mode, OFlags, openat};
 
 // Landlock syscall numbers on Linux x86_64/aarch64 (stable kernel ABI). rustix
-// 1.1.4 does not wrap these, so they are declared directly below.
+// 1.1.4 does not wrap these, so this module declares them directly.
 const SYS_LANDLOCK_CREATE_RULESET: i64 = 444;
 const SYS_LANDLOCK_ADD_RULE: i64 = 445;
 const SYS_LANDLOCK_RESTRICT_SELF: i64 = 446;
