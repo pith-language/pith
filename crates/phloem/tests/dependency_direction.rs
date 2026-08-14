@@ -7,7 +7,7 @@
 //! both directions: a reformatted manifest would break the spelling, and a
 //! transitive edge through a third crate would skip it.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::process::Command;
 
 use serde_json::Value as Json;
@@ -30,7 +30,7 @@ fn phloem_consumes_xylem_and_xylem_cannot_reach_phloem() {
     // workspace member and of everything they pull in, transitive edges
     // included. Dev- and build-dependency edges are dependencies; the
     // direction claim has to hold over all of them or it holds over none.
-    let mut names = HashMap::new();
+    let mut names = BTreeMap::new();
     for package in metadata.get("packages").and_then(Json::as_array).unwrap() {
         names.insert(
             package
@@ -50,7 +50,7 @@ fn phloem_consumes_xylem_and_xylem_cannot_reach_phloem() {
         .and_then(|resolve| resolve.get("nodes"))
         .and_then(Json::as_array)
         .unwrap();
-    let mut edges = HashMap::new();
+    let mut edges = BTreeMap::new();
     for node in nodes {
         let from = names
             .get(node.get("id").and_then(Json::as_str).unwrap())
