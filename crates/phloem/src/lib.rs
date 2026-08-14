@@ -1,25 +1,31 @@
 //! Packaging over the pith kernel.
 //!
 //! `phloem` is the first-party package library (docs/foundation/name.md): the
-//! tissue that carries the products of builds outward, as packages. This first
-//! slice prototypes decision 0039 over the constructors 0026 just landed: a
-//! package is named by declaration inside a domain, a package version adds
-//! coordinates in the comparison the domain declares, a description is a
-//! record value, a source binding is a declared sum with typed payloads, and
-//! a lock entry binds coordinates to the content identity of the resolved
-//! source with the origin as evidence rather than as identity.
+//! tissue that carries the products of builds outward, as packages. This
+//! slice prototypes decisions 0039 and 0040 over the constructors 0026
+//! landed: a package is named by declaration inside a domain, a package
+//! version adds coordinates in the comparison the domain declares, a
+//! description is a record value, a source binding is a declared sum with
+//! typed payloads, a lock entry binds coordinates to the content identity of
+//! the resolved source with the origin as evidence rather than as identity,
+//! constraints are values over the domain's ordering, and resolution is a
+//! host-rule computation in the graph whose answer carries its explanation.
 //!
 //! phloem is a peer of `xylem` and a consumer of it, never a wrapper
 //! (decisions 0009, 0039): it produces build requests against interfaces
 //! xylem already declares, and a build with no package defined anywhere works
-//! without this crate. Constraints, resolution, and the lock's file format
-//! are later records in the same milestone; nothing here anticipates them.
+//! without this crate. The lock's file format and the development
+//! environment are later records in the same milestone; nothing here
+//! anticipates them.
 
+pub mod constraint;
 pub mod description;
 pub mod identity;
 pub mod lock;
+pub mod preference;
 pub mod request;
 pub mod source;
+pub mod universe;
 
 use pith_diag::{Diag, DiagnosticSink, Severity, Span, StableCode};
 

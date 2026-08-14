@@ -191,6 +191,114 @@ fn segment(raw: &str) -> Segment<'_> {
     }
 }
 
+/// Debian version comparison: `[epoch:]upstream[-revision]`, the scheme a
+/// deb domain declares (0039 names it as the other canonical example beside
+/// semver). The epoch compares numerically and dominates everything; the
+/// upstream part compares with the Debian rule, where `~` sorts before
+/// anything including the empty string (so `1.0~rc1` precedes `1.0`); the
+/// revision compares numerically. The point of the scheme here is not
+/// fidelity to dpkg but a second declared ordering with genuinely different
+/// spellings, over which the range algebra in `constraint` must behave
+/// identically (0040).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Debian;
+
+impl VersionScheme for Debian {
+    fn compare(&self, left: &str, right: &str) -> Ordering {
+        let ((left_epoch, left_rest), (right_epoch, right_rest)) =
+            (split_epoch(left), split_epoch(right));
+        left_epoch
+            .cmp(&right_epoch)
+            .then_with(|| compare_upstream(left_rest, right_rest))
+            .then_with(|| compare_revision(left_rest, right_rest))
+    }
+}
+
+/// Split `[epoch:]rest`, defaulting the epoch to zero.
+fn split_epoch(version: &str) -> (u64, &str) {
+    match version.split_once(':') {
+        Some((epoch, rest)) => (epoch.parse().unwrap_or(0), rest),
+        None => (0, version),
+    }
+}
+
+/// Split off a `-debian_revision` suffix, if any.
+fn split_revision(rest: &str) -> (&str, Option<&str>) {
+    match rest.rsplit_once('-') {
+        Some((upstream, revision)) => (upstream, Some(revision)),
+        None => (rest, None),
+    }
+}
+
+fn compare_revision(left: &str, right: &str) -> Ordering {
+    let (left, right) = (split_revision(left).1, split_revision(right).1);
+    NumericSegments.compare(left.unwrap_or("0"), right.unwrap_or("0"))
+}
+
+/// The Debian upstream comparison: digit runs compare numerically, other
+/// characters by rank, with `~` ranked below the end of the string and the
+/// end of the string below every other character. Both walk their strings
+/// in lockstep until one decides.
+fn compare_upstream(left: &str, right: &str) -> Ordering {
+    let (mut left, mut right) = (left, right);
+    loop {
+        let (left_digit, right_digit) = (
+            left.starts_with(|c: char| c.is_ascii_digit()),
+            right.starts_with(|c: char| c.is_ascii_digit()),
+        );
+        if left_digit && right_digit {
+            let (left_run, left_rest) = digit_run(left);
+            let (right_run, right_rest) = digit_run(right);
+            let ordering = numeric_run(left_run).cmp(&numeric_run(right_run));
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+            left = left_rest;
+            right = right_rest;
+            continue;
+        }
+        let (left_rank, left_step) = next_rank(left);
+        let (right_rank, right_step) = next_rank(right);
+        if left_rank != right_rank {
+            return left_rank.cmp(&right_rank);
+        }
+        if left_step == 0 {
+            return Ordering::Equal;
+        }
+        left = &left[left_step..];
+        right = &right[right_step..];
+    }
+}
+
+/// A maximal run of leading digits and the rest after it.
+fn digit_run(text: &str) -> (&str, &str) {
+    let end = text
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(text.len());
+    text.split_at(end)
+}
+
+/// A digit run by value: leading zeros dropped, then longer-is-larger, so
+/// `01` equals `1` and `10` beats `9`.
+fn numeric_run(run: &str) -> (usize, Vec<u8>) {
+    let trimmed = run.trim_start_matches('0');
+    (trimmed.len(), trimmed.as_bytes().to_vec())
+}
+
+/// The rank of the next character, with `~` lowest and the end of the
+/// string just above it — the two facts that make `1.0~rc1 < 1.0 < 1.0+a`.
+/// Returns the rank and how many bytes to consume (zero at the end).
+fn next_rank(text: &str) -> (i32, usize) {
+    match text.as_bytes().first() {
+        None => (0, 0),
+        Some(b'~') => (-1, 1),
+        Some(byte) => (
+            i32::from(*byte),
+            text.chars().next().map_or(1, char::len_utf8),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -235,5 +343,28 @@ mod tests {
                 .unwrap_or(Ordering::Equal),
             Ordering::Less
         );
+    }
+
+    #[test]
+    fn debian_tilde_sorts_before_the_untilded_same_version() {
+        let scheme = Debian;
+        assert_eq!(scheme.compare("1.0~rc1", "1.0"), Ordering::Less);
+        assert_eq!(scheme.compare("1.0", "1.0+dfsg"), Ordering::Less);
+        assert_eq!(scheme.compare("1.0~rc1", "1.0~rc2"), Ordering::Less);
+    }
+
+    #[test]
+    fn debian_epoch_dominates_and_revision_compares_numerically() {
+        let scheme = Debian;
+        assert_eq!(scheme.compare("1:0.1", "0.9"), Ordering::Greater);
+        assert_eq!(scheme.compare("1.0-2", "1.0-10"), Ordering::Less);
+        assert_eq!(scheme.compare("1.0-2", "1.0"), Ordering::Greater);
+    }
+
+    #[test]
+    fn debian_digit_runs_compare_numerically_not_lexicographically() {
+        let scheme = Debian;
+        assert_eq!(scheme.compare("0.9", "0.10"), Ordering::Less);
+        assert_eq!(scheme.compare("1.01", "1.1"), Ordering::Equal);
     }
 }
