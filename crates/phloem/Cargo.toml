@@ -1,0 +1,24 @@
+[package]
+name = "phloem"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "First-party packaging library over the pith kernel (docs/foundation/name.md)"
+
+[lints]
+workspace = true
+
+[dependencies]
+pith-diag.workspace = true
+pith-ids.workspace = true
+pith-core.workspace = true
+xylem.workspace = true
+
+[dev-dependencies]
+pith-engine.workspace = true
+pith-executor-local.workspace = true
+pith-store.workspace = true
+tokio = { workspace = true, features = ["process", "fs", "io-util", "rt", "rt-multi-thread", "macros"] }
+tempfile.workspace = true

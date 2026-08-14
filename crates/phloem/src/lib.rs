@@ -1,0 +1,42 @@
+//! Packaging over the pith kernel.
+//!
+//! `phloem` is the first-party package library (docs/foundation/name.md): the
+//! tissue that carries the products of builds outward, as packages. This first
+//! slice prototypes decision 0039 over the constructors 0026 just landed: a
+//! package is named by declaration inside a domain, a package version adds
+//! coordinates in the comparison the domain declares, a description is a
+//! record value, a source binding is a declared sum with typed payloads, and
+//! a lock entry binds coordinates to the content identity of the resolved
+//! source with the origin as evidence rather than as identity.
+//!
+//! phloem is a peer of `xylem` and a consumer of it, never a wrapper
+//! (decisions 0009, 0039): it produces build requests against interfaces
+//! xylem already declares, and a build with no package defined anywhere works
+//! without this crate. Constraints, resolution, and the lock's file format
+//! are later records in the same milestone; nothing here anticipates them.
+
+pub mod description;
+pub mod identity;
+pub mod lock;
+pub mod request;
+pub mod source;
+
+use pith_diag::{Diag, DiagnosticSink, Severity, Span, StableCode};
+
+/// The stable code every phloem diagnostic carries. xylem's rules diagnose
+/// under 9002; packaging failures get their own so a report names the library
+/// the failure came from.
+pub(crate) const PHLOEM_CODE: u32 = 9004;
+
+/// An error diagnostic carrying `message`, in the shape the kernel's rule
+/// bodies hand back to the engine.
+pub(crate) fn diag(message: impl Into<Box<str>>) -> DiagnosticSink {
+    let mut sink = DiagnosticSink::new();
+    sink.push(Diag::new(
+        Severity::Error,
+        StableCode(PHLOEM_CODE),
+        Span::none(),
+        message,
+    ));
+    sink
+}
