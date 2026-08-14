@@ -1,10 +1,15 @@
 //! Nominal type names and value constructors for the xylem build graph.
 //!
 //! Decision 0026 makes nominal identity a declaration attribute. The names
-//! below are the declarations xylem owns: a toolchain, and the three content
-//! roles a C build moves through. They are nominal over their content identity
-//! so two rules producing content never collapse to the same `() -> Blob`
-//! interface and collide as `E-1102` ambiguity (the blocker Phase 0 lifted).
+//! below are the declarations xylem owns: a toolchain, and the content roles a
+//! C build moves through. They are nominal over their content identity so two
+//! rules producing content never collapse to the same `() -> Blob` interface
+//! and collide as `E-1102` ambiguity (the blocker Phase 0 lifted).
+//!
+//! The discovered header set is the one input here that is not nominal: it is
+//! a `List<Text>` of include paths as the depfile spelled them, the landed
+//! slice of 0026's `List<T>` constructor. Its content identities are resolved
+//! by the compile action against the header universe it was registered with.
 
 use pith_core::{Interface, Pure, Request, Type, Value};
 use pith_diag::Span;
@@ -24,6 +29,11 @@ pub const OBJECT: &str = "xylem.Object";
 
 /// A linked executable identified by its content.
 pub const EXECUTABLE: &str = "xylem.Executable";
+
+/// The make-syntax depfile a discovery pass captured, identified by its
+/// content. The entry rule parses it; the paths it names are the source's
+/// header dependencies.
+pub const DEPFILE: &str = "xylem.Depfile";
 
 /// A toolchain value carrying `driver` as its identity. The full closure lives
 /// on the discovered [`crate::Toolchain`] struct the action rule holds; this
@@ -60,7 +70,81 @@ pub fn executable(id: ContentId) -> Value {
     }
 }
 
-/// `(Toolchain, CSource) -> Object`.
+#[must_use]
+pub fn depfile(id: ContentId) -> Value {
+    Value::Nominal {
+        name: DEPFILE.into(),
+        representation: Box::new(Value::Blob(id)),
+    }
+}
+
+/// The type of a discovered header set: include paths as the depfile spelled
+/// them, canonically sorted and deduplicated by the parser that produced them.
+#[must_use]
+pub fn headers_type() -> Type {
+    Type::List(Box::new(Type::Text))
+}
+
+/// A discovered header set value over `paths`.
+#[must_use]
+pub fn headers<I, S>(paths: I) -> Value
+where
+    I: IntoIterator<Item = S>,
+    S: Into<Box<str>>,
+{
+    Value::List(
+        paths
+            .into_iter()
+            .map(|path| Value::Text(path.into()))
+            .collect(),
+    )
+}
+
+/// `(Toolchain, CSource) -> Depfile`: the interface of the discovery pass. The
+/// preprocessor runs over the source with the whole header universe staged and
+/// captures the depfile naming what the source actually includes.
+#[must_use]
+pub fn discovery_interface() -> Interface {
+    Interface {
+        inputs: Box::new([
+            Type::Nominal {
+                name: TOOLCHAIN.into(),
+            },
+            Type::Nominal {
+                name: C_SOURCE.into(),
+            },
+        ]),
+        output: Type::Nominal {
+            name: DEPFILE.into(),
+        },
+    }
+}
+
+/// `(Toolchain, CSource, List<Text>) -> Object`: the compile action's
+/// interface. The third input is the discovered header set; the action resolves
+/// each path against the universe it was registered with and declares the
+/// resolved files as its inputs.
+#[must_use]
+pub fn compile_action_interface() -> Interface {
+    Interface {
+        inputs: Box::new([
+            Type::Nominal {
+                name: TOOLCHAIN.into(),
+            },
+            Type::Nominal {
+                name: C_SOURCE.into(),
+            },
+            headers_type(),
+        ]),
+        output: Type::Nominal {
+            name: OBJECT.into(),
+        },
+    }
+}
+
+/// `(Toolchain, CSource) -> Object`: the compile entry a build requests. The
+/// entry runs discovery, parses the depfile, and requests the compile with the
+/// discovered set, so a caller names a source and nothing about its headers.
 #[must_use]
 pub fn compile_interface() -> Interface {
     Interface {
@@ -101,7 +185,8 @@ pub fn link_interface() -> Interface {
     }
 }
 
-/// A pure request to compile `source` under `toolchain_value`.
+/// A pure request to compile `source` under `toolchain_value`, discovering its
+/// header dependencies first.
 #[must_use]
 pub fn compile_request(toolchain_value: Value, source: ContentId) -> Request<Pure> {
     Request::<Pure>::new(

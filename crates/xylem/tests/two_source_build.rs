@@ -1,11 +1,15 @@
 //! Milestone M-3: a two-source C build through xylem, with fine-grained
-//! rebuilds.
+//! rebuilds and discovered header dependencies.
 //!
-//! Two C sources share a header and link to one executable. The tests cover the
-//! properties that matter: touching one source recompiles only its object and
-//! leaves the other in the reusable action index (U-5), two cold compiles of
-//! the same source produce byte-identical objects (0014 determinism), and the
-//! linked executable runs and exits with the value its sources compute.
+//! Two C sources share a header and link to one executable. The tests cover
+//! the properties that matter: touching one source recompiles only its object
+//! and leaves the other's discovery and compile in the reusable action index
+//! (U-5), editing the shared header rebuilds both objects because each
+//! compile's planned contract stages the header's new content (decision 0034),
+//! an undeclared header fails the compile inside the sandbox rather than
+//! reading the host filesystem (decision 0030), two cold compiles of the same
+//! source produce byte-identical objects (0014 determinism), and the linked
+//! executable runs and exits with the value its sources compute.
 //!
 //! It skips when the host has no nix-store C compiler. The subject is xylem's
 //! integration with the kernel, not the availability of a toolchain.
@@ -26,14 +30,20 @@ use pith_executor_local::LocalExecutor;
 use pith_ids::ContentId;
 use pith_state_sqlite::SqliteEngineStateStore;
 use pith_store::{ContentStore, FilesystemContentStore};
-use xylem::{BuildEngine, Toolchain, types};
+use xylem::{BuildEngine, HeaderUniverse, Toolchain, types};
 
 const SOURCE_A: &[u8] = b"#include \"answer.h\"\nint a(void) { return ANSWER; }\n";
 const SOURCE_B: &[u8] =
     b"#include \"answer.h\"\nint b(void) { return ANSWER + 1; }\nint main(void) { return a() + b(); }\n";
 const SOURCE_A_TOUCHED: &[u8] = b"#include \"answer.h\"\nint a(void) { return ANSWER + 2; }\n";
+/// Includes a header the universe in the undeclared-header test does not
+/// offer, so the discovery pass inside the sandbox cannot find it.
+const SOURCE_UNDECLARED: &[u8] = b"#include \"answer.h\"\n#include \"unused.h\"\n";
 const HEADER: &[u8] = b"#define ANSWER 40\nint a(void);\nint b(void);\n";
+const HEADER_TOUCHED: &[u8] = b"#define ANSWER 42\nint a(void);\nint b(void);\n";
 const HEADER_PATH: &str = "answer.h";
+const UNUSED_PATH: &str = "unused.h";
+const UNUSED: &[u8] = b"#define UNUSED 0\n";
 
 const ELF_MAGIC: &[u8] = b"\x7fELF";
 /// `main` returns `a() + b()` = `ANSWER + (ANSWER + 1)` = `81`, which the shell
@@ -189,12 +199,24 @@ fn run_build(engine: &mut Engine, request: &Request<Pure>) -> Evaluation {
     }
 }
 
+/// Drive a build that is expected to fail, and return the diagnostics it
+/// failed with. The undeclared-header test lives here: the failure is the
+/// claim being asserted, not a surprise.
+fn run_build_expecting_failure(engine: &mut Engine, request: &Request<Pure>) -> DiagnosticSink {
+    let run = engine.run(request, &runtime(), &AllowAllActions, &LocalExecutor::new());
+    match run {
+        Ok(Err(diagnostics)) => diagnostics,
+        Ok(Ok(evaluation)) => unreachable!("the build succeeded: {evaluation:?}"),
+        Err(error) => unreachable!("the runtime could not drive the run: {error:?}"),
+    }
+}
+
 /// A fresh engine over the durable substrate at `root` — a filesystem content
 /// store and a sqlite engine state database — with xylem's rules and the
-/// two-source build rule registered for `toolchain`, and the shared header
-/// staged. Two engines built over one root are successive runs of the same
-/// build.
-fn build_engine(root: &Path, toolchain: &Toolchain) -> (Engine, Value) {
+/// two-source build rule registered for `toolchain`, and `universe` offered to
+/// `#include`. Two engines built over one root are successive runs of the same
+/// build; a changed `universe` between them is an edit to a shared header.
+fn build_engine(root: &Path, toolchain: &Toolchain, universe: HeaderUniverse) -> (Engine, Value) {
     let store = match FilesystemContentStore::open(root) {
         Ok(store) => store,
         Err(error) => unreachable!("the filesystem store failed to open: {error:?}"),
@@ -204,12 +226,8 @@ fn build_engine(root: &Path, toolchain: &Toolchain) -> (Engine, Value) {
         Err(error) => unreachable!("the engine-state database failed to open: {error:?}"),
     };
     let mut engine = Engine::with_state_store(store, state);
-    let header = match engine.put_blob(HEADER) {
-        Ok(identity) => identity,
-        Err(error) => unreachable!("the store failed to hold the header: {error:?}"),
-    };
     let toolchain_value = toolchain.value();
-    engine.register_xylem(toolchain.clone(), Some((HEADER_PATH.into(), header)));
+    engine.register_xylem(toolchain.clone(), universe);
     engine.register_rule(
         build_rule(),
         TwoSourceBuild {
@@ -217,6 +235,25 @@ fn build_engine(root: &Path, toolchain: &Toolchain) -> (Engine, Value) {
         },
     );
     (engine, toolchain_value)
+}
+
+/// Stage the shared header (and, for the full-universe tests, a second header
+/// no source includes) into `engine`'s store and return the universe over
+/// them.
+fn header_universe(engine: &mut Engine, include_unused: bool) -> HeaderUniverse {
+    let header = match engine.put_blob(HEADER) {
+        Ok(identity) => identity,
+        Err(error) => unreachable!("the store failed to hold the header: {error:?}"),
+    };
+    let mut entries = vec![(HEADER_PATH.into(), header)];
+    if include_unused {
+        let unused = match engine.put_blob(UNUSED) {
+            Ok(identity) => identity,
+            Err(error) => unreachable!("the store failed to hold unused.h: {error:?}"),
+        };
+        entries.push((UNUSED_PATH.into(), unused));
+    }
+    HeaderUniverse::new(entries.into_boxed_slice())
 }
 
 fn build_request(sources: [ContentId; 2]) -> Request<Pure> {
@@ -263,21 +300,29 @@ fn materialize_executable(root: &Path, bytes: &[u8]) -> PathBuf {
     program
 }
 
+fn store_blob(engine: &mut Engine, bytes: &[u8], what: &str) -> ContentId {
+    match engine.put_blob(bytes) {
+        Ok(id) => id,
+        Err(error) => unreachable!("the store failed to hold {what}: {error:?}"),
+    }
+}
+
 #[test]
 fn a_two_source_build_produces_an_executable() {
     let Ok(toolchain) = Toolchain::discover("cc") else {
         return;
     };
     let root = temp_root();
-    let (mut engine, _toolchain_value) = build_engine(root.path(), &toolchain);
-    let source_a = match engine.put_blob(SOURCE_A) {
-        Ok(id) => id,
-        Err(error) => unreachable!("the store failed to hold a.c: {error:?}"),
+    let (mut engine, _) = {
+        let mut engine = match FilesystemContentStore::open(root.path()) {
+            Ok(store) => Engine::with_content_store(store),
+            Err(error) => unreachable!("the filesystem store failed to open: {error:?}"),
+        };
+        let universe = header_universe(&mut engine, false);
+        build_engine(root.path(), &toolchain, universe)
     };
-    let source_b = match engine.put_blob(SOURCE_B) {
-        Ok(id) => id,
-        Err(error) => unreachable!("the store failed to hold b.c: {error:?}"),
-    };
+    let source_a = store_blob(&mut engine, SOURCE_A, "a.c");
+    let source_b = store_blob(&mut engine, SOURCE_B, "b.c");
 
     let evaluation = run_build(&mut engine, &build_request([source_a, source_b]));
     let executable = blob_of(&evaluation.value);
@@ -307,15 +352,16 @@ fn the_built_executable_runs_and_exits_with_the_expected_code() {
         return;
     };
     let root = temp_root();
-    let (mut engine, _toolchain_value) = build_engine(root.path(), &toolchain);
-    let source_a = match engine.put_blob(SOURCE_A) {
-        Ok(id) => id,
-        Err(error) => unreachable!("the store failed to hold a.c: {error:?}"),
+    let (mut engine, _) = {
+        let mut engine = match FilesystemContentStore::open(root.path()) {
+            Ok(store) => Engine::with_content_store(store),
+            Err(error) => unreachable!("the filesystem store failed to open: {error:?}"),
+        };
+        let universe = header_universe(&mut engine, false);
+        build_engine(root.path(), &toolchain, universe)
     };
-    let source_b = match engine.put_blob(SOURCE_B) {
-        Ok(id) => id,
-        Err(error) => unreachable!("the store failed to hold b.c: {error:?}"),
-    };
+    let source_a = store_blob(&mut engine, SOURCE_A, "a.c");
+    let source_b = store_blob(&mut engine, SOURCE_B, "b.c");
 
     let evaluation = run_build(&mut engine, &build_request([source_a, source_b]));
     let executable = blob_of(&evaluation.value);
@@ -345,32 +391,30 @@ fn the_built_executable_runs_and_exits_with_the_expected_code() {
 }
 
 /// Fine-grained invalidation (U-5): touching `a.c` recompiles `a.o` and does
-/// not recompile `b.o`. The `b.o` compile is served from the reusable action
-/// index, so the second build adds one fewer action computation than a cold
-/// rebuild would.
+/// not re-run `b.o`'s discovery or compile. Both of those are served from the
+/// reusable action index, so the second build adds three action computations —
+/// `a`'s discovery, `a`'s compile, and the link — rather than five.
 #[test]
 fn touching_one_source_recompiles_only_its_object() {
     let Ok(toolchain) = Toolchain::discover("cc") else {
         return;
     };
     let root = temp_root();
-    let (mut engine, _toolchain_value) = build_engine(root.path(), &toolchain);
-    let source_a = match engine.put_blob(SOURCE_A) {
-        Ok(id) => id,
-        Err(error) => unreachable!("the store failed to hold a.c: {error:?}"),
+    let (mut engine, _) = {
+        let mut engine = match FilesystemContentStore::open(root.path()) {
+            Ok(store) => Engine::with_content_store(store),
+            Err(error) => unreachable!("the filesystem store failed to open: {error:?}"),
+        };
+        let universe = header_universe(&mut engine, true);
+        build_engine(root.path(), &toolchain, universe)
     };
-    let source_b = match engine.put_blob(SOURCE_B) {
-        Ok(id) => id,
-        Err(error) => unreachable!("the store failed to hold b.c: {error:?}"),
-    };
+    let source_a = store_blob(&mut engine, SOURCE_A, "a.c");
+    let source_b = store_blob(&mut engine, SOURCE_B, "b.c");
 
     let _first = run_build(&mut engine, &build_request([source_a, source_b]));
     let after_first = action_computations(&engine);
 
-    let source_a_touched = match engine.put_blob(SOURCE_A_TOUCHED) {
-        Ok(id) => id,
-        Err(error) => unreachable!("the store failed to hold the touched a.c: {error:?}"),
-    };
+    let source_a_touched = store_blob(&mut engine, SOURCE_A_TOUCHED, "the touched a.c");
     let _second = run_build(&mut engine, &build_request([source_a_touched, source_b]));
     let after_second = action_computations(&engine);
 
@@ -378,9 +422,139 @@ fn touching_one_source_recompiles_only_its_object() {
         .checked_sub(after_first)
         .expect("the action count went down");
     assert_eq!(
-        new_actions, 2,
-        "touching a.c should recompile a.o and re-link (2 actions), \
-         not recompile b.o (which would be 3); got {new_actions}"
+        new_actions, 3,
+        "touching a.c should re-run its discovery, recompile a.o, and re-link (3 actions), \
+         not re-run b's discovery or compile (which would be 5); got {new_actions}"
+    );
+}
+
+/// A rebuild under an edited header recompiles both objects (decision 0034).
+/// `a.c` is touched so the root re-runs, and the header's new content is
+/// offered through a changed universe. `b`'s compile entry has an unchanged
+/// pure key, so the measurement is on the walk 0033 built: serving it from the
+/// index re-plans its recorded action requests against the universe this run
+/// registered, the planned contracts stage the header's new content identity,
+/// and both compiles — not just `a`'s — execute again. The rebuild is two
+/// discoveries, two compiles, and a link, and the executable that comes out
+/// answers the touched header.
+#[test]
+fn a_rebuild_under_an_edited_header_recompiles_both_objects() {
+    let Ok(toolchain) = Toolchain::discover("cc") else {
+        return;
+    };
+    let root = temp_root();
+    let source_a;
+    let source_b;
+    {
+        let mut engine = match FilesystemContentStore::open(root.path()) {
+            Ok(store) => Engine::with_content_store(store),
+            Err(error) => unreachable!("the filesystem store failed to open: {error:?}"),
+        };
+        let universe = header_universe(&mut engine, true);
+        let (mut engine, _) = build_engine(root.path(), &toolchain, universe);
+        source_a = store_blob(&mut engine, SOURCE_A, "a.c");
+        source_b = store_blob(&mut engine, SOURCE_B, "b.c");
+        let _first = run_build(&mut engine, &build_request([source_a, source_b]));
+        assert_eq!(
+            action_computations(&engine),
+            5,
+            "the cold build ran five actions"
+        );
+    }
+
+    // The header edit: same universe shape, new content identity, delivered by
+    // a fresh engine over the same durable state. The first engine is dropped
+    // before the second opens, so the rebuild crosses the process boundary the
+    // reusable index lives across.
+    let (mut engine, _) = {
+        let mut engine = match FilesystemContentStore::open(root.path()) {
+            Ok(store) => Engine::with_content_store(store),
+            Err(error) => unreachable!("the store failed to reopen: {error:?}"),
+        };
+        let header = match engine.put_blob(HEADER_TOUCHED) {
+            Ok(identity) => identity,
+            Err(error) => unreachable!("the store failed to hold the touched header: {error:?}"),
+        };
+        let unused = match engine.put_blob(UNUSED) {
+            Ok(identity) => identity,
+            Err(error) => unreachable!("the store failed to hold unused.h: {error:?}"),
+        };
+        let universe = HeaderUniverse::new(
+            vec![(HEADER_PATH.into(), header), (UNUSED_PATH.into(), unused)].into_boxed_slice(),
+        );
+        build_engine(root.path(), &toolchain, universe)
+    };
+
+    // `a.c` is touched alongside the header, so the root re-runs. `b`'s entry
+    // is served from the index only after its action edges re-plan.
+    let source_a_touched = store_blob(&mut engine, SOURCE_A_TOUCHED, "the touched a.c");
+    let evaluation = run_build(&mut engine, &build_request([source_a_touched, source_b]));
+    assert_eq!(
+        action_computations(&engine),
+        5,
+        "an edited header must re-run both discoveries, both compiles, and the link; \
+         a smaller count means a stale object was served"
+    );
+
+    // The rebuilt executable answers the touched header, which is the proof
+    // the recompiles actually read the new content: a() is ANSWER+2 = 44,
+    // b() is ANSWER+1 = 43.
+    let executable = blob_of(&evaluation.value);
+    let store = match FilesystemContentStore::open(root.path()) {
+        Ok(store) => store,
+        Err(error) => unreachable!("the store failed to reopen: {error:?}"),
+    };
+    let bytes = match store.get_blob(executable) {
+        Ok(Some(bytes)) => bytes,
+        Ok(None) => unreachable!("the executable was not in the store"),
+        Err(error) => unreachable!("the store failed to read: {error:?}"),
+    };
+    let program = materialize_executable(root.path(), bytes.as_bytes());
+    let status = match Command::new(&program).status() {
+        Ok(status) => status,
+        Err(error) => unreachable!("could not run the program: {error:?}"),
+    };
+    let code = status
+        .code()
+        .unwrap_or_else(|| unreachable!("the program was terminated by a signal: {status}"));
+    assert_eq!(
+        code, 87,
+        "main computes (42+2) + (42+1) against the touched header"
+    );
+}
+
+/// A header the universe does not offer is a loud failure inside the sandbox,
+/// not a compile against the host filesystem (decisions 0030, 0034). Landlock
+/// confines the discovery pass to the staged universe, so the preprocessor's
+/// `#include` resolves nowhere and the tool reports it; nothing outside the
+/// declared set can be read instead.
+#[test]
+fn an_undeclared_header_fails_rather_than_reading_the_host() {
+    let Ok(toolchain) = Toolchain::discover("cc") else {
+        return;
+    };
+    let root = temp_root();
+    let (mut engine, _) = {
+        let mut engine = match FilesystemContentStore::open(root.path()) {
+            Ok(store) => Engine::with_content_store(store),
+            Err(error) => unreachable!("the filesystem store failed to open: {error:?}"),
+        };
+        let universe = header_universe(&mut engine, false);
+        build_engine(root.path(), &toolchain, universe)
+    };
+    let source = store_blob(&mut engine, SOURCE_UNDECLARED, "undeclared.c");
+
+    let diagnostics = run_build_expecting_failure(
+        &mut engine,
+        &types::compile_request(toolchain.value(), source),
+    );
+    let text: Vec<String> = diagnostics
+        .iter()
+        .map(|d| d.message.0.as_ref().to_owned())
+        .collect();
+    assert!(
+        text.iter().any(|message| message.contains("unused.h")),
+        "the diagnostics should name the undeclared header; got: {text:?}"
     );
 }
 
@@ -394,15 +568,16 @@ fn a_second_build_of_unchanged_sources_reuses_its_root() {
         return;
     };
     let root = temp_root();
-    let (mut engine, _toolchain_value) = build_engine(root.path(), &toolchain);
-    let source_a = match engine.put_blob(SOURCE_A) {
-        Ok(id) => id,
-        Err(error) => unreachable!("the store failed to hold a.c: {error:?}"),
+    let (mut engine, _) = {
+        let mut engine = match FilesystemContentStore::open(root.path()) {
+            Ok(store) => Engine::with_content_store(store),
+            Err(error) => unreachable!("the filesystem store failed to open: {error:?}"),
+        };
+        let universe = header_universe(&mut engine, false);
+        build_engine(root.path(), &toolchain, universe)
     };
-    let source_b = match engine.put_blob(SOURCE_B) {
-        Ok(id) => id,
-        Err(error) => unreachable!("the store failed to hold b.c: {error:?}"),
-    };
+    let source_a = store_blob(&mut engine, SOURCE_A, "a.c");
+    let source_b = store_blob(&mut engine, SOURCE_B, "b.c");
     let request = build_request([source_a, source_b]);
 
     let first = run_build(&mut engine, &request);
@@ -431,21 +606,27 @@ fn a_fresh_engine_over_the_same_state_hydrates_the_build() {
     };
     let root = temp_root();
     let (source_a, source_b, computed) = {
-        let (mut engine, _toolchain_value) = build_engine(root.path(), &toolchain);
-        let source_a = match engine.put_blob(SOURCE_A) {
-            Ok(id) => id,
-            Err(error) => unreachable!("the store failed to hold a.c: {error:?}"),
+        let mut engine = match FilesystemContentStore::open(root.path()) {
+            Ok(store) => Engine::with_content_store(store),
+            Err(error) => unreachable!("the filesystem store failed to open: {error:?}"),
         };
-        let source_b = match engine.put_blob(SOURCE_B) {
-            Ok(id) => id,
-            Err(error) => unreachable!("the store failed to hold b.c: {error:?}"),
-        };
+        let universe = header_universe(&mut engine, false);
+        let (mut engine, _) = build_engine(root.path(), &toolchain, universe);
+        let source_a = store_blob(&mut engine, SOURCE_A, "a.c");
+        let source_b = store_blob(&mut engine, SOURCE_B, "b.c");
         let computed = run_build(&mut engine, &build_request([source_a, source_b]));
         assert_eq!(computed.source, EvaluationSource::Computed);
         (source_a, source_b, computed.value)
     };
 
-    let (mut engine, _toolchain_value) = build_engine(root.path(), &toolchain);
+    let (mut engine, _) = {
+        let mut engine = match FilesystemContentStore::open(root.path()) {
+            Ok(store) => Engine::with_content_store(store),
+            Err(error) => unreachable!("the store failed to reopen: {error:?}"),
+        };
+        let universe = header_universe(&mut engine, false);
+        build_engine(root.path(), &toolchain, universe)
+    };
     let hydrated = run_build(&mut engine, &build_request([source_a, source_b]));
 
     assert_eq!(hydrated.source, EvaluationSource::Hydrated);
@@ -458,20 +639,24 @@ fn a_fresh_engine_over_the_same_state_hydrates_the_build() {
 }
 
 /// Determinism (0014): two cold compiles of the same source over the same
-/// header produce byte-identical objects. Caching is switched off so both
-/// compiles actually run.
+/// header universe produce byte-identical objects. Caching is switched off so
+/// both compiles actually run.
 #[test]
 fn two_cold_compiles_of_the_same_source_are_identical() {
     let Ok(toolchain) = Toolchain::discover("cc") else {
         return;
     };
     let root = temp_root();
-    let (mut engine, toolchain_value) = build_engine(root.path(), &toolchain);
-    engine.set_action_caching(false);
-    let source = match engine.put_blob(SOURCE_A) {
-        Ok(id) => id,
-        Err(error) => unreachable!("the store failed to hold a.c: {error:?}"),
+    let (mut engine, toolchain_value) = {
+        let mut engine = match FilesystemContentStore::open(root.path()) {
+            Ok(store) => Engine::with_content_store(store),
+            Err(error) => unreachable!("the filesystem store failed to open: {error:?}"),
+        };
+        let universe = header_universe(&mut engine, false);
+        build_engine(root.path(), &toolchain, universe)
     };
+    engine.set_action_caching(false);
+    let source = store_blob(&mut engine, SOURCE_A, "a.c");
 
     let compile = types::compile_request(toolchain_value, source);
     let first = blob_of(&run_build(&mut engine, &compile).value);
