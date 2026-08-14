@@ -73,7 +73,7 @@ pub(super) fn run_step(
             index,
             *attempt,
             dependencies,
-            *result,
+            result,
             *corrupt_reuse,
             model,
             subject,
@@ -141,7 +141,7 @@ fn complete(
     index: usize,
     selector: Selector,
     dependencies: &[GeneratedDependency],
-    result: i64,
+    result: &Value,
     corrupt_reuse: bool,
     model: &MemoryEngineStateStore,
     subject: &dyn EngineStateStore,
@@ -172,7 +172,7 @@ fn complete(
     let capabilities = required_capabilities(&target.computation, &resolved, tracked);
     let completion = |space: Space| CompletedAttempt {
         dependencies: with_capability_edges(materialize(&resolved, tracked, space), &provenance),
-        result: EncodedValue::from_value(&Value::Int(result)),
+        result: EncodedValue::from_value(result),
         provenance: provenance.clone(),
         reuse: reuse.materialize(tracked, space),
         capabilities: capabilities.clone(),

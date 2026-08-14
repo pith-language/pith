@@ -25,7 +25,12 @@ use crate::{
 /// version-2 database can hold. Nothing is released, so a pre-release database
 /// is moved aside and rebuilt rather than migrated, which the existing
 /// incompatible-database test already asserts.
-pub const RECORD_ENCODING_VERSION: SemanticEncodingVersion = SemanticEncodingVersion::new(3);
+///
+/// Version 4 is the `Record` constructor (0026): tag 8 is new in both grammars
+/// and no existing byte sequence changes meaning — a version-3 database can
+/// hold no record bytes — but the retained-value grammar the version gates has
+/// grown, so the gate moves on the same moved-aside-and-rebuilt terms.
+pub const RECORD_ENCODING_VERSION: SemanticEncodingVersion = SemanticEncodingVersion::new(4);
 
 pub const CURRENT_ENGINE_STATE_VERSIONS: EngineStateVersions = EngineStateVersions {
     schema: SchemaVersion::new(1),

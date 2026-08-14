@@ -14,7 +14,7 @@
 use pith_core::{
     ActionInput, ActionOutput, ActionProgram, ActionSpec, CanonicalDecodeError,
     CapabilityRequirement, Content, EnvironmentVariable, ExitStatusContract, NetworkPolicy,
-    OutputKind, PlatformRequirement, Type, Value,
+    OutputKind, PlatformRequirement, RecordField, Type, Value,
 };
 use pith_ids::ContentId;
 use proptest::prelude::*;
@@ -29,6 +29,21 @@ fn bounded_string(max: usize) -> impl Strategy<Value = String> {
     proptest::collection::vec(any::<char>(), 0..max).prop_map(|cs| cs.into_iter().collect())
 }
 
+/// Ascending, duplicate-free field names, so generated records satisfy the
+/// closed-record shape without a filter that would skew generation.
+const FIELD_NAMES: [&str; 3] = ["alpha", "beta", "gamma"];
+
+fn record_fields<T>(payloads: Vec<T>) -> Vec<RecordField<T>> {
+    FIELD_NAMES
+        .iter()
+        .zip(payloads)
+        .map(|(name, payload)| RecordField {
+            name: (*name).into(),
+            payload,
+        })
+        .collect()
+}
+
 fn type_strategy() -> impl Strategy<Value = Type> {
     prop_oneof![
         Just(Type::Unit),
@@ -41,11 +56,17 @@ fn type_strategy() -> impl Strategy<Value = Type> {
             name: name.into_boxed_str(),
         }),
         leaf_type_strategy().prop_map(|element| Type::List(Box::new(element))),
+        // Field names come from the fixed ascending alphabet above, so the
+        // slice already satisfies the closed-record shape and goes straight
+        // into the variant.
+        proptest::collection::vec(leaf_type_strategy(), 0..3)
+            .prop_map(|payloads| Type::Record(record_fields(payloads).into())),
     ]
 }
 
-/// Non-`List` types, so `type_strategy` stays finite: a list's element type is
-/// drawn from here, never from `type_strategy` itself.
+/// Non-recursive types, so `type_strategy` stays finite: a list's element type
+/// and a record's field type are drawn from here, never from `type_strategy`
+/// itself.
 fn leaf_type_strategy() -> impl Strategy<Value = Type> {
     prop_oneof![
         Just(Type::Unit),
@@ -89,6 +110,8 @@ fn value_strategy() -> impl Strategy<Value = Value> {
         }),
         proptest::collection::vec(scalar_value_strategy(), 0..4)
             .prop_map(|elements| Value::List(elements.into_boxed_slice())),
+        proptest::collection::vec(scalar_value_strategy(), 0..3)
+            .prop_map(|payloads| Value::Record(record_fields(payloads).into())),
     ]
 }
 

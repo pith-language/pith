@@ -330,7 +330,8 @@ impl SelectOutcome {
 mod tests {
     use super::*;
     use crate::value_codec::{
-        TAG_BLOB, TAG_BOOL, TAG_BYTES, TAG_INT, TAG_LIST, TAG_NOMINAL, TAG_TEXT, TAG_UNIT,
+        TAG_BLOB, TAG_BOOL, TAG_BYTES, TAG_INT, TAG_LIST, TAG_NOMINAL, TAG_RECORD, TAG_TEXT,
+        TAG_UNIT,
     };
     use pith_arena::Arena;
 
@@ -349,6 +350,14 @@ mod tests {
             (Type::Blob, TAG_BLOB),
             (Type::Nominal { name: "n".into() }, TAG_NOMINAL),
             (Type::List(Box::new(Type::Unit)), TAG_LIST),
+            (
+                Type::record([crate::RecordField {
+                    name: "n".into(),
+                    payload: Type::Unit,
+                }])
+                .unwrap(),
+                TAG_RECORD,
+            ),
         ];
         for (i, (_, tag_i)) in types.iter().enumerate() {
             for (_, tag_j) in types.iter().skip(i + 1) {
@@ -368,6 +377,14 @@ mod tests {
                 TAG_BLOB,
             ),
             (Value::List(Box::new([])), TAG_LIST),
+            (
+                Value::record([crate::RecordField {
+                    name: "n".into(),
+                    payload: Value::Unit,
+                }])
+                .unwrap(),
+                TAG_RECORD,
+            ),
         ];
         for (value, expected) in &values {
             let mut manifest = Vec::new();

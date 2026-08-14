@@ -54,6 +54,7 @@ pub fn check(scenario: &Scenario, subject: &dyn EngineStateStore) -> Result<(), 
 mod tests {
     use super::fixtures::pure_key;
     use super::*;
+    use pith_core::{RecordField, Value};
     use proptest::prelude::*;
 
     /// The generator has to produce records shared validation accepts, or the
@@ -66,14 +67,20 @@ mod tests {
                 Step::Complete {
                     attempt: 0,
                     dependencies: Box::new([]),
-                    result: 1,
+                    result: Value::Int(1),
                     corrupt_reuse: false,
                 },
                 Step::CreatePure { rule: 1, input: 0 },
                 Step::Complete {
                     attempt: 0,
                     dependencies: Box::new([GeneratedDependency::Pure(0)]),
-                    result: 2,
+                    result: Value::Record(
+                        [RecordField {
+                            name: "result".into(),
+                            payload: Value::Int(2),
+                        }]
+                        .into(),
+                    ),
                     corrupt_reuse: false,
                 },
                 Step::CreateAction {
@@ -85,7 +92,7 @@ mod tests {
                 Step::Complete {
                     attempt: 0,
                     dependencies: Box::new([GeneratedDependency::Blob(3)]),
-                    result: 3,
+                    result: Value::Int(3),
                     corrupt_reuse: false,
                 },
             ]),

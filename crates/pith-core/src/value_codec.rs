@@ -2,7 +2,7 @@
 //! [`Value`] variants.
 
 use crate::{
-    Interface, Type, Value,
+    Interface, RecordField, Type, Value,
     codec::CanonicalReader,
     manifest::{encode_bytes, encode_length, encode_str},
 };
@@ -22,6 +22,7 @@ pub(crate) const TAG_BYTES: u8 = 4;
 pub(crate) const TAG_BLOB: u8 = 5;
 pub(crate) const TAG_NOMINAL: u8 = 6;
 pub(crate) const TAG_LIST: u8 = 7;
+pub(crate) const TAG_RECORD: u8 = 8;
 
 pub(crate) fn encode_type_payload(encoded: &mut Vec<u8>, value_type: &Type) {
     match value_type {
@@ -39,7 +40,61 @@ pub(crate) fn encode_type_payload(encoded: &mut Vec<u8>, value_type: &Type) {
             encoded.push(TAG_LIST);
             encode_type_payload(encoded, element);
         }
+        Type::Record(fields) => {
+            encoded.push(TAG_RECORD);
+            encode_record_fields(encoded, fields, encode_type_payload);
+        }
     }
+}
+
+/// Records are the one shape `Type` and `Value` build the same way — named
+/// fields, one payload each — so both grammars share the field machinery.
+/// Fields are written in name order whatever order the in-memory slice holds,
+/// because name order is the canonical order 0026 fixes; the decoder accepts
+/// that order only, so two records that differ by construction order cannot
+/// encode differently.
+fn encode_record_fields<T>(
+    encoded: &mut Vec<u8>,
+    fields: &[RecordField<T>],
+    encode_payload: fn(&mut Vec<u8>, &T),
+) {
+    let mut ordered: Vec<&RecordField<T>> = fields.iter().collect();
+    ordered.sort_by(|left, right| left.name.cmp(&right.name));
+    encode_length(encoded, ordered.len());
+    for field in ordered {
+        encode_str(encoded, &field.name);
+        encode_payload(encoded, &field.payload);
+    }
+}
+
+fn decode_record_fields<T>(
+    decoder: &mut CanonicalReader,
+    depth: u32,
+    decode_payload: fn(&mut CanonicalReader, u32) -> Result<T, CanonicalDecodeError>,
+) -> Result<Box<[RecordField<T>]>, CanonicalDecodeError> {
+    if depth >= MAX_NOMINAL_NESTING {
+        return Err(CanonicalDecodeError::NestingTooDeep {
+            limit: MAX_NOMINAL_NESTING,
+        });
+    }
+    let count = decoder.read_length()?;
+    let mut fields: Vec<RecordField<T>> = Vec::with_capacity(count.min(64));
+    for _ in 0..count {
+        let name: Box<str> = decoder.read_text()?.into();
+        if let Some(previous) = fields.last()
+            && previous.name.as_ref() >= name.as_ref()
+        {
+            return Err(CanonicalDecodeError::RecordFieldsOutOfOrder {
+                earlier: previous.name.clone(),
+                later: name,
+            });
+        }
+        fields.push(RecordField {
+            name,
+            payload: decode_payload(decoder, depth.saturating_add(1))?,
+        });
+    }
+    Ok(fields.into_boxed_slice())
 }
 
 pub(crate) fn encode_value_payload(encoded: &mut Vec<u8>, value: &Value) {
@@ -80,11 +135,15 @@ pub(crate) fn encode_value_payload(encoded: &mut Vec<u8>, value: &Value) {
                 encode_value_payload(encoded, element);
             }
         }
+        Value::Record(fields) => {
+            encoded.push(TAG_RECORD);
+            encode_record_fields(encoded, fields, encode_value_payload);
+        }
     }
 }
 
 /// Failure to decode a canonical [`Type`] or [`Value`] encoding.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CanonicalDecodeError {
     UnsupportedVersion { version: u8 },
     UnknownTypeTag { tag: u8 },
@@ -95,6 +154,7 @@ pub enum CanonicalDecodeError {
     InvalidUtf8,
     LengthOutOfRange { length: u64 },
     NestingTooDeep { limit: u32 },
+    RecordFieldsOutOfOrder { earlier: Box<str>, later: Box<str> },
 }
 
 impl std::fmt::Display for CanonicalDecodeError {
@@ -125,6 +185,10 @@ impl std::fmt::Display for CanonicalDecodeError {
             Self::NestingTooDeep { limit } => write!(
                 formatter,
                 "canonical encoding nests values or types deeper than {limit}"
+            ),
+            Self::RecordFieldsOutOfOrder { earlier, later } => write!(
+                formatter,
+                "canonical record fields are not in strictly ascending name order: `{earlier}` then `{later}`"
             ),
         }
     }
@@ -189,6 +253,7 @@ fn decode_type_at_depth(
                 depth.saturating_add(1),
             )?))
         }
+        TAG_RECORD => Type::Record(decode_record_fields(decoder, depth, decode_type_at_depth)?),
         tag => return Err(CanonicalDecodeError::UnknownTypeTag { tag }),
     })
 }
@@ -253,13 +318,14 @@ impl Value {
 
 /// How deeply the recursive constructors may nest before decoding refuses.
 ///
-/// `Nominal` values, `List` values, and `List` types recurse during decoding,
-/// so they are the things that can make it recurse without bound. The decoder
+/// `Nominal` values, `List` values, `List` types, `Record` values, and
+/// `Record` types recurse during decoding, so they are the things that can
+/// make it recurse without bound. The decoder
 /// reads bytes an adapter hands it, and those bytes are whatever the database
-/// holds: a row of repeated `TAG_NOMINAL` or `TAG_LIST` recurses once per byte
-/// and overflows the stack, which aborts the process rather than returning the
-/// adapter error decision 0024 requires of corrupt state. Bounding the depth
-/// turns that into an ordinary decode failure.
+/// holds: a row of repeated `TAG_NOMINAL`, `TAG_LIST`, or `TAG_RECORD`
+/// recurses once per byte and overflows the stack, which aborts the process
+/// rather than returning the adapter error decision 0024 requires of corrupt
+/// state. Bounding the depth turns that into an ordinary decode failure.
 ///
 /// The limit is far above any real value. A nominal over a nominal is legal and
 /// occasionally useful; a chain dozens deep is not something the calculus in
@@ -300,6 +366,11 @@ fn decode_value_payload(
                 .read_sequence(|decoder| decode_value_payload(decoder, depth.saturating_add(1)))?;
             Ok(Value::List(elements))
         }
+        TAG_RECORD => Ok(Value::Record(decode_record_fields(
+            decoder,
+            depth,
+            decode_value_payload,
+        )?)),
         tag => Err(CanonicalDecodeError::UnknownValueTag { tag }),
     }
 }
@@ -307,8 +378,8 @@ fn decode_value_payload(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::RecordField;
     use pith_ids::{ContentDigest, ContentId};
-
     fn fixture_content_id() -> ContentId {
         ContentId::from_digest(ContentDigest::from_bytes([
             0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
@@ -333,6 +404,17 @@ mod tests {
                 name: "Machine".into(),
             })),
             Type::List(Box::new(Type::List(Box::new(Type::Int)))),
+            Type::record([
+                RecordField {
+                    name: "name".into(),
+                    payload: Type::Text,
+                },
+                RecordField {
+                    name: "nested".into(),
+                    payload: Type::List(Box::new(Type::Int)),
+                },
+            ])
+            .unwrap(),
         ] {
             let encoded = value_type.encode_canonical();
             assert_eq!(Type::decode_canonical(&encoded), Ok(value_type));
@@ -366,6 +448,17 @@ mod tests {
             Value::List(
                 vec![Value::List(vec![Value::Int(1)].into_boxed_slice())].into_boxed_slice(),
             ),
+            Value::record([
+                RecordField {
+                    name: "name".into(),
+                    payload: Value::Text("pith".into()),
+                },
+                RecordField {
+                    name: "nested".into(),
+                    payload: Value::List(vec![Value::Int(1)].into_boxed_slice()),
+                },
+            ])
+            .unwrap(),
         ] {
             let encoded = value.encode_canonical();
             assert_eq!(Value::decode_canonical(&encoded), Ok(value.clone()));
@@ -374,7 +467,7 @@ mod tests {
 
     #[test]
     fn version_one_type_bytes_are_stable() {
-        let fixtures: [(Type, &[u8]); 8] = [
+        let fixtures: [(Type, &[u8]); 9] = [
             (Type::Unit, &[0x01, 0x00]),
             (Type::Bool, &[0x01, 0x01]),
             (Type::Int, &[0x01, 0x02]),
@@ -388,6 +481,27 @@ mod tests {
                 ],
             ),
             (Type::List(Box::new(Type::Int)), &[0x01, 0x07, 0x02]),
+            // A two-field record, fields in canonical name order: the u64
+            // count, then per field the u64-length-prefixed name and the
+            // field's type payload.
+            (
+                Type::record([
+                    RecordField {
+                        name: "a".into(),
+                        payload: Type::Int,
+                    },
+                    RecordField {
+                        name: "b".into(),
+                        payload: Type::Text,
+                    },
+                ])
+                .unwrap(),
+                &[
+                    0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //
+                    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'a', 0x02, //
+                    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'b', 0x03,
+                ],
+            ),
         ];
 
         for (value_type, expected) in fixtures {
@@ -397,7 +511,7 @@ mod tests {
 
     #[test]
     fn version_one_value_bytes_are_stable() {
-        let fixtures: [(Value, &[u8]); 10] = [
+        let fixtures: [(Value, &[u8]); 11] = [
             (Value::Unit, &[0x01, 0x00]),
             (Value::Bool(false), &[0x01, 0x01, 0x00]),
             (Value::Bool(true), &[0x01, 0x01, 0x01]),
@@ -451,6 +565,26 @@ mod tests {
                     0x03, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'b',
                 ],
             ),
+            (
+                Value::record([
+                    RecordField {
+                        name: "a".into(),
+                        payload: Value::Int(7),
+                    },
+                    RecordField {
+                        name: "b".into(),
+                        payload: Value::Text("hi".into()),
+                    },
+                ])
+                .unwrap(),
+                &[
+                    0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //
+                    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'a', //
+                    0x02, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //
+                    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'b', //
+                    0x03, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'h', b'i',
+                ],
+            ),
         ];
 
         for (value, expected) in fixtures {
@@ -461,7 +595,10 @@ mod tests {
     #[test]
     fn unsupported_versions_are_rejected() {
         let error = CanonicalDecodeError::UnsupportedVersion { version: 2 };
-        assert_eq!(Type::decode_canonical(&[0x02, TAG_UNIT]), Err(error));
+        assert_eq!(
+            Type::decode_canonical(&[0x02, TAG_UNIT]),
+            Err(error.clone())
+        );
         assert_eq!(Value::decode_canonical(&[0x02, TAG_UNIT]), Err(error));
     }
 
@@ -538,6 +675,112 @@ mod tests {
         }
         assert_eq!(
             Type::decode_canonical(&element.encode_canonical()),
+            Err(CanonicalDecodeError::NestingTooDeep {
+                limit: MAX_NOMINAL_NESTING
+            })
+        );
+    }
+
+    #[test]
+    fn record_encoding_is_name_ordered_whatever_order_the_value_holds() {
+        // 0026 fixes name order as the canonical order, so the encoder writes
+        // it even for a slice built out of order, and the decoder refuses
+        // anything else — which also refuses a duplicate name — so two records
+        // that differ only by construction order cannot encode differently.
+        let sorted = Value::record([
+            RecordField {
+                name: "a".into(),
+                payload: Value::Int(1),
+            },
+            RecordField {
+                name: "b".into(),
+                payload: Value::Int(2),
+            },
+        ])
+        .unwrap();
+        let reversed = Value::Record(
+            vec![
+                RecordField {
+                    name: "b".into(),
+                    payload: Value::Int(2),
+                },
+                RecordField {
+                    name: "a".into(),
+                    payload: Value::Int(1),
+                },
+            ]
+            .into_boxed_slice(),
+        );
+        assert_eq!(sorted.encode_canonical(), reversed.encode_canonical());
+        assert_eq!(
+            Value::decode_canonical(&sorted.encode_canonical()),
+            Ok(sorted)
+        );
+    }
+
+    #[test]
+    fn out_of_order_and_duplicate_record_fields_are_rejected() {
+        // Hand-built bytes, one pair of fields in descending name order, for
+        // both grammars. Descending order is also what a duplicate name
+        // produces, so one encoding covers both rejections.
+        let fields_descending = |payload: u8| -> Vec<u8> {
+            let mut encoded = Vec::new();
+            encode_length(&mut encoded, 2);
+            for name in ["b", "a"] {
+                encode_str(&mut encoded, name);
+                encoded.push(payload);
+            }
+            encoded
+        };
+        let mut type_bytes = vec![ENCODING_VERSION, TAG_RECORD];
+        type_bytes.extend(fields_descending(TAG_INT));
+        assert_eq!(
+            Type::decode_canonical(&type_bytes),
+            Err(CanonicalDecodeError::RecordFieldsOutOfOrder {
+                earlier: "b".into(),
+                later: "a".into(),
+            })
+        );
+        let mut value_bytes = vec![ENCODING_VERSION, TAG_RECORD];
+        value_bytes.extend(fields_descending(TAG_UNIT));
+        assert_eq!(
+            Value::decode_canonical(&value_bytes),
+            Err(CanonicalDecodeError::RecordFieldsOutOfOrder {
+                earlier: "b".into(),
+                later: "a".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn deeply_nested_records_fail_rather_than_overflowing() {
+        // A record's field payload recurses in both grammars, so a run of
+        // record tags has the same unbounded-recursion shape a list chain has.
+        let mut value = Value::Int(0);
+        for _ in 0..(MAX_NOMINAL_NESTING.saturating_add(1)) {
+            value = Value::record([RecordField {
+                name: "f".into(),
+                payload: value,
+            }])
+            .unwrap();
+        }
+        assert_eq!(
+            Value::decode_canonical(&value.encode_canonical()),
+            Err(CanonicalDecodeError::NestingTooDeep {
+                limit: MAX_NOMINAL_NESTING
+            })
+        );
+
+        let mut field_type = Type::Int;
+        for _ in 0..(MAX_NOMINAL_NESTING.saturating_add(1)) {
+            field_type = Type::record([RecordField {
+                name: "f".into(),
+                payload: field_type,
+            }])
+            .unwrap();
+        }
+        assert_eq!(
+            Type::decode_canonical(&field_type.encode_canonical()),
             Err(CanonicalDecodeError::NestingTooDeep {
                 limit: MAX_NOMINAL_NESTING
             })

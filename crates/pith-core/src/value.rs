@@ -35,6 +35,52 @@ pub enum Value {
     /// `List<T>` when every element inhabits `T`, and an empty list as
     /// inhabiting every `List<T>`.
     List(Box<[Value]>),
+    /// Named fields, the landed slice of the closed record constructor 0026
+    /// names in the calculus constructor set. Closed: a record inhabits a
+    /// record type only when the field sets are equal, with no width or depth
+    /// subtyping and no optional fields. Construction sorts the fields by
+    /// name, which is the canonical order 0026 fixes for the encoding.
+    Record(Box<[RecordField<Value>]>),
+}
+
+/// One named field of a record. Shared by [`Value::Record`] (the field's
+/// value) and [`Type::Record`] (the field's type).
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct RecordField<T> {
+    pub name: Box<str>,
+    pub payload: T,
+}
+
+/// A record was built with two fields of one name. A closed record's field
+/// set is a set; the second field would be unreachable by name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DuplicateFieldError {
+    pub name: Box<str>,
+}
+
+impl std::fmt::Display for DuplicateFieldError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "record declares field `{}` twice", self.name)
+    }
+}
+
+impl std::error::Error for DuplicateFieldError {}
+
+fn sorted_fields<T>(
+    fields: impl Into<Box<[RecordField<T>]>>,
+) -> Result<Box<[RecordField<T>]>, DuplicateFieldError> {
+    let mut fields = fields.into();
+    fields.sort_by(|left, right| left.name.cmp(&right.name));
+    for pair in fields.windows(2) {
+        if let [earlier, later] = pair
+            && earlier.name == later.name
+        {
+            return Err(DuplicateFieldError {
+                name: earlier.name.clone(),
+            });
+        }
+    }
+    Ok(fields)
 }
 
 impl Value {
@@ -50,6 +96,15 @@ impl Value {
             Self::List(elements) => Type::List(Box::new(
                 elements.first().map_or(Type::Unit, Value::value_type),
             )),
+            Self::Record(fields) => Type::Record(
+                fields
+                    .iter()
+                    .map(|field| RecordField {
+                        name: field.name.clone(),
+                        payload: field.payload.value_type(),
+                    })
+                    .collect(),
+            ),
         }
     }
 
@@ -78,6 +133,15 @@ impl Value {
             (Self::List(elements), Type::List(element)) => {
                 elements.iter().all(|value| value.is_type(element))
             }
+            (Self::Record(fields), Type::Record(declared)) => {
+                // Both sides carry their fields sorted by name, so one walk
+                // decides: a closed record matches its own field set exactly,
+                // with no width or depth subtyping (0026).
+                fields.len() == declared.len()
+                    && fields.iter().zip(declared.iter()).all(|(field, expected)| {
+                        field.name == expected.name && field.payload.is_type(&expected.payload)
+                    })
+            }
             (Self::Unit, _)
             | (Self::Bool(_), _)
             | (Self::Int(_), _)
@@ -85,7 +149,8 @@ impl Value {
             | (Self::Bytes(_), _)
             | (Self::Blob(_), _)
             | (Self::Nominal { .. }, _)
-            | (Self::List(_), _) => false,
+            | (Self::List(_), _)
+            | (Self::Record(_), _) => false,
         }
     }
 
@@ -104,6 +169,13 @@ impl Value {
             Self::List(elements) => {
                 let inner: Vec<String> = elements.iter().map(Self::describe).collect();
                 format!("[{}]", inner.join(", "))
+            }
+            Self::Record(fields) => {
+                let inner: Vec<String> = fields
+                    .iter()
+                    .map(|field| format!("{}: {}", field.name, field.payload.describe()))
+                    .collect();
+                format!("{{{}}}", inner.join(", "))
             }
         }
     }
@@ -141,6 +213,12 @@ impl From<&Value> for ValueRepr {
             Value::List(elements) => ValueRepr::List {
                 elements: elements.iter().map(Into::into).collect(),
             },
+            Value::Record(fields) => ValueRepr::Record {
+                fields: fields
+                    .iter()
+                    .map(|field| (field.name.clone(), (&field.payload).into()))
+                    .collect(),
+            },
         }
     }
 }
@@ -160,6 +238,34 @@ pub enum Type {
     /// Type application is reified (0026): `List<Int>` and `List<Text>` are
     /// distinct types and distinct interface participants.
     List(Box<Type>),
+    /// The closed record constructor of the 0026 calculus: named fields,
+    /// sorted by name at construction, which is the canonical order the
+    /// encoding writes and the only order the decoder accepts.
+    Record(Box<[RecordField<Type>]>),
+}
+
+impl Type {
+    /// Build a record type, sorting the fields into canonical name order.
+    ///
+    /// # Errors
+    /// [`DuplicateFieldError`] when two fields share a name.
+    pub fn record(
+        fields: impl Into<Box<[RecordField<Type>]>>,
+    ) -> Result<Self, DuplicateFieldError> {
+        Ok(Self::Record(sorted_fields(fields)?))
+    }
+}
+
+impl Value {
+    /// Build a record value, sorting the fields into canonical name order.
+    ///
+    /// # Errors
+    /// [`DuplicateFieldError`] when two fields share a name.
+    pub fn record(
+        fields: impl Into<Box<[RecordField<Value>]>>,
+    ) -> Result<Self, DuplicateFieldError> {
+        Ok(Self::Record(sorted_fields(fields)?))
+    }
 }
 
 impl std::fmt::Display for Type {
@@ -173,6 +279,16 @@ impl std::fmt::Display for Type {
             Self::Blob => f.write_str("Blob"),
             Self::Nominal { name } => f.write_str(name),
             Self::List(element) => write!(f, "List<{element}>"),
+            Self::Record(fields) => {
+                f.write_str("{ ")?;
+                let mut separator = "";
+                for field in &**fields {
+                    f.write_str(separator)?;
+                    write!(f, "{}: {}", field.name, field.payload)?;
+                    separator = ", ";
+                }
+                f.write_str(" }")
+            }
         }
     }
 }
@@ -189,6 +305,12 @@ impl From<&Type> for TypeRepr {
             Type::Nominal { name } => TypeRepr::Nominal { name: name.clone() },
             Type::List(element) => TypeRepr::List {
                 element: Box::new(element.as_ref().into()),
+            },
+            Type::Record(fields) => TypeRepr::Record {
+                fields: fields
+                    .iter()
+                    .map(|field| (field.name.clone(), (&field.payload).into()))
+                    .collect(),
             },
         }
     }
@@ -213,6 +335,17 @@ mod tests {
             },
             Value::List(vec![].into_boxed_slice()),
             Value::List(vec![Value::Text("a".into()), Value::Text("b".into())].into_boxed_slice()),
+            Value::record([
+                RecordField {
+                    name: "name".into(),
+                    payload: Value::Text("pith".into()),
+                },
+                RecordField {
+                    name: "version".into(),
+                    payload: Value::Int(1),
+                },
+            ])
+            .unwrap(),
         ] {
             let repr: ValueRepr = (&v).into();
             let _ = format!("{repr:?}");
@@ -279,6 +412,30 @@ mod tests {
                 ),
                 Type::List(Box::new(Type::Text)),
             ),
+            (
+                Value::record([
+                    RecordField {
+                        name: "name".into(),
+                        payload: Value::Text("pith".into()),
+                    },
+                    RecordField {
+                        name: "version".into(),
+                        payload: Value::Int(1),
+                    },
+                ])
+                .unwrap(),
+                Type::record([
+                    RecordField {
+                        name: "name".into(),
+                        payload: Type::Text,
+                    },
+                    RecordField {
+                        name: "version".into(),
+                        payload: Type::Int,
+                    },
+                ])
+                .unwrap(),
+            ),
         ];
         let all_types = [
             Type::Unit,
@@ -292,6 +449,22 @@ mod tests {
             },
             Type::List(Box::new(Type::Text)),
             Type::List(Box::new(Type::Int)),
+            Type::record([
+                RecordField {
+                    name: "name".into(),
+                    payload: Type::Text,
+                },
+                RecordField {
+                    name: "version".into(),
+                    payload: Type::Int,
+                },
+            ])
+            .unwrap(),
+            Type::record([RecordField {
+                name: "name".into(),
+                payload: Type::Text,
+            }])
+            .unwrap(),
         ];
         for (value, own_type) in &values {
             for candidate in &all_types {
@@ -361,5 +534,129 @@ mod tests {
         assert!(!machine_id.is_type(&Type::Nominal {
             name: "OtherId".into(),
         }));
+    }
+
+    #[test]
+    fn record_construction_orders_fields_and_rejects_duplicates() {
+        // Canonical order is name order (0026), so construction order cannot
+        // reach equality, hashing, or the encoding. A repeated name has no
+        // meaning in a closed record.
+        let first = Value::record([
+            RecordField {
+                name: "b".into(),
+                payload: Value::Int(1),
+            },
+            RecordField {
+                name: "a".into(),
+                payload: Value::Text("x".into()),
+            },
+        ])
+        .unwrap();
+        let second = Value::record([
+            RecordField {
+                name: "a".into(),
+                payload: Value::Text("x".into()),
+            },
+            RecordField {
+                name: "b".into(),
+                payload: Value::Int(1),
+            },
+        ])
+        .unwrap();
+        assert_eq!(first, second);
+
+        let duplicate = Value::record([
+            RecordField {
+                name: "a".into(),
+                payload: Value::Int(1),
+            },
+            RecordField {
+                name: "a".into(),
+                payload: Value::Int(2),
+            },
+        ]);
+        assert_eq!(
+            duplicate.unwrap_err(),
+            DuplicateFieldError { name: "a".into() }
+        );
+        assert_eq!(
+            Type::record([
+                RecordField {
+                    name: "a".into(),
+                    payload: Type::Int,
+                },
+                RecordField {
+                    name: "a".into(),
+                    payload: Type::Text,
+                },
+            ])
+            .unwrap_err(),
+            DuplicateFieldError { name: "a".into() }
+        );
+    }
+
+    #[test]
+    fn a_record_matches_only_its_own_field_set() {
+        // Closed records: no width subtyping in either direction and no depth
+        // subtyping on a field (0026). A nominal payload keeps its identity
+        // inside a record field the way it does inside a list.
+        let value = Value::record([
+            RecordField {
+                name: "name".into(),
+                payload: Value::Text("pith".into()),
+            },
+            RecordField {
+                name: "version".into(),
+                payload: Value::Int(1),
+            },
+        ])
+        .unwrap();
+        let same = Type::record([
+            RecordField {
+                name: "version".into(),
+                payload: Type::Int,
+            },
+            RecordField {
+                name: "name".into(),
+                payload: Type::Text,
+            },
+        ])
+        .unwrap();
+        let wider = Type::record([
+            RecordField {
+                name: "name".into(),
+                payload: Type::Text,
+            },
+            RecordField {
+                name: "version".into(),
+                payload: Type::Int,
+            },
+            RecordField {
+                name: "options".into(),
+                payload: Type::List(Box::new(Type::Text)),
+            },
+        ])
+        .unwrap();
+        let narrower = Type::record([RecordField {
+            name: "name".into(),
+            payload: Type::Text,
+        }])
+        .unwrap();
+        let deeper = Type::record([
+            RecordField {
+                name: "name".into(),
+                payload: Type::Text,
+            },
+            RecordField {
+                name: "version".into(),
+                payload: Type::List(Box::new(Type::Int)),
+            },
+        ])
+        .unwrap();
+
+        assert!(value.is_type(&same));
+        assert!(!value.is_type(&wider));
+        assert!(!value.is_type(&narrower));
+        assert!(!value.is_type(&deeper));
     }
 }

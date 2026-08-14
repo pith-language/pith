@@ -3,11 +3,41 @@
 //! Steps refer to attempts by selector rather than by identifier, so generation
 //! stays stateless and a step resolves against whatever exists when it runs.
 
+use pith_core::{RecordField, Value};
 use proptest::prelude::*;
 
 /// How a generated step refers to an attempt. Resolved against what exists when
 /// the step runs, so generation stays stateless.
 pub(super) type Selector = u16;
+
+/// Ascending, duplicate-free field names, so a generated record satisfies the
+/// closed-record shape without a filter that would skew generation.
+const RESULT_FIELD_NAMES: [&str; 2] = ["name", "value"];
+
+/// The retained result of a generated completion. Covers the recursive value
+/// constructors — list, record — beside the scalars, so an adapter's treatment
+/// of every landed constructor is compared, not just the ones the fixtures
+/// happened to use first.
+fn result_value() -> impl Strategy<Value = Value> {
+    prop_oneof![
+        2 => any::<i64>().prop_map(Value::Int),
+        1 => any::<bool>().prop_map(Value::Bool),
+        1 => proptest::collection::vec(any::<i64>(), 0..3)
+            .prop_map(|elements| Value::List(elements.into_iter().map(Value::Int).collect())),
+        1 => proptest::collection::vec(any::<bool>(), 0..2).prop_map(|payloads| {
+            Value::Record(
+                RESULT_FIELD_NAMES
+                    .iter()
+                    .zip(payloads)
+                    .map(|(name, payload)| RecordField {
+                        name: (*name).into(),
+                        payload: Value::Bool(payload),
+                    })
+                    .collect(),
+            )
+        }),
+    ]
+}
 
 /// A dependency edge a generated step declares. Capability-use edges are absent
 /// because [`validate`](super::validate) derives them from the executor report.
@@ -33,7 +63,7 @@ pub enum Step {
     Complete {
         attempt: Selector,
         dependencies: Box<[GeneratedDependency]>,
-        result: i64,
+        result: Value,
         /// Publish a reuse decision the dependencies do not justify.
         corrupt_reuse: bool,
     },
@@ -84,7 +114,7 @@ fn step() -> impl Strategy<Value = Step> {
                 capabilities,
                 denied,
             }),
-        3 => (any::<Selector>(), generated_dependencies(), any::<i64>(), one_in(8))
+        3 => (any::<Selector>(), generated_dependencies(), result_value(), one_in(8))
             .prop_map(|(attempt, dependencies, result, corrupt_reuse)| Step::Complete {
                 attempt,
                 dependencies,
