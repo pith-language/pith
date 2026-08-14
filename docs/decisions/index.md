@@ -31,6 +31,7 @@ when an accepted decision changes, a new record supersedes it. the old record st
 - [0009: keep first-party domains as peers](0009-peer-first-party-domains.md)
 - [0011: separate documentation by role](0011-document-structure.md)
 - [0021: a hand-built arena graph with explicit change propagation, not a salsa query DB](0021-arena-graph-engine.md)
+- [0028: a first-party sandboxed local executor using landlock and seccomp](0028-sandboxed-local-executor.md)
 - [0033: a consumer of an action revalidates by re-planning it](0033-consumer-of-action-reuse.md)
 
 ## proposed
@@ -55,7 +56,6 @@ when an accepted decision changes, a new record supersedes it. the old record st
 - [0025: store engine state as normalized relations, not as canonical record blobs](0025-relational-engine-state.md)
 - [0026: a generic structural type calculus, with nominal identity, generic uncertainty, and no predicate types](0026-generic-typed-calculus.md)
 - [0027: frame retention and garbage collection as roots, two stores, and composable policy axes](0027-retention-and-gc.md)
-- [0028: a first-party sandboxed local executor using landlock and seccomp](0028-sandboxed-local-executor.md)
 - [0029: independence is declared by the rule body, not inferred by the scheduler](0029-declared-independence.md)
 - [0030: a toolchain enters an action as a declared closure of host paths](0030-toolchain-closure-as-declared-input.md)
 - [0031: an action is identified by its request and admitted by its execution facts](0031-action-cache-identity.md)

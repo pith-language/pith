@@ -795,6 +795,7 @@ name = "pith-executor-local"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "libc",
  "pith-core",
  "pith-diag",
  "pith-engine",

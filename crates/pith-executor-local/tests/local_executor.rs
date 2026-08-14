@@ -96,11 +96,11 @@ async fn runs_a_real_child_and_captures_declared_output() {
 }
 
 #[tokio::test]
-async fn reports_observed_because_landlock_is_installed_without_seccomp() {
-    // This build installs the landlock path-confinement ruleset but not yet the
-    // seccomp syscall allowlist (decisions 0028, 0030), so the honest report is
-    // Observed: paths are enforced, syscalls are not. When seccomp lands this
-    // assertion flips to Prevented, which 0028 reserves for both layers.
+async fn reports_prevented_when_both_layers_are_installed() {
+    // This build installs the landlock path-confinement ruleset and the seccomp
+    // syscall allowlist (decisions 0028, 0030), so the report is Prevented,
+    // which 0028 reserves for both layers. On an architecture the seccomp
+    // filter does not target, the honest report would still be Observed.
     let executor = LocalExecutor::new();
     if !shell_present() {
         eprintln!("skipping: /bin/sh is not readable");
@@ -111,7 +111,43 @@ async fn reports_observed_because_landlock_is_installed_without_seccomp() {
         .execute(&invocation)
         .await
         .expect("execution succeeds");
+    #[cfg(target_arch = "x86_64")]
+    assert_eq!(captured.report.access, AccessVerification::Prevented);
+    #[cfg(not(target_arch = "x86_64"))]
     assert_eq!(captured.report.access, AccessVerification::Observed);
+}
+
+/// `kill(2)` is absent from the seccomp allowlist, and the shell's `kill` is a
+/// builtin, so the script issues the syscall in its own process. Unfiltered,
+/// the same script exits zero, which is what makes the death here evidence.
+///
+/// x86_64 only, since that is where the filter is installed at all.
+#[cfg(target_arch = "x86_64")]
+#[tokio::test]
+async fn a_forbidden_syscall_kills_the_child() {
+    let executor = LocalExecutor::new();
+    if !shell_present() {
+        eprintln!("skipping: /bin/sh is not readable");
+        return;
+    }
+    // Signal zero: the kernel checks permission and delivers nothing, so an
+    // unfiltered run of this script succeeds.
+    let invocation = invocation("kill -0 $$ > result", "x");
+    let error = executor
+        .execute(&invocation)
+        .await
+        .expect_err("a forbidden syscall kills the child");
+    let message = error
+        .iter()
+        .next()
+        .expect("one diagnostic")
+        .message
+        .0
+        .as_ref();
+    assert!(
+        message.contains(&format!("signal {}", libc::SIGSYS)),
+        "the child should have died on SIGSYS, got: {message}"
+    );
 }
 
 #[tokio::test]

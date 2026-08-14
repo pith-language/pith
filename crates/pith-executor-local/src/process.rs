@@ -62,10 +62,9 @@ impl LocalExecutor {
     /// The [`AccessVerification`] this build reports, given which confinement
     /// layers it actually installed. `Prevented` requires both landlock and
     /// seccomp; `Observed` is one layer alone; `Unverified` is neither. This
-    /// build installs the landlock path-confinement ruleset but not yet the
-    /// seccomp syscall allowlist (see [`crate::sys_landlock`] and
-    /// [`crate::sys_seccomp`]), so the honest report is `Observed`: paths are a
-    /// kernel-enforced fact, syscalls are not yet.
+    /// build installs both on Linux x86_64 (see [`crate::sys_landlock`] and
+    /// [`crate::sys_seccomp`]); elsewhere the seccomp half does not exist and
+    /// the honest report is `Observed`.
     fn access_verification() -> AccessVerification {
         match (landlock_installed(), seccomp_filter_installed()) {
             (true, true) => AccessVerification::Prevented,

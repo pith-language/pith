@@ -52,6 +52,11 @@ async-trait = "0.1"
 # surface the executor needs, leaving `unsafe` only for the seccomp and any
 # landlock calls rustix does not yet expose.
 rustix = { version = "1", default-features = false, features = ["process"] }
+# Syscall numbers for the seccomp allowlist (decision 0028). rustix wraps calls,
+# not the per-architecture number table the BPF program compares against, and a
+# transcribed table is wrong in exactly the way that grants one syscall while
+# denying another.
+libc = "0.2.189"
 # Per-action scratch roots for the sandboxed executor (decision 0028).
 tempfile = "3"
 anstream = "0.6"
