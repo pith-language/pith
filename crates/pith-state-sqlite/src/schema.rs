@@ -6,22 +6,17 @@ use pith_engine::state::{EngineStateVersions, RECORD_ENCODING_VERSION, SchemaVer
 /// version, which belongs to `pith-engine`: the same records can be laid out
 /// differently, and the same layout can hold a new payload encoding.
 ///
-/// Per decision 0024, an incompatible metadata version moves the database
-/// aside and rebuilds from an empty graph and cache. Nothing has shipped, so
-/// no database outside a working tree needs to survive a change, and the
-/// schema is free to follow the engine's shape. Starting clean is the
-/// intended behaviour here, not a fallback. This moves for any change a
-/// prior build would misread: a new table or column, and equally a new code
-/// in an existing column — adding `Cancelled` to `attempts.status` left the
-/// layout untouched but would have had an older build pass the gate and then
-/// fail decoding a variant it does not have.
-///
-/// The layout moved from 1 to 2 when `reusable_index` gained its `published`
-/// column. A version-1 row has no publication order, and an older build
-/// reading the new layout would order the action reusable index by attempt
-/// identifier — creation order — where the engine's semantics are latest
-/// published.
-pub const SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(2);
+/// Pinned at 1 until something is released, per decision 0024: nothing has
+/// shipped, so no database outside a working tree needs to survive a change,
+/// the schema is free to follow the engine's shape, and an incompatible
+/// database is moved aside and rebuilt — starting clean is the intended
+/// behaviour here, not a fallback. Once there is a release to be compatible
+/// with, this starts moving for any change a prior build would misread: a
+/// new table or column, and equally a new code in an existing column —
+/// adding `Cancelled` to `attempts.status` left the layout untouched but
+/// would have had an older build pass the gate and then fail decoding a
+/// variant it does not have.
+pub const SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(1);
 
 pub const CURRENT_VERSIONS: EngineStateVersions = EngineStateVersions {
     schema: SCHEMA_VERSION,
