@@ -24,7 +24,9 @@ pub use rule::{
     ActionComputationKey, Interface, PureComputationKey, Request, Rule, RuleArena, RuleId,
     SelectOutcome, select_rule,
 };
-pub use value::{DuplicateFieldError, RecordField, Type, Value, ValueArena, ValueId};
+pub use value::{
+    DuplicateNameError, RecordField, SumConstructor, Type, Value, ValueArena, ValueId,
+};
 pub use value_codec::{CanonicalDecodeError, MAX_NOMINAL_NESTING};
 
 use pith_output::{IntoOutput, OutputRecord};

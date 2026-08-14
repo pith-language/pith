@@ -14,7 +14,7 @@
 use pith_core::{
     ActionInput, ActionOutput, ActionProgram, ActionSpec, CanonicalDecodeError,
     CapabilityRequirement, Content, EnvironmentVariable, ExitStatusContract, NetworkPolicy,
-    OutputKind, PlatformRequirement, RecordField, Type, Value,
+    OutputKind, PlatformRequirement, RecordField, SumConstructor, Type, Value,
 };
 use pith_ids::ContentId;
 use proptest::prelude::*;
@@ -61,6 +61,18 @@ fn type_strategy() -> impl Strategy<Value = Type> {
         // into the variant.
         proptest::collection::vec(leaf_type_strategy(), 0..3)
             .prop_map(|payloads| Type::Record(record_fields(payloads).into())),
+        (
+            bounded_string(16),
+            proptest::option::of(leaf_type_strategy())
+        )
+            .prop_map(|(name, payload)| Type::Sum {
+                name: name.into_boxed_str(),
+                constructors: [SumConstructor {
+                    name: "only".into(),
+                    payload,
+                }]
+                .into(),
+            },),
     ]
 }
 
@@ -112,6 +124,16 @@ fn value_strategy() -> impl Strategy<Value = Value> {
             .prop_map(|elements| Value::List(elements.into_boxed_slice())),
         proptest::collection::vec(scalar_value_strategy(), 0..3)
             .prop_map(|payloads| Value::Record(record_fields(payloads).into())),
+        (
+            bounded_string(16),
+            bounded_string(16),
+            proptest::option::of(scalar_value_strategy()),
+        )
+            .prop_map(|(type_name, constructor, payload)| Value::Sum {
+                type_name: type_name.into_boxed_str(),
+                constructor: constructor.into_boxed_str(),
+                payload: payload.map(Box::new),
+            }),
     ]
 }
 

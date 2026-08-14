@@ -330,8 +330,8 @@ impl SelectOutcome {
 mod tests {
     use super::*;
     use crate::value_codec::{
-        TAG_BLOB, TAG_BOOL, TAG_BYTES, TAG_INT, TAG_LIST, TAG_NOMINAL, TAG_RECORD, TAG_TEXT,
-        TAG_UNIT,
+        TAG_BLOB, TAG_BOOL, TAG_BYTES, TAG_INT, TAG_LIST, TAG_NOMINAL, TAG_RECORD, TAG_SUM,
+        TAG_TEXT, TAG_UNIT,
     };
     use pith_arena::Arena;
 
@@ -357,6 +357,17 @@ mod tests {
                 }])
                 .unwrap(),
                 TAG_RECORD,
+            ),
+            (
+                Type::sum(
+                    "s",
+                    [crate::SumConstructor {
+                        name: "c".into(),
+                        payload: None,
+                    }],
+                )
+                .unwrap(),
+                TAG_SUM,
             ),
         ];
         for (i, (_, tag_i)) in types.iter().enumerate() {
@@ -384,6 +395,14 @@ mod tests {
                 }])
                 .unwrap(),
                 TAG_RECORD,
+            ),
+            (
+                Value::Sum {
+                    type_name: "s".into(),
+                    constructor: "c".into(),
+                    payload: None,
+                },
+                TAG_SUM,
             ),
         ];
         for (value, expected) in &values {

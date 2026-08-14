@@ -30,6 +30,11 @@ pub enum ValueRepr {
     Record {
         fields: Box<[(Box<str>, ValueRepr)]>,
     },
+    Sum {
+        name: Box<str>,
+        constructor: Box<str>,
+        payload: Option<Box<ValueRepr>>,
+    },
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -41,7 +46,23 @@ pub enum TypeRepr {
     Text,
     Bytes,
     Blob,
-    Nominal { name: Box<str> },
-    List { element: Box<TypeRepr> },
-    Record { fields: Box<[(Box<str>, TypeRepr)]> },
+    Nominal {
+        name: Box<str>,
+    },
+    List {
+        element: Box<TypeRepr>,
+    },
+    Record {
+        fields: Box<[(Box<str>, TypeRepr)]>,
+    },
+    Sum {
+        name: Box<str>,
+        constructors: Box<[SumConstructorRepr]>,
+    },
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct SumConstructorRepr {
+    pub name: Box<str>,
+    pub payload: Option<Box<TypeRepr>>,
 }

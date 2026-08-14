@@ -30,7 +30,11 @@ use crate::{
 /// and no existing byte sequence changes meaning — a version-3 database can
 /// hold no record bytes — but the retained-value grammar the version gates has
 /// grown, so the gate moves on the same moved-aside-and-rebuilt terms.
-pub const RECORD_ENCODING_VERSION: SemanticEncodingVersion = SemanticEncodingVersion::new(4);
+///
+/// Version 5 is the declared `Sum` constructor (0026): tag 9 is new in both
+/// grammars on the same terms as tag 8, and the gate moves for the same
+/// reason.
+pub const RECORD_ENCODING_VERSION: SemanticEncodingVersion = SemanticEncodingVersion::new(5);
 
 pub const CURRENT_ENGINE_STATE_VERSIONS: EngineStateVersions = EngineStateVersions {
     schema: SchemaVersion::new(1),

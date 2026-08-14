@@ -2,7 +2,7 @@
 //! [`Value`] variants.
 
 use crate::{
-    Interface, RecordField, Type, Value,
+    Interface, RecordField, SumConstructor, Type, Value,
     codec::CanonicalReader,
     manifest::{encode_bytes, encode_length, encode_str},
 };
@@ -23,6 +23,7 @@ pub(crate) const TAG_BLOB: u8 = 5;
 pub(crate) const TAG_NOMINAL: u8 = 6;
 pub(crate) const TAG_LIST: u8 = 7;
 pub(crate) const TAG_RECORD: u8 = 8;
+pub(crate) const TAG_SUM: u8 = 9;
 
 pub(crate) fn encode_type_payload(encoded: &mut Vec<u8>, value_type: &Type) {
     match value_type {
@@ -44,6 +45,47 @@ pub(crate) fn encode_type_payload(encoded: &mut Vec<u8>, value_type: &Type) {
             encoded.push(TAG_RECORD);
             encode_record_fields(encoded, fields, encode_type_payload);
         }
+        Type::Sum { name, constructors } => {
+            encoded.push(TAG_SUM);
+            encode_str(encoded, name);
+            // Constructor order is canonical name order on the same terms a
+            // record's fields are.
+            let mut ordered: Vec<&SumConstructor> = constructors.iter().collect();
+            ordered.sort_by(|left, right| left.name.cmp(&right.name));
+            encode_length(encoded, ordered.len());
+            for constructor in ordered {
+                encode_str(encoded, &constructor.name);
+                encode_optional(encoded, constructor.payload.as_ref(), encode_type_payload);
+            }
+        }
+    }
+}
+
+/// A presence byte then the payload when present, for the optionally-typed
+/// payloads a sum carries in both grammars.
+fn encode_optional<T>(
+    encoded: &mut Vec<u8>,
+    payload: Option<&T>,
+    encode_payload: fn(&mut Vec<u8>, &T),
+) {
+    match payload {
+        Some(payload) => {
+            encoded.push(1);
+            encode_payload(encoded, payload);
+        }
+        None => encoded.push(0),
+    }
+}
+
+fn decode_optional<T>(
+    decoder: &mut CanonicalReader,
+    depth: u32,
+    decode_payload: fn(&mut CanonicalReader, u32) -> Result<T, CanonicalDecodeError>,
+) -> Result<Option<T>, CanonicalDecodeError> {
+    if decoder.read_bool()? {
+        decode_payload(decoder, depth).map(Some)
+    } else {
+        Ok(None)
     }
 }
 
@@ -84,7 +126,7 @@ fn decode_record_fields<T>(
         if let Some(previous) = fields.last()
             && previous.name.as_ref() >= name.as_ref()
         {
-            return Err(CanonicalDecodeError::RecordFieldsOutOfOrder {
+            return Err(CanonicalDecodeError::NamesOutOfOrder {
                 earlier: previous.name.clone(),
                 later: name,
             });
@@ -139,6 +181,16 @@ pub(crate) fn encode_value_payload(encoded: &mut Vec<u8>, value: &Value) {
             encoded.push(TAG_RECORD);
             encode_record_fields(encoded, fields, encode_value_payload);
         }
+        Value::Sum {
+            type_name,
+            constructor,
+            payload,
+        } => {
+            encoded.push(TAG_SUM);
+            encode_str(encoded, type_name);
+            encode_str(encoded, constructor);
+            encode_optional(encoded, payload.as_deref(), encode_value_payload);
+        }
     }
 }
 
@@ -154,7 +206,7 @@ pub enum CanonicalDecodeError {
     InvalidUtf8,
     LengthOutOfRange { length: u64 },
     NestingTooDeep { limit: u32 },
-    RecordFieldsOutOfOrder { earlier: Box<str>, later: Box<str> },
+    NamesOutOfOrder { earlier: Box<str>, later: Box<str> },
 }
 
 impl std::fmt::Display for CanonicalDecodeError {
@@ -186,9 +238,9 @@ impl std::fmt::Display for CanonicalDecodeError {
                 formatter,
                 "canonical encoding nests values or types deeper than {limit}"
             ),
-            Self::RecordFieldsOutOfOrder { earlier, later } => write!(
+            Self::NamesOutOfOrder { earlier, later } => write!(
                 formatter,
-                "canonical record fields are not in strictly ascending name order: `{earlier}` then `{later}`"
+                "canonical names are not in strictly ascending order: `{earlier}` then `{later}`"
             ),
         }
     }
@@ -254,6 +306,39 @@ fn decode_type_at_depth(
             )?))
         }
         TAG_RECORD => Type::Record(decode_record_fields(decoder, depth, decode_type_at_depth)?),
+        TAG_SUM => {
+            if depth >= MAX_NOMINAL_NESTING {
+                return Err(CanonicalDecodeError::NestingTooDeep {
+                    limit: MAX_NOMINAL_NESTING,
+                });
+            }
+            let name = decoder.read_text()?.into();
+            let count = decoder.read_length()?;
+            let mut constructors: Vec<SumConstructor> = Vec::with_capacity(count.min(64));
+            for _ in 0..count {
+                let constructor: Box<str> = decoder.read_text()?.into();
+                if let Some(previous) = constructors.last()
+                    && previous.name.as_ref() >= constructor.as_ref()
+                {
+                    return Err(CanonicalDecodeError::NamesOutOfOrder {
+                        earlier: previous.name.clone(),
+                        later: constructor,
+                    });
+                }
+                constructors.push(SumConstructor {
+                    name: constructor,
+                    payload: decode_optional(
+                        decoder,
+                        depth.saturating_add(1),
+                        decode_type_at_depth,
+                    )?,
+                });
+            }
+            Type::Sum {
+                name,
+                constructors: constructors.into(),
+            }
+        }
         tag => return Err(CanonicalDecodeError::UnknownTypeTag { tag }),
     })
 }
@@ -318,14 +403,15 @@ impl Value {
 
 /// How deeply the recursive constructors may nest before decoding refuses.
 ///
-/// `Nominal` values, `List` values, `List` types, `Record` values, and
-/// `Record` types recurse during decoding, so they are the things that can
-/// make it recurse without bound. The decoder
+/// `Nominal` values, `List` values, `List` types, `Record` values, `Record`
+/// types, `Sum` values, and `Sum` types recurse during decoding, so they are
+/// the things that can make it recurse without bound. The decoder
 /// reads bytes an adapter hands it, and those bytes are whatever the database
-/// holds: a row of repeated `TAG_NOMINAL`, `TAG_LIST`, or `TAG_RECORD`
-/// recurses once per byte and overflows the stack, which aborts the process
-/// rather than returning the adapter error decision 0024 requires of corrupt
-/// state. Bounding the depth turns that into an ordinary decode failure.
+/// holds: a row of repeated `TAG_NOMINAL`, `TAG_LIST`, `TAG_RECORD`, or
+/// `TAG_SUM` recurses once per byte and overflows the stack, which aborts the
+/// process rather than returning the adapter error decision 0024 requires of
+/// corrupt state. Bounding the depth turns that into an ordinary decode
+/// failure.
 ///
 /// The limit is far above any real value. A nominal over a nominal is legal and
 /// occasionally useful; a chain dozens deep is not something the calculus in
@@ -371,6 +457,21 @@ fn decode_value_payload(
             depth,
             decode_value_payload,
         )?)),
+        TAG_SUM => {
+            if depth >= MAX_NOMINAL_NESTING {
+                return Err(CanonicalDecodeError::NestingTooDeep {
+                    limit: MAX_NOMINAL_NESTING,
+                });
+            }
+            let type_name = decoder.read_text()?.into();
+            let constructor = decoder.read_text()?.into();
+            let payload = decode_optional(decoder, depth.saturating_add(1), decode_value_payload)?;
+            Ok(Value::Sum {
+                type_name,
+                constructor,
+                payload: payload.map(Box::new),
+            })
+        }
         tag => Err(CanonicalDecodeError::UnknownValueTag { tag }),
     }
 }
@@ -414,6 +515,20 @@ mod tests {
                     payload: Type::List(Box::new(Type::Int)),
                 },
             ])
+            .unwrap(),
+            Type::sum(
+                "Source",
+                [
+                    SumConstructor {
+                        name: "Git".into(),
+                        payload: Some(Type::Text),
+                    },
+                    SumConstructor {
+                        name: "Path".into(),
+                        payload: None,
+                    },
+                ],
+            )
             .unwrap(),
         ] {
             let encoded = value_type.encode_canonical();
@@ -459,6 +574,16 @@ mod tests {
                 },
             ])
             .unwrap(),
+            Value::Sum {
+                type_name: "Source".into(),
+                constructor: "Git".into(),
+                payload: Some(Box::new(Value::Text("main".into()))),
+            },
+            Value::Sum {
+                type_name: "Source".into(),
+                constructor: "Path".into(),
+                payload: None,
+            },
         ] {
             let encoded = value.encode_canonical();
             assert_eq!(Value::decode_canonical(&encoded), Ok(value.clone()));
@@ -467,7 +592,7 @@ mod tests {
 
     #[test]
     fn version_one_type_bytes_are_stable() {
-        let fixtures: [(Type, &[u8]); 9] = [
+        let fixtures: [(Type, &[u8]); 10] = [
             (Type::Unit, &[0x01, 0x00]),
             (Type::Bool, &[0x01, 0x01]),
             (Type::Int, &[0x01, 0x02]),
@@ -502,6 +627,32 @@ mod tests {
                     0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'b', 0x03,
                 ],
             ),
+            // A two-constructor sum, constructors in canonical name order:
+            // the sum name, the u64 count, then per constructor the
+            // length-prefixed name, a presence byte, and the payload type
+            // when present.
+            (
+                Type::sum(
+                    "S",
+                    [
+                        SumConstructor {
+                            name: "b".into(),
+                            payload: None,
+                        },
+                        SumConstructor {
+                            name: "a".into(),
+                            payload: Some(Type::Int),
+                        },
+                    ],
+                )
+                .unwrap(),
+                &[
+                    0x01, 0x09, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'S', //
+                    0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //
+                    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'a', 0x01, 0x02, //
+                    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'b', 0x00,
+                ],
+            ),
         ];
 
         for (value_type, expected) in fixtures {
@@ -511,7 +662,7 @@ mod tests {
 
     #[test]
     fn version_one_value_bytes_are_stable() {
-        let fixtures: [(Value, &[u8]); 11] = [
+        let fixtures: [(Value, &[u8]); 12] = [
             (Value::Unit, &[0x01, 0x00]),
             (Value::Bool(false), &[0x01, 0x01, 0x00]),
             (Value::Bool(true), &[0x01, 0x01, 0x01]),
@@ -582,6 +733,22 @@ mod tests {
                     0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'a', //
                     0x02, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //
                     0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'b', //
+                    0x03, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'h', b'i',
+                ],
+            ),
+            // A sum value: the sum name, the constructor name, a presence
+            // byte, then the payload when present.
+            (
+                Value::Sum {
+                    type_name: "S".into(),
+                    constructor: "a".into(),
+                    payload: Some(Box::new(Value::Text("hi".into()))),
+                },
+                &[
+                    0x01, 0x09, //
+                    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'S', //
+                    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'a', //
+                    0x01, //
                     0x03, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'h', b'i',
                 ],
             ),
@@ -736,7 +903,7 @@ mod tests {
         type_bytes.extend(fields_descending(TAG_INT));
         assert_eq!(
             Type::decode_canonical(&type_bytes),
-            Err(CanonicalDecodeError::RecordFieldsOutOfOrder {
+            Err(CanonicalDecodeError::NamesOutOfOrder {
                 earlier: "b".into(),
                 later: "a".into(),
             })
@@ -745,7 +912,7 @@ mod tests {
         value_bytes.extend(fields_descending(TAG_UNIT));
         assert_eq!(
             Value::decode_canonical(&value_bytes),
-            Err(CanonicalDecodeError::RecordFieldsOutOfOrder {
+            Err(CanonicalDecodeError::NamesOutOfOrder {
                 earlier: "b".into(),
                 later: "a".into(),
             })
@@ -783,6 +950,64 @@ mod tests {
             Type::decode_canonical(&field_type.encode_canonical()),
             Err(CanonicalDecodeError::NestingTooDeep {
                 limit: MAX_NOMINAL_NESTING
+            })
+        );
+    }
+
+    #[test]
+    fn deeply_nested_sums_fail_rather_than_overflowing() {
+        // A sum's payload recurses in both grammars, so a run of sum tags has
+        // the same unbounded-recursion shape a list chain has.
+        let mut value = Value::Int(0);
+        for _ in 0..(MAX_NOMINAL_NESTING.saturating_add(1)) {
+            value = Value::Sum {
+                type_name: "S".into(),
+                constructor: "a".into(),
+                payload: Some(Box::new(value)),
+            };
+        }
+        assert_eq!(
+            Value::decode_canonical(&value.encode_canonical()),
+            Err(CanonicalDecodeError::NestingTooDeep {
+                limit: MAX_NOMINAL_NESTING
+            })
+        );
+
+        let mut payload_type = Type::Int;
+        for _ in 0..(MAX_NOMINAL_NESTING.saturating_add(1)) {
+            payload_type = Type::sum(
+                "S",
+                [SumConstructor {
+                    name: "a".into(),
+                    payload: Some(payload_type),
+                }],
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            Type::decode_canonical(&payload_type.encode_canonical()),
+            Err(CanonicalDecodeError::NestingTooDeep {
+                limit: MAX_NOMINAL_NESTING
+            })
+        );
+    }
+
+    #[test]
+    fn out_of_order_sum_constructors_are_rejected() {
+        // Descending constructor names, which is also what a duplicate name
+        // produces; canonical order is the only one on the wire.
+        let mut encoded = vec![ENCODING_VERSION, TAG_SUM];
+        encode_str(&mut encoded, "S");
+        encode_length(&mut encoded, 2);
+        for name in ["b", "a"] {
+            encode_str(&mut encoded, name);
+            encoded.push(0);
+        }
+        assert_eq!(
+            Type::decode_canonical(&encoded),
+            Err(CanonicalDecodeError::NamesOutOfOrder {
+                earlier: "b".into(),
+                later: "a".into(),
             })
         );
     }

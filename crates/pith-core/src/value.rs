@@ -5,7 +5,7 @@
 
 use pith_arena::define_arena;
 use pith_ids::ContentId;
-use pith_output::dto::{TypeRepr, ValueRepr};
+use pith_output::dto::{SumConstructorRepr, TypeRepr, ValueRepr};
 
 define_arena!(ValueId, ValueArena, ValueBrand);
 
@@ -41,6 +41,18 @@ pub enum Value {
     /// subtyping and no optional fields. Construction sorts the fields by
     /// name, which is the canonical order 0026 fixes for the encoding.
     Record(Box<[RecordField<Value>]>),
+    /// One constructor of a declared sum, the landed slice of the sum
+    /// constructor 0026 names in the calculus constructor set. The value
+    /// carries the sum's name the way [`Value::Nominal`] carries its own —
+    /// the declaration site that would resolve the name does not exist yet —
+    /// plus the constructor it selects and that constructor's payload. It
+    /// cannot recover the sibling constructors, which is the sum half of the
+    /// `value_type` asymmetry documented on [`Value::is_type`].
+    Sum {
+        type_name: Box<str>,
+        constructor: Box<str>,
+        payload: Option<Box<Value>>,
+    },
 }
 
 /// One named field of a record. Shared by [`Value::Record`] (the field's
@@ -51,36 +63,49 @@ pub struct RecordField<T> {
     pub payload: T,
 }
 
-/// A record was built with two fields of one name. A closed record's field
-/// set is a set; the second field would be unreachable by name.
+/// One constructor of a declared sum, with the payload type it carries when
+/// it carries one.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SumConstructor {
+    pub name: Box<str>,
+    pub payload: Option<Type>,
+}
+
+/// A closed set of named things — a record's fields, a sum's constructors —
+/// was built with one name twice. The second entry would be unreachable by
+/// name.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DuplicateFieldError {
+pub struct DuplicateNameError {
     pub name: Box<str>,
 }
 
-impl std::fmt::Display for DuplicateFieldError {
+impl std::fmt::Display for DuplicateNameError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "record declares field `{}` twice", self.name)
+        write!(formatter, "the name `{}` is declared twice", self.name)
     }
 }
 
-impl std::error::Error for DuplicateFieldError {}
+impl std::error::Error for DuplicateNameError {}
 
-fn sorted_fields<T>(
-    fields: impl Into<Box<[RecordField<T>]>>,
-) -> Result<Box<[RecordField<T>]>, DuplicateFieldError> {
-    let mut fields = fields.into();
-    fields.sort_by(|left, right| left.name.cmp(&right.name));
-    for pair in fields.windows(2) {
+/// Sort a closed set of named entries into canonical name order, refusing a
+/// name used twice: canonical order is strictly ascending, so a duplicate
+/// would also be unencodable.
+fn sorted_by_unique_name<T>(
+    entries: impl Into<Box<[T]>>,
+    name: impl Fn(&T) -> &str,
+) -> Result<Box<[T]>, DuplicateNameError> {
+    let mut entries = entries.into();
+    entries.sort_by(|left, right| name(left).cmp(name(right)));
+    for pair in entries.windows(2) {
         if let [earlier, later] = pair
-            && earlier.name == later.name
+            && name(earlier) == name(later)
         {
-            return Err(DuplicateFieldError {
-                name: earlier.name.clone(),
+            return Err(DuplicateNameError {
+                name: name(earlier).into(),
             });
         }
     }
-    Ok(fields)
+    Ok(entries)
 }
 
 impl Value {
@@ -105,16 +130,38 @@ impl Value {
                     })
                     .collect(),
             ),
+            // The declared sum's other constructors are not recoverable from
+            // one of its values, so the best-effort type is the singleton sum
+            // holding only the constructor this value selected. That is not
+            // the declared type, and `is_type` is the check that decides
+            // inhabitation; see its doc comment.
+            Self::Sum {
+                type_name,
+                constructor,
+                payload,
+            } => Type::Sum {
+                name: type_name.clone(),
+                constructors: [SumConstructor {
+                    name: constructor.clone(),
+                    payload: payload.as_deref().map(|payload| payload.value_type()),
+                }]
+                .into(),
+            },
         }
     }
 
     /// Whether this value inhabits `expected`. Use it at request-input and
     /// result-type checks; `value_type` is the best-effort type for diagnostics
-    /// and the two agree everywhere except lists, where an empty list inhabits
+    /// and the two agree everywhere except where a value cannot know its own
+    /// whole type, which happens from both directions. an empty list inhabits
     /// every `List<T>` while `value_type` must pick one element type (`Unit`,
-    /// when there is no element to ask). A nominal value matches its own name
-    /// only; its representation does not match the representation's type
-    /// (decision 0026).
+    /// when there is no element to ask). a sum value knows the constructor it
+    /// selected but cannot recover its sibling constructors, so it inhabits
+    /// every declared sum that contains that constructor with a matching
+    /// payload, while `value_type` names only the singleton sum it can honestly
+    /// construct. a nominal value matches its own name only; its
+    /// representation does not match the representation's type (decision
+    /// 0026).
     #[must_use]
     pub fn is_type(&self, expected: &Type) -> bool {
         match (self, expected) {
@@ -142,6 +189,29 @@ impl Value {
                         field.name == expected.name && field.payload.is_type(&expected.payload)
                     })
             }
+            (
+                Self::Sum {
+                    type_name,
+                    constructor,
+                    payload,
+                },
+                Type::Sum {
+                    name: expected_name,
+                    constructors,
+                },
+            ) => {
+                type_name == expected_name
+                    && constructors.iter().any(|declared| {
+                        declared.name == *constructor
+                            && match (&declared.payload, payload.as_deref()) {
+                                (Some(expected_payload), Some(payload)) => {
+                                    payload.is_type(expected_payload)
+                                }
+                                (None, None) => true,
+                                _ => false,
+                            }
+                    })
+            }
             (Self::Unit, _)
             | (Self::Bool(_), _)
             | (Self::Int(_), _)
@@ -150,7 +220,8 @@ impl Value {
             | (Self::Blob(_), _)
             | (Self::Nominal { .. }, _)
             | (Self::List(_), _)
-            | (Self::Record(_), _) => false,
+            | (Self::Record(_), _)
+            | (Self::Sum { .. }, _) => false,
         }
     }
 
@@ -177,6 +248,14 @@ impl Value {
                     .collect();
                 format!("{{{}}}", inner.join(", "))
             }
+            Self::Sum {
+                type_name,
+                constructor,
+                payload,
+            } => match payload.as_deref() {
+                Some(payload) => format!("{}::{}({})", type_name, constructor, payload.describe()),
+                None => format!("{}::{}", type_name, constructor),
+            },
         }
     }
 }
@@ -219,6 +298,15 @@ impl From<&Value> for ValueRepr {
                     .map(|field| (field.name.clone(), (&field.payload).into()))
                     .collect(),
             },
+            Value::Sum {
+                type_name,
+                constructor,
+                payload,
+            } => ValueRepr::Sum {
+                name: type_name.clone(),
+                constructor: constructor.clone(),
+                payload: payload.as_deref().map(|payload| Box::new(payload.into())),
+            },
         }
     }
 }
@@ -242,17 +330,44 @@ pub enum Type {
     /// sorted by name at construction, which is the canonical order the
     /// encoding writes and the only order the decoder accepts.
     Record(Box<[RecordField<Type>]>),
+    /// The declared sum constructor of the 0026 calculus: a nominal name over
+    /// a fixed set of constructors, each optionally carrying a typed payload,
+    /// sorted by constructor name at construction. Not a record with a tag
+    /// field and not a polymorphic variant — 0026 rejects both and gives the
+    /// reasons.
+    Sum {
+        name: Box<str>,
+        constructors: Box<[SumConstructor]>,
+    },
 }
 
 impl Type {
     /// Build a record type, sorting the fields into canonical name order.
     ///
     /// # Errors
-    /// [`DuplicateFieldError`] when two fields share a name.
-    pub fn record(
-        fields: impl Into<Box<[RecordField<Type>]>>,
-    ) -> Result<Self, DuplicateFieldError> {
-        Ok(Self::Record(sorted_fields(fields)?))
+    /// [`DuplicateNameError`] when two fields share a name.
+    pub fn record(fields: impl Into<Box<[RecordField<Type>]>>) -> Result<Self, DuplicateNameError> {
+        Ok(Self::Record(sorted_by_unique_name(
+            fields,
+            |field: &RecordField<Type>| &field.name,
+        )?))
+    }
+
+    /// Build a declared sum type, sorting the constructors into canonical
+    /// name order.
+    ///
+    /// # Errors
+    /// [`DuplicateNameError`] when two constructors share a name.
+    pub fn sum(
+        name: impl Into<Box<str>>,
+        constructors: impl Into<Box<[SumConstructor]>>,
+    ) -> Result<Self, DuplicateNameError> {
+        Ok(Self::Sum {
+            name: name.into(),
+            constructors: sorted_by_unique_name(constructors, |constructor: &SumConstructor| {
+                &constructor.name
+            })?,
+        })
     }
 }
 
@@ -260,11 +375,14 @@ impl Value {
     /// Build a record value, sorting the fields into canonical name order.
     ///
     /// # Errors
-    /// [`DuplicateFieldError`] when two fields share a name.
+    /// [`DuplicateNameError`] when two fields share a name.
     pub fn record(
         fields: impl Into<Box<[RecordField<Value>]>>,
-    ) -> Result<Self, DuplicateFieldError> {
-        Ok(Self::Record(sorted_fields(fields)?))
+    ) -> Result<Self, DuplicateNameError> {
+        Ok(Self::Record(sorted_by_unique_name(
+            fields,
+            |field: &RecordField<Value>| &field.name,
+        )?))
     }
 }
 
@@ -289,6 +407,19 @@ impl std::fmt::Display for Type {
                 }
                 f.write_str(" }")
             }
+            Self::Sum { name, constructors } => {
+                write!(f, "{name}::{{")?;
+                let mut separator = "";
+                for constructor in &**constructors {
+                    f.write_str(separator)?;
+                    match &constructor.payload {
+                        Some(payload) => write!(f, "{}({payload})", constructor.name)?,
+                        None => f.write_str(&constructor.name)?,
+                    }
+                    separator = ", ";
+                }
+                f.write_str("}")
+            }
         }
     }
 }
@@ -310,6 +441,19 @@ impl From<&Type> for TypeRepr {
                 fields: fields
                     .iter()
                     .map(|field| (field.name.clone(), (&field.payload).into()))
+                    .collect(),
+            },
+            Type::Sum { name, constructors } => TypeRepr::Sum {
+                name: name.clone(),
+                constructors: constructors
+                    .iter()
+                    .map(|constructor| SumConstructorRepr {
+                        name: constructor.name.clone(),
+                        payload: constructor
+                            .payload
+                            .as_ref()
+                            .map(|payload| Box::new(payload.into())),
+                    })
                     .collect(),
             },
         }
@@ -346,6 +490,11 @@ mod tests {
                 },
             ])
             .unwrap(),
+            Value::Sum {
+                type_name: "Source".into(),
+                constructor: "Git".into(),
+                payload: Some(Box::new(Value::Text("main".into()))),
+            },
         ] {
             let repr: ValueRepr = (&v).into();
             let _ = format!("{repr:?}");
@@ -577,7 +726,7 @@ mod tests {
         ]);
         assert_eq!(
             duplicate.unwrap_err(),
-            DuplicateFieldError { name: "a".into() }
+            DuplicateNameError { name: "a".into() }
         );
         assert_eq!(
             Type::record([
@@ -591,7 +740,7 @@ mod tests {
                 },
             ])
             .unwrap_err(),
-            DuplicateFieldError { name: "a".into() }
+            DuplicateNameError { name: "a".into() }
         );
     }
 
@@ -658,5 +807,193 @@ mod tests {
         assert!(!value.is_type(&wider));
         assert!(!value.is_type(&narrower));
         assert!(!value.is_type(&deeper));
+    }
+
+    #[test]
+    fn a_sum_value_inhabits_the_declared_sums_that_contain_its_constructor() {
+        // A sum value knows its own constructor and payload but not its
+        // siblings, so inhabitation is membership: the declared name must
+        // match, the constructor must be in the declared set, and the payload
+        // must be present exactly when the declaration carries one and inhabit
+        // the declared payload type.
+        let source = Type::sum(
+            "Source",
+            [
+                SumConstructor {
+                    name: "Git".into(),
+                    payload: Some(Type::Text),
+                },
+                SumConstructor {
+                    name: "Path".into(),
+                    payload: None,
+                },
+            ],
+        )
+        .unwrap();
+        let git = Value::Sum {
+            type_name: "Source".into(),
+            constructor: "Git".into(),
+            payload: Some(Box::new(Value::Text("main".into()))),
+        };
+        let path = Value::Sum {
+            type_name: "Source".into(),
+            constructor: "Path".into(),
+            payload: None,
+        };
+        let renamed = Type::sum(
+            "Origin",
+            [
+                SumConstructor {
+                    name: "Git".into(),
+                    payload: Some(Type::Text),
+                },
+                SumConstructor {
+                    name: "Path".into(),
+                    payload: None,
+                },
+            ],
+        )
+        .unwrap();
+        let without_git = Type::sum(
+            "Source",
+            [SumConstructor {
+                name: "Path".into(),
+                payload: None,
+            }],
+        )
+        .unwrap();
+        let mistyped = Type::sum(
+            "Source",
+            [
+                SumConstructor {
+                    name: "Git".into(),
+                    payload: Some(Type::Int),
+                },
+                SumConstructor {
+                    name: "Path".into(),
+                    payload: None,
+                },
+            ],
+        )
+        .unwrap();
+        let bare_git = Type::sum(
+            "Source",
+            [
+                SumConstructor {
+                    name: "Git".into(),
+                    payload: None,
+                },
+                SumConstructor {
+                    name: "Path".into(),
+                    payload: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        assert!(git.is_type(&source));
+        assert!(path.is_type(&source));
+        assert!(!git.is_type(&renamed));
+        assert!(!git.is_type(&without_git));
+        assert!(!git.is_type(&mistyped));
+        assert!(!git.is_type(&bare_git));
+        assert!(path.is_type(&bare_git));
+    }
+
+    #[test]
+    fn sum_construction_orders_constructors_and_rejects_duplicates() {
+        let first = Type::sum(
+            "Source",
+            [
+                SumConstructor {
+                    name: "Git".into(),
+                    payload: Some(Type::Text),
+                },
+                SumConstructor {
+                    name: "Archive".into(),
+                    payload: Some(Type::Blob),
+                },
+            ],
+        )
+        .unwrap();
+        let second = Type::sum(
+            "Source",
+            [
+                SumConstructor {
+                    name: "Archive".into(),
+                    payload: Some(Type::Blob),
+                },
+                SumConstructor {
+                    name: "Git".into(),
+                    payload: Some(Type::Text),
+                },
+            ],
+        )
+        .unwrap();
+        assert_eq!(first, second);
+
+        let duplicate = Type::sum(
+            "Source",
+            [
+                SumConstructor {
+                    name: "Git".into(),
+                    payload: None,
+                },
+                SumConstructor {
+                    name: "Git".into(),
+                    payload: Some(Type::Text),
+                },
+            ],
+        );
+        assert_eq!(
+            duplicate.unwrap_err(),
+            DuplicateNameError { name: "Git".into() }
+        );
+    }
+
+    #[test]
+    fn a_sum_value_names_the_singleton_it_can_and_inhabits_the_declaration() {
+        // The mirror of the empty-list asymmetry: `value_type` cannot recover
+        // the sibling constructors, so it names the singleton sum holding only
+        // the selected constructor — a type the value does inhabit, since the
+        // singleton contains that constructor with a matching payload — while
+        // `is_type` accepts the declared type as well. Request-input checking
+        // compares with `is_type`, so the singleton is a diagnostic, never a
+        // gate.
+        let declared = Type::sum(
+            "Source",
+            [
+                SumConstructor {
+                    name: "Git".into(),
+                    payload: Some(Type::Text),
+                },
+                SumConstructor {
+                    name: "Path".into(),
+                    payload: None,
+                },
+            ],
+        )
+        .unwrap();
+        let git = Value::Sum {
+            type_name: "Source".into(),
+            constructor: "Git".into(),
+            payload: Some(Box::new(Value::Text("main".into()))),
+        };
+
+        let best_effort = git.value_type();
+        assert_eq!(
+            best_effort,
+            Type::Sum {
+                name: "Source".into(),
+                constructors: [SumConstructor {
+                    name: "Git".into(),
+                    payload: Some(Type::Text),
+                }]
+                .into(),
+            }
+        );
+        assert_ne!(best_effort, declared);
+        assert!(git.is_type(&best_effort));
+        assert!(git.is_type(&declared));
     }
 }

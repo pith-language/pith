@@ -15,9 +15,9 @@ pub(super) type Selector = u16;
 const RESULT_FIELD_NAMES: [&str; 2] = ["name", "value"];
 
 /// The retained result of a generated completion. Covers the recursive value
-/// constructors — list, record — beside the scalars, so an adapter's treatment
-/// of every landed constructor is compared, not just the ones the fixtures
-/// happened to use first.
+/// constructors — list, record, sum — beside the scalars, so an adapter's
+/// treatment of every landed constructor is compared, not just the ones the
+/// fixtures happened to use first.
 fn result_value() -> impl Strategy<Value = Value> {
     prop_oneof![
         2 => any::<i64>().prop_map(Value::Int),
@@ -36,6 +36,13 @@ fn result_value() -> impl Strategy<Value = Value> {
                     .collect(),
             )
         }),
+        1 => (any::<bool>(), proptest::option::of(any::<i64>())).prop_map(
+            |(present, payload)| Value::Sum {
+                type_name: "Outcome".into(),
+                constructor: if present { "Built" } else { "Failed" }.into(),
+                payload: payload.map(|n| Box::new(Value::Int(n))),
+            },
+        ),
     ]
 }
 
