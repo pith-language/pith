@@ -6,18 +6,22 @@ use pith_engine::state::{EngineStateVersions, RECORD_ENCODING_VERSION, SchemaVer
 /// version, which belongs to `pith-engine`: the same records can be laid out
 /// differently, and the same layout can hold a new payload encoding.
 ///
-/// Pinned at 1 before the first release, per decision 0024: an incompatible
-/// metadata version moves the database aside and rebuilds from an empty graph
-/// and cache. Nothing has shipped, so no database outside a working tree needs
-/// to survive a change, and the schema is free to follow the engine's shape.
-/// Starting clean is the intended behaviour here, not a fallback.
+/// Per decision 0024, an incompatible metadata version moves the database
+/// aside and rebuilds from an empty graph and cache. Nothing has shipped, so
+/// no database outside a working tree needs to survive a change, and the
+/// schema is free to follow the engine's shape. Starting clean is the
+/// intended behaviour here, not a fallback. This moves for any change a
+/// prior build would misread: a new table or column, and equally a new code
+/// in an existing column — adding `Cancelled` to `attempts.status` left the
+/// layout untouched but would have had an older build pass the gate and then
+/// fail decoding a variant it does not have.
 ///
-/// Once there is a release to be compatible with, this starts moving — for any
-/// change a prior build would misread. That includes new tables and columns,
-/// and equally a new code in an existing column: adding `Cancelled` to
-/// `attempts.status` left the layout untouched but would have had an older
-/// build pass the gate and then fail decoding a variant it does not have.
-pub const SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(1);
+/// The layout moved from 1 to 2 when `reusable_index` gained its `published`
+/// column. A version-1 row has no publication order, and an older build
+/// reading the new layout would order the action reusable index by attempt
+/// identifier — creation order — where the engine's semantics are latest
+/// published.
+pub const SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(2);
 
 pub const CURRENT_VERSIONS: EngineStateVersions = EngineStateVersions {
     schema: SCHEMA_VERSION,
@@ -154,9 +158,14 @@ pub const CREATE_SCHEMA: &str = "
         primary key (diagnostic, position)
     ) strict;
 
+    -- The reusable index. `published` is the database's publication
+    -- sequence, so latest reads as latest published: two attempts of one
+    -- action key can complete in either order of their creation, and the
+    -- admission test of 0031 serves the most recently recorded attempt.
     create table if not exists reusable_index (
         computation integer primary key references computations (id),
-        attempt integer not null references attempts (id)
+        attempt integer not null references attempts (id),
+        published integer not null
     ) strict;
 ";
 
@@ -277,6 +286,7 @@ diesel::table! {
     reusable_index (computation) {
         computation -> BigInt,
         attempt -> BigInt,
+        published -> BigInt,
     }
 }
 

@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 7bf90281ba2c37021daa76898a363653db50ce18d3b0f596177394636b53db4b # shrinks to scenario = Scenario { steps: [CreatePure { rule: 0, input: 0 }, CreatePure { rule: 0, input: 0 }, Complete { attempt: 0, dependencies: [Blob(0), Blob(1)], result: 0, corrupt_reuse: false }] }
+cc 80b349134c6897e018748f803dec2d487243a0b89bf5fa04a3cc5a6bbf0f7b70 # shrinks to scenario = Scenario { steps: [CreateAction { rule: 2, executable: 0, capabilities: [0], denied: false }, CreateAction { rule: 2, executable: 0, capabilities: [0], denied: false }, Complete { attempt: 10015, dependencies: [], result: Int(0), corrupt_reuse: false }, Complete { attempt: 0, dependencies: [], result: Int(0), corrupt_reuse: false }] }

@@ -253,11 +253,14 @@ pub fn reusable_attempt_row(
         .optional()?)
 }
 
-/// The newest reusable attempt for one action key (decision 0031).
+/// The latest published reusable attempt for one action key (decision 0031).
 ///
 /// An action computation row is never shared — it carries the authorization of
 /// its own attempt — so one key can have many rows, each with its own index
-/// entry. Ordering by attempt identifier picks the newest of them.
+/// entry. "Latest" is latest published, not newest attempt identifier: two
+/// attempts of one key can complete in either order of their creation, and
+/// the reference model serves whichever publication came last, so the
+/// adapter orders by the publication sequence.
 pub fn reusable_action_attempt_row(
     connection: &mut SqliteConnection,
     key: ActionComputationKey,
@@ -276,7 +279,7 @@ pub fn reusable_action_attempt_row(
         .filter(computations::rule_identity.eq(StoredRuleIdentity(key.rule_identity)))
         .filter(computations::rule_revision.eq(StoredRevisionDigest(key.rule_revision.digest())))
         .filter(computations::action_digest.eq(StoredActionDigest(key.digest)))
-        .order(reusable_index::attempt.desc())
+        .order(reusable_index::published.desc())
         .select(AttemptRow::as_select())
         .first(connection)
         .optional()?)
@@ -287,14 +290,27 @@ pub fn publish_reusable(
     computation: i64,
     attempt: DurableAttemptId,
 ) -> Result<(), Failure> {
+    // The database's publication sequence. Allocated under the store's write
+    // lock inside the caller's transaction, so `max + 1` cannot race, and it
+    // moves on re-publication of the same computation so the pure key's
+    // upsert re-orders too.
+    let published: i64 = reusable_index::table
+        .select(diesel::dsl::max(reusable_index::published))
+        .first::<Option<i64>>(connection)?
+        .unwrap_or(0)
+        .saturating_add(1);
     diesel::insert_into(reusable_index::table)
         .values((
             reusable_index::computation.eq(computation),
             reusable_index::attempt.eq(StoredAttemptId(attempt)),
+            reusable_index::published.eq(published),
         ))
         .on_conflict(reusable_index::computation)
         .do_update()
-        .set(reusable_index::attempt.eq(StoredAttemptId(attempt)))
+        .set((
+            reusable_index::attempt.eq(StoredAttemptId(attempt)),
+            reusable_index::published.eq(published),
+        ))
         .execute(connection)?;
     Ok(())
 }
