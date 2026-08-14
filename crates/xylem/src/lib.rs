@@ -23,4 +23,4 @@ pub use rules::{
     CompileAction, CompileRule, GenerateAction, GenerateRule, HeaderDiscoveryAction,
     HeaderUniverse, LinkAction, LinkRule, TestAction, TestRule,
 };
-pub use toolchain::{DiscoveryError, Toolchain};
+pub use toolchain::{DiscoveryError, Toolchain, Toolchains};

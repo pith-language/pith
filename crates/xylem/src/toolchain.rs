@@ -38,11 +38,63 @@ pub struct Toolchain {
     /// Every host path the driver reads at runtime. Declared as
     /// `ActionSpec::toolchain`; the executor adds one landlock rule per path.
     pub closure: Box<[Box<str>]>,
-    /// Where the driver looks for `cc1` before it looks at `PATH`.
-    pub program_path: Box<str>,
+    /// Where the driver looks for its own compiler proper before it looks at
+    /// `PATH`, declared to the action as `COMPILER_PATH`.
+    ///
+    /// `None` for a driver that has no separate compiler to find. gcc execs
+    /// `cc1`; clang compiles in its own process and answers
+    /// `-print-prog-name=cc1` with a bare name, which is it saying there is no
+    /// such program. Requiring one made discovery gcc-shaped, and a second
+    /// toolchain is what surfaced it.
+    pub program_path: Option<Box<str>>,
     /// The directory the driver came from, where `as` and `ld` live on a
     /// distribution compiler.
     pub tool_directory: Box<str>,
+}
+
+/// The toolchains a build may use, resolved by the driver path a request names.
+///
+/// One registration of each rule serves every toolchain. The toolchain value in a
+/// request carries the driver path, and `plan()` looks its closure up here.
+/// Holding a single toolchain per registration would mean one engine per
+/// compiler, and registering the same rule twice would give two rules one
+/// interface and collide as `E-1102` (decision 0015), so neither expresses what
+/// a toolchain being a request input is supposed to buy.
+#[derive(Clone, Debug)]
+pub struct Toolchains {
+    entries: Box<[Toolchain]>,
+}
+
+impl Toolchains {
+    /// A set over `entries`. A driver appearing twice is the caller's to avoid;
+    /// resolution takes the first match, so a duplicate is shadowed rather than
+    /// ambiguous.
+    #[must_use]
+    pub fn new(entries: Box<[Toolchain]>) -> Self {
+        Self { entries }
+    }
+
+    /// The common case: a build over one discovered toolchain.
+    #[must_use]
+    pub fn one(toolchain: Toolchain) -> Self {
+        Self {
+            entries: Box::new([toolchain]),
+        }
+    }
+
+    /// The toolchain whose driver is `driver`, or `None` when this build was not
+    /// registered with it.
+    #[must_use]
+    pub fn resolve(&self, driver: &str) -> Option<&Toolchain> {
+        self.entries
+            .iter()
+            .find(|toolchain| toolchain.driver.as_ref() == driver)
+    }
+
+    /// The registered toolchains, in registration order.
+    pub fn iter(&self) -> impl Iterator<Item = &Toolchain> {
+        self.entries.iter()
+    }
 }
 
 /// Why toolchain discovery did not produce a usable [`Toolchain`].
@@ -85,8 +137,10 @@ impl Toolchain {
         let driver_path = find_in_path(driver_name).ok_or(DiscoveryError::NotFound)?;
         let driver = driver_path.to_str().ok_or(DiscoveryError::Incomplete)?;
         let store_root = nix_store_root(driver).ok_or(DiscoveryError::Incomplete)?;
-        let cc1 = print_program_path(&driver_path, "cc1")?;
-        let program_path = directory_of(&cc1).ok_or(DiscoveryError::Incomplete)?;
+        let program_path = match print_program_path(&driver_path, "cc1")? {
+            Some(cc1) => Some(directory_of(&cc1).ok_or(DiscoveryError::Incomplete)?),
+            None => None,
+        };
         let tool_directory = directory_of(&driver_path).ok_or(DiscoveryError::Incomplete)?;
         let mut closure = BTreeSet::new();
         closure.extend(nix_closure(&store_root)?);
@@ -118,10 +172,10 @@ fn find_in_path(program: &str) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
-/// Ask the driver where it keeps one of its own programs. Returns `None` when
-/// the driver answers with a bare name, which is how it says "I expect to find
-/// this on `PATH`".
-fn print_program_path(driver: &Path, program: &str) -> Result<PathBuf, DiscoveryError> {
+/// Ask the driver where it keeps one of its own programs. `Ok(None)` is the
+/// driver answering with a bare name, which is how it says it has no such
+/// program of its own: there is nothing to declare, and nothing missing.
+fn print_program_path(driver: &Path, program: &str) -> Result<Option<PathBuf>, DiscoveryError> {
     let output = Command::new(driver)
         .arg(format!("-print-prog-name={program}"))
         .output()
@@ -134,11 +188,7 @@ fn print_program_path(driver: &Path, program: &str) -> Result<PathBuf, Discovery
     }
     let answer = String::from_utf8_lossy(&output.stdout);
     let answer = PathBuf::from(answer.trim());
-    if answer.is_absolute() {
-        Ok(answer)
-    } else {
-        Err(DiscoveryError::Incomplete)
-    }
+    Ok(answer.is_absolute().then_some(answer))
 }
 
 fn directory_of(path: &Path) -> Option<Box<str>> {

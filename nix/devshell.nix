@@ -49,6 +49,7 @@
         pkgs.deadnix
         pkgs.statix
         pkgs.git
+        pkgs.clang
       ];
 
       shellHook = ''

@@ -30,7 +30,7 @@ use pith_executor_local::LocalExecutor;
 use pith_ids::ContentId;
 use pith_state_sqlite::SqliteEngineStateStore;
 use pith_store::{ContentStore, FilesystemContentStore};
-use xylem::{BuildEngine, HeaderUniverse, Toolchain, types};
+use xylem::{BuildEngine, DiscoveryError, HeaderUniverse, Toolchain, Toolchains, types};
 
 const SOURCE_A: &[u8] = b"#include \"answer.h\"\nint a(void) { return ANSWER; }\n";
 const SOURCE_B: &[u8] =
@@ -235,7 +235,7 @@ fn build_engine(root: &Path, toolchain: &Toolchain, universe: HeaderUniverse) ->
     };
     let mut engine = Engine::with_state_store(store, state);
     let toolchain_value = toolchain.value();
-    engine.register_xylem(toolchain.clone(), universe);
+    engine.register_xylem(Toolchains::one(toolchain.clone()), universe);
     engine.register_rule(
         build_rule(),
         SourcesBuild {
@@ -642,6 +642,128 @@ fn an_undeclared_header_fails_rather_than_reading_the_host() {
 fn built_executable(engine: &mut Engine, source: &[u8], what: &str) -> ContentId {
     let id = store_blob(engine, source, what);
     blob_of(&run_build(engine, &build_request(&[id])).value)
+}
+
+/// An engine registered with both toolchains, so one registration of each rule
+/// serves both and the toolchain a request names is what selects the closure.
+fn two_toolchain_engine(
+    root: &Path,
+    gcc: &Toolchain,
+    clang: &Toolchain,
+    universe: HeaderUniverse,
+) -> Engine {
+    let store = match FilesystemContentStore::open(root) {
+        Ok(store) => store,
+        Err(error) => unreachable!("the filesystem store failed to open: {error:?}"),
+    };
+    let state = match SqliteEngineStateStore::open(root.join("state.db")) {
+        Ok(state) => state,
+        Err(error) => unreachable!("the engine-state database failed to open: {error:?}"),
+    };
+    let mut engine = Engine::with_state_store(store, state);
+    engine.register_xylem(
+        Toolchains::new(Box::new([gcc.clone(), clang.clone()])),
+        universe,
+    );
+    engine.register_rule(
+        build_rule(),
+        SourcesBuild {
+            toolchain_value: gcc.value(),
+        },
+    );
+    engine
+}
+
+#[test]
+fn two_toolchains_compile_the_same_source_without_sharing_a_cache_entry() {
+    let Ok(gcc) = Toolchain::discover("gcc") else {
+        return;
+    };
+    let clang = match Toolchain::discover("clang") {
+        Ok(clang) => clang,
+        // A host without clang has nothing to compare and skips. A clang that is
+        // present and undiscoverable is the gcc-shaped assumption this test
+        // exists to catch, so it fails rather than skipping past it.
+        Err(DiscoveryError::NotFound) => return,
+        Err(error) => unreachable!("clang is present but discovery failed: {error:?}"),
+    };
+    // Without this the test could be one compiler twice and still pass, which is
+    // the same skip-shaped-like-a-pass trap as a missing toolchain.
+    assert_ne!(
+        gcc.driver, clang.driver,
+        "the two drivers must be different programs"
+    );
+
+    let root = temp_root();
+    let mut engine = {
+        let mut store_engine = match FilesystemContentStore::open(root.path()) {
+            Ok(store) => Engine::with_content_store(store),
+            Err(error) => unreachable!("the filesystem store failed to open: {error:?}"),
+        };
+        let universe = header_universe(&mut store_engine, false);
+        two_toolchain_engine(root.path(), &gcc, &clang, universe)
+    };
+    let source = store_blob(&mut engine, SOURCE_A, "a.c");
+
+    let under_gcc = run_build(&mut engine, &types::compile_request(gcc.value(), source));
+    let after_gcc = action_computations(&engine);
+    let under_clang = run_build(&mut engine, &types::compile_request(clang.value(), source));
+    let after_clang = action_computations(&engine);
+    let gcc_again = run_build(&mut engine, &types::compile_request(gcc.value(), source));
+
+    // The toolchain is a request input, so clang's compile is a different
+    // request that plans a different contract and cannot be answered from
+    // gcc's entry. Both compiles also ran through one rule registration:
+    // registering per toolchain would have collided as E-1102.
+    assert_eq!(under_gcc.source, EvaluationSource::Computed);
+    assert_eq!(under_clang.source, EvaluationSource::Computed);
+    assert!(
+        after_clang > after_gcc,
+        "clang's compile must plan its own actions, not reuse gcc's"
+    );
+    assert_ne!(
+        blob_of(&under_gcc.value),
+        blob_of(&under_clang.value),
+        "two compilers must not produce byte-identical objects here"
+    );
+    assert_eq!(
+        gcc_again.source,
+        EvaluationSource::Reused,
+        "the first toolchain's entry survives the second toolchain's build"
+    );
+}
+
+#[test]
+fn a_toolchain_the_build_was_not_registered_with_is_refused() {
+    let Ok(gcc) = Toolchain::discover("gcc") else {
+        return;
+    };
+    let root = temp_root();
+    let (mut engine, _) = {
+        let mut store_engine = match FilesystemContentStore::open(root.path()) {
+            Ok(store) => Engine::with_content_store(store),
+            Err(error) => unreachable!("the filesystem store failed to open: {error:?}"),
+        };
+        let universe = header_universe(&mut store_engine, false);
+        build_engine(root.path(), &gcc, universe)
+    };
+    let source = store_blob(&mut engine, SOURCE_A, "a.c");
+
+    // A driver nothing registered has no closure to confine, and planning a
+    // contract against a guessed one would be the ambient discovery 0007 forbids.
+    let diagnostics = run_build_expecting_failure(
+        &mut engine,
+        &types::compile_request(types::toolchain("/nowhere/cc"), source),
+    );
+    let message = diagnostics
+        .iter()
+        .next()
+        .map(|diagnostic| diagnostic.message.0.to_string())
+        .unwrap_or_default();
+    assert!(
+        message.contains("was not registered with"),
+        "the error should name the unregistered toolchain, got: {message}"
+    );
 }
 
 #[test]

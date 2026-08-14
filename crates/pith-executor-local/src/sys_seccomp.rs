@@ -237,7 +237,9 @@ const ALLOWED_SYSCALLS: &[(libc::c_long, &str)] = allowlist![
     SYS_brk,
     SYS_madvise,
     SYS_sysinfo,
-    // Signals and exit.
+    // Signals and exit. clang installs an alternate signal stack so its crash
+    // handler can run on a blown stack; gcc never asked for one.
+    SYS_sigaltstack,
     SYS_rt_sigaction,
     SYS_rt_sigprocmask,
     SYS_rt_sigreturn,
@@ -278,6 +280,9 @@ const ALLOWED_SYSCALLS: &[(libc::c_long, &str)] = allowlist![
     SYS_fchmod,
     SYS_unlink,
     SYS_unlinkat,
+    // clang writes its output to a temporary and renames it into place, so a
+    // partial file never looks like a finished one.
+    SYS_rename,
     // Randomness for temp names: glibc's `mkstemp` family draws from
     // `getrandom` and dies rather than falling back when the call is filtered.
     SYS_getrandom,
@@ -303,6 +308,9 @@ const ALLOWED_SYSCALLS: &[(libc::c_long, &str)] = allowlist![
     // The shell's `times` and gcc's own accounting both read the resource
     // usage the kernel already tracks for them.
     SYS_getrusage,
+    // clang arms a watchdog around its own work. Denying it would kill the
+    // compile over a timer it never intended to fire.
+    SYS_alarm,
     // Local sockets: glibc's name-service switch opens an `AF_UNIX` stream to
     // the nscd door during an ordinary compile (0028's measurement). `connect`
     // follows because no other socket can exist to connect.

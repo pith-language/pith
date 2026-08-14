@@ -28,7 +28,7 @@ use pith_engine::{
 use pith_ids::ContentId;
 
 use crate::depfile;
-use crate::toolchain::Toolchain;
+use crate::toolchain::{Toolchain, Toolchains};
 use crate::types;
 
 /// The revision every xylem rule derives its identity from. Bumping this
@@ -68,6 +68,55 @@ fn blob_of(value: &Value, expected_name: &str) -> PithResult<ContentId> {
             value.describe()
         ))),
     }
+}
+
+/// The search paths a driver needs to find the rest of itself. `COMPILER_PATH`
+/// appears only for a driver that has a separate compiler to find, since an
+/// empty one would be a declaration with nothing behind it.
+fn compiler_environment(toolchain: &Toolchain) -> Box<[EnvironmentVariable]> {
+    let mut environment = Vec::with_capacity(2);
+    if let Some(program_path) = &toolchain.program_path {
+        environment.push(EnvironmentVariable {
+            name: "COMPILER_PATH".into(),
+            value: program_path.clone(),
+        });
+    }
+    environment.push(EnvironmentVariable {
+        name: "PATH".into(),
+        value: toolchain.tool_directory.clone(),
+    });
+    environment.into_boxed_slice()
+}
+
+/// The driver path a toolchain value carries, which is its identity for dispatch.
+fn driver_of(value: &Value) -> PithResult<&str> {
+    match value {
+        Value::Nominal {
+            name,
+            representation,
+        } if name.as_ref() == types::TOOLCHAIN => match representation.as_ref() {
+            Value::Text(driver) => Ok(driver),
+            _ => Err(diag("a Toolchain value carried no driver path")),
+        },
+        _ => Err(diag(&format!(
+            "expected a {} value, found {}",
+            types::TOOLCHAIN,
+            value.describe()
+        ))),
+    }
+}
+
+/// The registered toolchain the request's first input names.
+fn requested_toolchain<'a>(
+    toolchains: &'a Toolchains,
+    inputs: &[Value],
+) -> PithResult<&'a Toolchain> {
+    let driver = driver_of(input(inputs, 0)?)?;
+    toolchains.resolve(driver).ok_or_else(|| {
+        diag(&format!(
+            "the request named the toolchain `{driver}`, which this build was not registered with"
+        ))
+    })
 }
 
 /// Extract input `index` from `inputs`, diagnosing a request that did not
@@ -134,15 +183,15 @@ impl HeaderUniverse {
 /// source asks for, and landlock confines it to what was staged — and the
 /// depfile is the kernel's own record of which files those were.
 pub struct HeaderDiscoveryAction {
-    toolchain: Toolchain,
+    toolchains: Toolchains,
     universe: HeaderUniverse,
 }
 
 impl HeaderDiscoveryAction {
     #[must_use]
-    pub fn new(toolchain: Toolchain, universe: HeaderUniverse) -> Self {
+    pub fn new(toolchains: Toolchains, universe: HeaderUniverse) -> Self {
         Self {
-            toolchain,
+            toolchains,
             universe,
         }
     }
@@ -165,6 +214,7 @@ const DEPFILE_PATH: &str = "deps.d";
 
 impl ActionRule for HeaderDiscoveryAction {
     fn plan(&self, inputs: &[Value]) -> PithResult<ActionSpec> {
+        let toolchain = requested_toolchain(&self.toolchains, inputs)?;
         let source = blob_of(input(inputs, 1)?, types::C_SOURCE)?;
         let mut action_inputs = vec![ActionInput {
             path: SOURCE_PATH.into(),
@@ -177,8 +227,8 @@ impl ActionRule for HeaderDiscoveryAction {
             });
         }
         Ok(ActionSpec {
-            executable: ActionProgram::HostPath(self.toolchain.driver.clone()),
-            toolchain: self.toolchain.closure.clone(),
+            executable: ActionProgram::HostPath(toolchain.driver.clone()),
+            toolchain: toolchain.closure.clone(),
             arguments: [
                 "-MM".into(),
                 "-MF".into(),
@@ -192,17 +242,7 @@ impl ActionRule for HeaderDiscoveryAction {
                 kind: OutputKind::Blob,
             }]
             .into(),
-            environment: [
-                EnvironmentVariable {
-                    name: "COMPILER_PATH".into(),
-                    value: self.toolchain.program_path.clone(),
-                },
-                EnvironmentVariable {
-                    name: "PATH".into(),
-                    value: self.toolchain.tool_directory.clone(),
-                },
-            ]
-            .into(),
+            environment: compiler_environment(toolchain),
             platform: PlatformRequirement::Exact {
                 operating_system: std::env::consts::OS.into(),
                 architecture: std::env::consts::ARCH.into(),
@@ -230,15 +270,15 @@ impl ActionRule for HeaderDiscoveryAction {
 /// against the registered universe, and the resolved files are the compile's
 /// declared inputs, so the contract digests exactly what the source includes.
 pub struct CompileAction {
-    toolchain: Toolchain,
+    toolchains: Toolchains,
     universe: HeaderUniverse,
 }
 
 impl CompileAction {
     #[must_use]
-    pub fn new(toolchain: Toolchain, universe: HeaderUniverse) -> Self {
+    pub fn new(toolchains: Toolchains, universe: HeaderUniverse) -> Self {
         Self {
-            toolchain,
+            toolchains,
             universe,
         }
     }
@@ -257,6 +297,7 @@ impl CompileAction {
 
 impl ActionRule for CompileAction {
     fn plan(&self, inputs: &[Value]) -> PithResult<ActionSpec> {
+        let toolchain = requested_toolchain(&self.toolchains, inputs)?;
         let source = blob_of(input(inputs, 1)?, types::C_SOURCE)?;
         let Value::List(discovered) = input(inputs, 2)? else {
             return Err(diag(
@@ -288,8 +329,8 @@ impl ActionRule for CompileAction {
             }
         }
         Ok(ActionSpec {
-            executable: ActionProgram::HostPath(self.toolchain.driver.clone()),
-            toolchain: self.toolchain.closure.clone(),
+            executable: ActionProgram::HostPath(toolchain.driver.clone()),
+            toolchain: toolchain.closure.clone(),
             arguments: [
                 "-c".into(),
                 SOURCE_PATH.into(),
@@ -303,17 +344,7 @@ impl ActionRule for CompileAction {
                 kind: OutputKind::Blob,
             }]
             .into(),
-            environment: [
-                EnvironmentVariable {
-                    name: "COMPILER_PATH".into(),
-                    value: self.toolchain.program_path.clone(),
-                },
-                EnvironmentVariable {
-                    name: "PATH".into(),
-                    value: self.toolchain.tool_directory.clone(),
-                },
-            ]
-            .into(),
+            environment: compiler_environment(toolchain),
             platform: PlatformRequirement::Exact {
                 operating_system: std::env::consts::OS.into(),
                 architecture: std::env::consts::ARCH.into(),
@@ -341,13 +372,13 @@ impl ActionRule for CompileAction {
 /// derived from its position, which is the order the caller's list gave and is
 /// the order the driver receives them in.
 pub struct LinkAction {
-    toolchain: Toolchain,
+    toolchains: Toolchains,
 }
 
 impl LinkAction {
     #[must_use]
-    pub fn new(toolchain: Toolchain) -> Self {
-        Self { toolchain }
+    pub fn new(toolchains: Toolchains) -> Self {
+        Self { toolchains }
     }
 
     #[must_use]
@@ -373,6 +404,7 @@ fn object_path(position: usize) -> Box<str> {
 
 impl ActionRule for LinkAction {
     fn plan(&self, inputs: &[Value]) -> PithResult<ActionSpec> {
+        let toolchain = requested_toolchain(&self.toolchains, inputs)?;
         let Value::List(objects) = input(inputs, 1)? else {
             return Err(diag(
                 "the link request carried no object list as its second input",
@@ -395,8 +427,8 @@ impl ActionRule for LinkAction {
         arguments.push("-o".into());
         arguments.push(EXECUTABLE_PATH.into());
         Ok(ActionSpec {
-            executable: ActionProgram::HostPath(self.toolchain.driver.clone()),
-            toolchain: self.toolchain.closure.clone(),
+            executable: ActionProgram::HostPath(toolchain.driver.clone()),
+            toolchain: toolchain.closure.clone(),
             arguments: arguments.into(),
             inputs: action_inputs.into_boxed_slice(),
             outputs: [ActionOutput {
@@ -406,7 +438,7 @@ impl ActionRule for LinkAction {
             .into(),
             environment: [EnvironmentVariable {
                 name: "PATH".into(),
-                value: self.toolchain.tool_directory.clone(),
+                value: toolchain.tool_directory.clone(),
             }]
             .into(),
             platform: PlatformRequirement::Exact {
@@ -582,13 +614,13 @@ impl PureRule for LinkRule {
 /// generator that wrote somewhere else would produce no declared output and fail
 /// the action, which is the loud failure the alternative hides.
 pub struct GenerateAction {
-    toolchain: Toolchain,
+    toolchains: Toolchains,
 }
 
 impl GenerateAction {
     #[must_use]
-    pub fn new(toolchain: Toolchain) -> Self {
-        Self { toolchain }
+    pub fn new(toolchains: Toolchains) -> Self {
+        Self { toolchains }
     }
 
     #[must_use]
@@ -606,10 +638,11 @@ const GENERATED_PATH: &str = "generated.c";
 
 impl ActionRule for GenerateAction {
     fn plan(&self, inputs: &[Value]) -> PithResult<ActionSpec> {
+        let toolchain = requested_toolchain(&self.toolchains, inputs)?;
         let generator = blob_of(input(inputs, 1)?, types::EXECUTABLE)?;
         Ok(ActionSpec {
             executable: ActionProgram::Content(generator),
-            toolchain: self.toolchain.closure.clone(),
+            toolchain: toolchain.closure.clone(),
             arguments: [GENERATED_PATH.into()].into(),
             inputs: Box::new([]),
             outputs: [ActionOutput {
@@ -683,13 +716,13 @@ impl PureRule for GenerateRule {
 /// 0037): a test that exits nonzero has produced a finding, and a finding is a
 /// result worth recording and reusing.
 pub struct TestAction {
-    toolchain: Toolchain,
+    toolchains: Toolchains,
 }
 
 impl TestAction {
     #[must_use]
-    pub fn new(toolchain: Toolchain) -> Self {
-        Self { toolchain }
+    pub fn new(toolchains: Toolchains) -> Self {
+        Self { toolchains }
     }
 
     #[must_use]
@@ -705,10 +738,11 @@ impl TestAction {
 
 impl ActionRule for TestAction {
     fn plan(&self, inputs: &[Value]) -> PithResult<ActionSpec> {
+        let toolchain = requested_toolchain(&self.toolchains, inputs)?;
         let executable = blob_of(input(inputs, 1)?, types::EXECUTABLE)?;
         Ok(ActionSpec {
             executable: ActionProgram::Content(executable),
-            toolchain: self.toolchain.closure.clone(),
+            toolchain: toolchain.closure.clone(),
             arguments: Box::new([]),
             inputs: Box::new([]),
             // A test says what it found by how it ends. Declaring an output
@@ -811,10 +845,10 @@ mod tests {
         let toolchain = Toolchain {
             driver: "/bin/cc".into(),
             closure: Box::new([]),
-            program_path: "/bin".into(),
+            program_path: Some("/bin".into()),
             tool_directory: "/bin".into(),
         };
-        CompileAction::new(toolchain, universe())
+        CompileAction::new(Toolchains::one(toolchain), universe())
     }
 
     fn compile_inputs(discovered: &[&str]) -> Vec<Value> {
@@ -856,10 +890,10 @@ mod tests {
         let toolchain = Toolchain {
             driver: "/bin/cc".into(),
             closure: Box::new([]),
-            program_path: "/bin".into(),
+            program_path: Some("/bin".into()),
             tool_directory: "/bin".into(),
         };
-        let discovery = HeaderDiscoveryAction::new(toolchain, universe());
+        let discovery = HeaderDiscoveryAction::new(Toolchains::one(toolchain), universe());
         let inputs = vec![
             types::toolchain("/bin/cc"),
             types::c_source(ContentId::of_blob(b"source")),
@@ -880,10 +914,10 @@ mod tests {
         let toolchain = Toolchain {
             driver: "/bin/cc".into(),
             closure: Box::new([]),
-            program_path: "/bin".into(),
+            program_path: Some("/bin".into()),
             tool_directory: "/bin".into(),
         };
-        LinkAction::new(toolchain)
+        LinkAction::new(Toolchains::one(toolchain))
     }
 
     #[test]
