@@ -291,8 +291,10 @@ fn blob_of(value: &Value) -> ContentId {
 /// Discover a toolchain, skipping only on genuine absence. A driver that is
 /// present but undiscoverable fails the test rather than skipping it green:
 /// a skip and a pass must not be the same color, because nearly every claim
-/// M-3 makes rests on these tests actually running. A skip prints, so a run
-/// that tested nothing is visible in the output.
+/// M-3 makes rests on these tests actually running. A skip prints, which is
+/// visible under an uncaptured run (`cargo nextest run --no-capture`) — nextest
+/// captures the output of passing tests, so `a_c_toolchain_is_available` is
+/// what makes a compiler-less host fail rather than look green.
 fn toolchain_or_skip(driver: &str) -> Option<Toolchain> {
     match Toolchain::discover(driver) {
         Ok(toolchain) => Some(toolchain),
@@ -300,8 +302,29 @@ fn toolchain_or_skip(driver: &str) -> Option<Toolchain> {
             eprintln!("skipping: no {driver} driver on this host");
             None
         }
-        Err(error) => unreachable!("{driver} is present but discovery failed: {error}"),
+        // Reachable by design: the driver is on the host but could not be
+        // resolved into a closure. `unreachable!` would be a lie about the
+        // state space; a plain panic with the reason is the honest form.
+        Err(error) => panic!("{driver} is present but discovery failed: {error}"),
     }
+}
+
+/// A host with no C compiler at all cannot run any test in this file, and a
+/// green run over seventeen skips would read as a verified M-3. Fail instead:
+/// installing a compiler is the fix, not reading the run as evidence.
+#[test]
+fn a_c_toolchain_is_available() {
+    for driver in ["cc", "gcc", "clang"] {
+        match Toolchain::discover(driver) {
+            Ok(_toolchain) => return,
+            Err(DiscoveryError::NotFound) => {}
+            Err(error) => panic!("{driver} is present but discovery failed: {error}"),
+        }
+    }
+    panic!(
+        "no C compiler (cc, gcc, or clang) on this host: the M-3 fixture cannot run \
+         and its other tests all skipped"
+    );
 }
 
 fn temp_root() -> tempfile::TempDir {
