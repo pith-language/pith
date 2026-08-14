@@ -20,21 +20,14 @@ use crate::{
 /// `semantic_encoding` half of an adapter's [`EngineStateVersions`]. Adapters
 /// choose their own table layout and report it as `schema` (decision 0025).
 ///
-/// Version 3 is the `List` constructor (0026): tag 7 gains a payload in both
-/// the value and the type grammar, which changes the meaning of bytes a
-/// version-2 database can hold. Nothing is released, so a pre-release database
-/// is moved aside and rebuilt rather than migrated, which the existing
-/// incompatible-database test already asserts.
-///
-/// Version 4 is the `Record` constructor (0026): tag 8 is new in both grammars
-/// and no existing byte sequence changes meaning — a version-3 database can
-/// hold no record bytes — but the retained-value grammar the version gates has
-/// grown, so the gate moves on the same moved-aside-and-rebuilt terms.
-///
-/// Version 5 is the declared `Sum` constructor (0026): tag 9 is new in both
-/// grammars on the same terms as tag 8, and the gate moves for the same
-/// reason.
-pub const RECORD_ENCODING_VERSION: SemanticEncodingVersion = SemanticEncodingVersion::new(5);
+/// Pinned at 1 while nothing is released, on the same terms the sqlite
+/// adapter pins its schema: no database outside a working tree needs to
+/// survive a change, so a pre-release database is moved aside and rebuilt
+/// rather than versioned around, and a stale one is deleted. Once there is a
+/// release to be compatible with, this starts moving for any change a prior
+/// build would misread — a new constructor in the value grammar as much as a
+/// changed meaning of existing bytes.
+pub const RECORD_ENCODING_VERSION: SemanticEncodingVersion = SemanticEncodingVersion::new(1);
 
 pub const CURRENT_ENGINE_STATE_VERSIONS: EngineStateVersions = EngineStateVersions {
     schema: SchemaVersion::new(1),
