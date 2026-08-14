@@ -726,6 +726,7 @@ dependencies = [
  "pith-executor-local",
  "pith-ids",
  "pith-store",
+ "serde_json",
  "tempfile",
  "tokio",
  "xylem",
