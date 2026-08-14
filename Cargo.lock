@@ -740,7 +740,9 @@ dependencies = [
  "pith-core",
  "pith-diag",
  "pith-engine",
+ "pith-ids",
  "pith-output",
+ "pith-store",
  "tracing",
  "tracing-subscriber",
 ]
