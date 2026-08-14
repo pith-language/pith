@@ -30,12 +30,13 @@ several questions block milestones rather than sitting alongside the implementat
 
 - milestone M-5 (Linux system library) and M-6 (deployment library) are gated by decision 0012 (revision-pinned plans) and 0013 (managed-object identity)
 - the reproducibility story in milestone M-3 (first build library) is gated by decision 0014
+- surface language syntax is gated by the 0026 calculus landing in the core, not by a milestone. the older gate has been discharged: [0028](../decisions/0028-sandboxed-local-executor.md) deferred all surface syntax to the M-3 build library on the same grounds as [0026](../decisions/0026-generic-typed-calculus.md), and M-3 is complete — it discharged the deferral by building xylem as a rust library API, so no surface syntax exists yet. what stands in the way now is the calculus itself: `pith-core`'s `Type` carries the six scalars, `Nominal { name }`, and `List`, while the records, declared sums, generics, and effect and uncertainty constructors 0026 specifies are not built, so a surface syntax would have nothing to type
 
 milestone M-1 used decisions 0015 and 0019 as prototype hypotheses and is complete at its semantic-prototype scope. those decisions remain proposed: their broader interface and effect-category claims stay open until the later milestones exercise them.
 
 ## language and types
 
-- should the language use structural or nominal types at module boundaries? (decision 0017 proposed structural default with opt-in nominal; superseded by [0026](../decisions/0026-generic-typed-calculus.md), which carries that mechanism into a full closed calculus with records, declared sums, generics, effect types, and uncertainty types)
+- should the language use structural or nominal types at module boundaries? (decision 0017 proposed structural default with opt-in nominal; superseded by [0026](../decisions/0026-generic-typed-calculus.md), which carries that mechanism into a full closed calculus with records, declared sums, generics, effect types, and uncertainty types. none of that calculus beyond `Nominal` and `List` is built in `pith-core`, and surface syntax for it is gated on it landing — see gating)
 - how much refinement typing can stay fast enough for editors? (settled by [0026](../decisions/0026-generic-typed-calculus.md): no predicate types in the language; validation is pure rules; the `Unchecked<T>`/`T` distinction is structural)
 - should evaluation be total by construction, or can termination be checked with an explicit unsafe boundary? (decision 0018 proposes total by construction with cycle detection and a backstop limit)
 - what is the smallest effect syntax that keeps capability use visible?
