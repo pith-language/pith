@@ -14,6 +14,7 @@ workspace = true
 pith-diag.workspace = true
 pith-ids.workspace = true
 pith-core.workspace = true
+pith-engine.workspace = true
 xylem.workspace = true
 
 [dev-dependencies]
