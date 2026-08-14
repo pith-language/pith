@@ -52,6 +52,17 @@ const HEADER_PATH: &str = "answer.h";
 const UNUSED_PATH: &str = "unused.h";
 const UNUSED: &[u8] = b"#define UNUSED 0\n";
 
+/// A generator: writes a C source to the path it is given. Takes the output path
+/// as an argument, the way a codegen tool does, so nothing about where the result
+/// goes is baked into the program.
+const SOURCE_GENERATOR: &[u8] = b"#include <stdio.h>\nint main(int argc, char **argv) {\n  if (argc < 2) return 1;\n  FILE *out = fopen(argv[1], \"w\");\n  if (!out) return 1;\n  fputs(\"int generated(void) { return 7; }\\n\", out);\n  return fclose(out) == 0 ? 0 : 1;\n}\n";
+/// A second generator emitting a different constant, for the invalidation test.
+const SOURCE_GENERATOR_TOUCHED: &[u8] = b"#include <stdio.h>\nint main(int argc, char **argv) {\n  if (argc < 2) return 1;\n  FILE *out = fopen(argv[1], \"w\");\n  if (!out) return 1;\n  fputs(\"int generated(void) { return 9; }\\n\", out);\n  return fclose(out) == 0 ? 0 : 1;\n}\n";
+/// A main that exits with what the generated source returns, so the built
+/// program's exit status reports which generator produced it.
+const SOURCE_USES_GENERATED: &[u8] =
+    b"int generated(void);\nint main(void) { return generated(); }\n";
+
 /// A test program reporting success the way a test does: exit zero.
 const SOURCE_TEST_PASSING: &[u8] = b"int main(void) { return 0; }\n";
 /// A test program reporting a failure: a nonzero exit, which under
@@ -631,6 +642,97 @@ fn an_undeclared_header_fails_rather_than_reading_the_host() {
 fn built_executable(engine: &mut Engine, source: &[u8], what: &str) -> ContentId {
     let id = store_blob(engine, source, what);
     blob_of(&run_build(engine, &build_request(&[id])).value)
+}
+
+#[test]
+fn a_generated_source_is_compiled_and_linked_through_the_graph() {
+    let Ok(toolchain) = Toolchain::discover("cc") else {
+        return;
+    };
+    let root = temp_root();
+    let (mut engine, toolchain_value) = {
+        let mut engine = match FilesystemContentStore::open(root.path()) {
+            Ok(store) => Engine::with_content_store(store),
+            Err(error) => unreachable!("the filesystem store failed to open: {error:?}"),
+        };
+        let universe = header_universe(&mut engine, false);
+        build_engine(root.path(), &toolchain, universe)
+    };
+    let generator = built_executable(&mut engine, SOURCE_GENERATOR, "generator.c");
+
+    // The generated source is a value the graph produced, so the compile below
+    // depends on the generate action rather than on bytes the test threaded in.
+    let generated = blob_of(
+        &run_build(
+            &mut engine,
+            &types::generate_request(toolchain_value.clone(), generator),
+        )
+        .value,
+    );
+    let main = store_blob(&mut engine, SOURCE_USES_GENERATED, "main.c");
+    let program = blob_of(&run_build(&mut engine, &build_request(&[generated, main])).value);
+
+    // The generator wrote a function returning 7, so a program that exits
+    // nonzero is one whose code came from the generate action. Running it is
+    // better evidence than inspecting its bytes: it means the generated source
+    // compiled, linked, and behaved as the generator wrote it.
+    let verdict = run_build(&mut engine, &types::test_request(toolchain_value, program));
+    assert_eq!(verdict.value, types::test_report(false));
+}
+
+#[test]
+fn touching_the_generator_regenerates_the_source_and_relinks() {
+    let Ok(toolchain) = Toolchain::discover("cc") else {
+        return;
+    };
+    let root = temp_root();
+    let (mut engine, toolchain_value) = {
+        let mut engine = match FilesystemContentStore::open(root.path()) {
+            Ok(store) => Engine::with_content_store(store),
+            Err(error) => unreachable!("the filesystem store failed to open: {error:?}"),
+        };
+        let universe = header_universe(&mut engine, false);
+        build_engine(root.path(), &toolchain, universe)
+    };
+    let main = store_blob(&mut engine, SOURCE_USES_GENERATED, "main.c");
+
+    let first_generator = built_executable(&mut engine, SOURCE_GENERATOR, "generator.c");
+    let first_generated = blob_of(
+        &run_build(
+            &mut engine,
+            &types::generate_request(toolchain_value.clone(), first_generator),
+        )
+        .value,
+    );
+    let first_program =
+        blob_of(&run_build(&mut engine, &build_request(&[first_generated, main])).value);
+
+    // A changed generator is a different program, so the generate action's
+    // contract names different content and derives a different key (0031, 0036).
+    let second_generator =
+        built_executable(&mut engine, SOURCE_GENERATOR_TOUCHED, "generator.c touched");
+    let second_generated = blob_of(
+        &run_build(
+            &mut engine,
+            &types::generate_request(toolchain_value, second_generator),
+        )
+        .value,
+    );
+    let second_program =
+        blob_of(&run_build(&mut engine, &build_request(&[second_generated, main])).value);
+
+    assert_ne!(
+        first_generator, second_generator,
+        "the two generators must differ for this test to mean anything"
+    );
+    assert_ne!(
+        first_generated, second_generated,
+        "a changed generator must produce a changed source"
+    );
+    assert_ne!(
+        first_program, second_program,
+        "a changed generated source must produce a changed executable"
+    );
 }
 
 #[test]

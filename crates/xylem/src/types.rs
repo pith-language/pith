@@ -224,6 +224,39 @@ pub fn test_interface() -> Interface {
     }
 }
 
+/// `(Toolchain, Executable) -> CSource`: run a generator the build produced and
+/// take the source it wrote. Shares its input types with [`test_interface`] and
+/// differs in its output, which is what keeps the two rules unambiguous under
+/// 0015's selection: a nominal output type is a distinguishing part of an
+/// interface, and this is the collision 0026's nominal identity exists to stop.
+#[must_use]
+pub fn generate_interface() -> Interface {
+    Interface {
+        inputs: Box::new([
+            Type::Nominal {
+                name: TOOLCHAIN.into(),
+            },
+            Type::Nominal {
+                name: EXECUTABLE.into(),
+            },
+        ]),
+        output: Type::Nominal {
+            name: C_SOURCE.into(),
+        },
+    }
+}
+
+/// A pure request to run `generator` and take the C source it writes.
+#[must_use]
+pub fn generate_request(toolchain_value: Value, generator: ContentId) -> Request<Pure> {
+    Request::<Pure>::new(
+        "generate-entry",
+        generate_interface(),
+        [toolchain_value, executable(generator)],
+        Span::none(),
+    )
+}
+
 /// A pure request to run `executable` as a test under `toolchain_value`.
 #[must_use]
 pub fn test_request(toolchain_value: Value, executable: ContentId) -> Request<Pure> {
