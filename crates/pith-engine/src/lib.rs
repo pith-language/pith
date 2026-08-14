@@ -23,8 +23,8 @@ pub use cancel::{CancelSignal, NeverCancelled};
 pub use graph::{
     ActionPlan, ActionRecord, AttemptState, ComputationKind, ComputationNode, DependencyEdge,
     Engine, EngineQuery, Evaluation, EvaluationSource, LiveInvalidationExplanation,
-    LiveInvalidationReason, PureRule, PureRuleFrame, PureStep, Resumption, ReuseDecision,
-    ReuseReason, RuleSelection,
+    LiveInvalidationReason, PureRule, PureRuleFrame, PureStep, Resumption, ReuseContext,
+    ReuseDecision, ReuseReason, RuleSelection,
 };
 pub use policy::{ActionAuthorization, ActionPolicy, AllowAllActions};
 pub use runtime::{Runtime, RuntimeError, TokioRuntime};

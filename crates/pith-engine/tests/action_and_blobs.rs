@@ -3,7 +3,7 @@
 //! 0022).
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
 use pith_core::{
     Action, ActionInput, ActionOutput, ActionSpec, CapabilityRequirement, Content, Interface,
@@ -128,6 +128,23 @@ impl ActionRule for DoubleAction {
             },
             None => Err(fixture_error("double action produced no output")),
         }
+    }
+}
+
+/// `DoubleAction` with its planned argument taken from state the rule holds.
+/// Delegating keeps one description of the contract, so the two rules differ
+/// only in where the argument comes from.
+struct HeldStateAction {
+    argument: Arc<AtomicI64>,
+}
+
+impl ActionRule for HeldStateAction {
+    fn plan(&self, _inputs: &[Value]) -> PithResult<ActionSpec> {
+        DoubleAction.plan(&[Value::Int(self.argument.load(Ordering::Relaxed))])
+    }
+
+    fn complete(&self, inputs: &[Value], execution: &ActionExecution) -> PithResult<Value> {
+        DoubleAction.complete(inputs, execution)
     }
 }
 
@@ -1282,21 +1299,17 @@ fn an_identical_action_is_served_from_the_reusable_index() {
     let second_evaluation_result = second_runtime_result.unwrap();
     let second = second_evaluation_result.unwrap();
 
-    // The consumer runs again: a pure key does not carry the action rule's
-    // identity, so decision 0031 keeps it out of the index. It plans the same
-    // contract, and the action is served.
+    // The consumer is served whole (decision 0033): revalidating its action
+    // edge re-selects the rule, re-plans the recorded request, derives the key
+    // it was recorded under, and finds the attempt still admissible. Its rule
+    // body does not run a second time, and neither does the action.
     assert_eq!(first.source, EvaluationSource::Computed);
-    assert_eq!(second.source, EvaluationSource::Computed);
-    assert_ne!(first.computation, second.computation);
+    assert_eq!(second.source, EvaluationSource::Reused);
+    assert_eq!(first.computation, second.computation);
     assert_eq!(first.value, second.value);
     assert_eq!(executions.load(Ordering::Relaxed), 1);
 
     let action_computation = action_dependency_of(&engine, first.computation);
-    assert_eq!(
-        action_dependency_of(&engine, second.computation),
-        action_computation,
-        "the second run depends on the action attempt the first one recorded"
-    );
     let action_state = &engine
         .query()
         .computation(action_computation)
@@ -1312,12 +1325,105 @@ fn an_identical_action_is_served_from_the_reusable_index() {
     assert!(matches!(
         &engine.query().computation(first.computation).unwrap().state,
         AttemptState::Complete {
-            reuse: ReuseDecision::NotReusable(ReuseReason::EffectfulDependency {
-                computation,
-            }),
+            reuse: ReuseDecision::Reusable,
             ..
-        } if *computation == action_computation
+        }
     ));
+}
+
+/// The consumer of an action is revalidated against a re-plan, so a contract
+/// that changed for a reason the consumer's own key cannot see makes the
+/// consumer dirty (decision 0033). `HeldStateAction` plans from state it holds
+/// rather than from the request, which is the shape of a compile rule holding a
+/// header: the header is not a request input and participates in no rule
+/// revision, so only the planned contract's digest records it.
+#[test]
+fn a_consumer_reruns_when_its_action_replans_a_different_contract() {
+    let mut engine = fixture_engine();
+    let action_interface = interface(&[Type::Int], Type::Blob);
+    let root_interface = interface(&[], Type::Blob);
+    let held = Arc::new(AtomicI64::new(21));
+    engine.register_action_rule(
+        action_rule("double", action_interface.clone()),
+        HeldStateAction {
+            argument: held.clone(),
+        },
+    );
+    engine.register_rule(
+        pure_rule("entry", root_interface.clone()),
+        ActionDepRule {
+            dependency: action_request("double", action_interface, [Value::Int(21)]),
+        },
+    );
+    let executions = Arc::new(AtomicUsize::new(0));
+    let executor = CountingExecutor {
+        executions: executions.clone(),
+    };
+    let root_request = pure_request("entry", root_interface, []);
+
+    let computed = engine
+        .run(&root_request, &runtime(), &AllowAllActions, &executor)
+        .unwrap()
+        .unwrap();
+    assert_eq!(computed.source, EvaluationSource::Computed);
+    assert_eq!(executions.load(Ordering::Relaxed), 1);
+
+    // Nothing in the consumer's key changed, and nothing in the request did
+    // either. The plan is the only place the difference is visible.
+    held.store(22, Ordering::Relaxed);
+    let rerun = engine
+        .run(&root_request, &runtime(), &AllowAllActions, &executor)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(rerun.source, EvaluationSource::Computed);
+    assert_ne!(rerun.computation, computed.computation);
+    assert_eq!(
+        executions.load(Ordering::Relaxed),
+        2,
+        "the re-planned contract has no recorded attempt, so the action runs"
+    );
+}
+
+/// A run with no policy and no executor cannot revalidate an action edge, so
+/// [`Engine::evaluate_pure`] declines a result that rests on one. It refuses to
+/// take an effectful step for the same reason.
+#[test]
+fn a_pure_only_evaluation_will_not_serve_a_consumer_of_an_action() {
+    let mut engine = fixture_engine();
+    let action_interface = interface(&[Type::Int], Type::Blob);
+    let root_interface = interface(&[], Type::Blob);
+    engine.register_action_rule(
+        action_rule("double", action_interface.clone()),
+        DoubleAction,
+    );
+    engine.register_rule(
+        pure_rule("entry", root_interface.clone()),
+        ActionDepRule {
+            dependency: action_request("double", action_interface, [Value::Int(21)]),
+        },
+    );
+    let executions = Arc::new(AtomicUsize::new(0));
+    let executor = CountingExecutor {
+        executions: executions.clone(),
+    };
+    let root_request = pure_request("entry", root_interface, []);
+    let computed = engine
+        .run(&root_request, &runtime(), &AllowAllActions, &executor)
+        .unwrap()
+        .unwrap();
+    assert_eq!(computed.source, EvaluationSource::Computed);
+
+    // The completed root is reusable and its action edge revalidates under a
+    // run. Reaching it through the pure entry point instead runs the body,
+    // which stops at `NeedAction` and is rejected.
+    let diagnostics = engine.evaluate_pure(&root_request).unwrap_err();
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diag| diag.code == pith_diag::EngineCode::EffectfulStepInPure.into())
+    );
 }
 
 #[test]

@@ -13,15 +13,15 @@ use pith_diag::{DiagnosticSink, PithResult, Severity, Span, StableCode};
 use pith_engine::state::{
     CompletedAttempt, DurableActionProvenance, DurableAttempt, DurableAttemptId,
     DurableAttemptState, DurableComputation, DurableDependency, DurableProvenance,
-    DurableReuseDecision, DurableReuseReason, EncodedValue, EngineStateError, EngineStateStore,
-    EngineStateVersions, InvalidationExplanation, MemoryEngineStateStore, StoppedAttempt,
+    DurableReuseDecision, EncodedValue, EngineStateError, EngineStateStore, EngineStateVersions,
+    InvalidationExplanation, MemoryEngineStateStore, StoppedAttempt,
 };
 use pith_engine::{
     AccessVerification, ActionAuthorization, ActionExecution, ActionInvocation, ActionRule,
     AllowAllActions, AttemptState, CapturedActionExecution, CapturedExecutionReport,
     CapturedOutput, CapturedOutputContent, ComputationKind, Engine, EvaluationSource,
     ExecutionPlatform, Executor, ExecutorIdentity, PureRule, PureRuleFrame, PureStep, Resumption,
-    ReuseDecision, TokioRuntime,
+    ReuseContext, ReuseDecision, TokioRuntime,
 };
 use pith_ids::ContentId;
 use pith_store::{ContentStore, MemoryContentStore};
@@ -314,6 +314,18 @@ fn pure_rule(label: &str, interface: Interface) -> Rule<Pure> {
     let identity = RuleIdentity::of_module_declaration("engine-state-wiring-tests", label);
     let revision = RuleRevision::of_manifest(identity, b"engine-state-wiring-tests-v1");
     Rule::<Pure>::new(revision, label, interface, Span::none())
+}
+
+/// The same rule at a different revision, which is what decision 0023 has an
+/// author bump when the rule's semantics change.
+fn revised_pure_rule(label: &str, interface: Interface, revision: &[u8]) -> Rule<Pure> {
+    let identity = RuleIdentity::of_module_declaration("engine-state-wiring-tests", label);
+    Rule::<Pure>::new(
+        RuleRevision::of_manifest(identity, revision),
+        label,
+        interface,
+        Span::none(),
+    )
 }
 
 fn pure_request(
@@ -998,7 +1010,7 @@ fn pure_create_failure_reconciles_the_orphaned_arena_node() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn action_dependency_publishes_a_reusable_action_and_a_non_reusable_parent() {
+fn action_dependency_publishes_a_reusable_action_and_a_reusable_parent() {
     let mut engine = engine_with_fixtures();
     let action_interface = interface(&[], Type::Blob);
     let root_interface = interface(&[], Type::Blob);
@@ -1046,15 +1058,10 @@ fn action_dependency_publishes_a_reusable_action_and_a_non_reusable_parent() {
         }]
     );
 
-    // A pure key does not carry the identity of the action rule that planned
-    // the contract, so the parent stays out of the index (decision 0031).
+    // The parent enters the index too (decision 0033), and the gap its key
+    // leaves is closed when it is read back.
     let parent_record = completed_record(store, durable_id(&engine, evaluation.computation));
-    assert_eq!(
-        parent_record.reuse,
-        DurableReuseDecision::NotReusable(DurableReuseReason::EffectfulDependency {
-            attempt: action_id,
-        })
-    );
+    assert_eq!(parent_record.reuse, DurableReuseDecision::Reusable);
     assert_eq!(
         parent_record.dependencies.as_ref(),
         [DurableDependency::Action { attempt: action_id }]
@@ -1129,7 +1136,7 @@ fn durable_reuse_is_valid_until_a_dependency_result_identity_changes() {
     // After computing both, root's durable reuse is valid.
     assert!(
         engine
-            .durable_reuse_is_valid(root_evaluation.computation)
+            .durable_reuse_is_valid(root_evaluation.computation, &ReuseContext::PureOnly)
             .unwrap()
     );
 
@@ -1163,7 +1170,7 @@ fn durable_reuse_is_valid_until_a_dependency_result_identity_changes() {
     assert_ne!(changed_leaf, original_leaf_attempt);
     assert!(
         !engine
-            .durable_reuse_is_valid(root_evaluation.computation)
+            .durable_reuse_is_valid(root_evaluation.computation, &ReuseContext::PureOnly)
             .unwrap()
     );
 }
@@ -1186,7 +1193,7 @@ fn durable_reuse_remains_valid_when_a_dependency_result_is_canonically_equal() {
         .unwrap();
     assert!(
         engine
-            .durable_reuse_is_valid(root_evaluation.computation)
+            .durable_reuse_is_valid(root_evaluation.computation, &ReuseContext::PureOnly)
             .unwrap()
     );
 
@@ -1215,7 +1222,7 @@ fn durable_reuse_remains_valid_when_a_dependency_result_is_canonically_equal() {
 
     assert!(
         engine
-            .durable_reuse_is_valid(root_evaluation.computation)
+            .durable_reuse_is_valid(root_evaluation.computation, &ReuseContext::PureOnly)
             .unwrap()
     );
 }
@@ -1284,14 +1291,64 @@ fn hydrates_a_completed_pure_result_into_a_fresh_engine() {
     assert_eq!(attempt_history_len(&state, key), 1);
     // The hydrated node is terminal and reusable in the new arena, so a third
     // request inside the same instance takes the in-process path.
-    assert!(second.durable_reuse_is_valid(hydrated.computation).unwrap());
+    assert!(
+        second
+            .durable_reuse_is_valid(hydrated.computation, &ReuseContext::PureOnly)
+            .unwrap()
+    );
 }
 
-/// A second engine over the same durable substrate reuses the first engine's
-/// action (decision 0031). The second engine's executor fails when called, so
-/// reaching a value at all proves the result came from engine state.
+/// A second engine over the same durable substrate hydrates the consumer of the
+/// first engine's action (decision 0033), so neither the consumer's rule body
+/// nor the action runs. Revalidating the recorded action edge re-plans it and
+/// finds the recorded attempt still admissible; nothing below the consumer is
+/// allocated, because there is nothing left to ask.
 #[test]
-fn hydrates_a_completed_action_into_a_fresh_engine() {
+fn hydrates_a_consumer_of_an_action_into_a_fresh_engine() {
+    let state = SharedEngineStateStore::default();
+    let content = SharedContentStore::default();
+    let action_interface = interface(&[], Type::Blob);
+    let root_interface = interface(&[], Type::Blob);
+
+    let mut first = engine_with_shared_substrate(state.clone(), content.clone());
+    register_action_fixtures(&mut first, &action_interface, &root_interface);
+    let computed = first
+        .run(
+            &pure_request("entry", root_interface.clone(), []),
+            &runtime(),
+            &AllowAllActions,
+            &FixtureExecutor,
+        )
+        .unwrap()
+        .unwrap();
+    let original_root = durable_id(&first, computed.computation);
+
+    let mut second = engine_with_shared_substrate(state.clone(), content.clone());
+    register_action_fixtures(&mut second, &action_interface, &root_interface);
+    let hydrated = second
+        .run(
+            &pure_request("entry", root_interface, []),
+            &runtime(),
+            &AllowAllActions,
+            &NeverRunsExecutor,
+        )
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(hydrated.source, EvaluationSource::Hydrated);
+    assert_eq!(hydrated.value, computed.value);
+    // On the terms 0024 set for pure hydration, the node is mapped onto the
+    // attempt it was loaded from and records no new one.
+    assert_eq!(durable_id(&second, hydrated.computation), original_root);
+    assert_eq!(second.query().computations().count(), 1);
+}
+
+/// The action half of the same substrate, reached when the consumer cannot be
+/// served. The second engine registers the consumer at a later revision, so its
+/// pure key differs and its body runs; the `NeedAction` step it reaches is then
+/// answered from the reusable action index (decision 0031).
+#[test]
+fn hydrates_a_completed_action_when_its_consumer_must_rerun() {
     let state = SharedEngineStateStore::default();
     let content = SharedContentStore::default();
     let action_interface = interface(&[], Type::Blob);
@@ -1311,8 +1368,17 @@ fn hydrates_a_completed_action_into_a_fresh_engine() {
     let original_attempt = durable_id(&first, sole_action_computation(&first).0);
 
     let mut second = engine_with_shared_substrate(state.clone(), content.clone());
-    register_action_fixtures(&mut second, &action_interface, &root_interface);
-    let hydrated = second
+    second.register_action_rule(
+        action_rule("produce", action_interface.clone()),
+        BlobProducingAction,
+    );
+    second.register_rule(
+        revised_pure_rule("entry", root_interface.clone(), b"revised"),
+        ActionDepRule {
+            dependency: action_request("produce", action_interface, []),
+        },
+    );
+    let recomputed = second
         .run(
             &pure_request("entry", root_interface, []),
             &runtime(),
@@ -1322,10 +1388,9 @@ fn hydrates_a_completed_action_into_a_fresh_engine() {
         .unwrap()
         .unwrap();
 
-    assert_eq!(hydrated.value, computed.value);
+    assert_eq!(recomputed.source, EvaluationSource::Computed);
+    assert_eq!(recomputed.value, computed.value);
     let (hydrated_action, hydrated_node) = sole_action_computation(&second);
-    // On the terms 0024 set for pure hydration, the node is mapped onto the
-    // attempt it was loaded from and records no new one.
     assert_eq!(durable_id(&second, hydrated_action), original_attempt);
     assert!(matches!(
         hydrated_node.state,

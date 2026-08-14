@@ -25,6 +25,7 @@ use super::action_pipeline::{ActionRuleMeta, ActionStart, PreparedAction};
 use super::diagnostics::{cancelled_diag, effectful_in_pure_diag};
 use super::eval::ChainPause;
 use super::ir::{Resumption, StopReason};
+use super::reuse::ReuseContext;
 use super::scheduler::{ChainId, Scheduler};
 use super::{DependencyEdge, Engine};
 use crate::action::{CapturedActionExecution, Executor};
@@ -97,7 +98,7 @@ impl Engine {
     /// Drive every chain to completion without leaving the synchronous core.
     pub(super) fn drive_pure(&mut self, scheduler: &mut Scheduler) -> PithResult<()> {
         while let Some(chain) = scheduler.next_ready() {
-            match self.advance_chain(scheduler, chain)? {
+            match self.advance_chain(scheduler, chain, &ReuseContext::PureOnly)? {
                 ChainPause::Settled => {}
                 ChainPause::Blob(_) | ChainPause::Action(_) => {
                     return Err(effectful_in_pure_diag());
@@ -145,13 +146,21 @@ impl Engine {
         cancel: &C,
         started: &mut StartedActions<'a>,
     ) -> Result<(), RunAbort> {
+        // Revalidating a recorded action edge re-plans the request behind it and
+        // shows the contract to this run's policy (decision 0033), so the reuse
+        // path needs both for as long as the run lasts.
+        let environment = executor.identity();
+        let context = ReuseContext::Run {
+            policy,
+            environment: &environment,
+        };
         let mut waiting: VecDeque<(ChainId, Request<Action>)> = VecDeque::new();
         loop {
             while let Some(chain) = scheduler.next_ready() {
                 if cancel.is_cancelled() {
                     return Err(cancelled_abort());
                 }
-                match self.advance_chain(scheduler, chain)? {
+                match self.advance_chain(scheduler, chain, &context)? {
                     ChainPause::Settled => {}
                     ChainPause::Blob(id) => {
                         let bytes = self.fetch_blob(id)?;
@@ -167,7 +176,7 @@ impl Engine {
                 let Some((chain, request)) = waiting.pop_front() else {
                     break;
                 };
-                self.start_action(scheduler, chain, request, policy, executor, started)?;
+                self.start_action(scheduler, chain, request, executor, &context, started)?;
             }
             // A reused action has no future to finish, so nothing else will
             // wake the chain that asked for it.
@@ -208,17 +217,17 @@ impl Engine {
     /// Plan an action and hand it to the executor, parking `chain` until it
     /// returns. The dependency edge is recorded now rather than on completion,
     /// so the graph shows what a running action belongs to.
-    fn start_action<'a, P: ActionPolicy, E: Executor>(
+    fn start_action<'a, E: Executor>(
         &mut self,
         scheduler: &Scheduler,
         chain: ChainId,
         request: Request<Action>,
-        policy: &P,
         executor: &'a E,
+        context: &ReuseContext<'_>,
         started: &mut StartedActions<'a>,
     ) -> PithResult<()> {
         let parent = scheduler.top(chain)?.computation;
-        match self.begin_action(&request, policy, &executor.identity()) {
+        match self.begin_action(&request, context) {
             ActionStart::PlanningFailed(diagnostics) => Err(diagnostics),
             ActionStart::Refused {
                 computation,

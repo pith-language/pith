@@ -20,16 +20,16 @@ use super::ir::{
 };
 use crate::action::{
     ActionExecution, ActionInvocation, CapturedFileContent, CapturedOutputContent,
-    CapturedTreeEntryContent, ExecutionReport, ExecutorIdentity, MaterializedActionInput,
-    MaterializedBlob, MaterializedContent, MaterializedFileContent, MaterializedTree,
-    MaterializedTreeEntryContent, ProducedOutput,
+    CapturedTreeEntryContent, ExecutionReport, MaterializedActionInput, MaterializedBlob,
+    MaterializedContent, MaterializedFileContent, MaterializedTree, MaterializedTreeEntryContent,
+    ProducedOutput,
 };
 use crate::graph::capabilities::canonical_capabilities;
 use crate::graph::diagnostics::{
     InternalInvariant, content_unavailable_diag, internal_diag, one_diag, store_error_diag,
     validate_action_result, validate_execution_platform,
 };
-use crate::policy::{ActionAuthorization, ActionPolicy};
+use crate::policy::ActionAuthorization;
 
 /// Metadata copied out of the selected action rule for the duration of one
 /// execution. Bundling these keeps [`Engine::finish_action`]'s argument list
@@ -95,12 +95,18 @@ impl Engine {
 
     /// Plan, authorize, allocate, and materialize one action, stopping at the
     /// executor call. See [`ActionStart`] for why the split is here.
-    pub(super) fn begin_action<P: ActionPolicy>(
+    pub(super) fn begin_action(
         &mut self,
         request: &Request<Action>,
-        policy: &P,
-        environment: &ExecutorIdentity,
+        context: &super::reuse::ReuseContext<'_>,
     ) -> ActionStart {
+        // Only a run reaches an action. The pure driver rejects the step that
+        // would ask for one, so a context without a policy cannot get here.
+        let Some((policy, environment)) = context.run() else {
+            return ActionStart::PlanningFailed(internal_diag(
+                InternalInvariant::ActionStartedOutsideARun,
+            ));
+        };
         let plan = match self.plan_action(request) {
             Ok(plan) => plan,
             Err(diagnostics) => return ActionStart::PlanningFailed(diagnostics),
@@ -134,8 +140,14 @@ impl Engine {
         };
         // A denied action must not be answered from a run that was allowed.
         if denial.is_none() {
-            match self.reusable_action_evaluation(key, request, &plan, &authorization, environment)
-            {
+            match self.reusable_action_evaluation(
+                key,
+                request,
+                &plan,
+                &authorization,
+                context,
+                environment,
+            ) {
                 Ok(Some(evaluation)) => return ActionStart::Reused(evaluation),
                 Ok(None) => {}
                 Err(diagnostics) => return ActionStart::PlanningFailed(diagnostics),

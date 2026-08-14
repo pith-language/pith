@@ -19,11 +19,12 @@ use std::process::Command;
 use pith_core::{Pure, Request, Rule, RuleIdentity, RuleRevision, Value};
 use pith_diag::{Diag, DiagnosticSink, PithResult, Severity, Span, StableCode};
 use pith_engine::{
-    AllowAllActions, ComputationKind, Engine, Evaluation, PureRule, PureRuleFrame, PureStep,
-    Resumption, TokioRuntime,
+    AllowAllActions, ComputationKind, Engine, Evaluation, EvaluationSource, PureRule,
+    PureRuleFrame, PureStep, Resumption, TokioRuntime,
 };
 use pith_executor_local::LocalExecutor;
 use pith_ids::ContentId;
+use pith_state_sqlite::SqliteEngineStateStore;
 use pith_store::{ContentStore, FilesystemContentStore};
 use xylem::{BuildEngine, Toolchain, types};
 
@@ -188,15 +189,21 @@ fn run_build(engine: &mut Engine, request: &Request<Pure>) -> Evaluation {
     }
 }
 
-/// A fresh engine over a filesystem store at `root`, with xylem's rules and the
-/// two-source build rule registered for `toolchain`, with the shared header
-/// staged.
+/// A fresh engine over the durable substrate at `root` — a filesystem content
+/// store and a sqlite engine state database — with xylem's rules and the
+/// two-source build rule registered for `toolchain`, and the shared header
+/// staged. Two engines built over one root are successive runs of the same
+/// build.
 fn build_engine(root: &Path, toolchain: &Toolchain) -> (Engine, Value) {
     let store = match FilesystemContentStore::open(root) {
         Ok(store) => store,
         Err(error) => unreachable!("the filesystem store failed to open: {error:?}"),
     };
-    let mut engine = Engine::with_content_store(store);
+    let state = match SqliteEngineStateStore::open(root.join("state.db")) {
+        Ok(state) => state,
+        Err(error) => unreachable!("the engine-state database failed to open: {error:?}"),
+    };
+    let mut engine = Engine::with_state_store(store, state);
     let header = match engine.put_blob(HEADER) {
         Ok(identity) => identity,
         Err(error) => unreachable!("the store failed to hold the header: {error:?}"),
@@ -374,6 +381,79 @@ fn touching_one_source_recompiles_only_its_object() {
         new_actions, 2,
         "touching a.c should recompile a.o and re-link (2 actions), \
          not recompile b.o (which would be 3); got {new_actions}"
+    );
+}
+
+/// A second build of unchanged sources reuses its root (decision 0033). Every
+/// target of a build sits above an action, so before the consumer of an action
+/// could be reused this was the whole pure half of the graph re-running on every
+/// build. Nothing new is computed and no action is planned.
+#[test]
+fn a_second_build_of_unchanged_sources_reuses_its_root() {
+    let Ok(toolchain) = Toolchain::discover("cc") else {
+        return;
+    };
+    let root = temp_root();
+    let (mut engine, _toolchain_value) = build_engine(root.path(), &toolchain);
+    let source_a = match engine.put_blob(SOURCE_A) {
+        Ok(id) => id,
+        Err(error) => unreachable!("the store failed to hold a.c: {error:?}"),
+    };
+    let source_b = match engine.put_blob(SOURCE_B) {
+        Ok(id) => id,
+        Err(error) => unreachable!("the store failed to hold b.c: {error:?}"),
+    };
+    let request = build_request([source_a, source_b]);
+
+    let first = run_build(&mut engine, &request);
+    let after_first = action_computations(&engine);
+    let second = run_build(&mut engine, &request);
+
+    assert_eq!(first.source, EvaluationSource::Computed);
+    assert_eq!(second.source, EvaluationSource::Reused);
+    assert_eq!(first.computation, second.computation);
+    assert_eq!(first.value, second.value);
+    assert_eq!(
+        action_computations(&engine),
+        after_first,
+        "a reused root plans no action"
+    );
+}
+
+/// The same build in a fresh engine over the same sqlite state and filesystem
+/// content store: the root hydrates rather than recomputing. The first engine is
+/// dropped before the second opens, so the result crosses a process boundary in
+/// everything but name.
+#[test]
+fn a_fresh_engine_over_the_same_state_hydrates_the_build() {
+    let Ok(toolchain) = Toolchain::discover("cc") else {
+        return;
+    };
+    let root = temp_root();
+    let (source_a, source_b, computed) = {
+        let (mut engine, _toolchain_value) = build_engine(root.path(), &toolchain);
+        let source_a = match engine.put_blob(SOURCE_A) {
+            Ok(id) => id,
+            Err(error) => unreachable!("the store failed to hold a.c: {error:?}"),
+        };
+        let source_b = match engine.put_blob(SOURCE_B) {
+            Ok(id) => id,
+            Err(error) => unreachable!("the store failed to hold b.c: {error:?}"),
+        };
+        let computed = run_build(&mut engine, &build_request([source_a, source_b]));
+        assert_eq!(computed.source, EvaluationSource::Computed);
+        (source_a, source_b, computed.value)
+    };
+
+    let (mut engine, _toolchain_value) = build_engine(root.path(), &toolchain);
+    let hydrated = run_build(&mut engine, &build_request([source_a, source_b]));
+
+    assert_eq!(hydrated.source, EvaluationSource::Hydrated);
+    assert_eq!(hydrated.value, computed);
+    assert_eq!(
+        action_computations(&engine),
+        0,
+        "a hydrated root allocates no computation beneath it"
     );
 }
 
