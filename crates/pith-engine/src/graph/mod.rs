@@ -25,6 +25,7 @@ pub use ir::{
     PureRuleFrame, PureStep, Resumption, ReuseDecision, ReuseReason, RuleSelection,
 };
 pub use query::EngineQuery;
+pub use reuse::ReuseContext;
 
 use std::num::NonZeroUsize;
 
@@ -229,7 +230,7 @@ impl Engine {
     /// let _ = engine.evaluate_pure(&request);
     /// ```
     pub fn evaluate_pure(&mut self, request: &Request<Pure>) -> PithResult<Evaluation> {
-        let mut plan = self.open_roots(std::slice::from_ref(request))?;
+        let mut plan = self.open_roots(std::slice::from_ref(request), &ReuseContext::PureOnly)?;
         if let Err(diagnostics) = self.drive_pure(&mut plan.scheduler) {
             self.stop_live_frames(&plan.scheduler, &diagnostics, StopReason::Failed);
             return Err(diagnostics);
@@ -325,7 +326,14 @@ impl Engine {
         executor: &E,
         cancel: &C,
     ) -> PithResult<Box<[Evaluation]>> {
-        let mut plan = self.open_roots(requests)?;
+        let environment = executor.identity();
+        let mut plan = self.open_roots(
+            requests,
+            &ReuseContext::Run {
+                policy,
+                environment: &environment,
+            },
+        )?;
         // `drive_run` records whatever it was holding before returning, so
         // there is nothing left Pending to clean up here.
         self.drive_run(&mut plan.scheduler, policy, executor, cancel)

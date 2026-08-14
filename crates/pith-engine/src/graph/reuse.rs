@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use indexmap::IndexMap;
 use pith_core::{Action, ActionComputationKey, Content, Pure, PureComputationKey, Request, RuleId};
-use pith_diag::{DiagnosticSink, PithResult};
+use pith_diag::{DiagnosticSink, PithResult, Span};
 use pith_ids::ComputationId;
 use smallvec::SmallVec;
 
@@ -23,11 +23,42 @@ use super::{
 use crate::action::{ExecutionReport, ExecutorIdentity};
 use crate::graph::capabilities::canonical_capabilities;
 use crate::graph::diagnostics::{InternalInvariant, internal_diag, store_error_diag};
-use crate::policy::ActionAuthorization;
+use crate::policy::{ActionAuthorization, ActionPolicy};
 use crate::state::{
-    CompletedAttempt, DurableActionProvenance, DurableAttempt, DurableAttemptId,
-    DurableAttemptState, DurableDependency, DurableProvenance, DurableReuseDecision,
+    CompletedAttempt, DurableActionProvenance, DurableActionRequest, DurableAttempt,
+    DurableAttemptId, DurableAttemptState, DurableComputation, DurableDependency,
+    DurableProvenance, DurableReuseDecision,
 };
+
+/// What revalidating a recorded action edge needs from the run considering it
+/// (decision 0033). The edge is revalidated by re-planning the request that
+/// produced it, so the run has to supply a policy to authorize the contract that
+/// plan yields and the executor whose recorded attempts it would accept.
+pub enum ReuseContext<'a> {
+    /// Revalidation cannot reach an executor or a policy, so no attempt
+    /// carrying an action edge is currently valid. [`Engine::evaluate_pure`]
+    /// refuses to take an effectful step and declines to serve a result resting
+    /// on one for the same reason.
+    PureOnly,
+    Run {
+        policy: &'a dyn ActionPolicy,
+        environment: &'a ExecutorIdentity,
+    },
+}
+
+impl<'a> ReuseContext<'a> {
+    /// The policy and executor identity a run supplies, or `None` when there is
+    /// no run behind this evaluation.
+    pub(super) fn run(&self) -> Option<(&'a dyn ActionPolicy, &'a ExecutorIdentity)> {
+        match self {
+            Self::PureOnly => None,
+            Self::Run {
+                policy,
+                environment,
+            } => Some((*policy, *environment)),
+        }
+    }
+}
 
 impl Engine {
     /// Resolve `request` from an already-completed computation instead of
@@ -46,19 +77,24 @@ impl Engine {
         &mut self,
         rule: RuleId,
         request: &Request<Pure>,
+        context: &ReuseContext<'_>,
     ) -> PithResult<Option<Evaluation>> {
         let Some(rule_metadata) = self.rules.get(rule) else {
             return Err(internal_diag(InternalInvariant::SelectedRuleHasNoMetadata));
         };
         let key = PureComputationKey::new(rule_metadata, request);
-        if let Some(evaluation) = self.live_pure_reuse(key)? {
+        if let Some(evaluation) = self.live_pure_reuse(key, context)? {
             return Ok(Some(evaluation));
         }
-        self.hydrate_pure_computation(key, rule, request)
+        self.hydrate_pure_computation(key, rule, request, context)
     }
 
     /// Reuse a completed node already in this instance's arena.
-    fn live_pure_reuse(&self, key: PureComputationKey) -> PithResult<Option<Evaluation>> {
+    fn live_pure_reuse(
+        &self,
+        key: PureComputationKey,
+        context: &ReuseContext<'_>,
+    ) -> PithResult<Option<Evaluation>> {
         let Some(computation) = self.pure_computations.get(&key).copied() else {
             return Ok(None);
         };
@@ -75,7 +111,7 @@ impl Engine {
         // The arena says reusable. Decision 0024 ("dynamic dependencies and
         // revalidation") also requires confirming the durable record's
         // dependency set has not drifted.
-        if !self.durable_reuse_is_valid(computation)? {
+        if !self.durable_reuse_is_valid(computation, context)? {
             return Ok(None);
         }
         Ok(Some(Evaluation {
@@ -99,12 +135,13 @@ impl Engine {
         key: PureComputationKey,
         rule: RuleId,
         request: &Request<Pure>,
+        context: &ReuseContext<'_>,
     ) -> PithResult<Option<Evaluation>> {
         let Some(attempt) = self.latest_reusable_attempt(key)? else {
             return Ok(None);
         };
         let completion = reusable_index_completion(&attempt, key)?;
-        if !self.durable_completion_is_valid(completion)? {
+        if !self.durable_completion_is_valid(completion, context)? {
             // A recorded dependency drifted, so the consumer is dirty and must
             // be re-evaluated. An ordinary miss, not a fault.
             return Ok(None);
@@ -138,11 +175,12 @@ impl Engine {
                 reuse: ReuseDecision::Reusable,
             },
             action: None,
-            // A reusable pure attempt has neither action nor capability-use
-            // dependencies — `durable_dependency_is_valid` rejects both — so
-            // its effective capability requirements are empty by induction over
-            // the reusable subtree.
-            capabilities: Box::new([]),
+            // Propagation happens over the arena subgraph a hydrated node does
+            // not have, and a reusable attempt may now carry an action edge
+            // (decision 0033), so the induction that made these empty no longer
+            // holds. The record carries them, checked against its dependencies
+            // when it was published.
+            capabilities: completion.capabilities.clone(),
         });
         self.index_pure_computation(key, computation);
         self.durable_attempts.insert(computation, attempt.id);
@@ -165,7 +203,11 @@ impl Engine {
     /// # Errors
     /// `E-1207` (internal invariant) when engine state cannot be read or a
     /// recorded dependency contradicts the store's publication invariants.
-    pub fn durable_reuse_is_valid(&self, computation: ComputationId) -> PithResult<bool> {
+    pub fn durable_reuse_is_valid(
+        &self,
+        computation: ComputationId,
+        context: &ReuseContext<'_>,
+    ) -> PithResult<bool> {
         let Some(attempt_id) = self.durable_attempts.get(&computation).copied() else {
             return Ok(false);
         };
@@ -175,25 +217,36 @@ impl Engine {
         let DurableAttemptState::Complete(completion) = &attempt.state else {
             return Ok(false);
         };
-        self.durable_completion_is_valid(completion)
+        self.durable_completion_is_valid(completion, context)
     }
 
     /// Revalidate one completed attempt's recorded dependency set.
-    fn durable_completion_is_valid(&self, completion: &CompletedAttempt) -> PithResult<bool> {
+    fn durable_completion_is_valid(
+        &self,
+        completion: &CompletedAttempt,
+        context: &ReuseContext<'_>,
+    ) -> PithResult<bool> {
         for dependency in &completion.dependencies {
-            if !self.durable_dependency_is_valid(dependency)? {
+            if !self.durable_dependency_is_valid(dependency, context)? {
                 return Ok(false);
             }
         }
         Ok(true)
     }
 
-    fn durable_dependency_is_valid(&self, dependency: &DurableDependency) -> PithResult<bool> {
+    fn durable_dependency_is_valid(
+        &self,
+        dependency: &DurableDependency,
+        context: &ReuseContext<'_>,
+    ) -> PithResult<bool> {
         match dependency {
             DurableDependency::Pure {
                 computation,
                 attempt,
             } => self.durable_pure_dependency_is_valid(*computation, *attempt),
+            DurableDependency::Action { attempt } => {
+                self.durable_action_dependency_is_valid(*attempt, context)
+            }
             // Content identity is the dependency: retained bytes that still
             // reproduce a `ContentId` cannot have drifted.
             DurableDependency::Blob { .. } => Ok(true),
@@ -201,15 +254,106 @@ impl Engine {
             // the capability may be exercised again is the current policy's
             // answer, reapplied before any reuse is served.
             DurableDependency::CapabilityUse { .. } => Ok(true),
-            // A reusable attempt cannot carry an action edge: a pure attempt
-            // that depends on an action is published `EffectfulDependency`
-            // (decision 0031), and an action attempt's own edges are capability
-            // use. The publication validator enforces both, so reaching here is
-            // a fault, not a reason to recompute.
-            DurableDependency::Action { .. } => Err(internal_diag(
-                InternalInvariant::ReusableAttemptHasEffectfulDependency,
-            )),
         }
+    }
+
+    /// An `Action` dependency, revalidated by re-selecting and re-planning the
+    /// request the recorded attempt was made from (decision 0033).
+    ///
+    /// The consumer is pure and every pure edge ahead of this one has already
+    /// been confirmed to yield a canonically equal value, so the recorded
+    /// request is the request this run would issue. What the walk cannot take on
+    /// trust is the key: an `ActionComputationKey` commits to the digest of the
+    /// contract its rule planned, and a recorded key would hide a revised rule,
+    /// a different rule winning the same interface, and a change to the state
+    /// the planner holds.
+    ///
+    /// Planning here also gives the current run's policy a contract to
+    /// authorize, which serving the consumer whole would otherwise skip.
+    fn durable_action_dependency_is_valid(
+        &self,
+        recorded: DurableAttemptId,
+        context: &ReuseContext<'_>,
+    ) -> PithResult<bool> {
+        let Some((policy, environment)) = context.run() else {
+            return Ok(false);
+        };
+        let Some(attempt) = self.state_store.attempt(recorded).map_err(read_failed)? else {
+            return Ok(false);
+        };
+        let DurableAttemptState::Complete(completion) = &attempt.state else {
+            return Ok(false);
+        };
+        let DurableComputation::Action { request, .. } = &attempt.computation else {
+            return Err(internal_diag(
+                InternalInvariant::DurableActionEdgeTargetNotAction,
+            ));
+        };
+        let Some(recorded_key) = attempt.computation.action_key() else {
+            return Err(internal_diag(
+                InternalInvariant::DurableActionEdgeTargetNotAction,
+            ));
+        };
+
+        let request = recorded_action_request(request)?;
+        // A plan that cannot be made is a miss. Re-running the consumer takes
+        // the ordinary path, which reports the diagnostic; revalidation answers
+        // whether an attempt may be served and never diagnoses.
+        let Ok(plan) = self.plan_action(&request) else {
+            return Ok(false);
+        };
+        if !matches!(policy.authorize(&plan), ActionAuthorization::Allowed { .. }) {
+            return Ok(false);
+        }
+        let key = self.action_computation_key(plan.rule, &request, plan.spec_digest)?;
+        if key == recorded_key {
+            return self.recorded_execution_is_reusable(completion, environment);
+        }
+
+        // The request now plans a different contract, which does not make the
+        // consumer dirty on its own: an action re-executed under a revised rule
+        // whose outputs content-address to what the previous attempt produced
+        // leaves the value this consumer computed from them unchanged. This is
+        // what `durable_pure_dependency_is_valid` does for a recomputed pure
+        // dependency, at the edge a build most wants it at.
+        let Some(latest) = self
+            .state_store
+            .latest_completed_reusable_action_attempt(key)
+            .map_err(read_failed)?
+        else {
+            // Nothing has been recorded under the new key, so nothing is known.
+            return Ok(false);
+        };
+        let DurableAttemptState::Complete(latest_completion) = &latest.state else {
+            return Err(internal_diag(
+                InternalInvariant::ReusableIndexEntryNotComplete,
+            ));
+        };
+        if latest_completion.result != completion.result {
+            return Ok(false);
+        }
+        self.recorded_execution_is_reusable(latest_completion, environment)
+    }
+
+    /// Decision 0031's admission test over a completed action attempt: the
+    /// recorded execution belongs to this run's environment, its confinement
+    /// meets this engine's floor, and the content it produced is still stored.
+    fn recorded_execution_is_reusable(
+        &self,
+        completion: &CompletedAttempt,
+        environment: &ExecutorIdentity,
+    ) -> PithResult<bool> {
+        let DurableProvenance::Action(DurableActionProvenance::Imported { imported_report }) =
+            &completion.provenance
+        else {
+            return Err(internal_diag(
+                InternalInvariant::CompletedActionMissingImportedReport,
+            ));
+        };
+        Ok(
+            self.execution_matches_environment(imported_report, environment)
+                && self.execution_is_admissible(imported_report)?,
+        )
     }
 
     /// A `Pure` dependency whose latest reusable attempt is a *different*
@@ -272,20 +416,22 @@ impl Engine {
         request: &Request<Action>,
         plan: &ActionPlan,
         authorization: &ActionAuthorization,
+        context: &ReuseContext<'_>,
         environment: &ExecutorIdentity,
     ) -> PithResult<Option<Evaluation>> {
         if !self.action_caching() {
             return Ok(None);
         }
-        if let Some(evaluation) = self.live_action_reuse(key, environment)? {
+        if let Some(evaluation) = self.live_action_reuse(key, context, environment)? {
             return Ok(Some(evaluation));
         }
-        self.hydrate_action_computation(key, request, plan, authorization, environment)
+        self.hydrate_action_computation(key, request, plan, authorization, context, environment)
     }
 
     fn live_action_reuse(
         &self,
         key: ActionComputationKey,
+        context: &ReuseContext<'_>,
         environment: &ExecutorIdentity,
     ) -> PithResult<Option<Evaluation>> {
         let Some(computation) = self.action_computations.get(&key).copied() else {
@@ -313,7 +459,7 @@ impl Engine {
             return Ok(None);
         }
         let result = result.clone();
-        if !self.durable_reuse_is_valid(computation)? {
+        if !self.durable_reuse_is_valid(computation, context)? {
             return Ok(None);
         }
         Ok(Some(Evaluation {
@@ -337,6 +483,7 @@ impl Engine {
         request: &Request<Action>,
         plan: &ActionPlan,
         authorization: &ActionAuthorization,
+        context: &ReuseContext<'_>,
         environment: &ExecutorIdentity,
     ) -> PithResult<Option<Evaluation>> {
         let Some(attempt) = self
@@ -372,7 +519,7 @@ impl Engine {
         };
         if !self.execution_matches_environment(imported_report, environment)
             || !self.execution_is_admissible(imported_report)?
-            || !self.durable_completion_is_valid(completion)?
+            || !self.durable_completion_is_valid(completion, context)?
         {
             return Ok(None);
         }
@@ -473,23 +620,19 @@ impl Engine {
         self.pure_computations.insert(key, computation);
     }
 
-    /// The reuse decision a completed node's dependencies support.
+    /// The reuse decision a completed node's dependencies support: a dependency
+    /// that is not itself reusable stops reuse, and nothing else does.
     ///
-    /// A dependency that is not itself reusable is reported ahead of a merely
-    /// effectful one, since both stop reuse and the first is the more specific
-    /// answer. An action edge stops reuse even when the action it names is
-    /// reusable, because this node's key does not carry the identity of the
-    /// action rule that planned it (decision 0031).
+    /// An action edge whose target is reusable no longer stops it. The node's
+    /// key does not name the action rule that planned the edge, and decision
+    /// 0033 answers that by re-planning the recorded request when the attempt
+    /// is considered for reuse instead of refusing it a place in the index.
     pub(super) fn reuse_decision(&self, dependencies: &[DependencyEdge]) -> ReuseDecision {
-        let mut first_action = None;
         for dependency in dependencies {
             let computation = match dependency {
                 DependencyEdge::Blob { .. } | DependencyEdge::CapabilityUse { .. } => continue,
-                DependencyEdge::Action { computation, .. } => {
-                    first_action = first_action.or(Some(*computation));
-                    *computation
-                }
-                DependencyEdge::Request { computation, .. } => *computation,
+                DependencyEdge::Action { computation, .. }
+                | DependencyEdge::Request { computation, .. } => *computation,
             };
             let Some(node) = self.computations.get(computation) else {
                 return ReuseDecision::NotReusable(ReuseReason::DependencyMissing { computation });
@@ -516,13 +659,24 @@ impl Engine {
                 }
             }
         }
-        match first_action {
-            Some(computation) => {
-                ReuseDecision::NotReusable(ReuseReason::EffectfulDependency { computation })
-            }
-            None => ReuseDecision::Reusable,
-        }
+        ReuseDecision::Reusable
     }
+}
+
+/// The request a recorded action computation was made from. Selection and
+/// planning read the interface and the inputs (decision 0015), which is all the
+/// record keeps: a request's label and span serve diagnostics, and revalidation
+/// does not diagnose.
+fn recorded_action_request(recorded: &DurableActionRequest) -> PithResult<Request<Action>> {
+    let inputs = recorded.decoded_inputs().map_err(|error| {
+        internal_diag(InternalInvariant::RecordedActionRequestUndecodable(error))
+    })?;
+    Ok(Request::new(
+        "",
+        recorded.interface.clone(),
+        inputs,
+        Span::none(),
+    ))
 }
 
 /// Check the reusable index's contract before trusting the record it returned:

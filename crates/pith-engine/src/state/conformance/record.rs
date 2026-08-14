@@ -176,7 +176,6 @@ pub(super) enum ReuseOutcome {
 #[derive(Clone, Copy)]
 pub(super) enum Refusal {
     ActionCachingDisabled,
-    EffectfulDependency { tracked: usize },
     DependencyNotReusable { tracked: usize },
 }
 
@@ -186,14 +185,6 @@ impl ReuseOutcome {
             Self::Reusable => return DurableReuseDecision::Reusable,
             Self::NotReusable(Refusal::ActionCachingDisabled) => {
                 DurableReuseReason::ActionCachingDisabled
-            }
-            Self::NotReusable(Refusal::EffectfulDependency { tracked: position }) => {
-                match tracked.get(position) {
-                    Some(entry) => DurableReuseReason::EffectfulDependency {
-                        attempt: space.identifier(entry),
-                    },
-                    None => return DurableReuseDecision::Reusable,
-                }
             }
             Self::NotReusable(Refusal::DependencyNotReusable { tracked: position }) => {
                 match tracked.get(position) {
@@ -224,16 +215,13 @@ pub(super) fn reuse_decision(
         let entry = tracked.get(position)?;
         (entry.terminal != Some(TerminalKind::CompleteReusable)).then_some(position)
     });
-    let first_action = dependencies.iter().find_map(|dependency| match dependency {
-        ResolvedDependency::Action { tracked } => Some(*tracked),
-        ResolvedDependency::Pure { .. } | ResolvedDependency::Blob { .. } => None,
-    });
-    let honest = match (first_non_reusable, first_action) {
-        (Some(tracked), _) => ReuseOutcome::NotReusable(Refusal::DependencyNotReusable { tracked }),
-        (None, Some(tracked)) => {
-            ReuseOutcome::NotReusable(Refusal::EffectfulDependency { tracked })
-        }
-        (None, None) => ReuseOutcome::Reusable,
+    // An action edge no longer refuses reuse on its own (decision 0033), so the
+    // only edge that does is one that is not itself reusable. This mirrors
+    // `state::validate::validate_reuse_decision`, which is the derivation both
+    // adapters are held to.
+    let honest = match first_non_reusable {
+        Some(tracked) => ReuseOutcome::NotReusable(Refusal::DependencyNotReusable { tracked }),
+        None => ReuseOutcome::Reusable,
     };
     match (corrupt, honest) {
         (false, honest) => honest,

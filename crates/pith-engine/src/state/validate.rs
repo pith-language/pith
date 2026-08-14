@@ -108,15 +108,9 @@ pub fn validate_publication(
     validate_action_lifecycle(attempt, computation, terminal_state)?;
 
     let mut first_non_reusable_dependency = None;
-    let mut first_action_dependency = None;
     let mut required_capabilities = Vec::new();
     for dependency in terminal_state.dependencies() {
         let dependency_record = validate_dependency(lookup, attempt, terminal_state, dependency)?;
-        if first_action_dependency.is_none()
-            && let DurableDependency::Action { attempt } = dependency
-        {
-            first_action_dependency = Some(*attempt);
-        }
         if let Some(dependency_record) = &dependency_record
             && let DurableAttemptState::Complete(completion) = &dependency_record.state
         {
@@ -146,7 +140,6 @@ pub fn validate_publication(
         computation,
         terminal_state,
         first_non_reusable_dependency,
-        first_action_dependency,
     )?;
     Ok(())
 }
@@ -362,7 +355,6 @@ fn validate_reuse_decision(
     computation: &DurableComputation,
     terminal_state: &TerminalAttemptState,
     first_non_reusable_dependency: Option<DurableAttemptId>,
-    first_action_dependency: Option<DurableAttemptId>,
 ) -> Result<(), EngineStateError> {
     let TerminalAttemptState::Complete(completion) = terminal_state else {
         return Ok(());
@@ -380,22 +372,16 @@ fn validate_reuse_decision(
     ) {
         return Ok(());
     }
-    // A non-reusable dependency is reported ahead of a merely effectful one,
-    // since both stop reuse and the first is the more specific answer.
-    let expected = match (first_non_reusable_dependency, first_action_dependency) {
-        (Some(attempt), _) => ExpectedReuseDecision::DependencyNotReusable { attempt },
-        (None, Some(attempt)) => ExpectedReuseDecision::EffectfulDependency { attempt },
-        (None, None) => ExpectedReuseDecision::Reusable,
+    // An action edge no longer stops reuse on its own (decision 0033): the
+    // consumer revalidates it by re-planning the recorded request, so the only
+    // edge that blocks a completed attempt is one that is not itself reusable.
+    let expected = match first_non_reusable_dependency {
+        Some(attempt) => ExpectedReuseDecision::DependencyNotReusable { attempt },
+        None => ExpectedReuseDecision::Reusable,
     };
     let matches_expected = match (&completion.reuse, expected) {
         (DurableReuseDecision::Reusable, ExpectedReuseDecision::Reusable) => true,
         (
-            DurableReuseDecision::NotReusable(DurableReuseReason::EffectfulDependency {
-                attempt: actual,
-            }),
-            ExpectedReuseDecision::EffectfulDependency { attempt: expected },
-        )
-        | (
             DurableReuseDecision::NotReusable(DurableReuseReason::DependencyNotReusable {
                 attempt: actual,
             }),

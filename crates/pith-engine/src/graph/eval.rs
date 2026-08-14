@@ -19,6 +19,7 @@ use super::ir::{
     AttemptState, ComputationKind, ComputationNode, DependencyEdge, EvalFrame, Evaluation,
     EvaluationSource, PureStep, Resumption, StopReason,
 };
+use super::reuse::ReuseContext;
 use super::scheduler::{ChainId, Scheduler, cycle_key};
 use super::{Engine, PureComputationKey};
 
@@ -89,6 +90,7 @@ impl Engine {
         &mut self,
         scheduler: &mut Scheduler,
         chain: ChainId,
+        context: &ReuseContext<'_>,
     ) -> PithResult<ChainPause> {
         loop {
             let step = {
@@ -104,9 +106,11 @@ impl Engine {
                         return Ok(ChainPause::Settled);
                     }
                 }
-                PureStep::Need(request) => self.handle_pure_need(scheduler, chain, request)?,
+                PureStep::Need(request) => {
+                    self.handle_pure_need(scheduler, chain, request, context)?;
+                }
                 PureStep::NeedAll(requests) => {
-                    self.handle_pure_need_all(scheduler, chain, requests)?;
+                    self.handle_pure_need_all(scheduler, chain, requests, context)?;
                     return Ok(ChainPause::Settled);
                 }
                 PureStep::NeedBlob(id) => return Ok(ChainPause::Blob(id)),
@@ -144,9 +148,10 @@ impl Engine {
         scheduler: &mut Scheduler,
         chain: ChainId,
         request: Request<Pure>,
+        context: &ReuseContext<'_>,
     ) -> PithResult<()> {
         let parent = scheduler.top(chain)?.computation;
-        match self.prepare_request(scheduler, chain, parent, request)? {
+        match self.prepare_request(scheduler, chain, parent, request, context)? {
             PreparedRequest::Reused(value) => {
                 let Some(frame) = scheduler.stack_mut(chain)?.last_mut() else {
                     return Err(internal_diag(InternalInvariant::PureLostRequestingFrame));
@@ -167,11 +172,12 @@ impl Engine {
         scheduler: &mut Scheduler,
         chain: ChainId,
         requests: Box<[Request<Pure>]>,
+        context: &ReuseContext<'_>,
     ) -> PithResult<()> {
         let parent = scheduler.top(chain)?.computation;
         let mut prepared = Vec::with_capacity(requests.len());
         for request in requests.into_vec() {
-            prepared.push(self.prepare_request(scheduler, chain, parent, request)?);
+            prepared.push(self.prepare_request(scheduler, chain, parent, request, context)?);
         }
 
         // Every request was already computed, so there is nothing to wait for
@@ -210,6 +216,7 @@ impl Engine {
         chain: ChainId,
         parent: ComputationId,
         request: Request<Pure>,
+        context: &ReuseContext<'_>,
     ) -> PithResult<PreparedRequest> {
         let rule = self.resolve_pure_rule(&request)?;
         let (interface, inputs, label) = cycle_key(&request);
@@ -217,7 +224,7 @@ impl Engine {
             let cycle: Vec<&str> = labels.iter().map(AsRef::as_ref).collect();
             return Err(cycle_diag(&cycle, request.span));
         }
-        if let Some(reused) = self.reusable_pure_evaluation(rule, &request)? {
+        if let Some(reused) = self.reusable_pure_evaluation(rule, &request, context)? {
             self.record_edge(
                 parent,
                 DependencyEdge::Request {
@@ -240,11 +247,15 @@ impl Engine {
 
     /// Open one chain per root request, skipping the roots the reusable index
     /// can already answer.
-    pub(super) fn open_roots(&mut self, requests: &[Request<Pure>]) -> PithResult<RootPlan> {
+    pub(super) fn open_roots(
+        &mut self,
+        requests: &[Request<Pure>],
+        context: &ReuseContext<'_>,
+    ) -> PithResult<RootPlan> {
         let mut reused = Vec::with_capacity(requests.len());
         let mut frames = Vec::new();
         for request in requests {
-            match self.open_root(request) {
+            match self.open_root(request, context) {
                 Ok(OpenedRoot::Reused(evaluation)) => reused.push(Some(evaluation)),
                 Ok(OpenedRoot::Fresh(frame)) => {
                     frames.push(frame);
@@ -267,9 +278,13 @@ impl Engine {
         })
     }
 
-    fn open_root(&mut self, request: &Request<Pure>) -> PithResult<OpenedRoot> {
+    fn open_root(
+        &mut self,
+        request: &Request<Pure>,
+        context: &ReuseContext<'_>,
+    ) -> PithResult<OpenedRoot> {
         let rule = self.resolve_pure_rule(request)?;
-        match self.reusable_pure_evaluation(rule, request)? {
+        match self.reusable_pure_evaluation(rule, request, context)? {
             Some(evaluation) => Ok(OpenedRoot::Reused(evaluation)),
             None => Ok(OpenedRoot::Fresh(self.start_frame(request.clone(), rule)?)),
         }

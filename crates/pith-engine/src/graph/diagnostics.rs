@@ -86,10 +86,18 @@ pub(super) enum InternalInvariant {
     /// The reusable index returned a completed attempt whose reuse decision is
     /// not `Reusable`.
     ReusableIndexEntryNotReusable,
-    /// A reusable pure attempt carries an action or capability-use dependency.
-    /// Action attempts are never reusable, so a pure attempt that depends on
-    /// one cannot be reusable either; the store validates this on publication.
-    ReusableAttemptHasEffectfulDependency,
+    /// An action was started by an evaluation that carries no policy and no
+    /// executor. The pure driver rejects the step that asks for one, so only a
+    /// run reaches the action pipeline.
+    ActionStartedOutsideARun,
+    /// An action dependency edge resolved to an attempt that is not an action
+    /// computation. The store rejects such publications, so an edge that
+    /// reaches revalidation naming one has been corrupted since.
+    DurableActionEdgeTargetNotAction,
+    /// A recorded action request could not be decoded. Its inputs were
+    /// validated when they entered the store, so this means the retained
+    /// encoding is unreadable under the current semantic encoding version.
+    RecordedActionRequestUndecodable(pith_core::CanonicalDecodeError),
     /// A completed attempt's recorded dependency resolved to an attempt that is
     /// not itself complete. The store rejects such publications.
     DurableDependencyAttemptNotComplete,
@@ -186,8 +194,14 @@ impl InternalInvariant {
             InternalInvariant::ReusableIndexEntryNotReusable => {
                 "the reusable index references an attempt that is not reusable".to_string()
             }
-            InternalInvariant::ReusableAttemptHasEffectfulDependency => {
-                "a reusable pure attempt depends on an action or capability use".to_string()
+            InternalInvariant::ActionStartedOutsideARun => {
+                "an action was started outside a run".to_string()
+            }
+            InternalInvariant::DurableActionEdgeTargetNotAction => {
+                "an action durable dependency edge targets a non-action computation".to_string()
+            }
+            InternalInvariant::RecordedActionRequestUndecodable(error) => {
+                format!("a recorded action request could not be decoded: {error}")
             }
             InternalInvariant::DurableDependencyAttemptNotComplete => {
                 "a completed attempt depends on a non-complete attempt".to_string()
@@ -348,7 +362,11 @@ mod tests {
             InternalInvariant::ReusableIndexEntryNotComplete,
             InternalInvariant::ReusableIndexEntryKeyMismatch,
             InternalInvariant::ReusableIndexEntryNotReusable,
-            InternalInvariant::ReusableAttemptHasEffectfulDependency,
+            InternalInvariant::ActionStartedOutsideARun,
+            InternalInvariant::DurableActionEdgeTargetNotAction,
+            InternalInvariant::RecordedActionRequestUndecodable(
+                pith_core::CanonicalDecodeError::Truncated,
+            ),
             InternalInvariant::DurableDependencyAttemptNotComplete,
             InternalInvariant::HydratedResultUndecodable(
                 pith_core::CanonicalDecodeError::Truncated,

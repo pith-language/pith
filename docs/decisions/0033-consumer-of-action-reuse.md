@@ -4,7 +4,7 @@ id: decision-0033-consumer-of-action-reuse
 title: a consumer of an action revalidates by re-planning it
 summary: let a completed pure attempt holding an action dependency enter the reusable index, and revalidate that dependency by re-selecting and re-planning the recorded request instead of trusting the key recorded when it ran
 kind: decision
-status: proposed
+status: accepted
 created: 2026-06-01
 updated: 2026-06-19
 tags:
@@ -40,7 +40,7 @@ the reusable index therefore holds only what sits below the effect boundary, and
 
 a `PureComputationKey` covers the rule identity, the rule revision, the requested interface, and the inputs. it does not name the action rule a `NeedAction` step will select, so a result recorded under one action rule stays findable under the same key after that rule is revised. the recorded edge does not close the gap either: `DurableDependency::Action` carries an attempt identifier and nothing else, so revalidation cannot ask whether the request would still resolve to that attempt. the pure edge can ask, because it carries the dependency's `PureComputationKey` and the index answers which attempt is currently reusable under it.
 
-## proposed decision
+## decision
 
 a completed pure attempt holding an action dependency may enter the reusable index. its action edge is revalidated by re-selecting and re-planning the request that produced it.
 
@@ -123,6 +123,18 @@ a completed attempt gains its effective capability requirements. hydration asser
 both engine-state adapters change, the sqlite schema gains the request columns and the capability column, and the schema and semantic-encoding versions move together.
 
 the M-3 fixture gains the assertion it cannot make today: a second build of unchanged sources reuses its root instead of recomputing it, and a fresh engine over the same durable state hydrates it. the fine-grained invalidation test's action count is unaffected, since a served action already returns the existing node rather than allocating one.
+
+revalidation needs the run's policy and executor before the pure reuse path is entered, which is earlier than the action pipeline needed them. `ReuseContext` carries both from the driver through the step machine to `durable_reuse_is_valid`, with a `PureOnly` variant for the entry point that has neither.
+
+### measured
+
+`crates/xylem/tests/two_source_build.rs` builds two sources against a nix-store gcc over a filesystem content store and a sqlite state database. a second build on the same engine reports `Reused` at the root and plans no action. a second engine over the same root, opened after the first is dropped, reports `Hydrated` and allocates no computation beneath the root at all. the fine-grained invalidation count is unchanged at two new actions for a touched `a.c`.
+
+the case the record argues from is covered directly: `a_consumer_reruns_when_its_action_replans_a_different_contract` gives an action rule state the request does not name, changes it between runs, and measures the consumer re-running and the action executing a second time. the consumer's own key is identical across both runs, so the re-plan is the only thing that sees the difference.
+
+### where the admission test applies
+
+the walk applies 0031's admission test in both branches: the recorded attempt when the re-derived key matches, and the attempt found under the new key when equality pruning answers instead. serving a consumer hands back a result naming content the action produced, so an attempt whose content has been collected answers nothing in either branch. the equality paragraph above states only the result comparison, which is the pure edge's shape; the content check is the part a pure edge does not need.
 
 ## unresolved
 

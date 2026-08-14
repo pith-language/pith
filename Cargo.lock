@@ -740,7 +740,9 @@ dependencies = [
  "pith-core",
  "pith-diag",
  "pith-engine",
+ "pith-ids",
  "pith-output",
+ "pith-store",
  "tracing",
  "tracing-subscriber",
 ]
@@ -1506,6 +1508,7 @@ dependencies = [
  "pith-engine",
  "pith-executor-local",
  "pith-ids",
+ "pith-state-sqlite",
  "pith-store",
  "tempfile",
  "tokio",
