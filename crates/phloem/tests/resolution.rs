@@ -1,16 +1,20 @@
 //! Resolution as a computation in the graph (decision 0040): the solver is
-//! an ordinary pure rule selected by 0015, its four inputs are values that
-//! participate in the computation key, and the reusable index serves and
-//! invalidates resolutions through the machinery that already exists. These
-//! tests measure that; the solver's own behavior is pinned in the module
-//! tests under `src/`.
+//! an ordinary pure rule selected by 0015, its inputs — the declared version
+//! ordering, the constraint set, the candidate universe, the preference
+//! list, the budget — are values that participate in the computation key,
+//! and the reusable index serves and invalidates resolutions through the
+//! machinery that already exists. These tests measure that; the solver's own
+//! behavior is pinned in the module tests under `src/`.
 
 use std::sync::{Arc, Mutex};
 
 use phloem::constraint::{Bound, Constraint, Range, constraint_set_value};
-use phloem::identity::{DomainIdentity, NumericSegments, PackageIdentity};
+use phloem::identity::{
+    DEBIAN, DomainIdentity, NUMERIC_SEGMENTS, PackageIdentity, version_scheme_value,
+};
 use phloem::preference::{Preference, PreferenceList, preference_list_value};
-use phloem::resolve::{RESOLUTION, Resolution, ResolveSolver, resolve_interface, resolve_request};
+use phloem::resolution::{RESOLUTION, Resolution, resolve_interface, resolve_request};
+use phloem::resolve::{ResolveSolver, Schemes};
 use phloem::source::SourceBinding;
 use phloem::universe::{Candidate, CandidateUniverse};
 use pith_core::ActionComputationKey;
@@ -59,7 +63,11 @@ fn preferences_newest() -> Value {
 }
 
 fn solver() -> ResolveSolver {
-    ResolveSolver::new(NumericSegments)
+    ResolveSolver::new(Schemes::standard())
+}
+
+fn numeric_scheme() -> Value {
+    version_scheme_value(NUMERIC_SEGMENTS)
 }
 
 fn engine_with(state: &SharedState) -> Engine {
@@ -70,12 +78,13 @@ fn engine_with(state: &SharedState) -> Engine {
 }
 
 fn request_over(
+    scheme: &Value,
     constraints: &Value,
     universe: &Value,
     preferences: &Value,
     budget: u64,
 ) -> Request<Pure> {
-    resolve_request(constraints, universe, preferences, budget)
+    resolve_request(scheme, constraints, universe, preferences, budget)
 }
 
 /// One durable substrate behind several engines, the arrangement 0024
@@ -221,6 +230,7 @@ fn a_resolution_computes_then_serves_from_the_arena_index() {
     let universe = CandidateUniverse::new(vec![candidate("zlib", "1.2"), candidate("zlib", "1.3")]);
     let constraints = constraint_set_value(&[zlib_constraint()]);
     let request = request_over(
+        &numeric_scheme(),
         &constraints,
         &universe.to_value(),
         &preferences_newest(),
@@ -246,6 +256,7 @@ fn a_resolution_hydrates_into_a_fresh_engine_over_the_same_state() {
     let universe = CandidateUniverse::new(vec![candidate("zlib", "1.3")]);
     let constraints = constraint_set_value(&[zlib_constraint()]);
     let request = request_over(
+        &numeric_scheme(),
         &constraints,
         &universe.to_value(),
         &preferences_newest(),
@@ -276,8 +287,20 @@ fn a_changed_candidate_universe_is_a_new_computation_and_the_old_answer_stands()
     let before = CandidateUniverse::new(vec![candidate("zlib", "1.3")]);
     let after = CandidateUniverse::new(vec![candidate("zlib", "1.3.1")]);
     let constraints = constraint_set_value(&[zlib_constraint()]);
-    let old_request = request_over(&constraints, &before.to_value(), &preferences_newest(), 100);
-    let new_request = request_over(&constraints, &after.to_value(), &preferences_newest(), 100);
+    let old_request = request_over(
+        &numeric_scheme(),
+        &constraints,
+        &before.to_value(),
+        &preferences_newest(),
+        100,
+    );
+    let new_request = request_over(
+        &numeric_scheme(),
+        &constraints,
+        &after.to_value(),
+        &preferences_newest(),
+        100,
+    );
 
     let mut first = engine_with(&state);
     first.evaluate_pure(&old_request).unwrap();
@@ -292,20 +315,18 @@ fn a_changed_candidate_universe_is_a_new_computation_and_the_old_answer_stands()
     };
     assert_eq!(universe, after.content_id());
 
-    // The other three inputs are unchanged by value, so the universe is the
-    // one input that moved; and the recorded answer for the old key still
+    // Every input but the universe is unchanged by value, so the universe
+    // is the one that moved; and the recorded answer for the old key still
     // serves, which is what reproducible-under-the-same-universe means.
-    assert_eq!(
-        old_request.inputs.first().unwrap(),
-        new_request.inputs.first().unwrap()
-    );
-    assert_eq!(
+    for unchanged in [0, 1, 3, 4] {
+        assert_eq!(
+            old_request.inputs.get(unchanged).unwrap(),
+            new_request.inputs.get(unchanged).unwrap()
+        );
+    }
+    assert_ne!(
         old_request.inputs.get(2).unwrap(),
         new_request.inputs.get(2).unwrap()
-    );
-    assert_eq!(
-        old_request.inputs.get(3).unwrap(),
-        new_request.inputs.get(3).unwrap()
     );
     let mut second = Engine::with_state_store(MemoryContentStore::default(), state.clone());
     let solver = solver();
@@ -330,7 +351,13 @@ fn a_budget_exhausted_answer_is_a_function_of_the_inputs_and_is_served_from_the_
         root_constraint("a", Range::Any),
         root_constraint("b", Range::AtLeast(Bound::new("2.0", true))),
     ]);
-    let request = request_over(&constraints, &universe.to_value(), &preferences_newest(), 0);
+    let request = request_over(
+        &numeric_scheme(),
+        &constraints,
+        &universe.to_value(),
+        &preferences_newest(),
+        0,
+    );
 
     let computed = engine.evaluate_pure(&request).unwrap();
     let resolution = Resolution::from_value(&computed.value).unwrap();
@@ -354,6 +381,7 @@ fn the_resolution_interface_selects_exactly_one_rule() {
     let query = engine.query();
     let universe = CandidateUniverse::new(vec![candidate("zlib", "1.3")]);
     let request = request_over(
+        &numeric_scheme(),
         &constraint_set_value(&[zlib_constraint()]),
         &universe.to_value(),
         &preferences_newest(),
@@ -374,4 +402,84 @@ fn the_resolution_interface_selects_exactly_one_rule() {
     assert!(mismatched.validate_inputs().is_ok());
     assert!(query.select(&mismatched).is_err());
     let _ = RESOLUTION;
+}
+
+#[test]
+fn a_different_declared_ordering_is_a_different_computation() {
+    // The scheme input closes the hole 0038's third class of state names:
+    // the ordering a resolution ran under is part of the computation key, so
+    // an answer recorded under one declared ordering is never served under
+    // another. The two spellings below order differently under the two
+    // schemes — tilde is lowest for Debian, a non-numeric segment sorts
+    // above a numeric one for the numeric scheme — so `newest` picks
+    // different winners, and neither engine sees the other's answer.
+    let state = SharedState::default();
+    let universe =
+        CandidateUniverse::new(vec![candidate("zlib", "1.0"), candidate("zlib", "1.0~rc1")]);
+    let constraints = constraint_set_value(&[zlib_constraint()]);
+
+    let mut first = engine_with(&state);
+    let numeric_answer = first
+        .evaluate_pure(&request_over(
+            &numeric_scheme(),
+            &constraints,
+            &universe.to_value(),
+            &preferences_newest(),
+            100,
+        ))
+        .unwrap();
+    let Resolution::Solved {
+        choice: numeric_choice,
+        ..
+    } = Resolution::from_value(&numeric_answer.value).unwrap()
+    else {
+        unreachable!("the numeric scheme resolves");
+    };
+    assert_eq!(
+        numeric_choice.first().unwrap().version,
+        Box::from("1.0~rc1"),
+        "a non-numeric segment sorts above a numeric one under the numeric scheme"
+    );
+
+    // A fresh engine over the same durable substrate: the debian-keyed
+    // request has no recorded answer under its key, so it computes, while
+    // the numeric-keyed one is served from the reusable index — hydration,
+    // not re-evaluation, because this engine's arena has never seen the key.
+    let mut second = engine_with(&state);
+    let deb_answer = second
+        .evaluate_pure(&request_over(
+            &version_scheme_value(DEBIAN),
+            &constraints,
+            &universe.to_value(),
+            &preferences_newest(),
+            100,
+        ))
+        .unwrap();
+    assert_eq!(
+        deb_answer.source,
+        EvaluationSource::Computed,
+        "an answer under one ordering must not be served under another"
+    );
+    let Resolution::Solved {
+        choice: deb_choice, ..
+    } = Resolution::from_value(&deb_answer.value).unwrap()
+    else {
+        unreachable!("the debian scheme resolves");
+    };
+    assert_eq!(
+        deb_choice.first().unwrap().version,
+        Box::from("1.0"),
+        "tilde sorts lowest under the debian scheme"
+    );
+    let served = second
+        .evaluate_pure(&request_over(
+            &numeric_scheme(),
+            &constraints,
+            &universe.to_value(),
+            &preferences_newest(),
+            100,
+        ))
+        .unwrap();
+    assert_eq!(served.source, EvaluationSource::Hydrated);
+    assert_eq!(served.value, numeric_answer.value);
 }

@@ -24,7 +24,9 @@ pub mod identity;
 pub mod lock;
 pub mod preference;
 pub mod request;
+pub mod resolution;
 pub mod resolve;
+pub mod search;
 pub mod source;
 pub mod universe;
 

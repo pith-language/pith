@@ -12,7 +12,7 @@
 
 use std::cmp::Ordering;
 
-use pith_core::Value;
+use pith_core::{Type, Value};
 use pith_diag::PithResult;
 
 use crate::diag;
@@ -131,12 +131,75 @@ impl PackageVersion {
 /// The version format and comparison a domain declares. 0039 leaves the
 /// format to the domain — semver for most, Debian's epoch-and-tilde ordering
 /// for a deb domain — so phloem takes the ordering as a declaration rather
-/// than baking one in. Version-range semantics over these comparisons are a
-/// later record's work.
+/// than baking one in. Version-range semantics over these comparisons are
+/// declared values over the ordering (0040).
 pub trait VersionScheme {
     /// How `left` and `right` order. Total: two spellings a domain accepts
     /// as versions have an ordering, whatever the domain's rule is.
     fn compare(&self, left: &str, right: &str) -> Ordering;
+}
+
+/// A boxed scheme is a scheme, so a registry can hold its orderings behind
+/// one pointer type.
+impl<T: VersionScheme + ?Sized> VersionScheme for Box<T> {
+    fn compare(&self, left: &str, right: &str) -> Ordering {
+        (**self).compare(left, right)
+    }
+}
+
+/// The nominal type a request carries to name the declared ordering it runs
+/// under: `phloem.VersionScheme` over the scheme's declared name.
+pub const VERSION_SCHEME: &str = "phloem.VersionScheme";
+
+/// The declared name of [`NumericSegments`].
+pub const NUMERIC_SEGMENTS: &str = "numeric-segments";
+
+/// The declared name of [`Debian`].
+pub const DEBIAN: &str = "debian";
+
+/// The version-scheme type: nominal over the scheme's declared name.
+#[must_use]
+pub fn version_scheme_type() -> Type {
+    Type::Nominal {
+        name: VERSION_SCHEME.into(),
+    }
+}
+
+/// A version-scheme value naming `scheme`. The name, not the comparison, is
+/// what travels: the name is the identity a computation key covers, and the
+/// ordering it resolves to is looked up in the registered schemes the way a
+/// toolchain value names a driver whose closure the rule holds. A name whose
+/// ordering changes is a declaration that changed its meaning, on the terms
+/// a package name changing its meaning is domain policy to enforce.
+#[must_use]
+pub fn version_scheme_value(scheme: &str) -> Value {
+    Value::Nominal {
+        name: VERSION_SCHEME.into(),
+        representation: Box::new(Value::Text(scheme.into())),
+    }
+}
+
+/// The declared name a version-scheme value carries.
+///
+/// # Errors
+/// A [`pith_diag::DiagnosticSink`] naming what was found when the value is
+/// not a version-scheme value.
+pub fn version_scheme_name(value: &Value) -> PithResult<&str> {
+    match value {
+        Value::Nominal {
+            name,
+            representation,
+        } if name.as_ref() == VERSION_SCHEME => match representation.as_ref() {
+            Value::Text(text) => Ok(text),
+            other => Err(diag(format!(
+                "a {VERSION_SCHEME} value carried {other:?} rather than a text"
+            ))),
+        },
+        other => Err(diag(format!(
+            "expected a {VERSION_SCHEME} value, found {}",
+            other.describe()
+        ))),
+    }
 }
 
 /// A dot-separated numeric scheme, the comparison most domains declare:
