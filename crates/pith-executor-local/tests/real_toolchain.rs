@@ -14,8 +14,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use pith_core::{
-    Action, ActionInput, ActionOutput, ActionSpec, Content, EnvironmentVariable, Interface,
-    NetworkPolicy, OutputKind, PlatformRequirement, Pure, Request, Rule, RuleIdentity,
+    Action, ActionInput, ActionOutput, ActionProgram, ActionSpec, Content, EnvironmentVariable,
+    Interface, NetworkPolicy, OutputKind, PlatformRequirement, Pure, Request, Rule, RuleIdentity,
     RuleRevision, Type, Value,
 };
 use pith_diag::{Diag, DiagnosticSink, PithResult, Severity, Span, StableCode};
@@ -123,7 +123,7 @@ struct CompileAction {
 impl ActionRule for CompileAction {
     fn plan(&self, _inputs: &[Value]) -> PithResult<ActionSpec> {
         Ok(ActionSpec {
-            executable: self.compiler.clone(),
+            executable: ActionProgram::HostPath(self.compiler.clone()),
             toolchain: self.closure.clone(),
             arguments: [
                 "-c".into(),

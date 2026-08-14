@@ -10,8 +10,8 @@
 use std::path::Path;
 
 use pith_core::{
-    ActionInput, ActionOutput, ActionSpec, CapabilityRequirement, Content, EnvironmentVariable,
-    NetworkPolicy, OutputKind, PlatformRequirement,
+    ActionInput, ActionOutput, ActionProgram, ActionSpec, CapabilityRequirement, Content,
+    EnvironmentVariable, NetworkPolicy, OutputKind, PlatformRequirement,
 };
 use pith_engine::{
     ActionInvocation, CapturedOutputContent, CapturedTreeEntryContent, Executor,
@@ -46,7 +46,7 @@ fn invocation(script: &str) -> Option<ActionInvocation> {
     }
     Some(ActionInvocation {
         spec: ActionSpec {
-            executable: "/bin/sh".into(),
+            executable: ActionProgram::HostPath("/bin/sh".into()),
             toolchain: fixture_closure(),
             arguments: ["-c".into(), script.into()].into(),
             inputs: Box::new([]),
@@ -57,6 +57,7 @@ fn invocation(script: &str) -> Option<ActionInvocation> {
             network: NetworkPolicy::Deny,
         },
         inputs: Box::new([]),
+        program: None,
     })
 }
 
@@ -538,7 +539,7 @@ async fn an_executable_path_that_does_not_exist_is_a_spawn_error() {
     // runs.
     let invocation = ActionInvocation {
         spec: ActionSpec {
-            executable: "/bin/definitely-not-a-real-executable".into(),
+            executable: ActionProgram::HostPath("/bin/definitely-not-a-real-executable".into()),
             toolchain: Box::new([]),
             arguments: Box::new([]),
             inputs: Box::new([]),
@@ -549,6 +550,7 @@ async fn an_executable_path_that_does_not_exist_is_a_spawn_error() {
             network: NetworkPolicy::Deny,
         },
         inputs: Box::new([]),
+        program: None,
     };
 
     let error = LocalExecutor::new().execute(&invocation).await.err();

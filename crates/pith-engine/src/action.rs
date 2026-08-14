@@ -59,6 +59,12 @@ pub struct ExecutorIdentity {
 pub struct ActionInvocation {
     pub spec: ActionSpec,
     pub inputs: Box<[MaterializedActionInput]>,
+    /// The bytes of the program, when the contract named content rather than a
+    /// host path (`ActionProgram::Content`). The engine resolves it from the
+    /// content store on the same terms as an input, so the executor never
+    /// touches the store. `None` for a host-path program, whose bytes belong to
+    /// the host.
+    pub program: Option<MaterializedBlob>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

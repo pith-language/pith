@@ -16,8 +16,9 @@
 //! key (decision 0031).
 
 use pith_core::{
-    Action, ActionInput, ActionOutput, ActionSpec, Content, EnvironmentVariable, NetworkPolicy,
-    OutputKind, PlatformRequirement, Pure, Request, Rule, RuleIdentity, RuleRevision, Value,
+    Action, ActionInput, ActionOutput, ActionProgram, ActionSpec, Content, EnvironmentVariable,
+    NetworkPolicy, OutputKind, PlatformRequirement, Pure, Request, Rule, RuleIdentity,
+    RuleRevision, Value,
 };
 use pith_diag::{Diag, DiagnosticSink, PithResult, Severity, Span, StableCode};
 use pith_engine::{
@@ -175,7 +176,7 @@ impl ActionRule for HeaderDiscoveryAction {
             });
         }
         Ok(ActionSpec {
-            executable: self.toolchain.driver.clone(),
+            executable: ActionProgram::HostPath(self.toolchain.driver.clone()),
             toolchain: self.toolchain.closure.clone(),
             arguments: [
                 "-MM".into(),
@@ -285,7 +286,7 @@ impl ActionRule for CompileAction {
             }
         }
         Ok(ActionSpec {
-            executable: self.toolchain.driver.clone(),
+            executable: ActionProgram::HostPath(self.toolchain.driver.clone()),
             toolchain: self.toolchain.closure.clone(),
             arguments: [
                 "-c".into(),
@@ -391,7 +392,7 @@ impl ActionRule for LinkAction {
         arguments.push("-o".into());
         arguments.push(EXECUTABLE_PATH.into());
         Ok(ActionSpec {
-            executable: self.toolchain.driver.clone(),
+            executable: ActionProgram::HostPath(self.toolchain.driver.clone()),
             toolchain: self.toolchain.closure.clone(),
             arguments: arguments.into(),
             inputs: action_inputs.into_boxed_slice(),

@@ -62,6 +62,7 @@ when an accepted decision changes, a new record supersedes it. the old record st
 - [0032: one action is one tool invocation, and a foreign build system is one opaque boundary](0032-action-granularity.md)
 - [0034: header dependencies are discovered by an action and resolved at plan](0034-discovered-header-dependencies.md)
 - [0035: a link is over a list of objects](0035-link-over-a-list-of-objects.md)
+- [0036: a program the graph produced enters an action as content](0036-produced-program-as-content.md)
 
 note: 0013 amends 0005 to add a fifth identity type. 0005 stands; the amendment is recorded in 0013.
 
@@ -90,3 +91,5 @@ note: 0030 amends 0028 by recording how a toolchain enters an action contract as
 note: 0034 exercises the license 0007 grants for discovered dependencies inside the mechanism 0007 prescribes: discovery runs as a tracked, cached action over a declared header universe, and the discovered set reaches the compile as a request input the planner resolves. 0007 stands; its "static inference" alternative's split — inference declares, hermetic execution fails loudly on a miss — is what the universe and the landlock layer respectively implement.
 
 note: 0035 closes the fixed-arity-two item the link rule's doc comment carried since M-3 began, over the `List` constructor 0034 landed. 0026 stands; the element type keeps nominal identity inside the list, which is what preserves 0015's unambiguous selection now that the link input is no longer positional.
+
+note: 0036 amends 0030 by covering the case 0030's argument does not reach. 0030 stands: a toolchain is not one file, so it enters a contract as a host path and a declared closure. a build product is one file the engine owns, and 0005's separation of content identity from external identity is what makes that a typed sum rather than a path whose meaning depends on its first character.

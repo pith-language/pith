@@ -12,8 +12,9 @@
 //! `fuzz_action_spec.rs`.
 
 use pith_core::{
-    ActionInput, ActionOutput, ActionSpec, CanonicalDecodeError, CapabilityRequirement, Content,
-    EnvironmentVariable, NetworkPolicy, OutputKind, PlatformRequirement, Type, Value,
+    ActionInput, ActionOutput, ActionProgram, ActionSpec, CanonicalDecodeError,
+    CapabilityRequirement, Content, EnvironmentVariable, NetworkPolicy, OutputKind,
+    PlatformRequirement, Type, Value,
 };
 use pith_ids::ContentId;
 use proptest::prelude::*;
@@ -91,7 +92,7 @@ fn value_strategy() -> impl Strategy<Value = Value> {
     ]
 }
 
-/// Valid absolute host paths for the `executable` field (decision 0030). Built
+/// Valid absolute host paths for a host-path program (decision 0030). Built
 /// from a fixed alphabet so every generated path passes `is_valid_host_path`:
 /// absolute, NUL-free, no traversal components.
 fn executable_path_strategy() -> impl Strategy<Value = Box<str>> {
@@ -106,6 +107,15 @@ fn executable_path_strategy() -> impl Strategy<Value = Box<str>> {
         }
         path.into_boxed_str()
     })
+}
+
+/// Both program variants, so the round trip covers the tagged sum and not only
+/// the host-path arm (decision 0036).
+fn program_strategy() -> impl Strategy<Value = ActionProgram> {
+    prop_oneof![
+        executable_path_strategy().prop_map(ActionProgram::HostPath),
+        bounded_bytes(32).prop_map(|bytes| ActionProgram::Content(ContentId::of_blob(&bytes))),
+    ]
 }
 
 fn action_input_strategy() -> impl Strategy<Value = ActionInput> {
@@ -181,7 +191,7 @@ fn network_strategy() -> impl Strategy<Value = NetworkPolicy> {
 
 fn spec_strategy() -> impl Strategy<Value = ActionSpec> {
     (
-        executable_path_strategy(),
+        program_strategy(),
         proptest::collection::vec(bounded_string(16), 0..4),
         proptest::collection::vec(action_input_strategy(), 0..4),
         proptest::collection::vec(action_output_strategy(), 0..4),

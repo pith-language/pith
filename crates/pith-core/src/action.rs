@@ -8,9 +8,11 @@ use pith_ids::{ActionSpecDigest, ContentId};
 
 use crate::manifest::{encode_length, encode_str};
 
-/// Discriminant tags for `PlatformRequirement` and `NetworkPolicy` in the
-/// action-spec manifest. Stable digest format: renumbering invalidates every
-/// persisted `ActionSpecDigest`.
+/// Discriminant tags for `ActionProgram`, `PlatformRequirement`, and
+/// `NetworkPolicy` in the action-spec manifest. Stable digest format:
+/// renumbering invalidates every persisted `ActionSpecDigest`.
+const TAG_PROGRAM_HOST_PATH: u8 = 0;
+const TAG_PROGRAM_CONTENT: u8 = 1;
 const TAG_PLATFORM_ANY: u8 = 0;
 const TAG_PLATFORM_EXACT: u8 = 1;
 const TAG_NETWORK_DENY: u8 = 0;
@@ -102,14 +104,58 @@ pub enum NetworkPolicy {
     AllowAll,
 }
 
+/// The program an action runs.
+///
+/// The two variants are two of the identity kinds decision 0005 separates, and
+/// the type is what keeps them apart. A host path is an external identity: it
+/// names a thing outside the engine, and what those bytes are is a fact about
+/// the host rather than something the contract states. A [`ContentId`] is a
+/// content identity the engine owns. Encoding the second as a path would put a
+/// content identity in a field typed for an external one, which is the
+/// substitution 0005 has a type system to prevent.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ActionProgram {
+    /// An absolute host path the executor `execve`s directly, with the rest of
+    /// the program's installation declared in [`ActionSpec::toolchain`]. This is
+    /// how a toolchain enters a contract (decision 0030): a compiler is not one
+    /// file, so naming its bytes would be a claim the contract cannot keep.
+    HostPath(Box<str>),
+    /// Content the graph produced, which the executor stages inside the scratch
+    /// root and runs from there. A build product is one file, so naming its
+    /// bytes is what is true of it. The identity reaches the contract digest, so
+    /// an action that runs a rebuilt program is a different action, which is
+    /// what 0031's request-side key needs to distinguish the two.
+    Content(ContentId),
+}
+
+impl ActionProgram {
+    /// The host path this program runs from, when it has one. `None` for a
+    /// content program, whose path exists only once an executor has staged it.
+    #[must_use]
+    pub fn host_path(&self) -> Option<&str> {
+        match self {
+            Self::HostPath(path) => Some(path),
+            Self::Content(_) => None,
+        }
+    }
+
+    /// The content this program is, when the engine owns it. `None` for a host
+    /// path, whose bytes the engine never reads.
+    #[must_use]
+    pub fn content(&self) -> Option<ContentId> {
+        match self {
+            Self::HostPath(_) => None,
+            Self::Content(id) => Some(*id),
+        }
+    }
+}
+
 /// Complete, inspectable contract for one bounded external action.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ActionSpec {
-    /// Absolute host path of the program the executor runs. The executable is
-    /// not staged from the content store; the executor `execve`s this path
-    /// directly. See decision 0030 for why a toolchain executable is a host
-    /// path rather than a content identity.
-    pub executable: Box<str>,
+    /// The program the executor runs: a host path it `execve`s directly, or
+    /// content it stages and runs. See [`ActionProgram`].
+    pub executable: ActionProgram,
     /// Host filesystem paths the action may read to find the rest of its
     /// toolchain. For a nix toolchain these are the top-level `/nix/store/...`
     /// directories returned by `nix path-info -r` over the executable's store
@@ -127,10 +173,22 @@ pub struct ActionSpec {
 }
 
 impl ActionSpec {
-    /// A minimal contract with no ambient environment, network, or authority.
+    /// A minimal contract with no ambient environment, network, or authority,
+    /// running the host program at `executable`. Use
+    /// [`ActionSpec::isolated_content`] for a program the graph produced.
     pub fn isolated(executable: &str) -> Self {
+        Self::isolated_program(ActionProgram::HostPath(executable.into()))
+    }
+
+    /// A minimal contract running `program`, content the engine owns.
+    #[must_use]
+    pub fn isolated_content(program: ContentId) -> Self {
+        Self::isolated_program(ActionProgram::Content(program))
+    }
+
+    fn isolated_program(executable: ActionProgram) -> Self {
         Self {
-            executable: executable.into(),
+            executable,
             toolchain: Box::new([]),
             arguments: Box::new([]),
             inputs: Box::new([]),
@@ -154,10 +212,13 @@ impl ActionSpec {
             }
         }
 
-        if !is_valid_host_path(&self.executable) {
+        // A content program carries a `ContentId`, which is well-formed by
+        // construction; only the host-path variant can be spelled wrongly.
+        if let ActionProgram::HostPath(path) = &self.executable
+            && !is_valid_host_path(path)
+        {
             return Err(invalid_action_spec(format!(
-                "invalid action executable path `{}`",
-                self.executable
+                "invalid action executable path `{path}`"
             )));
         }
 
@@ -290,7 +351,16 @@ impl ActionSpec {
 
     fn canonical_manifest(&self) -> Vec<u8> {
         let mut manifest = Vec::new();
-        encode_str(&mut manifest, &self.executable);
+        match &self.executable {
+            ActionProgram::HostPath(path) => {
+                manifest.push(TAG_PROGRAM_HOST_PATH);
+                encode_str(&mut manifest, path);
+            }
+            ActionProgram::Content(id) => {
+                manifest.push(TAG_PROGRAM_CONTENT);
+                manifest.extend_from_slice(id.digest().as_bytes());
+            }
+        }
 
         let mut toolchain: Vec<_> = self.toolchain.iter().collect();
         toolchain.sort();
@@ -578,7 +648,7 @@ mod tests {
 
         let variants = [
             ActionSpec {
-                executable: "/bin/other-tool".into(),
+                executable: ActionProgram::HostPath("/bin/other-tool".into()),
                 ..baseline.clone()
             },
             ActionSpec {

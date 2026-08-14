@@ -9,14 +9,21 @@
 //! [`ActionSpecDigest`]: pith_ids::ActionSpecDigest
 
 use crate::action::{
-    ActionInput, ActionOutput, ActionSpec, EnvironmentVariable, NetworkPolicy, PlatformRequirement,
+    ActionInput, ActionOutput, ActionProgram, ActionSpec, EnvironmentVariable, NetworkPolicy,
+    PlatformRequirement,
 };
 use crate::codec::{
     CanonicalDecodeError, CanonicalReader, encode_capabilities, encode_content, encode_sequence,
     encode_str, output_kind_tag, read_capabilities, read_content, read_output_kind,
 };
 
-const ENCODING_VERSION: u8 = 1;
+/// Version 2 carries the program as a tagged sum so a contract can name content
+/// the graph produced as well as a host path (decision 0036). The storage format
+/// is versioned independently of the digest manifest for this reason (0024).
+const ENCODING_VERSION: u8 = 2;
+
+const TAG_PROGRAM_HOST_PATH: u8 = 0;
+const TAG_PROGRAM_CONTENT: u8 = 1;
 
 const TAG_PLATFORM_ANY: u8 = 0;
 const TAG_PLATFORM_EXACT: u8 = 1;
@@ -30,7 +37,16 @@ impl ActionSpec {
     #[must_use]
     pub fn encode_stored(&self) -> Vec<u8> {
         let mut encoded = vec![ENCODING_VERSION];
-        encode_str(&mut encoded, &self.executable);
+        match &self.executable {
+            ActionProgram::HostPath(path) => {
+                encoded.push(TAG_PROGRAM_HOST_PATH);
+                encode_str(&mut encoded, path);
+            }
+            ActionProgram::Content(id) => {
+                encoded.push(TAG_PROGRAM_CONTENT);
+                encoded.extend_from_slice(id.digest().as_bytes());
+            }
+        }
         encode_sequence(&mut encoded, &self.toolchain, |out, path| {
             encode_str(out, path);
         });
@@ -70,9 +86,18 @@ impl ActionSpec {
     }
 }
 
+/// Decode the tagged program a contract runs.
+fn read_program(reader: &mut CanonicalReader<'_>) -> Result<ActionProgram, CanonicalDecodeError> {
+    match reader.read_byte()? {
+        TAG_PROGRAM_HOST_PATH => Ok(ActionProgram::HostPath(reader.read_text()?.into())),
+        TAG_PROGRAM_CONTENT => Ok(ActionProgram::Content(reader.read_content_id()?)),
+        tag => Err(CanonicalDecodeError::UnknownValueTag { tag }),
+    }
+}
+
 /// Decode a contract body after its version byte has been read.
 fn read_spec(reader: &mut CanonicalReader<'_>) -> Result<ActionSpec, CanonicalDecodeError> {
-    let executable = reader.read_text()?.into();
+    let executable = read_program(reader)?;
     let toolchain = reader.read_sequence(|reader| reader.read_text().map(Box::<str>::from))?;
     let arguments = reader.read_sequence(|reader| reader.read_text().map(Box::<str>::from))?;
     let inputs = reader.read_sequence(|reader| {
@@ -167,7 +192,7 @@ mod tests {
 
     fn populated_spec() -> ActionSpec {
         ActionSpec {
-            executable: "/bin/tool".into(),
+            executable: ActionProgram::HostPath("/bin/tool".into()),
             toolchain: ["/nix/store/gcc".into(), "/nix/store/glibc".into()].into(),
             arguments: ["--flag".into(), "".into()].into(),
             inputs: [

@@ -9,8 +9,8 @@
 #![cfg(target_os = "linux")]
 
 use pith_core::{
-    ActionInput, ActionOutput, ActionSpec, Content, EnvironmentVariable, NetworkPolicy, OutputKind,
-    PlatformRequirement,
+    ActionInput, ActionOutput, ActionProgram, ActionSpec, Content, EnvironmentVariable,
+    NetworkPolicy, OutputKind, PlatformRequirement,
 };
 use pith_engine::{
     AccessVerification, ActionInvocation, Executor, MaterializedBlob, MaterializedContent,
@@ -31,7 +31,7 @@ fn shell_present() -> bool {
 /// an input and `result` declared as a blob output.
 fn invocation(script: &str, operand: &str) -> ActionInvocation {
     let spec = ActionSpec {
-        executable: "/bin/sh".into(),
+        executable: ActionProgram::HostPath("/bin/sh".into()),
         toolchain: support::closure_for(&["/bin/sh", "wc", "tr"]),
         arguments: ["-c".into(), script.into()].into(),
         inputs: [ActionInput {
@@ -55,6 +55,7 @@ fn invocation(script: &str, operand: &str) -> ActionInvocation {
     };
     ActionInvocation {
         spec,
+        program: None,
         inputs: [pith_engine::MaterializedActionInput {
             path: "operand".into(),
             content: MaterializedContent::Blob(MaterializedBlob {
@@ -64,6 +65,78 @@ fn invocation(script: &str, operand: &str) -> ActionInvocation {
         }]
         .into(),
     }
+}
+
+/// Turn `invocation` into one whose program is content the engine owns rather
+/// than a host path (decision 0036): the same script, handed over as bytes.
+///
+/// A `#!` script is the smallest program that can be written as a literal here.
+/// The kernel execs the staged file and then the interpreter it names, which is
+/// `/bin/sh` from the declared closure, so the exec reaches the same shell by a
+/// different route.
+fn as_content_program(mut invocation: ActionInvocation, script: &str) -> ActionInvocation {
+    let program = format!("#!/bin/sh\n{script}\n")
+        .into_bytes()
+        .into_boxed_slice();
+    let id = ContentId::of_blob(&program);
+    invocation.spec.executable = ActionProgram::Content(id);
+    invocation.spec.arguments = Box::new([]);
+    invocation.program = Some(MaterializedBlob { id, bytes: program });
+    invocation
+}
+
+#[tokio::test]
+async fn runs_a_program_the_graph_produced() {
+    let executor = LocalExecutor::new();
+    if !shell_present() {
+        eprintln!("skipping: /bin/sh is not readable");
+        return;
+    }
+    // Nothing on the host has made these bytes runnable, so the executor has to
+    // stage them and set the executable bit for the exec to reach them at all.
+    let script = "wc -c < operand | tr -d ' ' > result";
+    let invocation = as_content_program(invocation(script, "hello"), script);
+    let captured = executor
+        .execute(&invocation)
+        .await
+        .expect("a content program runs");
+    let output = captured.report.outputs.first().expect("one output");
+    match &output.content {
+        pith_engine::CapturedOutputContent::Blob(bytes) => {
+            let text = std::str::from_utf8(bytes).expect("utf-8 output");
+            assert_eq!(text.trim(), "5");
+        }
+        other => unreachable!("expected a blob output, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_content_program_the_engine_did_not_materialize_is_refused() {
+    let executor = LocalExecutor::new();
+    if !shell_present() {
+        eprintln!("skipping: /bin/sh is not readable");
+        return;
+    }
+    // The executor never reads the content store (decision 0028), so bytes it
+    // was not handed are bytes it cannot run. Failing loudly beats execing
+    // whatever the contract's other fields happen to name.
+    let mut invocation = as_content_program(invocation("true > result", "x"), "true > result");
+    invocation.program = None;
+    let error = executor
+        .execute(&invocation)
+        .await
+        .expect_err("a contract naming content with no bytes is refused");
+    let message = error
+        .iter()
+        .next()
+        .expect("one diagnostic")
+        .message
+        .0
+        .as_ref();
+    assert!(
+        message.contains("materialized none"),
+        "the error should say the program was never materialized, got: {message}"
+    );
 }
 
 #[tokio::test]

@@ -7,10 +7,12 @@
 //! already rejected absolute paths, `..`, trailing slashes, and overlapping
 //! input/output pairs (see `pith_core::ActionSpec::validate`).
 //!
-//! The executable is a host path the executor `execve`s directly (decision
-//! 0030); it is not staged here. Only declared source inputs are laid out under
-//! the working directory, which is one of two directories in the scratch root:
-//! `work` holds them, `tmp` holds whatever the child writes as a temporary.
+//! A host-path program is `execve`d where it lies and is not staged (decision
+//! 0030). A content program is staged, as `program` in the scratch root beside
+//! the working and temporary directories, so it cannot collide with a declared
+//! path and cannot be mistaken for a declared output (decision 0036). Declared
+//! source inputs are laid out under the working directory: of the scratch root's
+//! three entries, `work` holds them and `tmp` holds the child's temporaries.
 
 use std::path::{Path, PathBuf};
 
@@ -36,8 +38,9 @@ pub(super) struct StagedAction {
     /// so a tool's temporaries can never collide with a declared path or be
     /// mistaken for a declared output.
     pub(super) temp_dir: PathBuf,
-    /// The absolute host path the executor `execve`s. Carried from
-    /// `spec.executable` so the process driver does not re-parse the spec.
+    /// The absolute host path the executor `execve`s: `spec.executable` itself
+    /// for a host-path program, or where the content program was staged. Either
+    /// way the process driver does not re-parse the spec.
     pub(super) executable: Box<str>,
 }
 
@@ -59,13 +62,40 @@ pub(super) async fn stage(invocation: &ActionInvocation, root: &Path) -> StageRe
         .map_err(|error| io_diag("temporary directory", error))?;
 
     stage_inputs(invocation, &working_dir).await?;
+    let executable = stage_program(invocation, root).await?;
 
     Ok(StagedAction {
         scratch_root: root.to_path_buf(),
         working_dir,
         temp_dir,
-        executable: invocation.spec.executable.clone(),
+        executable,
     })
+}
+
+/// Resolve the program to a path the driver can `execve`. A host path is used
+/// as declared; a content program is written into the scratch root with its
+/// executable bit set, since a program the graph produced arrives as bytes and
+/// nothing on the host has made it runnable yet.
+async fn stage_program(invocation: &ActionInvocation, root: &Path) -> StageResult<Box<str>> {
+    match (invocation.spec.executable.host_path(), &invocation.program) {
+        (Some(path), _) => Ok(path.into()),
+        (None, Some(blob)) => {
+            let staged = root.join("program");
+            fs::write(&staged, &blob.bytes)
+                .await
+                .map_err(|error| io_diag("program", error))?;
+            set_executable_bit(&staged)?;
+            match staged.to_str() {
+                Some(path) => Ok(path.into()),
+                None => Err(executor_diag(
+                    "the staged program path is not valid UTF-8".to_string(),
+                )),
+            }
+        }
+        (None, None) => Err(executor_diag(
+            "the contract named a content program but the engine materialized none".to_string(),
+        )),
+    }
 }
 
 /// Lay out each declared input at its declared relative path under the working

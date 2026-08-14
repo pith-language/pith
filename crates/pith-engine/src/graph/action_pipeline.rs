@@ -388,9 +388,19 @@ impl Engine {
                 content,
             });
         }
+        let program = match spec.executable.content() {
+            Some(id) => {
+                let MaterializedContent::Blob(blob) = self.materialize_blob(id)? else {
+                    return Err(internal_diag(InternalInvariant::TreeFileMaterializedAsTree));
+                };
+                Some(blob)
+            }
+            None => None,
+        };
         Ok(ActionInvocation {
             spec: spec.clone(),
             inputs: inputs.into_boxed_slice(),
+            program,
         })
     }
 

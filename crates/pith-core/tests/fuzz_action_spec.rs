@@ -14,8 +14,8 @@
 //! by construction; a guard test fails the suite if that ever stops holding.
 
 use pith_core::{
-    ActionInput, ActionOutput, ActionSpec, CapabilityRequirement, Content, EnvironmentVariable,
-    NetworkPolicy, OutputKind, PlatformRequirement,
+    ActionInput, ActionOutput, ActionProgram, ActionSpec, CapabilityRequirement, Content,
+    EnvironmentVariable, NetworkPolicy, OutputKind, PlatformRequirement,
 };
 use pith_ids::ContentId;
 use proptest::prelude::*;
@@ -183,11 +183,13 @@ fn build_spec(
         .collect();
 
     ActionSpec {
-        executable: EXECUTABLES
-            .get(executable_seed as usize)
-            .copied()
-            .unwrap_or(EXECUTABLES.first().copied().unwrap())
-            .into(),
+        executable: ActionProgram::HostPath(
+            EXECUTABLES
+                .get(executable_seed as usize)
+                .copied()
+                .unwrap_or(EXECUTABLES.first().copied().unwrap())
+                .into(),
+        ),
         toolchain: Box::new([]),
         arguments: arguments.into_boxed_slice(),
         inputs: input_vec.into_boxed_slice(),

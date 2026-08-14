@@ -207,7 +207,7 @@ impl Executor for FixtureExecutor {
 
     async fn execute(&self, invocation: &ActionInvocation) -> PithResult<CapturedActionExecution> {
         let spec = &invocation.spec;
-        let content = if spec.executable.as_ref() == double_executable() {
+        let content = if spec.executable.host_path() == Some(double_executable()) {
             let Some(input) = invocation.inputs.first() else {
                 return Err(fixture_error("double action fixture requires one input"));
             };
@@ -630,7 +630,7 @@ fn action_dependency_driven_through_run() {
             [Value::Int(21)],
         ))
         .unwrap();
-    assert_eq!(plan.spec.executable.as_ref(), double_executable());
+    assert_eq!(plan.spec.executable.host_path(), Some(double_executable()));
     assert_eq!(plan.spec_digest, plan.spec.digest().unwrap());
     assert_eq!(
         plan.spec.capabilities.as_ref(),
@@ -672,7 +672,10 @@ fn action_dependency_driven_through_run() {
         .and_then(|node| node.action.as_ref())
         .unwrap();
     assert_eq!(action.spec_digest, action.spec.digest().unwrap());
-    assert_eq!(action.spec.executable.as_ref(), double_executable());
+    assert_eq!(
+        action.spec.executable.host_path(),
+        Some(double_executable())
+    );
     assert_eq!(
         action.authorization,
         ActionAuthorization::Allowed {

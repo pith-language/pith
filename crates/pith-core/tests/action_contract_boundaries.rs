@@ -6,14 +6,14 @@
 //! fields whose order has no meaning.
 
 use pith_core::{
-    ActionInput, ActionOutput, ActionSpec, CapabilityRequirement, Content, EnvironmentVariable,
-    NetworkPolicy, OutputKind, PlatformRequirement,
+    ActionInput, ActionOutput, ActionProgram, ActionSpec, CapabilityRequirement, Content,
+    EnvironmentVariable, NetworkPolicy, OutputKind, PlatformRequirement,
 };
 use pith_ids::ContentId;
 
 fn valid_spec() -> ActionSpec {
     ActionSpec {
-        executable: "/bin/tool".into(),
+        executable: ActionProgram::HostPath("/bin/tool".into()),
         toolchain: Box::new([]),
         arguments: ["--mode".into(), "release".into()].into(),
         inputs: [
