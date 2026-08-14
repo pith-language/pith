@@ -55,7 +55,7 @@ milestone M-1 used decisions 0015 and 0019 as prototype hypotheses and is comple
 - is there one generic constraint representation with multiple solvers, or several domain-specific models with shared evidence?
 - how are preferences separated from hard requirements?
 - what makes a resolution explanation useful for versions, toolchains, and machine placement?
-- how are locks represented when the valid result depends on several target platforms?
+- how are locks represented when the valid result depends on several target platforms? ([0039](../decisions/0039-package-identity.md) fixes the entry's identity half: a package version bound to the content identity of its source, with origin as evidence and per-platform realizations derived rather than locked. whether a lock should ever pin realizations is left here, and the constraint and solver questions above are untouched)
 
 ## actions and effects
 
@@ -75,7 +75,7 @@ milestone M-1 used decisions 0015 and 0019 as prototype hypotheses and is comple
 
 ## identity and state
 
-- what gives a semantic object its identity when files move or modules are refactored? (decision 0013 introduces managed-object identity for the deployment case; source-level semantic identity is open)
+- what gives a semantic object its identity when files move or modules are refactored? (decision 0013 introduces managed-object identity for the deployment case; [0039](../decisions/0039-package-identity.md) proposes the source-level answer for packages: an author-declared name in a domain, not a location or a digest. the general question for other declarations stays open)
 - when is an external object adopted, replaced, or treated as unrelated? (decision 0013)
 - where does the binding between semantic and external identity live? (decision 0013)
 - how are ownership transfers made safe? (decision 0013 names the primitive; transfer safety is open)
