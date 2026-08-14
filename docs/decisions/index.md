@@ -64,6 +64,7 @@ when an accepted decision changes, a new record supersedes it. the old record st
 - [0035: a link is over a list of objects](0035-link-over-a-list-of-objects.md)
 - [0036: a program the graph produced enters an action as content](0036-produced-program-as-content.md)
 - [0037: a contract declares whether an exit status is a failure or a result](0037-exit-status-as-a-declared-outcome.md)
+- [0038: rule bodies are data in one kernel-facing core ir, with host rules as a permanent declared tier](0038-represented-rule-bodies.md)
 
 note: 0013 amends 0005 to add a fifth identity type. 0005 stands; the amendment is recorded in 0013.
 
@@ -96,3 +97,5 @@ note: 0035 closes the fixed-arity-two item the link rule's doc comment carried s
 note: 0036 amends 0030 by covering the case 0030's argument does not reach. 0030 stands: a toolchain is not one file, so it enters a contract as a host path and a declared closure. a build product is one file the engine owns, and 0005's separation of content identity from external identity is what makes that a typed sum rather than a path whose meaning depends on its first character.
 
 note: 0037 extends the contract 0003 makes visible to cover how an action ends. it exists because 0032 bars the wrapper that would otherwise answer the question: an action is one invocation of one tool, so what a nonzero exit means has to be declared rather than arranged around.
+
+note: 0038 names the thing the design overview and 0010 call the "typed semantic representation" and that nothing had settled: one elaborated, canonicalizable core ir in which a rule body is data — its yield points are the `PureStep` protocol made explicit, and its suspension is a re-enterable (body, control point, environment) state rather than a host closure. host rules stay as a declared tier with 0023's conservative revisions; represented rules derive their revisions from a digest of the body. it is the mechanism 0033's unresolved section points at: a represented `plan()` is a kernel evaluation with no ambient access, so the honesty 0033 trusts becomes structural. it sits behind the same gate as surface syntax, the 0026 calculus landing, and not behind surface syntax itself.
