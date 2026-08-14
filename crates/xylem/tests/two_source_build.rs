@@ -52,6 +52,12 @@ const HEADER_PATH: &str = "answer.h";
 const UNUSED_PATH: &str = "unused.h";
 const UNUSED: &[u8] = b"#define UNUSED 0\n";
 
+/// A test program reporting success the way a test does: exit zero.
+const SOURCE_TEST_PASSING: &[u8] = b"int main(void) { return 0; }\n";
+/// A test program reporting a failure: a nonzero exit, which under
+/// `ExitStatusContract::Reported` is a verdict rather than a broken action.
+const SOURCE_TEST_FAILING: &[u8] = b"int main(void) { return 3; }\n";
+
 const ELF_MAGIC: &[u8] = b"\x7fELF";
 /// `main` returns `a() + b()` = `ANSWER + (ANSWER + 1)` = `81`, which the shell
 /// reports as the process exit code.
@@ -621,6 +627,100 @@ fn an_undeclared_header_fails_rather_than_reading_the_host() {
 /// target of a build sits above an action, so before the consumer of an action
 /// could be reused this was the whole pure half of the graph re-running on every
 /// build. Nothing new is computed and no action is planned.
+/// Build `source` into an executable and return its content identity.
+fn built_executable(engine: &mut Engine, source: &[u8], what: &str) -> ContentId {
+    let id = store_blob(engine, source, what);
+    blob_of(&run_build(engine, &build_request(&[id])).value)
+}
+
+#[test]
+fn a_passing_test_reports_a_passing_verdict() {
+    let Ok(toolchain) = Toolchain::discover("cc") else {
+        return;
+    };
+    let root = temp_root();
+    let (mut engine, toolchain_value) = {
+        let mut engine = match FilesystemContentStore::open(root.path()) {
+            Ok(store) => Engine::with_content_store(store),
+            Err(error) => unreachable!("the filesystem store failed to open: {error:?}"),
+        };
+        let universe = header_universe(&mut engine, false);
+        build_engine(root.path(), &toolchain, universe)
+    };
+    let executable = built_executable(&mut engine, SOURCE_TEST_PASSING, "passing.c");
+
+    // The program under test is the action's program, staged from the store and
+    // run confined (decisions 0036, 0028), rather than written to a file by the
+    // test and spawned outside the graph.
+    let verdict = run_build(
+        &mut engine,
+        &types::test_request(toolchain_value, executable),
+    );
+
+    assert_eq!(verdict.value, types::test_report(true));
+}
+
+#[test]
+fn a_failing_test_is_a_verdict_rather_than_a_failed_build() {
+    let Ok(toolchain) = Toolchain::discover("cc") else {
+        return;
+    };
+    let root = temp_root();
+    let (mut engine, toolchain_value) = {
+        let mut engine = match FilesystemContentStore::open(root.path()) {
+            Ok(store) => Engine::with_content_store(store),
+            Err(error) => unreachable!("the filesystem store failed to open: {error:?}"),
+        };
+        let universe = header_universe(&mut engine, false);
+        build_engine(root.path(), &toolchain, universe)
+    };
+    let executable = built_executable(&mut engine, SOURCE_TEST_FAILING, "failing.c");
+
+    // `run_build` fails the test on a failed run, so reaching an assertion at
+    // all is half the claim: the nonzero exit did not fail the action.
+    let verdict = run_build(
+        &mut engine,
+        &types::test_request(toolchain_value, executable),
+    );
+
+    assert_eq!(verdict.value, types::test_report(false));
+}
+
+#[test]
+fn an_unchanged_failing_test_is_served_rather_than_re_run() {
+    let Ok(toolchain) = Toolchain::discover("cc") else {
+        return;
+    };
+    let root = temp_root();
+    let (mut engine, toolchain_value) = {
+        let mut engine = match FilesystemContentStore::open(root.path()) {
+            Ok(store) => Engine::with_content_store(store),
+            Err(error) => unreachable!("the filesystem store failed to open: {error:?}"),
+        };
+        let universe = header_universe(&mut engine, false);
+        build_engine(root.path(), &toolchain, universe)
+    };
+    let executable = built_executable(&mut engine, SOURCE_TEST_FAILING, "failing.c");
+    let request = types::test_request(toolchain_value, executable);
+
+    let first = run_build(&mut engine, &request);
+    let after_first = action_computations(&engine);
+    let second = run_build(&mut engine, &request);
+
+    // A failing test that nothing has changed is the case a build most wants to
+    // be cheap, and it is the one a failed action could never give: a failed
+    // computation is not in the reusable index.
+    assert_eq!(first.source, EvaluationSource::Computed);
+    assert_eq!(second.source, EvaluationSource::Reused);
+    assert_eq!(first.value, second.value);
+    assert_eq!(second.value, types::test_report(false));
+    assert_eq!(
+        action_computations(&engine),
+        after_first,
+        "a reused verdict plans no action"
+    );
+}
+
 #[test]
 fn a_second_build_of_unchanged_sources_reuses_its_root() {
     let Ok(toolchain) = Toolchain::discover("cc") else {

@@ -21,5 +21,6 @@ pub mod types;
 pub use build::BuildEngine;
 pub use rules::{
     CompileAction, CompileRule, HeaderDiscoveryAction, HeaderUniverse, LinkAction, LinkRule,
+    TestAction, TestRule,
 };
 pub use toolchain::{DiscoveryError, Toolchain};

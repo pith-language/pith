@@ -9,6 +9,7 @@ use pith_engine::Engine;
 
 use crate::rules::{
     CompileAction, CompileRule, HeaderDiscoveryAction, HeaderUniverse, LinkAction, LinkRule,
+    TestAction, TestRule,
 };
 use crate::toolchain::Toolchain;
 
@@ -25,11 +26,14 @@ impl BuildEngine for Engine {
     fn register_xylem(&mut self, toolchain: Toolchain, universe: HeaderUniverse) {
         let discovery = HeaderDiscoveryAction::new(toolchain.clone(), universe.clone());
         let compile = CompileAction::new(toolchain.clone(), universe);
-        let link = LinkAction::new(toolchain);
+        let link = LinkAction::new(toolchain.clone());
+        let test = TestAction::new(toolchain);
         self.register_action_rule(discovery.rule(), discovery);
         self.register_action_rule(compile.rule(), compile);
         self.register_action_rule(link.rule(), link);
+        self.register_action_rule(test.rule(), test);
         self.register_rule(CompileRule::rule(), CompileRule);
         self.register_rule(LinkRule::rule(), LinkRule);
+        self.register_rule(TestRule::rule(), TestRule);
     }
 }

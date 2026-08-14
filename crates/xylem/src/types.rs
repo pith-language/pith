@@ -35,6 +35,16 @@ pub const EXECUTABLE: &str = "xylem.Executable";
 /// header dependencies.
 pub const DEPFILE: &str = "xylem.Depfile";
 
+/// The verdict a test run produced.
+///
+/// Nominal over `Bool`, which is the whole of what a build asks a test. A report
+/// carrying the exit status, the captured output, and a per-assertion breakdown
+/// wants a record constructor, and 0026's calculus has none yet; the rule that
+/// produces this reads the status and decides, so the distinction between an
+/// exit code and a signal is made where the information is rather than carried
+/// in a shape the calculus cannot check.
+pub const TEST_REPORT: &str = "xylem.TestReport";
+
 /// A toolchain value carrying `driver` as its identity. The full closure lives
 /// on the discovered [`crate::Toolchain`] struct the action rule holds; this
 /// value is what the rule graph sees.
@@ -67,6 +77,15 @@ pub fn executable(id: ContentId) -> Value {
     Value::Nominal {
         name: EXECUTABLE.into(),
         representation: Box::new(Value::Blob(id)),
+    }
+}
+
+/// A test verdict value. `true` is the program reporting success.
+#[must_use]
+pub fn test_report(passed: bool) -> Value {
+    Value::Nominal {
+        name: TEST_REPORT.into(),
+        representation: Box::new(Value::Bool(passed)),
     }
 }
 
@@ -182,6 +201,38 @@ pub fn link_interface() -> Interface {
             name: EXECUTABLE.into(),
         },
     }
+}
+
+/// `(Toolchain, Executable) -> TestReport`: run a built executable and read its
+/// verdict. The toolchain is an input because the program needs its loader and
+/// libc to run at all, and because a verdict from one toolchain's build does not
+/// answer for another's.
+#[must_use]
+pub fn test_interface() -> Interface {
+    Interface {
+        inputs: Box::new([
+            Type::Nominal {
+                name: TOOLCHAIN.into(),
+            },
+            Type::Nominal {
+                name: EXECUTABLE.into(),
+            },
+        ]),
+        output: Type::Nominal {
+            name: TEST_REPORT.into(),
+        },
+    }
+}
+
+/// A pure request to run `executable` as a test under `toolchain_value`.
+#[must_use]
+pub fn test_request(toolchain_value: Value, executable: ContentId) -> Request<Pure> {
+    Request::<Pure>::new(
+        "test-entry",
+        test_interface(),
+        [toolchain_value, self::executable(executable)],
+        Span::none(),
+    )
 }
 
 /// A pure request to compile `source` under `toolchain_value`, discovering its
