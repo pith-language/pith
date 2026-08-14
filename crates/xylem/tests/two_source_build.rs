@@ -11,8 +11,10 @@
 //! source produce byte-identical objects (0014 determinism), and the linked
 //! executable runs and exits with the value its sources compute.
 //!
-//! It skips when the host has no nix-store C compiler. The subject is xylem's
-//! integration with the kernel, not the availability of a toolchain.
+//! It skips when the host has no nix-store C compiler, and only then: a
+//! driver that is present but fails discovery fails the test rather than
+//! skipping it green. The subject is xylem's integration with the kernel, not
+//! the availability of a toolchain.
 
 #![cfg(target_os = "linux")]
 
@@ -286,6 +288,22 @@ fn blob_of(value: &Value) -> ContentId {
     }
 }
 
+/// Discover a toolchain, skipping only on genuine absence. A driver that is
+/// present but undiscoverable fails the test rather than skipping it green:
+/// a skip and a pass must not be the same color, because nearly every claim
+/// M-3 makes rests on these tests actually running. A skip prints, so a run
+/// that tested nothing is visible in the output.
+fn toolchain_or_skip(driver: &str) -> Option<Toolchain> {
+    match Toolchain::discover(driver) {
+        Ok(toolchain) => Some(toolchain),
+        Err(DiscoveryError::NotFound) => {
+            eprintln!("skipping: no {driver} driver on this host");
+            None
+        }
+        Err(error) => unreachable!("{driver} is present but discovery failed: {error}"),
+    }
+}
+
 fn temp_root() -> tempfile::TempDir {
     match tempfile::tempdir() {
         Ok(root) => root,
@@ -318,7 +336,7 @@ fn store_blob(engine: &mut Engine, bytes: &[u8], what: &str) -> ContentId {
 
 #[test]
 fn a_two_source_build_produces_an_executable() {
-    let Ok(toolchain) = Toolchain::discover("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc") else {
         return;
     };
     let root = temp_root();
@@ -357,7 +375,7 @@ fn a_two_source_build_produces_an_executable() {
 /// produced a program that works, not just bytes with the right magic.
 #[test]
 fn the_built_executable_runs_and_exits_with_the_expected_code() {
-    let Ok(toolchain) = Toolchain::discover("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc") else {
         return;
     };
     let root = temp_root();
@@ -405,7 +423,7 @@ fn the_built_executable_runs_and_exits_with_the_expected_code() {
 /// cold build runs nine actions: four discoveries, four compiles, one link.
 #[test]
 fn a_three_source_build_links_a_list_of_objects() {
-    let Ok(toolchain) = Toolchain::discover("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc") else {
         return;
     };
     let root = temp_root();
@@ -472,7 +490,7 @@ fn a_three_source_build_links_a_list_of_objects() {
 /// `a`'s discovery, `a`'s compile, and the link — rather than five.
 #[test]
 fn touching_one_source_recompiles_only_its_object() {
-    let Ok(toolchain) = Toolchain::discover("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc") else {
         return;
     };
     let root = temp_root();
@@ -515,7 +533,7 @@ fn touching_one_source_recompiles_only_its_object() {
 /// answers the touched header.
 #[test]
 fn a_rebuild_under_an_edited_header_recompiles_both_objects() {
-    let Ok(toolchain) = Toolchain::discover("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc") else {
         return;
     };
     let root = temp_root();
@@ -606,7 +624,7 @@ fn a_rebuild_under_an_edited_header_recompiles_both_objects() {
 /// declared set can be read instead.
 #[test]
 fn an_undeclared_header_fails_rather_than_reading_the_host() {
-    let Ok(toolchain) = Toolchain::discover("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc") else {
         return;
     };
     let root = temp_root();
@@ -676,16 +694,11 @@ fn two_toolchain_engine(
 
 #[test]
 fn two_toolchains_compile_the_same_source_without_sharing_a_cache_entry() {
-    let Ok(gcc) = Toolchain::discover("gcc") else {
+    let Some(gcc) = toolchain_or_skip("gcc") else {
         return;
     };
-    let clang = match Toolchain::discover("clang") {
-        Ok(clang) => clang,
-        // A host without clang has nothing to compare and skips. A clang that is
-        // present and undiscoverable is the gcc-shaped assumption this test
-        // exists to catch, so it fails.
-        Err(DiscoveryError::NotFound) => return,
-        Err(error) => unreachable!("clang is present but discovery failed: {error:?}"),
+    let Some(clang) = toolchain_or_skip("clang") else {
+        return;
     };
     // Without this the test could be one compiler twice and still pass.
     assert_ne!(
@@ -733,7 +746,7 @@ fn two_toolchains_compile_the_same_source_without_sharing_a_cache_entry() {
 
 #[test]
 fn a_toolchain_the_build_was_not_registered_with_is_refused() {
-    let Ok(gcc) = Toolchain::discover("gcc") else {
+    let Some(gcc) = toolchain_or_skip("gcc") else {
         return;
     };
     let root = temp_root();
@@ -766,7 +779,7 @@ fn a_toolchain_the_build_was_not_registered_with_is_refused() {
 
 #[test]
 fn a_generated_source_is_compiled_and_linked_through_the_graph() {
-    let Ok(toolchain) = Toolchain::discover("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc") else {
         return;
     };
     let root = temp_root();
@@ -801,7 +814,7 @@ fn a_generated_source_is_compiled_and_linked_through_the_graph() {
 
 #[test]
 fn touching_the_generator_regenerates_the_source_and_relinks() {
-    let Ok(toolchain) = Toolchain::discover("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc") else {
         return;
     };
     let root = temp_root();
@@ -856,7 +869,7 @@ fn touching_the_generator_regenerates_the_source_and_relinks() {
 
 #[test]
 fn a_passing_test_reports_a_passing_verdict() {
-    let Ok(toolchain) = Toolchain::discover("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc") else {
         return;
     };
     let root = temp_root();
@@ -882,7 +895,7 @@ fn a_passing_test_reports_a_passing_verdict() {
 
 #[test]
 fn a_failing_test_is_a_verdict_rather_than_a_failed_build() {
-    let Ok(toolchain) = Toolchain::discover("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc") else {
         return;
     };
     let root = temp_root();
@@ -908,7 +921,7 @@ fn a_failing_test_is_a_verdict_rather_than_a_failed_build() {
 
 #[test]
 fn an_unchanged_failing_test_is_served_rather_than_re_run() {
-    let Ok(toolchain) = Toolchain::discover("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc") else {
         return;
     };
     let root = temp_root();
@@ -942,7 +955,7 @@ fn an_unchanged_failing_test_is_served_rather_than_re_run() {
 
 #[test]
 fn a_second_build_of_unchanged_sources_reuses_its_root() {
-    let Ok(toolchain) = Toolchain::discover("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc") else {
         return;
     };
     let root = temp_root();
@@ -979,7 +992,7 @@ fn a_second_build_of_unchanged_sources_reuses_its_root() {
 /// everything but name.
 #[test]
 fn a_fresh_engine_over_the_same_state_hydrates_the_build() {
-    let Ok(toolchain) = Toolchain::discover("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc") else {
         return;
     };
     let root = temp_root();
@@ -1021,7 +1034,7 @@ fn a_fresh_engine_over_the_same_state_hydrates_the_build() {
 /// both compiles actually run.
 #[test]
 fn two_cold_compiles_of_the_same_source_are_identical() {
-    let Ok(toolchain) = Toolchain::discover("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc") else {
         return;
     };
     let root = temp_root();
