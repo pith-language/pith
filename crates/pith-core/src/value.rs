@@ -810,6 +810,88 @@ mod tests {
     }
 
     #[test]
+    fn a_record_inherits_the_asymmetry_of_its_fields() {
+        // The agreement test above pairs records and sums with
+        // fully-determined payloads — Text, Int — which is the one case
+        // where agreement holds. Nested ambiguity breaks it, so the matrix's
+        // claim cannot include these values. What holds everywhere is
+        // reflexivity: is_type accepts each value against its own
+        // value_type.
+        let declared_sum = Type::sum(
+            "Source",
+            [
+                SumConstructor {
+                    name: "Git".into(),
+                    payload: Some(Type::Text),
+                },
+                SumConstructor {
+                    name: "Path".into(),
+                    payload: None,
+                },
+            ],
+        )
+        .unwrap();
+        let empty_list_field = Value::record([RecordField {
+            name: "f".into(),
+            payload: Value::List(vec![].into_boxed_slice()),
+        }])
+        .unwrap();
+        let sum_field = Value::record([RecordField {
+            name: "s".into(),
+            payload: Value::Sum {
+                type_name: "Source".into(),
+                constructor: "Git".into(),
+                payload: Some(Box::new(Value::Text("main".into()))),
+            },
+        }])
+        .unwrap();
+
+        // The empty-list field: the value inhabits field types its
+        // best-effort type does not name.
+        let best_effort_list = empty_list_field.value_type();
+        assert_eq!(
+            best_effort_list,
+            Type::record([RecordField {
+                name: "f".into(),
+                payload: Type::List(Box::new(Type::Unit)),
+            }])
+            .unwrap()
+        );
+        assert!(
+            empty_list_field.is_type(
+                &Type::record([RecordField {
+                    name: "f".into(),
+                    payload: Type::List(Box::new(Type::Text)),
+                }])
+                .unwrap()
+            )
+        );
+        assert!(
+            empty_list_field.is_type(
+                &Type::record([RecordField {
+                    name: "f".into(),
+                    payload: Type::List(Box::new(Type::Int)),
+                }])
+                .unwrap()
+            )
+        );
+
+        // The sum field: the value inhabits the declared sum its best-effort
+        // type collapses to a singleton of.
+        let best_effort_sum = sum_field.value_type();
+        let declared_field = Type::record([RecordField {
+            name: "s".into(),
+            payload: declared_sum,
+        }])
+        .unwrap();
+        assert_ne!(best_effort_sum, declared_field);
+        assert!(sum_field.is_type(&declared_field));
+
+        assert!(empty_list_field.is_type(&best_effort_list));
+        assert!(sum_field.is_type(&best_effort_sum));
+    }
+
+    #[test]
     fn a_sum_value_inhabits_the_declared_sums_that_contain_its_constructor() {
         // A sum value knows its own constructor and payload but not its
         // siblings, so inhabitation is membership: the declared name must
