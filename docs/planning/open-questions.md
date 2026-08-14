@@ -52,9 +52,9 @@ milestone M-1 used decisions 0015 and 0019 as prototype hypotheses and is comple
 
 ## constraints
 
-- is there one generic constraint representation with multiple solvers, or several domain-specific models with shared evidence?
-- how are preferences separated from hard requirements?
-- what makes a resolution explanation useful for versions, toolchains, and machine placement?
+- is there one generic constraint representation with multiple solvers, or several domain-specific models with shared evidence? ([0040](../decisions/0040-declared-constraints-and-resolution.md) proposes the second: constraint models are domain-declared values in the 0026 calculus, and what is shared is a protocol — a solver request names the constraint set, the candidate universe with provenance, and the preference order; an answer names the choice and a derivation. this binds M-6's placement and toolchain domains the same way: they declare their own models rather than translating into package vocabulary)
+- how are preferences separated from hard requirements? ([0040](../decisions/0040-declared-constraints-and-resolution.md): hard constraints intersect to define validity; a preference is a third input value, a lexicographic list of orderings the domain already declares — 0039's version scheme makes "newest" fact rather than policy — and an underdetermined preference refuses on 0015's terms)
+- what makes a resolution explanation useful for versions, toolchains, and machine placement? ([0040](../decisions/0040-declared-constraints-and-resolution.md): two layers — the engine's existing invalidation explanation names the input that moved, and the solver carries its own derivation as a value in the answer, held to a proof standard that separates "no solution exists" from "the search budget ran out." the exact derivation shape stays open there)
 - how are locks represented when the valid result depends on several target platforms? ([0039](../decisions/0039-package-identity.md) fixes the entry's identity half: a package version bound to the content identity of its source, with origin as evidence and per-platform realizations derived rather than locked. whether a lock should ever pin realizations is left here, and the constraint and solver questions above are untouched)
 
 ## actions and effects
@@ -84,7 +84,7 @@ milestone M-1 used decisions 0015 and 0019 as prototype hypotheses and is comple
 ## first-party domains
 
 - what is the minimal artifact interface needed by both build and deployment libraries?
-- should package resolution happen before rule evaluation, during it, or through a fixed point?
+- should package resolution happen before rule evaluation, during it, or through a fixed point? ([0040](../decisions/0040-declared-constraints-and-resolution.md) proposes during: resolution is an ordinary request against a declared interface, selected by 0015, whose solver body sits in 0038's host-rule tier. a pre-pass could not key or invalidate its result — a changed candidate universe would leave the engine serving a stale resolution with no input diff to explain it — and the graph's own propagation is the fixed point. the solver's algorithm choice stays open there, and whether several versions of one package may coexist in one realization is left to the first solver to measure)
 - what is the semantic definition of a service without importing systemd or Kubernetes assumptions?
 - how much rollout planning can be generic across machines, schedulers, and external APIs?
 - how can persistent-data migrations remain declarative without becoming too weak for real systems?
