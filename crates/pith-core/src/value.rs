@@ -811,12 +811,11 @@ mod tests {
 
     #[test]
     fn a_record_inherits_the_asymmetry_of_its_fields() {
-        // The agreement test above pairs records and sums with
-        // fully-determined payloads — Text, Int — which is the one case
-        // where agreement holds. Nested ambiguity breaks it, so the matrix's
-        // claim cannot include these values. What holds everywhere is
-        // reflexivity: is_type accepts each value against its own
-        // value_type.
+        // The agreement test's record pairing uses fully-determined payloads
+        // — Text, Int — which is the one case where agreement holds. Nested
+        // ambiguity breaks it, so the matrix's claim cannot include these
+        // values. What holds everywhere is reflexivity: is_type accepts each
+        // value against its own value_type.
         let declared_sum = Type::sum(
             "Source",
             [
@@ -889,6 +888,49 @@ mod tests {
 
         assert!(empty_list_field.is_type(&best_effort_list));
         assert!(sum_field.is_type(&best_effort_sum));
+
+        // A sum whose payload is an empty list inherits both exceptions at
+        // once: value_type names the singleton holding `List<Unit>`, while
+        // the value inhabits every declared sum carrying the constructor with
+        // a `List<Text>` or `List<Int>` payload.
+        let empty_list_payload = Value::Sum {
+            type_name: "Source".into(),
+            constructor: "Archive".into(),
+            payload: Some(Box::new(Value::List(vec![].into_boxed_slice()))),
+        };
+        let best_effort_payload = empty_list_payload.value_type();
+        assert_eq!(
+            best_effort_payload,
+            Type::sum(
+                "Source",
+                [SumConstructor {
+                    name: "Archive".into(),
+                    payload: Some(Type::List(Box::new(Type::Unit))),
+                }],
+            )
+            .unwrap()
+        );
+        for element in [Type::Text, Type::Int] {
+            assert!(
+                empty_list_payload.is_type(
+                    &Type::sum(
+                        "Source",
+                        [
+                            SumConstructor {
+                                name: "Archive".into(),
+                                payload: Some(Type::List(Box::new(element.clone()))),
+                            },
+                            SumConstructor {
+                                name: "Git".into(),
+                                payload: Some(Type::Text),
+                            },
+                        ],
+                    )
+                    .unwrap()
+                )
+            );
+        }
+        assert!(empty_list_payload.is_type(&best_effort_payload));
     }
 
     #[test]
