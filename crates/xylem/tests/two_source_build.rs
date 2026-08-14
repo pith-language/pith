@@ -683,12 +683,11 @@ fn two_toolchains_compile_the_same_source_without_sharing_a_cache_entry() {
         Ok(clang) => clang,
         // A host without clang has nothing to compare and skips. A clang that is
         // present and undiscoverable is the gcc-shaped assumption this test
-        // exists to catch, so it fails rather than skipping past it.
+        // exists to catch, so it fails.
         Err(DiscoveryError::NotFound) => return,
         Err(error) => unreachable!("clang is present but discovery failed: {error:?}"),
     };
-    // Without this the test could be one compiler twice and still pass, which is
-    // the same skip-shaped-like-a-pass trap as a missing toolchain.
+    // Without this the test could be one compiler twice and still pass.
     assert_ne!(
         gcc.driver, clang.driver,
         "the two drivers must be different programs"
@@ -712,9 +711,8 @@ fn two_toolchains_compile_the_same_source_without_sharing_a_cache_entry() {
     let gcc_again = run_build(&mut engine, &types::compile_request(gcc.value(), source));
 
     // The toolchain is a request input, so clang's compile is a different
-    // request that plans a different contract and cannot be answered from
-    // gcc's entry. Both compiles also ran through one rule registration:
-    // registering per toolchain would have collided as E-1102.
+    // request that plans a different contract and cannot be answered from gcc's
+    // entry.
     assert_eq!(under_gcc.source, EvaluationSource::Computed);
     assert_eq!(under_clang.source, EvaluationSource::Computed);
     assert!(
@@ -782,8 +780,8 @@ fn a_generated_source_is_compiled_and_linked_through_the_graph() {
     };
     let generator = built_executable(&mut engine, SOURCE_GENERATOR, "generator.c");
 
-    // The generated source is a value the graph produced, so the compile below
-    // depends on the generate action rather than on bytes the test threaded in.
+    // The generated source is a value the graph produced, so the compile
+    // depends on the generate action.
     let generated = blob_of(
         &run_build(
             &mut engine,
@@ -795,9 +793,8 @@ fn a_generated_source_is_compiled_and_linked_through_the_graph() {
     let program = blob_of(&run_build(&mut engine, &build_request(&[generated, main])).value);
 
     // The generator wrote a function returning 7, so a program that exits
-    // nonzero is one whose code came from the generate action. Running it is
-    // better evidence than inspecting its bytes: it means the generated source
-    // compiled, linked, and behaved as the generator wrote it.
+    // nonzero ran code the generate action produced: the generated source
+    // compiled, linked, and behaved as it was written.
     let verdict = run_build(&mut engine, &types::test_request(toolchain_value, program));
     assert_eq!(verdict.value, types::test_report(false));
 }
@@ -874,8 +871,7 @@ fn a_passing_test_reports_a_passing_verdict() {
     let executable = built_executable(&mut engine, SOURCE_TEST_PASSING, "passing.c");
 
     // The program under test is the action's program, staged from the store and
-    // run confined (decisions 0036, 0028), rather than written to a file by the
-    // test and spawned outside the graph.
+    // run confined (decisions 0036, 0028).
     let verdict = run_build(
         &mut engine,
         &types::test_request(toolchain_value, executable),
@@ -931,9 +927,8 @@ fn an_unchanged_failing_test_is_served_rather_than_re_run() {
     let after_first = action_computations(&engine);
     let second = run_build(&mut engine, &request);
 
-    // A failing test that nothing has changed is the case a build most wants to
-    // be cheap, and it is the one a failed action could never give: a failed
-    // computation is not in the reusable index.
+    // A failed computation is not in the reusable index, so this is the case a
+    // failed action could not have served.
     assert_eq!(first.source, EvaluationSource::Computed);
     assert_eq!(second.source, EvaluationSource::Reused);
     assert_eq!(first.value, second.value);

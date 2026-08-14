@@ -128,11 +128,9 @@ pub struct ActionExecution {
     /// [`ActionRule::complete`] can read a verdict out of it under
     /// `ExitStatusContract::Reported`.
     ///
-    /// This rides on the execution envelope rather than on [`ExecutionReport`],
-    /// which is the part that persists: `complete` runs only when an action
-    /// actually executes, and what a later run is served is the value it
-    /// derived. The status is the raw material, and the typed result is the
-    /// record.
+    /// [`ExecutionReport`] is the part that persists, and this is not on it.
+    /// `complete` runs only when an action actually executes, and a later run is
+    /// served the value it derived, so the derived value is what the graph keeps.
     pub exit: Option<ActionExit>,
 }
 

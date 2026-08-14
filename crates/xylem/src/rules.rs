@@ -608,11 +608,10 @@ impl PureRule for LinkRule {
 
 /// Runs a generator the build produced and takes the C source it wrote.
 ///
-/// The generator is told where to write rather than having a path baked into it,
-/// which is how a codegen tool takes an output: the contract names the path, the
-/// program receives it as an argument, and the captured file is the result. A
-/// generator that wrote somewhere else would produce no declared output and fail
-/// the action, which is the loud failure the alternative hides.
+/// A codegen tool takes its output path as an argument, so the contract names
+/// the path, the program receives it, and the captured file is the result. A
+/// generator that wrote somewhere else produces no declared output and fails the
+/// action, which is the failure a baked-in path would hide.
 pub struct GenerateAction {
     toolchains: Toolchains,
 }
@@ -706,15 +705,15 @@ impl PureRule for GenerateRule {
 /// Runs a built executable and reads its verdict from how it ended.
 ///
 /// The program is the executable itself, as content the graph produced
-/// (decision 0036), so the contract names the bytes under test rather than a
-/// path something else would have to write them to. The toolchain closure is
+/// (decision 0036), so the contract names the bytes under test. The toolchain
+/// closure is
 /// declared because a dynamically linked binary needs the loader it names in
 /// `PT_INTERP` and the libraries on its `RUNPATH`, and under a nix toolchain
 /// both are store paths inside that closure.
 ///
 /// The contract reports the exit status instead of failing on it (decision
-/// 0037): a test that exits nonzero has produced a finding, and a finding is a
-/// result worth recording and reusing.
+/// 0037): a test that exits nonzero has produced a finding, and the graph
+/// records and reuses findings.
 pub struct TestAction {
     toolchains: Toolchains,
 }
@@ -746,8 +745,8 @@ impl ActionRule for TestAction {
             arguments: Box::new([]),
             inputs: Box::new([]),
             // A test says what it found by how it ends. Declaring an output
-            // would mean specifying a report format the program has to write,
-            // which is a test harness rather than a program a user brought.
+            // would specify a report format the program has to write, which is a
+            // harness pith would be imposing on it.
             outputs: Box::new([]),
             environment: Box::new([]),
             platform: PlatformRequirement::Exact {
@@ -775,8 +774,7 @@ impl ActionRule for TestAction {
 }
 
 /// The pure entry a build requests to run a test, so the verdict is a pure
-/// result that reuse and hydration reach (decision 0033) rather than an action
-/// a caller has to drive itself.
+/// result that reuse and hydration reach (decision 0033).
 pub struct TestRule;
 
 impl TestRule {

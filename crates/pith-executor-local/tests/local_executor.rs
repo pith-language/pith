@@ -119,8 +119,7 @@ async fn a_content_program_the_engine_did_not_materialize_is_refused() {
         return;
     }
     // The executor never reads the content store (decision 0028), so bytes it
-    // was not handed are bytes it cannot run. Failing loudly beats execing
-    // whatever the contract's other fields happen to name.
+    // was not handed are bytes it cannot run.
     let mut invocation = as_content_program(invocation("true > result", "x"), "true > result");
     invocation.program = None;
     let error = executor

@@ -41,8 +41,7 @@ pub const DEPFILE: &str = "xylem.Depfile";
 /// carrying the exit status, the captured output, and a per-assertion breakdown
 /// wants a record constructor, and 0026's calculus has none yet; the rule that
 /// produces this reads the status and decides, so the distinction between an
-/// exit code and a signal is made where the information is rather than carried
-/// in a shape the calculus cannot check.
+/// exit code and a signal is made where the information is.
 pub const TEST_REPORT: &str = "xylem.TestReport";
 
 /// A toolchain value carrying `driver` as its identity. The full closure lives

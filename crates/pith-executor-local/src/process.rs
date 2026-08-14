@@ -295,8 +295,8 @@ async fn run_in_scratch(
 }
 
 /// How the child stopped, as an [`ActionExit`]. A status carrying neither a code
-/// nor a signal is not something this platform produces, and reporting `None`
-/// says so rather than inventing a zero.
+/// nor a signal is not something this platform produces; `None` reports that
+/// honestly, where a zero would be invented.
 fn observed_exit(status: &std::process::ExitStatus) -> Option<ActionExit> {
     use std::os::unix::process::ExitStatusExt;
 

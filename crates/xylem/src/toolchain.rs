@@ -44,8 +44,7 @@ pub struct Toolchain {
     /// `None` for a driver that has no separate compiler to find. gcc execs
     /// `cc1`; clang compiles in its own process and answers
     /// `-print-prog-name=cc1` with a bare name, which is it saying there is no
-    /// such program. Requiring one made discovery gcc-shaped, and a second
-    /// toolchain is what surfaced it.
+    /// such program to declare.
     pub program_path: Option<Box<str>>,
     /// The directory the driver came from, where `as` and `ld` live on a
     /// distribution compiler.
@@ -58,8 +57,8 @@ pub struct Toolchain {
 /// request carries the driver path, and `plan()` looks its closure up here.
 /// Holding a single toolchain per registration would mean one engine per
 /// compiler, and registering the same rule twice would give two rules one
-/// interface and collide as `E-1102` (decision 0015), so neither expresses what
-/// a toolchain being a request input is supposed to buy.
+/// interface and collide as `E-1102` (decision 0015). Neither makes a toolchain
+/// a request input in more than name.
 #[derive(Clone, Debug)]
 pub struct Toolchains {
     entries: Box<[Toolchain]>,
@@ -67,8 +66,7 @@ pub struct Toolchains {
 
 impl Toolchains {
     /// A set over `entries`. A driver appearing twice is the caller's to avoid;
-    /// resolution takes the first match, so a duplicate is shadowed rather than
-    /// ambiguous.
+    /// resolution takes the first match, so a duplicate is shadowed.
     #[must_use]
     pub fn new(entries: Box<[Toolchain]>) -> Self {
         Self { entries }

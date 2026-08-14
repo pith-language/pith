@@ -238,7 +238,7 @@ const ALLOWED_SYSCALLS: &[(libc::c_long, &str)] = allowlist![
     SYS_madvise,
     SYS_sysinfo,
     // Signals and exit. clang installs an alternate signal stack so its crash
-    // handler can run on a blown stack; gcc never asked for one.
+    // handler has somewhere to run when the stack it crashed on is gone.
     SYS_sigaltstack,
     SYS_rt_sigaction,
     SYS_rt_sigprocmask,

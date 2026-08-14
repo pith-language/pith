@@ -109,7 +109,7 @@ pub enum NetworkPolicy {
 /// How an action's exit status is read.
 ///
 /// A compiler that exits nonzero wrote no object, so the action failed and there
-/// is nothing worth keeping. A test that exits nonzero produced a verdict, and a
+/// is nothing to capture. A test that exits nonzero produced a verdict, and a
 /// verdict is a result. Nothing about the two invocations tells them apart from
 /// outside, and decision 0032 bars wrapping the program in something that could
 /// report the difference, so the contract states it. Decision 0003 puts what an
@@ -142,8 +142,8 @@ pub enum ActionProgram {
     /// file, so naming its bytes would be a claim the contract cannot keep.
     HostPath(Box<str>),
     /// Content the graph produced, which the executor stages inside the scratch
-    /// root and runs from there. A build product is one file, so naming its
-    /// bytes is what is true of it. The identity reaches the contract digest, so
+    /// root and runs from there. A build product is one file, and its bytes are
+    /// what a contract can name. The identity reaches the contract digest, so
     /// an action that runs a rebuilt program is a different action, which is
     /// what 0031's request-side key needs to distinguish the two.
     Content(ContentId),
