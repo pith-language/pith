@@ -162,9 +162,11 @@ pub fn compile_interface() -> Interface {
     }
 }
 
-/// `(Toolchain, Object, Object) -> Executable`. Fixed arity two for now;
-/// linking more than two objects needs a list or tree-valued content variant
-/// (decision 0026) and is its own follow-up.
+/// `(Toolchain, List<Object>) -> Executable`: the link interface over any
+/// number of objects (decision 0035). The elements keep their nominal
+/// identity, so this is `List<xylem.Object>` and not `List<Blob>` — the
+/// distinction that keeps rule selection unambiguous now that the input is a
+/// list.
 #[must_use]
 pub fn link_interface() -> Interface {
     Interface {
@@ -172,12 +174,9 @@ pub fn link_interface() -> Interface {
             Type::Nominal {
                 name: TOOLCHAIN.into(),
             },
-            Type::Nominal {
+            Type::List(Box::new(Type::Nominal {
                 name: OBJECT.into(),
-            },
-            Type::Nominal {
-                name: OBJECT.into(),
-            },
+            })),
         ]),
         output: Type::Nominal {
             name: EXECUTABLE.into(),
@@ -197,13 +196,20 @@ pub fn compile_request(toolchain_value: Value, source: ContentId) -> Request<Pur
     )
 }
 
-/// A pure request to link `first` and `second` under `toolchain_value`.
+/// A pure request to link `objects`, in the order given, under
+/// `toolchain_value`.
 #[must_use]
-pub fn link_request(toolchain_value: Value, first: ContentId, second: ContentId) -> Request<Pure> {
+pub fn link_request<I>(toolchain_value: Value, objects: I) -> Request<Pure>
+where
+    I: IntoIterator<Item = ContentId>,
+{
     Request::<Pure>::new(
         "link-entry",
         link_interface(),
-        [toolchain_value, object(first), object(second)],
+        [
+            toolchain_value,
+            Value::List(objects.into_iter().map(object).collect()),
+        ],
         Span::none(),
     )
 }

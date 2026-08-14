@@ -35,7 +35,14 @@ use xylem::{BuildEngine, HeaderUniverse, Toolchain, types};
 const SOURCE_A: &[u8] = b"#include \"answer.h\"\nint a(void) { return ANSWER; }\n";
 const SOURCE_B: &[u8] =
     b"#include \"answer.h\"\nint b(void) { return ANSWER + 1; }\nint main(void) { return a() + b(); }\n";
+/// `b` without the `main`, for builds whose main lives in its own source.
+const SOURCE_B_NO_MAIN: &[u8] = b"#include \"answer.h\"\nint b(void) { return ANSWER + 1; }\n";
 const SOURCE_A_TOUCHED: &[u8] = b"#include \"answer.h\"\nint a(void) { return ANSWER + 2; }\n";
+/// The third source and the main that sums all three, for the variadic-link
+/// test: `a() + b() + c()` = `40 + 41 + 42` = `123`.
+const SOURCE_C: &[u8] = b"#include \"answer.h\"\nint c(void) { return ANSWER + 2; }\n";
+const SOURCE_MAIN_THREE: &[u8] =
+    b"#include \"answer.h\"\nint main(void) { return a() + b() + c(); }\n";
 /// Includes a header the universe in the undeclared-header test does not
 /// offer, so the discovery pass inside the sandbox cannot find it.
 const SOURCE_UNDECLARED: &[u8] = b"#include \"answer.h\"\n#include \"unused.h\"\n";
@@ -61,32 +68,32 @@ fn diag(message: &str) -> DiagnosticSink {
     sink
 }
 
-/// A build: compile two sources, link the objects. The sources arrive as the
-/// two request inputs (as `xylem.CSource` values); the build yields the linked
+/// A build: compile the sources, link the objects. The sources arrive as one
+/// `List<CSource>` request input in link order; the build yields the linked
 /// `xylem.Executable`.
-struct TwoSourceBuild {
+struct SourcesBuild {
     toolchain_value: Value,
 }
 
-impl PureRule for TwoSourceBuild {
+impl PureRule for SourcesBuild {
     fn start(&self, inputs: &[Value]) -> Box<dyn PureRuleFrame> {
-        let first = inputs.first().unwrap_or_else(|| {
-            unreachable!("a two-source build request always supplies two source values")
-        });
-        let second = inputs.get(1).unwrap_or_else(|| {
-            unreachable!("a two-source build request always supplies two source values")
-        });
-        Box::new(TwoSourceBuildFrame {
+        let Value::List(sources) = inputs
+            .first()
+            .unwrap_or_else(|| unreachable!("a build request always supplies a source list"))
+        else {
+            unreachable!("a build request always supplies a source list")
+        };
+        Box::new(SourcesBuildFrame {
             toolchain_value: self.toolchain_value.clone(),
-            sources: [first.clone(), second.clone()],
+            sources: sources.clone(),
             phase: BuildPhase::Compiling,
         })
     }
 }
 
-struct TwoSourceBuildFrame {
+struct SourcesBuildFrame {
     toolchain_value: Value,
-    sources: [Value; 2],
+    sources: Box<[Value]>,
     phase: BuildPhase,
 }
 
@@ -96,42 +103,36 @@ enum BuildPhase {
     Done,
 }
 
-impl PureRuleFrame for TwoSourceBuildFrame {
+impl PureRuleFrame for SourcesBuildFrame {
     fn step(&mut self, input: Option<Resumption>) -> PithResult<PureStep> {
         match self.phase {
             BuildPhase::Compiling => {
-                let [src_a, src_b] = &self.sources;
-                let compile_a = Request::new(
-                    "compile",
-                    types::compile_interface(),
-                    [self.toolchain_value.clone(), src_a.clone()],
-                    Span::none(),
-                );
-                let compile_b = Request::new(
-                    "compile",
-                    types::compile_interface(),
-                    [self.toolchain_value.clone(), src_b.clone()],
-                    Span::none(),
-                );
+                let compiles = self
+                    .sources
+                    .iter()
+                    .map(|source| {
+                        Request::new(
+                            "compile",
+                            types::compile_interface(),
+                            [self.toolchain_value.clone(), source.clone()],
+                            Span::none(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
                 self.phase = BuildPhase::Linking;
-                Ok(PureStep::NeedAll(
-                    [compile_a, compile_b].to_vec().into_boxed_slice(),
-                ))
+                Ok(PureStep::NeedAll(compiles.into_boxed_slice()))
             }
             BuildPhase::Linking => {
-                let [obj_a, obj_b] = match input {
-                    Some(Resumption::Many(values)) if values.len() == 2 => {
-                        let [first, second] = values.as_ref() else {
-                            unreachable!("len == 2 was checked")
-                        };
-                        [first.clone(), second.clone()]
+                let objects = match input {
+                    Some(Resumption::Many(values)) if values.len() == self.sources.len() => {
+                        values.clone()
                     }
-                    _ => return Err(diag("the compiles did not return two objects")),
+                    _ => return Err(diag("the compiles did not return one object per source")),
                 };
-                let link = Request::new(
+                let link = Request::<pith_core::Action>::new(
                     "link",
                     types::link_interface(),
-                    [self.toolchain_value.clone(), obj_a, obj_b],
+                    [self.toolchain_value.clone(), Value::List(objects.clone())],
                     Span::none(),
                 );
                 self.phase = BuildPhase::Done;
@@ -145,19 +146,14 @@ impl PureRuleFrame for TwoSourceBuildFrame {
     }
 }
 
-/// `(CSource, CSource) -> Executable`: the interface of the two-source build
-/// rule. Which sources a build links, and how many, is the build description,
-/// not build-library policy, so the rule lives in the test rather than in xylem.
+/// `List<CSource> -> Executable`: the interface of the build rule. Which
+/// sources a build links, and how many, is the build description, not
+/// build-library policy, so the rule lives in the test rather than in xylem.
 fn build_interface() -> pith_core::Interface {
     pith_core::Interface {
-        inputs: Box::new([
-            pith_core::Type::Nominal {
-                name: types::C_SOURCE.into(),
-            },
-            pith_core::Type::Nominal {
-                name: types::C_SOURCE.into(),
-            },
-        ]),
+        inputs: Box::new([pith_core::Type::List(Box::new(pith_core::Type::Nominal {
+            name: types::C_SOURCE.into(),
+        }))]),
         output: pith_core::Type::Nominal {
             name: types::EXECUTABLE.into(),
         },
@@ -165,14 +161,9 @@ fn build_interface() -> pith_core::Interface {
 }
 
 fn build_rule() -> Rule<Pure> {
-    let identity = RuleIdentity::of_module_declaration("xylem-tests", "two-source-build");
+    let identity = RuleIdentity::of_module_declaration("xylem-tests", "sources-build");
     let revision = RuleRevision::of_manifest(identity, b"xylem-tests-v1");
-    Rule::<Pure>::new(
-        revision,
-        "two-source-build",
-        build_interface(),
-        Span::none(),
-    )
+    Rule::<Pure>::new(revision, "sources-build", build_interface(), Span::none())
 }
 
 fn runtime() -> TokioRuntime {
@@ -230,7 +221,7 @@ fn build_engine(root: &Path, toolchain: &Toolchain, universe: HeaderUniverse) ->
     engine.register_xylem(toolchain.clone(), universe);
     engine.register_rule(
         build_rule(),
-        TwoSourceBuild {
+        SourcesBuild {
             toolchain_value: toolchain_value.clone(),
         },
     );
@@ -256,12 +247,13 @@ fn header_universe(engine: &mut Engine, include_unused: bool) -> HeaderUniverse 
     HeaderUniverse::new(entries.into_boxed_slice())
 }
 
-fn build_request(sources: [ContentId; 2]) -> Request<Pure> {
-    let [first, second] = sources;
+fn build_request(sources: &[ContentId]) -> Request<Pure> {
     Request::<Pure>::new(
-        "two-source-build",
+        "sources-build",
         build_interface(),
-        [types::c_source(first), types::c_source(second)],
+        [Value::List(
+            sources.iter().map(|id| types::c_source(*id)).collect(),
+        )],
         Span::none(),
     )
 }
@@ -324,7 +316,7 @@ fn a_two_source_build_produces_an_executable() {
     let source_a = store_blob(&mut engine, SOURCE_A, "a.c");
     let source_b = store_blob(&mut engine, SOURCE_B, "b.c");
 
-    let evaluation = run_build(&mut engine, &build_request([source_a, source_b]));
+    let evaluation = run_build(&mut engine, &build_request(&[source_a, source_b]));
     let executable = blob_of(&evaluation.value);
 
     let store = match FilesystemContentStore::open(root.path()) {
@@ -363,7 +355,7 @@ fn the_built_executable_runs_and_exits_with_the_expected_code() {
     let source_a = store_blob(&mut engine, SOURCE_A, "a.c");
     let source_b = store_blob(&mut engine, SOURCE_B, "b.c");
 
-    let evaluation = run_build(&mut engine, &build_request([source_a, source_b]));
+    let evaluation = run_build(&mut engine, &build_request(&[source_a, source_b]));
     let executable = blob_of(&evaluation.value);
 
     let store = match FilesystemContentStore::open(root.path()) {
@@ -390,6 +382,73 @@ fn the_built_executable_runs_and_exits_with_the_expected_code() {
     );
 }
 
+/// Variadic linking (decision 0035): a build of four sources links all four
+/// objects in one driver invocation over a `List<Object>`, and the executable
+/// that comes out computes over all of them — `a() + b() + c()` = `123`. The
+/// cold build runs nine actions: four discoveries, four compiles, one link.
+#[test]
+fn a_three_source_build_links_a_list_of_objects() {
+    let Ok(toolchain) = Toolchain::discover("cc") else {
+        return;
+    };
+    let root = temp_root();
+    let (mut engine, _) = {
+        let mut engine = match FilesystemContentStore::open(root.path()) {
+            Ok(store) => Engine::with_content_store(store),
+            Err(error) => unreachable!("the filesystem store failed to open: {error:?}"),
+        };
+        // A universe whose header declares all three functions, since this
+        // build's main calls `c`.
+        let header = match engine
+            .put_blob(b"#define ANSWER 40\nint a(void);\nint b(void);\nint c(void);\n")
+        {
+            Ok(identity) => identity,
+            Err(error) => unreachable!("the store failed to hold the header: {error:?}"),
+        };
+        let universe = HeaderUniverse::new(vec![(HEADER_PATH.into(), header)].into_boxed_slice());
+        build_engine(root.path(), &toolchain, universe)
+    };
+    let source_a = store_blob(&mut engine, SOURCE_A, "a.c");
+    let source_b = store_blob(&mut engine, SOURCE_B_NO_MAIN, "b.c");
+    let source_c = store_blob(&mut engine, SOURCE_C, "c.c");
+    let source_main = store_blob(&mut engine, SOURCE_MAIN_THREE, "main3.c");
+
+    let evaluation = run_build(
+        &mut engine,
+        &build_request(&[source_a, source_b, source_c, source_main]),
+    );
+    assert_eq!(
+        action_computations(&engine),
+        9,
+        "the cold four-source build runs nine actions: \
+         four discoveries, four compiles, one link"
+    );
+
+    let executable = blob_of(&evaluation.value);
+    let store = match FilesystemContentStore::open(root.path()) {
+        Ok(store) => store,
+        Err(error) => unreachable!("the store failed to reopen: {error:?}"),
+    };
+    let bytes = match store.get_blob(executable) {
+        Ok(Some(bytes)) => bytes,
+        Ok(None) => unreachable!("the executable was not in the store"),
+        Err(error) => unreachable!("the store failed to read: {error:?}"),
+    };
+    let program = materialize_executable(root.path(), bytes.as_bytes());
+
+    let status = match Command::new(&program).status() {
+        Ok(status) => status,
+        Err(error) => unreachable!("could not run the program: {error:?}"),
+    };
+    let code = status
+        .code()
+        .unwrap_or_else(|| unreachable!("the program was terminated by a signal: {status}"));
+    assert_eq!(
+        code, 123,
+        "main computes 40 + 41 + 42 over the four linked objects; got {code}"
+    );
+}
+
 /// Fine-grained invalidation (U-5): touching `a.c` recompiles `a.o` and does
 /// not re-run `b.o`'s discovery or compile. Both of those are served from the
 /// reusable action index, so the second build adds three action computations —
@@ -411,11 +470,11 @@ fn touching_one_source_recompiles_only_its_object() {
     let source_a = store_blob(&mut engine, SOURCE_A, "a.c");
     let source_b = store_blob(&mut engine, SOURCE_B, "b.c");
 
-    let _first = run_build(&mut engine, &build_request([source_a, source_b]));
+    let _first = run_build(&mut engine, &build_request(&[source_a, source_b]));
     let after_first = action_computations(&engine);
 
     let source_a_touched = store_blob(&mut engine, SOURCE_A_TOUCHED, "the touched a.c");
-    let _second = run_build(&mut engine, &build_request([source_a_touched, source_b]));
+    let _second = run_build(&mut engine, &build_request(&[source_a_touched, source_b]));
     let after_second = action_computations(&engine);
 
     let new_actions = after_second
@@ -454,7 +513,7 @@ fn a_rebuild_under_an_edited_header_recompiles_both_objects() {
         let (mut engine, _) = build_engine(root.path(), &toolchain, universe);
         source_a = store_blob(&mut engine, SOURCE_A, "a.c");
         source_b = store_blob(&mut engine, SOURCE_B, "b.c");
-        let _first = run_build(&mut engine, &build_request([source_a, source_b]));
+        let _first = run_build(&mut engine, &build_request(&[source_a, source_b]));
         assert_eq!(
             action_computations(&engine),
             5,
@@ -488,7 +547,7 @@ fn a_rebuild_under_an_edited_header_recompiles_both_objects() {
     // `a.c` is touched alongside the header, so the root re-runs. `b`'s entry
     // is served from the index only after its action edges re-plan.
     let source_a_touched = store_blob(&mut engine, SOURCE_A_TOUCHED, "the touched a.c");
-    let evaluation = run_build(&mut engine, &build_request([source_a_touched, source_b]));
+    let evaluation = run_build(&mut engine, &build_request(&[source_a_touched, source_b]));
     assert_eq!(
         action_computations(&engine),
         5,
@@ -578,7 +637,7 @@ fn a_second_build_of_unchanged_sources_reuses_its_root() {
     };
     let source_a = store_blob(&mut engine, SOURCE_A, "a.c");
     let source_b = store_blob(&mut engine, SOURCE_B, "b.c");
-    let request = build_request([source_a, source_b]);
+    let request = build_request(&[source_a, source_b]);
 
     let first = run_build(&mut engine, &request);
     let after_first = action_computations(&engine);
@@ -614,7 +673,7 @@ fn a_fresh_engine_over_the_same_state_hydrates_the_build() {
         let (mut engine, _) = build_engine(root.path(), &toolchain, universe);
         let source_a = store_blob(&mut engine, SOURCE_A, "a.c");
         let source_b = store_blob(&mut engine, SOURCE_B, "b.c");
-        let computed = run_build(&mut engine, &build_request([source_a, source_b]));
+        let computed = run_build(&mut engine, &build_request(&[source_a, source_b]));
         assert_eq!(computed.source, EvaluationSource::Computed);
         (source_a, source_b, computed.value)
     };
@@ -627,7 +686,7 @@ fn a_fresh_engine_over_the_same_state_hydrates_the_build() {
         let universe = header_universe(&mut engine, false);
         build_engine(root.path(), &toolchain, universe)
     };
-    let hydrated = run_build(&mut engine, &build_request([source_a, source_b]));
+    let hydrated = run_build(&mut engine, &build_request(&[source_a, source_b]));
 
     assert_eq!(hydrated.source, EvaluationSource::Hydrated);
     assert_eq!(hydrated.value, computed);

@@ -332,8 +332,10 @@ impl ActionRule for CompileAction {
     }
 }
 
-/// Links two objects into one executable. Fixed arity two; linking more needs a
-/// list or tree-valued content variant (decision 0026) and is its own work.
+/// Links any number of objects into one executable. The objects arrive as one
+/// request input, a `List<Object>` (decision 0035); each is staged at a path
+/// derived from its position, which is the order the caller's list gave and is
+/// the order the driver receives them in.
 pub struct LinkAction {
     toolchain: Toolchain,
 }
@@ -355,35 +357,44 @@ impl LinkAction {
     }
 }
 
-const FIRST_OBJECT_PATH: &str = "first.o";
-const SECOND_OBJECT_PATH: &str = "second.o";
 const EXECUTABLE_PATH: &str = "out";
+
+/// The staged path of the object at `position`: `object-0.o`, `object-1.o`, ….
+/// Derived from position so the contract is a function of the list and nothing
+/// else; two link requests over the same objects in the same order plan the
+/// same contract and share a cache entry.
+fn object_path(position: usize) -> Box<str> {
+    format!("object-{position}.o").into()
+}
 
 impl ActionRule for LinkAction {
     fn plan(&self, inputs: &[Value]) -> PithResult<ActionSpec> {
-        let first = blob_of(input(inputs, 1)?, types::OBJECT)?;
-        let second = blob_of(input(inputs, 2)?, types::OBJECT)?;
+        let Value::List(objects) = input(inputs, 1)? else {
+            return Err(diag(
+                "the link request carried no object list as its second input",
+            ));
+        };
+        if objects.is_empty() {
+            return Err(diag("the link request carried an empty object list"));
+        }
+        let mut action_inputs = Vec::with_capacity(objects.len());
+        let mut arguments = Vec::with_capacity(objects.len().saturating_add(2));
+        for (position, value) in objects.iter().enumerate() {
+            let id = blob_of(value, types::OBJECT)?;
+            let path = object_path(position);
+            arguments.push(path.clone());
+            action_inputs.push(ActionInput {
+                path,
+                content: Content::Blob(id),
+            });
+        }
+        arguments.push("-o".into());
+        arguments.push(EXECUTABLE_PATH.into());
         Ok(ActionSpec {
             executable: self.toolchain.driver.clone(),
             toolchain: self.toolchain.closure.clone(),
-            arguments: [
-                FIRST_OBJECT_PATH.into(),
-                SECOND_OBJECT_PATH.into(),
-                "-o".into(),
-                EXECUTABLE_PATH.into(),
-            ]
-            .into(),
-            inputs: [
-                ActionInput {
-                    path: FIRST_OBJECT_PATH.into(),
-                    content: Content::Blob(first),
-                },
-                ActionInput {
-                    path: SECOND_OBJECT_PATH.into(),
-                    content: Content::Blob(second),
-                },
-            ]
-            .into(),
+            arguments: arguments.into(),
+            inputs: action_inputs.into_boxed_slice(),
             outputs: [ActionOutput {
                 path: EXECUTABLE_PATH.into(),
                 kind: OutputKind::Blob,
@@ -660,6 +671,111 @@ mod tests {
                 .iter()
                 .any(|arg| arg.as_ref() == DEPFILE_PATH),
             "the discovery pass writes a depfile: {spec:?}"
+        );
+    }
+
+    fn link_action() -> LinkAction {
+        let toolchain = Toolchain {
+            driver: "/bin/cc".into(),
+            closure: Box::new([]),
+            program_path: "/bin".into(),
+            tool_directory: "/bin".into(),
+        };
+        LinkAction::new(toolchain)
+    }
+
+    #[test]
+    fn a_link_plans_one_staged_path_per_object_in_list_order() {
+        let first = ContentId::of_blob(b"first");
+        let second = ContentId::of_blob(b"second");
+        let third = ContentId::of_blob(b"third");
+        let request = types::link_request(types::toolchain("/bin/cc"), [first, second, third]);
+        let spec = link_action()
+            .plan(request.inputs.as_ref())
+            .expect("the link plans");
+
+        let paths: Vec<&str> = spec.inputs.iter().map(|i| i.path.as_ref()).collect();
+        assert_eq!(paths, ["object-0.o", "object-1.o", "object-2.o"]);
+        assert_eq!(
+            spec.arguments
+                .iter()
+                .map(|a| a.as_ref())
+                .collect::<Vec<_>>(),
+            ["object-0.o", "object-1.o", "object-2.o", "-o", "out"]
+        );
+        // Each staged input carries the content identity at its position, so
+        // the contract — and the action key derived from it — is a function of
+        // the list.
+        let staged: Vec<ContentId> = spec
+            .inputs
+            .iter()
+            .map(|i| match i.content {
+                Content::Blob(id) => id,
+                Content::Tree(_) => unreachable!("an object stages as a blob"),
+            })
+            .collect();
+        assert_eq!(staged, [first, second, third]);
+    }
+
+    #[test]
+    fn a_reordering_of_the_same_objects_plans_a_different_contract() {
+        let first = ContentId::of_blob(b"first");
+        let second = ContentId::of_blob(b"second");
+        let forward = types::link_request(types::toolchain("/bin/cc"), [first, second]);
+        let reversed = types::link_request(types::toolchain("/bin/cc"), [second, first]);
+        let forward_spec = link_action()
+            .plan(forward.inputs.as_ref())
+            .expect("the forward link plans");
+        let reversed_spec = link_action()
+            .plan(reversed.inputs.as_ref())
+            .expect("the reversed link plans");
+
+        // Object order reaches the driver, and the contract says so: a
+        // reordered link is a different request, not a cache hit on the same
+        // set. (A linker is free to make order observable through symbol
+        // resolution and layout.)
+        assert_ne!(
+            forward_spec.digest().expect("the forward spec digests"),
+            reversed_spec.digest().expect("the reversed spec digests")
+        );
+    }
+
+    #[test]
+    fn an_empty_object_list_fails_the_plan() {
+        let request = types::link_request(types::toolchain("/bin/cc"), std::iter::empty());
+        let error = link_action()
+            .plan(request.inputs.as_ref())
+            .expect_err("an empty link is not a plan");
+        assert!(
+            error
+                .iter()
+                .any(|d| d.message.0.contains("empty object list")),
+            "the diagnostics should name the empty list: {error:?}"
+        );
+    }
+
+    #[test]
+    fn a_bare_blob_in_the_object_list_fails_the_plan() {
+        // The list's element type is nominal: a `Value::Blob` that skipped the
+        // `xylem.Object` constructor is a type error the planner reports
+        // rather than links.
+        let request = Request::<Pure>::new(
+            "link-entry",
+            types::link_interface(),
+            [
+                types::toolchain("/bin/cc"),
+                Value::List(
+                    vec![Value::Blob(ContentId::of_blob(b"not-an-object"))].into_boxed_slice(),
+                ),
+            ],
+            Span::none(),
+        );
+        let error = link_action()
+            .plan(request.inputs.as_ref())
+            .expect_err("a bare blob is not an object value");
+        assert!(
+            error.iter().any(|d| d.message.0.contains("xylem.Object")),
+            "the diagnostics should name the expected nominal type: {error:?}"
         );
     }
 }
