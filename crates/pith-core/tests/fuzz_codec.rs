@@ -39,6 +39,23 @@ fn type_strategy() -> impl Strategy<Value = Type> {
         bounded_string(16).prop_map(|name| Type::Nominal {
             name: name.into_boxed_str(),
         }),
+        leaf_type_strategy().prop_map(|element| Type::List(Box::new(element))),
+    ]
+}
+
+/// Non-`List` types, so `type_strategy` stays finite: a list's element type is
+/// drawn from here, never from `type_strategy` itself.
+fn leaf_type_strategy() -> impl Strategy<Value = Type> {
+    prop_oneof![
+        Just(Type::Unit),
+        Just(Type::Bool),
+        Just(Type::Int),
+        Just(Type::Text),
+        Just(Type::Bytes),
+        Just(Type::Blob),
+        bounded_string(16).prop_map(|name| Type::Nominal {
+            name: name.into_boxed_str(),
+        }),
     ]
 }
 
@@ -69,6 +86,8 @@ fn value_strategy() -> impl Strategy<Value = Value> {
                 representation: Box::new(representation),
             }
         }),
+        proptest::collection::vec(scalar_value_strategy(), 0..4)
+            .prop_map(|elements| Value::List(elements.into_boxed_slice())),
     ]
 }
 
@@ -257,13 +276,13 @@ proptest! {
 
 /// The property above bounds its input at 256 bytes, which caps nominal nesting
 /// at about 28 levels and cannot reach the depth that overflows the stack. A
-/// stored row is not bounded that way: `Nominal` is the calculus's only
-/// recursive constructor, so a long run of its tag recurses once per tag, and
-/// before the depth limit a few megabytes of them aborted the process instead
-/// of returning an error. That is not a panic a property test can catch, since
-/// a stack overflow is not unwindable — it is the one failure mode the
-/// "decoding arbitrary bytes never panics" invariant at the top of this file
-/// most needs to exclude, so it is asserted directly.
+/// stored row is not bounded that way: `Nominal` and `List` are the calculus's
+/// recursive constructors, so a long run of either tag recurses once per tag,
+/// and before the depth limit a few megabytes of them aborted the process
+/// instead of returning an error. That is not a panic a property test can
+/// catch, since a stack overflow is not unwindable — it is the one failure mode
+/// the "decoding arbitrary bytes never panics" invariant at the top of this
+/// file most needs to exclude, so it is asserted directly.
 #[test]
 fn decoding_deeply_nested_nominal_values_fails_rather_than_overflowing() {
     // Each level is the nominal tag plus an empty name: one recursion per nine
@@ -280,7 +299,28 @@ fn decoding_deeply_nested_nominal_values_fails_rather_than_overflowing() {
         Err(CanonicalDecodeError::NestingTooDeep {
             limit: pith_core::MAX_NOMINAL_NESTING,
         })
-    );
+    )
+}
+
+/// The list tag is one byte per level, so it reaches the unbounded-recursion
+/// shape even faster than the nominal chain above.
+#[test]
+fn decoding_deeply_nested_lists_fails_rather_than_overflowing() {
+    let mut encoded = vec![1u8, 7];
+    for _ in 0..400_000 {
+        encoded.extend_from_slice(&1u64.to_le_bytes());
+        encoded.push(7);
+    }
+    // The innermost list holds one `Unit`, closing the chain.
+    encoded.extend_from_slice(&1u64.to_le_bytes());
+    encoded.push(0);
+
+    assert_eq!(
+        Value::decode_canonical(&encoded),
+        Err(CanonicalDecodeError::NestingTooDeep {
+            limit: pith_core::MAX_NOMINAL_NESTING,
+        })
+    )
 }
 
 /// The limit refuses a chain one level past it and accepts one at it, so it

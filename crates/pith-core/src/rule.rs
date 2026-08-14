@@ -208,8 +208,8 @@ impl<K: EffectCategory> Request<K> {
             .zip(self.interface.inputs.iter())
             .enumerate()
         {
-            let actual = value.value_type();
-            if actual != *expected {
+            if !value.is_type(expected) {
+                let actual = value.value_type();
                 return Err(Diag::engine(
                     EngineCode::RequestInputsMismatch,
                     self.span,
@@ -330,7 +330,7 @@ impl SelectOutcome {
 mod tests {
     use super::*;
     use crate::value_codec::{
-        TAG_BLOB, TAG_BOOL, TAG_BYTES, TAG_INT, TAG_NOMINAL, TAG_TEXT, TAG_UNIT,
+        TAG_BLOB, TAG_BOOL, TAG_BYTES, TAG_INT, TAG_LIST, TAG_NOMINAL, TAG_TEXT, TAG_UNIT,
     };
     use pith_arena::Arena;
 
@@ -348,6 +348,7 @@ mod tests {
             (Type::Bytes, TAG_BYTES),
             (Type::Blob, TAG_BLOB),
             (Type::Nominal { name: "n".into() }, TAG_NOMINAL),
+            (Type::List(Box::new(Type::Unit)), TAG_LIST),
         ];
         for (i, (_, tag_i)) in types.iter().enumerate() {
             for (_, tag_j) in types.iter().skip(i + 1) {
@@ -366,6 +367,7 @@ mod tests {
                 )),
                 TAG_BLOB,
             ),
+            (Value::List(Box::new([])), TAG_LIST),
         ];
         for (value, expected) in &values {
             let mut manifest = Vec::new();

@@ -21,6 +21,7 @@ pub(crate) const TAG_TEXT: u8 = 3;
 pub(crate) const TAG_BYTES: u8 = 4;
 pub(crate) const TAG_BLOB: u8 = 5;
 pub(crate) const TAG_NOMINAL: u8 = 6;
+pub(crate) const TAG_LIST: u8 = 7;
 
 pub(crate) fn encode_type_payload(encoded: &mut Vec<u8>, value_type: &Type) {
     match value_type {
@@ -33,6 +34,10 @@ pub(crate) fn encode_type_payload(encoded: &mut Vec<u8>, value_type: &Type) {
         Type::Nominal { name } => {
             encoded.push(TAG_NOMINAL);
             encode_str(encoded, name);
+        }
+        Type::List(element) => {
+            encoded.push(TAG_LIST);
+            encode_type_payload(encoded, element);
         }
     }
 }
@@ -67,6 +72,13 @@ pub(crate) fn encode_value_payload(encoded: &mut Vec<u8>, value: &Value) {
             encoded.push(TAG_NOMINAL);
             encode_str(encoded, name);
             encode_value_payload(encoded, representation);
+        }
+        Value::List(elements) => {
+            encoded.push(TAG_LIST);
+            encode_length(encoded, elements.len());
+            for element in elements.iter() {
+                encode_value_payload(encoded, element);
+            }
         }
     }
 }
@@ -112,7 +124,7 @@ impl std::fmt::Display for CanonicalDecodeError {
             ),
             Self::NestingTooDeep { limit } => write!(
                 formatter,
-                "canonical encoding nests nominal values deeper than {limit}"
+                "canonical encoding nests values or types deeper than {limit}"
             ),
         }
     }
@@ -147,6 +159,15 @@ impl Type {
 pub(crate) fn decode_type_payload(
     decoder: &mut CanonicalReader,
 ) -> Result<Type, CanonicalDecodeError> {
+    decode_type_at_depth(decoder, 0)
+}
+
+/// `List` made `Type` recursive, so decoding one type payload now nests the
+/// same way a value payload does and is bounded by the same limit.
+fn decode_type_at_depth(
+    decoder: &mut CanonicalReader,
+    depth: u32,
+) -> Result<Type, CanonicalDecodeError> {
     Ok(match decoder.read_byte()? {
         TAG_UNIT => Type::Unit,
         TAG_BOOL => Type::Bool,
@@ -157,6 +178,17 @@ pub(crate) fn decode_type_payload(
         TAG_NOMINAL => Type::Nominal {
             name: decoder.read_text()?.into(),
         },
+        TAG_LIST => {
+            if depth >= MAX_NOMINAL_NESTING {
+                return Err(CanonicalDecodeError::NestingTooDeep {
+                    limit: MAX_NOMINAL_NESTING,
+                });
+            }
+            Type::List(Box::new(decode_type_at_depth(
+                decoder,
+                depth.saturating_add(1),
+            )?))
+        }
         tag => return Err(CanonicalDecodeError::UnknownTypeTag { tag }),
     })
 }
@@ -219,15 +251,15 @@ impl Value {
     }
 }
 
-/// How deeply a nominal value may nest inside another before decoding refuses.
+/// How deeply the recursive constructors may nest before decoding refuses.
 ///
-/// `Nominal` is the only recursive constructor in the calculus, so it is the
-/// only thing that can make decoding recurse. The decoder reads bytes an
-/// adapter hands it, and those bytes are whatever the database holds: a row of
-/// repeated `TAG_NOMINAL` recurses once per byte and overflows the stack, which
-/// aborts the process rather than returning the adapter error decision 0024
-/// requires of corrupt state. Bounding the depth turns that into an ordinary
-/// decode failure.
+/// `Nominal` values, `List` values, and `List` types recurse during decoding,
+/// so they are the things that can make it recurse without bound. The decoder
+/// reads bytes an adapter hands it, and those bytes are whatever the database
+/// holds: a row of repeated `TAG_NOMINAL` or `TAG_LIST` recurses once per byte
+/// and overflows the stack, which aborts the process rather than returning the
+/// adapter error decision 0024 requires of corrupt state. Bounding the depth
+/// turns that into an ordinary decode failure.
 ///
 /// The limit is far above any real value. A nominal over a nominal is legal and
 /// occasionally useful; a chain dozens deep is not something the calculus in
@@ -258,6 +290,16 @@ fn decode_value_payload(
                 representation,
             })
         }
+        TAG_LIST => {
+            if depth >= MAX_NOMINAL_NESTING {
+                return Err(CanonicalDecodeError::NestingTooDeep {
+                    limit: MAX_NOMINAL_NESTING,
+                });
+            }
+            let elements = decoder
+                .read_sequence(|decoder| decode_value_payload(decoder, depth.saturating_add(1)))?;
+            Ok(Value::List(elements))
+        }
         tag => Err(CanonicalDecodeError::UnknownValueTag { tag }),
     }
 }
@@ -287,6 +329,10 @@ mod tests {
             Type::Nominal {
                 name: "Machine".into(),
             },
+            Type::List(Box::new(Type::Nominal {
+                name: "Machine".into(),
+            })),
+            Type::List(Box::new(Type::List(Box::new(Type::Int)))),
         ] {
             let encoded = value_type.encode_canonical();
             assert_eq!(Type::decode_canonical(&encoded), Ok(value_type));
@@ -315,6 +361,11 @@ mod tests {
                     representation: Box::new(Value::Int(1)),
                 }),
             },
+            Value::List(vec![].into_boxed_slice()),
+            Value::List(vec![Value::Text("a".into()), Value::Text("b".into())].into_boxed_slice()),
+            Value::List(
+                vec![Value::List(vec![Value::Int(1)].into_boxed_slice())].into_boxed_slice(),
+            ),
         ] {
             let encoded = value.encode_canonical();
             assert_eq!(Value::decode_canonical(&encoded), Ok(value.clone()));
@@ -323,7 +374,7 @@ mod tests {
 
     #[test]
     fn version_one_type_bytes_are_stable() {
-        let fixtures: [(Type, &[u8]); 7] = [
+        let fixtures: [(Type, &[u8]); 8] = [
             (Type::Unit, &[0x01, 0x00]),
             (Type::Bool, &[0x01, 0x01]),
             (Type::Int, &[0x01, 0x02]),
@@ -336,6 +387,7 @@ mod tests {
                     0x01, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'N',
                 ],
             ),
+            (Type::List(Box::new(Type::Int)), &[0x01, 0x07, 0x02]),
         ];
 
         for (value_type, expected) in fixtures {
@@ -345,7 +397,7 @@ mod tests {
 
     #[test]
     fn version_one_value_bytes_are_stable() {
-        let fixtures: [(Value, &[u8]); 8] = [
+        let fixtures: [(Value, &[u8]); 10] = [
             (Value::Unit, &[0x01, 0x00]),
             (Value::Bool(false), &[0x01, 0x01, 0x00]),
             (Value::Bool(true), &[0x01, 0x01, 0x01]),
@@ -380,6 +432,23 @@ mod tests {
                 },
                 &[
                     0x01, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'N', 0x00,
+                ],
+            ),
+            // An empty list: the tag, the u64 element count, nothing else.
+            (
+                Value::List(vec![].into_boxed_slice()),
+                &[0x01, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+            ),
+            // A list of two texts: the u64 count, then each element's own
+            // payload.
+            (
+                Value::List(
+                    vec![Value::Text("a".into()), Value::Text("b".into())].into_boxed_slice(),
+                ),
+                &[
+                    0x01, 0x07, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //
+                    0x03, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'a', //
+                    0x03, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'b',
                 ],
             ),
         ];
@@ -436,6 +505,7 @@ mod tests {
                 name: "N".into(),
                 representation: Box::new(Value::Unit),
             },
+            Value::List(vec![Value::Int(1)].into_boxed_slice()),
         ] {
             let mut encoded = value.encode_canonical();
             let _ = encoded.pop();
@@ -444,6 +514,34 @@ mod tests {
                 Err(CanonicalDecodeError::Truncated)
             );
         }
+    }
+
+    #[test]
+    fn deeply_nested_lists_and_list_types_fail_rather_than_overflowing() {
+        // `List` recurses in both the value and the type grammar, so a hostile
+        // row of list tags has the same unbounded-recursion shape a nominal
+        // chain has. The bound turns it into a decode error.
+        let mut value = Value::Unit;
+        for _ in 0..(MAX_NOMINAL_NESTING.saturating_add(1)) {
+            value = Value::List(vec![value].into_boxed_slice());
+        }
+        assert_eq!(
+            Value::decode_canonical(&value.encode_canonical()),
+            Err(CanonicalDecodeError::NestingTooDeep {
+                limit: MAX_NOMINAL_NESTING
+            })
+        );
+
+        let mut element = Type::Unit;
+        for _ in 0..(MAX_NOMINAL_NESTING.saturating_add(1)) {
+            element = Type::List(Box::new(element));
+        }
+        assert_eq!(
+            Type::decode_canonical(&element.encode_canonical()),
+            Err(CanonicalDecodeError::NestingTooDeep {
+                limit: MAX_NOMINAL_NESTING
+            })
+        );
     }
 
     #[test]

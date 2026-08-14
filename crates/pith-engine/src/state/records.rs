@@ -19,7 +19,13 @@ use crate::{
 /// [`Value`] result and an [`ActionSpec`] contract. Reported as the
 /// `semantic_encoding` half of an adapter's [`EngineStateVersions`]. Adapters
 /// choose their own table layout and report it as `schema` (decision 0025).
-pub const RECORD_ENCODING_VERSION: SemanticEncodingVersion = SemanticEncodingVersion::new(2);
+///
+/// Version 3 is the `List` constructor (0026): tag 7 gains a payload in both
+/// the value and the type grammar, which changes the meaning of bytes a
+/// version-2 database can hold. Nothing is released, so a pre-release database
+/// is moved aside and rebuilt rather than migrated, which the existing
+/// incompatible-database test already asserts.
+pub const RECORD_ENCODING_VERSION: SemanticEncodingVersion = SemanticEncodingVersion::new(3);
 
 pub const CURRENT_ENGINE_STATE_VERSIONS: EngineStateVersions = EngineStateVersions {
     schema: SchemaVersion::new(1),

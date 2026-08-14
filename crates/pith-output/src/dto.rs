@@ -24,6 +24,9 @@ pub enum ValueRepr {
         name: Box<str>,
         representation: Box<ValueRepr>,
     },
+    List {
+        elements: Box<[ValueRepr]>,
+    },
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -36,4 +39,5 @@ pub enum TypeRepr {
     Bytes,
     Blob,
     Nominal { name: Box<str> },
+    List { element: Box<TypeRepr> },
 }

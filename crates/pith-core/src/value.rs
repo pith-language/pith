@@ -29,6 +29,12 @@ pub enum Value {
         name: Box<str>,
         representation: Box<Value>,
     },
+    /// An ordered sequence of values, the landed slice of the `List<T>`
+    /// constructor 0026 names in the calculus constructor set. Homogeneous in
+    /// use: the request and result checks below treat a list as inhabiting
+    /// `List<T>` when every element inhabits `T`, and an empty list as
+    /// inhabiting every `List<T>`.
+    List(Box<[Value]>),
 }
 
 impl Value {
@@ -41,14 +47,19 @@ impl Value {
             Self::Bytes(_) => Type::Bytes,
             Self::Blob(_) => Type::Blob,
             Self::Nominal { name, .. } => Type::Nominal { name: name.clone() },
+            Self::List(elements) => Type::List(Box::new(
+                elements.first().map_or(Type::Unit, Value::value_type),
+            )),
         }
     }
 
-    /// Whether this value inhabits `expected`. Equivalent to
-    /// `self.value_type() == *expected` but avoids allocating the intermediate
-    /// `Type`; use it at result-type checks where only the comparison matters.
-    /// A nominal value matches its own name only; its representation does not
-    /// match the representation's type (decision 0026).
+    /// Whether this value inhabits `expected`. Use it at request-input and
+    /// result-type checks; `value_type` is the best-effort type for diagnostics
+    /// and the two agree everywhere except lists, where an empty list inhabits
+    /// every `List<T>` while `value_type` must pick one element type (`Unit`,
+    /// when there is no element to ask). A nominal value matches its own name
+    /// only; its representation does not match the representation's type
+    /// (decision 0026).
     #[must_use]
     pub fn is_type(&self, expected: &Type) -> bool {
         match (self, expected) {
@@ -64,28 +75,36 @@ impl Value {
                     name: expected_name,
                 },
             ) => name == expected_name,
+            (Self::List(elements), Type::List(element)) => {
+                elements.iter().all(|value| value.is_type(element))
+            }
             (Self::Unit, _)
             | (Self::Bool(_), _)
             | (Self::Int(_), _)
             | (Self::Text(_), _)
             | (Self::Bytes(_), _)
             | (Self::Blob(_), _)
-            | (Self::Nominal { .. }, _) => false,
+            | (Self::Nominal { .. }, _)
+            | (Self::List(_), _) => false,
         }
     }
 
     pub fn describe(&self) -> String {
         match self {
-            Value::Unit => "()".to_string(),
-            Value::Bool(b) => b.to_string(),
-            Value::Int(n) => n.to_string(),
-            Value::Text(s) => s.as_ref().to_string(),
-            Value::Bytes(b) => format!("bytes({})", b.len()),
-            Value::Blob(id) => format!("blob({})", hex_digest(id)),
-            Value::Nominal {
+            Self::Unit => "()".to_string(),
+            Self::Bool(b) => b.to_string(),
+            Self::Int(n) => n.to_string(),
+            Self::Text(s) => s.as_ref().to_string(),
+            Self::Bytes(b) => format!("bytes({})", b.len()),
+            Self::Blob(id) => format!("blob({})", hex_digest(id)),
+            Self::Nominal {
                 name,
                 representation,
             } => format!("{}({})", name, representation.describe()),
+            Self::List(elements) => {
+                let inner: Vec<String> = elements.iter().map(Self::describe).collect();
+                format!("[{}]", inner.join(", "))
+            }
         }
     }
 }
@@ -119,6 +138,9 @@ impl From<&Value> for ValueRepr {
                 name: name.clone(),
                 representation: Box::new(representation.as_ref().into()),
             },
+            Value::List(elements) => ValueRepr::List {
+                elements: elements.iter().map(Into::into).collect(),
+            },
         }
     }
 }
@@ -131,7 +153,13 @@ pub enum Type {
     Text,
     Bytes,
     Blob,
-    Nominal { name: Box<str> },
+    Nominal {
+        name: Box<str>,
+    },
+    /// The type of a [`Value::List`] whose elements inhabit the element type.
+    /// Type application is reified (0026): `List<Int>` and `List<Text>` are
+    /// distinct types and distinct interface participants.
+    List(Box<Type>),
 }
 
 impl std::fmt::Display for Type {
@@ -144,6 +172,7 @@ impl std::fmt::Display for Type {
             Self::Bytes => f.write_str("Bytes"),
             Self::Blob => f.write_str("Blob"),
             Self::Nominal { name } => f.write_str(name),
+            Self::List(element) => write!(f, "List<{element}>"),
         }
     }
 }
@@ -158,6 +187,9 @@ impl From<&Type> for TypeRepr {
             Type::Bytes => TypeRepr::Bytes,
             Type::Blob => TypeRepr::Blob,
             Type::Nominal { name } => TypeRepr::Nominal { name: name.clone() },
+            Type::List(element) => TypeRepr::List {
+                element: Box::new(element.as_ref().into()),
+            },
         }
     }
 }
@@ -179,6 +211,8 @@ mod tests {
                 name: "MachineId".into(),
                 representation: Box::new(Value::Text("m-1".into())),
             },
+            Value::List(vec![].into_boxed_slice()),
+            Value::List(vec![Value::Text("a".into()), Value::Text("b".into())].into_boxed_slice()),
         ] {
             let repr: ValueRepr = (&v).into();
             let _ = format!("{repr:?}");
@@ -239,6 +273,12 @@ mod tests {
                     name: "MachineId".into(),
                 },
             ),
+            (
+                Value::List(
+                    vec![Value::Text("a".into()), Value::Text("b".into())].into_boxed_slice(),
+                ),
+                Type::List(Box::new(Type::Text)),
+            ),
         ];
         let all_types = [
             Type::Unit,
@@ -250,6 +290,8 @@ mod tests {
             Type::Nominal {
                 name: "MachineId".into(),
             },
+            Type::List(Box::new(Type::Text)),
+            Type::List(Box::new(Type::Int)),
         ];
         for (value, own_type) in &values {
             for candidate in &all_types {
@@ -262,6 +304,45 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_list_is_typed_by_its_elements() {
+        // 0026 reifies type application: List<Text> and List<Int> are distinct
+        // types, so a list of one element type does not inhabit another. A
+        // nominal element keeps its identity inside the list, which is what
+        // keeps two list-consuming rules from collapsing onto one interface.
+        let texts = Value::List(vec![Value::Text("a".into())].into_boxed_slice());
+        let objects = Value::List(
+            vec![Value::Nominal {
+                name: "Object".into(),
+                representation: Box::new(Value::Blob(ContentId::of_blob(b"o"))),
+            }]
+            .into_boxed_slice(),
+        );
+        let blobs = Value::List(vec![Value::Blob(ContentId::of_blob(b"o"))].into_boxed_slice());
+
+        assert!(texts.is_type(&Type::List(Box::new(Type::Text))));
+        assert!(!texts.is_type(&Type::List(Box::new(Type::Int))));
+        assert!(objects.is_type(&Type::List(Box::new(Type::Nominal {
+            name: "Object".into()
+        }))));
+        assert!(!objects.is_type(&Type::List(Box::new(Type::Blob))));
+        assert!(!blobs.is_type(&Type::List(Box::new(Type::Nominal {
+            name: "Object".into()
+        }))));
+    }
+
+    #[test]
+    fn an_empty_list_inhabits_every_list_type() {
+        // value_type must pick one element type when there is no element to
+        // ask, so an empty list would otherwise be rejected at request-input
+        // and result checks against any concrete List<T>. is_type is the
+        // check those sites use, and it accepts it.
+        let empty = Value::List(vec![].into_boxed_slice());
+        assert!(empty.is_type(&Type::List(Box::new(Type::Text))));
+        assert!(empty.is_type(&Type::List(Box::new(Type::Int))));
+        assert_eq!(empty.value_type(), Type::List(Box::new(Type::Unit)));
     }
 
     #[test]
