@@ -73,6 +73,8 @@ two protocol inputs are excluded. the budget shapes whether the deterministic wa
 
 a resolution is a pure computation whose body sits in 0038's host-rule tier, and writing a file is not pure. the boundary is 0003's: the engine computes the answer value, and whoever drives the engine renders the document and writes the file. no rule sees a path, and the solver gains no file behaviour; the write and read functions are caller-side adapters in the phloem library, in the position the store adapters hold. the prototype holds this line with a test that resolves through the engine and observes that no file exists until the caller writes one.
 
+a second ground appeared when the prototype was built, and it is recorded here rather than left in the code: the answer is not the whole document. 0040's protocol has an answer name the choice and the explanation, so the version scheme and the preference list are request-side values the answer deliberately does not repeat, and a lock is assembled from both halves. the caller is the only party holding the two, which is the same party the effect boundary names.
+
 publication follows 0024's content discipline: a temporary file in the destination directory, flushed, renamed into place, so a crash cannot leave a torn lock. only a solved answer yields a written lock. an unsatisfiable, underdetermined, or exhausted resolution writes nothing and the existing file stands, on the same ground 0024 uses when a failed reevaluation publishes no partial dependency set — the file records selections, and none of the three is one.
 
 ### reading a lock back: a record and an input
