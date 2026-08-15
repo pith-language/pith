@@ -180,24 +180,73 @@ fn record_binding(
     Ok(())
 }
 
-/// Write the lock to `path`, through a flushed temporary file renamed into
-/// place on the publication discipline the content store uses (0024). A
-/// caller-side effect: no rule reaches this.
+/// Write the lock to `path` on the publication discipline the content
+/// store implements (0024): a temporary file named for this writer and
+/// created exclusively, so two writers cannot share one; flushed; renamed
+/// into place; the destination directory flushed after the rename so the
+/// rename itself survives a crash; and the temporary file removed on every
+/// failure path. A caller-side effect: no rule reaches this.
 ///
 /// # Errors
 /// A [`pith_diag::DiagnosticSink`] naming the path and the failure when the
-/// file cannot be written or renamed.
+/// file cannot be written, flushed, renamed, or its directory flushed.
 pub fn write(lock: &Lock, path: &Path) -> PithResult<()> {
     let text = render(lock);
-    let temporary = temporary_path(path);
-    let outcome = (|| -> std::io::Result<()> {
-        let mut file = std::fs::File::create(&temporary)?;
-        file.write_all(text.as_bytes())?;
-        file.sync_all()?;
+    let directory = destination_directory(path);
+    let (temporary, mut file) =
+        temporary_file(&directory).map_err(|error| io_diag("writing the lock", path, &error))?;
+    if let Err(error) = file.write_all(text.as_bytes()).and_then(|()| file.sync_all()) {
         drop(file);
-        std::fs::rename(&temporary, path)
-    })();
-    outcome.map_err(|error| io_diag("writing the lock", path, &error))
+        remove_temporary_file(&temporary);
+        return Err(io_diag("writing the lock", path, &error));
+    }
+    drop(file);
+    match std::fs::rename(&temporary, path) {
+        Ok(()) => {
+            std::fs::File::open(&directory)
+                .and_then(|directory| directory.sync_all())
+                .map_err(|error| io_diag("flushing the directory of the lock", path, &error))
+        }
+        Err(error) => {
+            remove_temporary_file(&temporary);
+            Err(io_diag("publishing the lock", path, &error))
+        }
+    }
+}
+
+/// The directory a rename into `path` happens in; a bare file name
+/// publishes into the working directory.
+fn destination_directory(path: &Path) -> std::path::PathBuf {
+    match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+        _ => std::path::PathBuf::from("."),
+    }
+}
+
+/// The process-wide sequence behind the store's per-instance one, so two
+/// writers in one process cannot share a temporary file either.
+static NEXT_TEMPORARY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn temporary_file(directory: &Path) -> std::io::Result<(std::path::PathBuf, std::fs::File)> {
+    loop {
+        let sequence = NEXT_TEMPORARY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path = directory.join(format!(
+            ".pith-lock-{}.{}.tmp",
+            std::process::id(),
+            sequence
+        ));
+        match std::fs::File::create_new(&path) {
+            Ok(file) => return Ok((path, file)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+/// Best-effort removal on a failure path; a temporary left behind is inert
+/// and never parses as a lock under its hidden name.
+fn remove_temporary_file(path: &Path) {
+    let _ = std::fs::remove_file(path);
 }
 
 /// Read the lock at `path` and parse it. A caller-side effect, the read
@@ -214,16 +263,6 @@ pub fn read(path: &Path) -> PithResult<Lock> {
 
 fn io_diag(what: &str, path: &Path, error: &std::io::Error) -> pith_diag::DiagnosticSink {
     diag(format!("{what} at {} failed: {error}", path.display()))
-}
-
-fn temporary_path(path: &Path) -> std::path::PathBuf {
-    let name = path.file_name().map_or_else(
-        || std::ffi::OsString::from("pith.lock"),
-        |name| name.to_os_string(),
-    );
-    let mut temporary = path.with_file_name(name);
-    temporary.as_mut_os_string().push(".tmp");
-    temporary
 }
 
 #[derive(Default)]
@@ -977,9 +1016,14 @@ mod tests {
         let path = directory.path().join("pith.lock");
         write(&lock(), &path).unwrap();
         assert!(path.exists());
-        assert!(
-            !directory.path().join("pith.lock.tmp").exists(),
-            "the temporary file is renamed away"
+        let remaining: Vec<std::ffi::OsString> = std::fs::read_dir(directory.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(
+            remaining,
+            vec![std::ffi::OsString::from("pith.lock")],
+            "a successful write leaves the lock and no temporary behind"
         );
         assert_eq!(read(&path).unwrap(), lock());
         let error = read(&directory.path().join("absent.lock")).unwrap_err();
