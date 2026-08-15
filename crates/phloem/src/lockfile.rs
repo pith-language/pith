@@ -20,6 +20,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::io::Write as _;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use pith_diag::PithResult;
 use pith_ids::{ContentDigest, ContentId};
@@ -191,18 +192,19 @@ pub fn write(lock: &Lock, path: &Path) -> PithResult<()> {
     let directory = destination_directory(path);
     let (temporary, mut file) =
         temporary_file(&directory).map_err(|error| io_diag("writing the lock", path, &error))?;
-    if let Err(error) = file.write_all(text.as_bytes()).and_then(|()| file.sync_all()) {
+    if let Err(error) = file
+        .write_all(text.as_bytes())
+        .and_then(|()| file.sync_all())
+    {
         drop(file);
         remove_temporary_file(&temporary);
         return Err(io_diag("writing the lock", path, &error));
     }
     drop(file);
     match std::fs::rename(&temporary, path) {
-        Ok(()) => {
-            std::fs::File::open(&directory)
-                .and_then(|directory| directory.sync_all())
-                .map_err(|error| io_diag("flushing the directory of the lock", path, &error))
-        }
+        Ok(()) => std::fs::File::open(&directory)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|error| io_diag("flushing the directory of the lock", path, &error)),
         Err(error) => {
             remove_temporary_file(&temporary);
             Err(io_diag("publishing the lock", path, &error))
@@ -221,11 +223,11 @@ fn destination_directory(path: &Path) -> std::path::PathBuf {
 
 /// The process-wide sequence behind the store's per-instance one, so two
 /// writers in one process cannot share a temporary file either.
-static NEXT_TEMPORARY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
 
 fn temporary_file(directory: &Path) -> std::io::Result<(std::path::PathBuf, std::fs::File)> {
     loop {
-        let sequence = NEXT_TEMPORARY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let sequence = NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed);
         let path = directory.join(format!(
             ".pith-lock-{}.{}.tmp",
             std::process::id(),
@@ -743,10 +745,7 @@ mod tests {
             "the value's canonical order puts the shorter name first"
         );
         let text = render(&written);
-        let binds: Vec<&str> = text
-            .lines()
-            .filter(|line| line.starts_with(BIND))
-            .collect();
+        let binds: Vec<&str> = text.lines().filter(|line| line.starts_with(BIND)).collect();
         let Some((first, second)) = binds.first().zip(binds.get(1)) else {
             unreachable!("the fixture holds two entries");
         };
