@@ -33,6 +33,7 @@ when an accepted decision changes, a new record supersedes it. the old record st
 - [0021: a hand-built arena graph with explicit change propagation, not a salsa query DB](0021-arena-graph-engine.md)
 - [0028: a first-party sandboxed local executor using landlock and seccomp](0028-sandboxed-local-executor.md)
 - [0033: a consumer of an action revalidates by re-planning it](0033-consumer-of-action-reuse.md)
+- [0041: the written lock is a text projection of the lock value, and writing it is a caller effect](0041-the-written-lock.md)
 
 ## proposed
 
@@ -67,7 +68,6 @@ when an accepted decision changes, a new record supersedes it. the old record st
 - [0038: rule bodies are data in one kernel-facing core ir, with host rules as a permanent declared tier](0038-represented-rule-bodies.md)
 - [0039: separate package identity from version and realization identity](0039-package-identity.md)
 - [0040: constraints are declared values with domain models, and resolution is a host-rule computation in the graph](0040-declared-constraints-and-resolution.md)
-- [0041: the written lock is a text projection of the lock value, and writing it is a caller effect](0041-the-written-lock.md)
 
 note: 0013 amends 0005 to add a fifth identity type. 0005 stands; the amendment is recorded in 0013.
 
