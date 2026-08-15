@@ -120,6 +120,10 @@ fn archive() -> Vec<u8> {
         header[257..263].copy_from_slice(b"ustar\0");
         let octal = format!("{:011o}\0", data.len());
         header[124..124 + octal.len()].copy_from_slice(octal.as_bytes());
+        // A ustar checksum sums the header with the checksum field read as
+        // eight spaces — the reading `archive.rs` checks against — so the
+        // field is spaced before the sum and overwritten after it.
+        header[148..156].fill(b' ');
         let sum: u64 = header.iter().copied().map(u64::from).sum();
         let checksum = format!("{sum:06o}\0 ");
         header[148..156].copy_from_slice(checksum.as_bytes());
