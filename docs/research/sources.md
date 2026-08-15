@@ -31,6 +31,7 @@ this file tracks sources already used or queued for a deeper pass. a link here d
 
 - [Nix language manual](https://nix.dev/manual/nix/latest/language/)
 - [Nix store manual](https://nix.dev/manual/nix/latest/store/)
+- [Nix advanced attributes: fixed-output derivations](https://nix.dev/manual/nix/stable/language/advanced-attributes)
 - [NixOS module-system manual](https://nixos.org/manual/nixos/stable/#sec-writing-modules)
 - [Eelco Dolstra's publications](https://edolstra.github.io/pubs/)
 
@@ -85,6 +86,12 @@ this file tracks sources already used or queued for a deeper pass. a link here d
 - [OSTree](https://ostreedev.github.io/ostree/)
 - [BuildStream](https://docs.buildstream.build/)
 - [The Update Framework](https://theupdateframework.io/)
+- [TUF specification](https://theupdateframework.github.io/specification/latest/)
+- [Go checksum database design](https://go.googlesource.com/proposal/+/master/design/25530-sumdb.md)
+- [transparent-log design](https://research.swtch.com/tlog)
+- [cargo registry index format](https://doc.rust-lang.org/cargo/reference/registry-index.html)
+- [Debian repository format](https://wiki.debian.org/DebianRepository/Format)
+- [git objects](https://git-scm.com/book/en/v2/Git-Internals-Git-Objects)
 - [in-toto](https://in-toto.io/)
 - [SLSA](https://slsa.dev/spec/)
 - [Sigstore](https://docs.sigstore.dev/)
