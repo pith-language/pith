@@ -42,10 +42,6 @@ const UNIVERSE: &str = "universe";
 const PREFERENCE: &str = "preference";
 const BIND: &str = "bind";
 
-const REGISTRY: &str = "registry";
-const FORGE: &str = "forge";
-const LOCAL_PATH: &str = "local-path";
-
 const SHA256: &str = "sha256:";
 const HEX_LEN: usize = 64;
 
@@ -317,15 +313,11 @@ impl Header {
 
     fn preference(&mut self, tokens: &[String], number: usize) -> PithResult<()> {
         let found = singleton(tokens, PREFERENCE, number)?;
-        let preference = match found {
-            "newest" => Preference::Newest,
-            "oldest" => Preference::Oldest,
-            other => {
-                return Err(diag(format!(
-                    "line {number}: `{other}` is not a declared preference; expected \
-                     newest or oldest"
-                )));
-            }
+        let Some(preference) = Preference::from_name(found) else {
+            return Err(diag(format!(
+                "line {number}: `{found}` is not a declared preference; expected newest \
+                 or oldest"
+            )));
         };
         self.preferences.push(preference);
         Ok(())
@@ -375,24 +367,16 @@ fn singleton<'a>(tokens: &'a [String], directive: &str, number: usize) -> PithRe
 }
 
 fn bind_line(entry: &LockEntry) -> String {
-    let (kind, location) = origin_parts(&entry.origin);
     format!(
-        "{BIND} {} {} {} {} {SHA256}{} {kind} {}",
+        "{BIND} {} {} {} {} {SHA256}{} {} {}",
         token(entry.package.identity().domain().as_str()),
         token(entry.package.identity().name()),
         token(entry.package.version()),
         features_token(&entry.features),
         entry.source.digest(),
-        token(location),
+        entry.origin.kind(),
+        token(entry.origin.location()),
     )
-}
-
-fn origin_parts(origin: &Origin) -> (&'static str, &str) {
-    match origin {
-        Origin::Registry(location) => (REGISTRY, location),
-        Origin::Forge(location) => (FORGE, location),
-        Origin::LocalPath(path) => (LOCAL_PATH, path),
-    }
 }
 
 fn bind_entry(tokens: &[String], number: usize) -> PithResult<LockEntry> {
@@ -405,16 +389,11 @@ fn bind_entry(tokens: &[String], number: usize) -> PithResult<LockEntry> {
     };
     let features = parse_features(features, number)?;
     let source = parse_digest(source, "the bind source", number)?;
-    let origin = match kind.as_str() {
-        REGISTRY => Origin::Registry(location.clone().into()),
-        FORGE => Origin::Forge(location.clone().into()),
-        LOCAL_PATH => Origin::LocalPath(location.clone().into()),
-        other => {
-            return Err(diag(format!(
-                "line {number}: `{other}` is not an origin kind; expected {REGISTRY}, \
-                 {FORGE}, or {LOCAL_PATH}"
-            )));
-        }
+    let Some(origin) = Origin::from_kind(kind.as_str(), location.clone()) else {
+        return Err(diag(format!(
+            "line {number}: `{kind}` is not an origin kind; expected registry, forge, or \
+             local-path"
+        )));
     };
     Ok(LockEntry::new(
         PackageVersion::new(
@@ -775,6 +754,14 @@ mod tests {
             first.contains("openssl") && second.contains("zlib"),
             "the file's line order puts openssl before zlib: {binds:?}"
         );
+    }
+
+    #[test]
+    fn a_preferences_written_name_reads_back_through_from_name() {
+        for preference in [Preference::Newest, Preference::Oldest] {
+            assert_eq!(Preference::from_name(preference.name()), Some(preference));
+        }
+        assert_eq!(Preference::from_name("heaviest"), None);
     }
 
     #[test]

@@ -42,6 +42,11 @@ const REGISTRY: &str = "Registry";
 const FORGE: &str = "Forge";
 const LOCAL_PATH: &str = "LocalPath";
 
+/// The origin kinds as the written lock spells them, one per constructor.
+pub const KIND_REGISTRY: &str = "registry";
+pub const KIND_FORGE: &str = "forge";
+pub const KIND_LOCAL_PATH: &str = "local-path";
+
 const DOMAIN: &str = "domain";
 const NAME: &str = "name";
 const VERSION: &str = "version";
@@ -112,6 +117,43 @@ impl Origin {
             FORGE => Ok(Self::Forge(location)),
             LOCAL_PATH => Ok(Self::LocalPath(location)),
             other => Err(diag(format!("{other} is not a constructor of {ORIGIN}"))),
+        }
+    }
+}
+
+impl Origin {
+    /// The origin's kind as the written lock spells it, the inverse of
+    /// [`Self::from_kind`]. Both spellings live here, beside the sum they
+    /// name, so a new kind lands where it is declared rather than in a
+    /// reader.
+    #[must_use]
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Registry(_) => KIND_REGISTRY,
+            Self::Forge(_) => KIND_FORGE,
+            Self::LocalPath(_) => KIND_LOCAL_PATH,
+        }
+    }
+
+    /// The origin a written kind names at `location`, the inverse of
+    /// [`Self::kind`].
+    #[must_use]
+    pub fn from_kind(kind: &str, location: impl Into<Box<str>>) -> Option<Self> {
+        match kind {
+            KIND_REGISTRY => Some(Self::Registry(location.into())),
+            KIND_FORGE => Some(Self::Forge(location.into())),
+            KIND_LOCAL_PATH => Some(Self::LocalPath(location.into())),
+            _ => None,
+        }
+    }
+
+    /// Where the resolution happened, the payload every kind carries.
+    #[must_use]
+    pub fn location(&self) -> &str {
+        match self {
+            Self::Registry(location) | Self::Forge(location) | Self::LocalPath(location) => {
+                location
+            }
         }
     }
 }
@@ -426,6 +468,24 @@ mod tests {
         );
         assert_eq!(reordered, canonical);
         assert_eq!(reordered.content_id(), canonical.content_id());
+    }
+
+    #[test]
+    fn an_origins_written_kind_reads_back_through_from_kind() {
+        let origins = [
+            (Origin::Registry("pkgs.pith-lang.org".into()), KIND_REGISTRY),
+            (Origin::Forge("git.pith-lang.org".into()), KIND_FORGE),
+            (Origin::LocalPath("vendor/zlib".into()), KIND_LOCAL_PATH),
+        ];
+        for (origin, kind) in origins {
+            assert_eq!(origin.kind(), kind);
+            assert_eq!(
+                Origin::from_kind(origin.kind(), origin.location()),
+                Some(origin.clone())
+            );
+        }
+        assert_eq!(Origin::from_kind("mirror", "somewhere"), None);
+        assert_eq!(Origin::Registry("r".into()).location(), "r");
     }
 
     #[test]

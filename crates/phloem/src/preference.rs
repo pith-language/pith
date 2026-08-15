@@ -25,6 +25,10 @@ pub const PREFERENCE: &str = "phloem.Preference";
 const NEWEST: &str = "Newest";
 const OLDEST: &str = "Oldest";
 
+/// The written names of the orderings, the inverse pair for the lock file.
+const NEWEST_NAME: &str = "newest";
+const OLDEST_NAME: &str = "oldest";
+
 /// One declared ordering over candidates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Preference {
@@ -102,12 +106,25 @@ impl Preference {
         }
     }
 
-    /// The name a decision trail records for this ordering.
+    /// The name a decision trail records for this ordering, and the name
+    /// the written lock spells it by.
     #[must_use]
     pub fn name(self) -> &'static str {
         match self {
-            Self::Newest => "newest",
-            Self::Oldest => "oldest",
+            Self::Newest => NEWEST_NAME,
+            Self::Oldest => OLDEST_NAME,
+        }
+    }
+
+    /// The preference a written name names, the inverse of [`Self::name`].
+    /// Both spellings live here, beside the ordering they name, so a new
+    /// ordering lands where it is declared rather than in a reader.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            NEWEST_NAME => Some(Self::Newest),
+            OLDEST_NAME => Some(Self::Oldest),
+            _ => None,
         }
     }
 }
