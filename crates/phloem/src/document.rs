@@ -60,9 +60,12 @@ pub fn lock_type() -> Type {
 /// One lock document: the entries a resolution selected, with every input
 /// the selection depended on that the declarations do not already hold.
 ///
-/// The entries are held in one canonical order — by each entry's canonical
-/// encoding — so the same selection set has one spelling, one digest, and
-/// one rendered file regardless of the order the search reported.
+/// The entries are a set over package identities, held in one canonical
+/// order — by each entry's canonical encoding — so the same selection set
+/// has one spelling and one digest regardless of the order the search
+/// reported. The rendered file orders the same entries by the line's own
+/// bytes instead, which is the diff's business rather than the digest's
+/// (0041).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Lock {
     /// The resolve rule's revision digest, as lowercase hex.

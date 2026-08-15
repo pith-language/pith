@@ -49,8 +49,16 @@ const SHA256: &str = "sha256:";
 const HEX_LEN: usize = 64;
 
 /// The document as its canonical text: header directives, a blank line,
-/// then one binding line per entry in sorted order, LF line endings, and a
-/// trailing newline.
+/// then one binding line per entry sorted by the line's own bytes, LF line
+/// endings, and a trailing newline.
+///
+/// The file's order is not the value's. The document holds its entries in
+/// the canonical order of their value encodings, which length-prefixes
+/// every string and would order names by length before their first
+/// character; the file orders by the line's own bytes so adjacent packages
+/// stay adjacent in a diff (0041). The value's order is the digest's
+/// business, the file's is the diff's, and parse normalizes the file back
+/// into the value's order.
 #[must_use]
 pub fn render(lock: &Lock) -> String {
     let mut out = String::new();
@@ -62,8 +70,10 @@ pub fn render(lock: &Lock) -> String {
         let _ = writeln!(out, "{PREFERENCE} {}", preference.name());
     }
     out.push('\n');
-    for entry in lock.entries.iter() {
-        let _ = writeln!(out, "{}", bind_line(entry));
+    let mut lines: Vec<String> = lock.entries.iter().map(bind_line).collect();
+    lines.sort();
+    for line in lines {
+        let _ = writeln!(out, "{line}");
     }
     out
 }
@@ -657,6 +667,33 @@ mod tests {
                 ),
             ],
         )
+    }
+
+    #[test]
+    fn entries_are_ordered_by_the_line_bytes_not_the_canonical_encoding() {
+        // The value orders entries by canonical encoding, whose length
+        // prefixes put `zlib` (four bytes of name) before `openssl`
+        // (seven). The file orders by the line's own bytes so adjacent
+        // packages stay adjacent in a diff, which reverses the two. Both
+        // orders are deterministic; only the file's is this one.
+        let written = lock();
+        assert_eq!(
+            written.entries.first().unwrap().package.identity().name(),
+            "zlib",
+            "the value's canonical order puts the shorter name first"
+        );
+        let text = render(&written);
+        let binds: Vec<&str> = text
+            .lines()
+            .filter(|line| line.starts_with(BIND))
+            .collect();
+        let Some((first, second)) = binds.first().zip(binds.get(1)) else {
+            unreachable!("the fixture holds two entries");
+        };
+        assert!(
+            first.contains("openssl") && second.contains("zlib"),
+            "the file's line order puts openssl before zlib: {binds:?}"
+        );
     }
 
     #[test]
