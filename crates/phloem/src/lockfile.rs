@@ -346,7 +346,11 @@ fn bind_entry(tokens: &[String], number: usize) -> PithResult<LockEntry> {
             tokens.len().saturating_sub(1)
         )));
     };
-    let binding = parse_binding_tokens(&tokens[..6], number)?;
+    let binding_tokens = match tokens.get(..6) {
+        Some(binding_tokens) => binding_tokens,
+        None => unreachable!("the binding prefix exists in the eight-token pattern"),
+    };
+    let binding = parse_binding_tokens(binding_tokens, number)?;
     let Some(origin) = Origin::from_kind(kind.as_str(), location.clone()) else {
         return Err(diag(format!(
             "line {number}: `{kind}` is not an origin kind; expected registry, forge, or \

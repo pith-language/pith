@@ -54,11 +54,10 @@ impl Schemes {
     /// one ordering claims it.
     pub fn new(mut entries: Box<[(Box<str>, Scheme)]>) -> PithResult<Self> {
         entries.sort_by(|left, right| left.0.cmp(&right.0));
-        if let Some(duplicate) = entries
-            .windows(2)
-            .find(|pair| pair[0].0 == pair[1].0)
-            .map(|pair| pair[0].0.as_ref())
-        {
+        if let Some(duplicate) = entries.windows(2).find_map(|pair| match pair {
+            [left, right] if left.0 == right.0 => Some(left.0.as_ref()),
+            _ => None,
+        }) {
             return Err(crate::diag(format!(
                 "the version scheme `{duplicate}` was registered twice; one declared name \
                  cannot select two orderings"

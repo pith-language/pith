@@ -295,10 +295,7 @@ pub(crate) fn parse_digest(text: &str, field: &str, number: usize) -> PithResult
             "line {number}: {field} carried `{text}` rather than a `sha256:`-prefixed digest"
         )));
     };
-    if !hex
-        .chars()
-        .all(|character| character.to_digit(16).is_some())
-    {
+    if !hex.chars().all(|character| character.is_ascii_hexdigit()) {
         return Err(diag(format!(
             "line {number}: {field} carried `{hex}`, which is not hexadecimal"
         )));
