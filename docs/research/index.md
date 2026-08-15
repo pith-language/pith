@@ -33,6 +33,7 @@ each lineage starts with the pressure that created a system. it records the mech
 - [desired state and deployment](deployment-and-state.md)
 - [reproducibility lineage](reproducibility.md)
 - [artifacts, identity, and trust](artifacts-and-trust.md)
+- [binary reuse and binary caches](binary-reuse.md)
 - [tooling and inspectability](tooling.md)
 - [source ledger](sources.md)
 
@@ -43,6 +44,8 @@ the build-system note has the strongest evidence so far. it uses first-party des
 the deployment note is the next strongest. it covers Terraform, Kubernetes, Pulumi, and Crossplane from primary sources and operator-documented failure modes, and it grounds the deployment decisions 0012 and 0013.
 
 the reproducibility note covers the Reproducible Builds project and the SOURCE_DATE_EPOCH specification. it grounds decision 0014.
+
+the binary-reuse note draws Nix's substitution gates, Bazel's action cache, ccache and sccache, Debian's and Arch's signed repositories, SLSA and in-toto, and rebuilderd from primary sources. it grounds decision 0042 and records the disagreement those systems never settled about whether a binary cache is an optimization or a trust boundary.
 
 the Nix baseline draws on Nix documentation and the project's own analysis of Nix's ideas. it needs a closer pass over the thesis, early mailing-list discussions, module-system history, flakes, and content-addressed derivations.
 
