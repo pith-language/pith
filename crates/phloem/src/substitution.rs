@@ -806,7 +806,7 @@ mod tests {
     }
 
     #[test]
-    fn an_offers_feature_set_is_canonically_sorted_the_way_an_entrys_is() {
+    fn an_offers_feature_set_is_canonically_sorted_the_way_an_entries_is() {
         // Two spellings of one feature set are one offer, on 0040's terms;
         // the admission test compares sets, so the spelling cannot decide it.
         let reordered = BinaryOffer::new(
