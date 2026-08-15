@@ -58,7 +58,7 @@ pub fn index_line(candidate: &Candidate) -> String {
         unreachable!("a registry candidate binds an archive");
     };
     let mut line = format!(
-        "{} {} {}:{}",
+        "{} {} {}{}",
         candidate.version,
         features_token(&candidate.features),
         crate::locktext::SHA256,
@@ -138,11 +138,22 @@ fn parse_requires(name: &str, rest: &[String]) -> PithResult<Box<[Requirement]>>
                  package side is empty",
             )));
         }
-        let parsed_range = parse_range(range, 0)?;
+        // The range and feature spellings diagnose against a lock line they
+        // are not part of, so their messages are re-attributed to the index
+        // line being read — a refusal that names only "line 0" would not say
+        // which package's answer was refused.
+        let parsed_range =
+            parse_range(range, 0).map_err(|error| reattribute(&error, name, "range"))?;
         let no_features: Box<[Box<str>]> = Box::new([]);
-        let (features, consumed) = match tail.first() {
-            Some(token) if token.starts_with('[') => (parse_features(token, 0)?, 4),
-            _ => (no_features, 3),
+        let bracketed = tail
+            .first()
+            .filter(|token| token.starts_with('['))
+            .map(|token| {
+                parse_features(token, 0).map_err(|error| reattribute(&error, name, "features"))
+            });
+        let (features, consumed) = match bracketed {
+            Some(parsed) => (parsed?, 4),
+            None => (no_features, 3),
         };
         clauses.push(Requirement {
             subject: PackageIdentity::declare(DomainIdentity::new(subject_domain), subject_name),
@@ -152,6 +163,24 @@ fn parse_requires(name: &str, rest: &[String]) -> PithResult<Box<[Requirement]>>
         tokens = tokens.get(consumed..).unwrap_or(&[]);
     }
     Ok(clauses.into())
+}
+
+/// Re-attributes a lock-text diagnostic to the index line being read, keeping
+/// the message it carried: `line 0: ...` names no package, and a registry
+/// read refuses lines, not files.
+fn reattribute(
+    error: &pith_diag::DiagnosticSink,
+    name: &str,
+    what: &str,
+) -> pith_diag::DiagnosticSink {
+    let carried = error
+        .iter()
+        .map(|diagnostic| diagnostic.message.0.as_ref())
+        .collect::<Vec<_>>()
+        .join("; ");
+    diag(format!(
+        "`{name}` index line: the requirement's {what} is malformed: {carried}"
+    ))
 }
 
 /// One fetched entry: the bytes as read, and the content identity measured
