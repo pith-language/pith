@@ -83,27 +83,51 @@ pub struct Lock {
 impl Lock {
     /// A lock document over `entries`, sorted into the canonical order the
     /// digest and the rendered file read.
-    #[must_use]
+    ///
+    /// The entries are a set over package identities, the property `parse`
+    /// enforces when it reads a file: a document holding two bindings for one
+    /// package would render a file `parse` rejects, which falsifies the
+    /// round-trip guarantee on the document's own output. The constructor
+    /// refuses the document rather than sorting the conflict away.
+    ///
+    /// # Errors
+    /// A [`pith_diag::DiagnosticSink`] naming the package and both versions
+    /// when `entries` binds one package twice.
     pub fn new(
         resolver: impl Into<Box<str>>,
         scheme: impl Into<Box<str>>,
         universe: ContentId,
         preferences: PreferenceList,
         entries: impl Into<Vec<LockEntry>>,
-    ) -> Self {
+    ) -> PithResult<Self> {
         let mut entries = entries.into();
         entries.sort_by(|left, right| {
             left.to_value()
                 .encode_canonical()
                 .cmp(&right.to_value().encode_canonical())
         });
-        Self {
+        for pair in entries.windows(2) {
+            if let [earlier, later] = pair
+                && earlier.package.identity() == later.package.identity()
+            {
+                return Err(diag(format!(
+                    "the lock binds `{}` in `{}` twice: version {} and version {}; two \
+                     selections of one package is the one conflict the entries' set shape \
+                     cannot hold",
+                    later.package.identity().name(),
+                    later.package.identity().domain().as_str(),
+                    earlier.package.version(),
+                    later.package.version(),
+                )));
+            }
+        }
+        Ok(Self {
             resolver: resolver.into(),
             scheme: scheme.into(),
             universe,
             preferences,
             entries: entries.into(),
-        }
+        })
     }
 
     /// The document as a value of the declared record type.
@@ -140,7 +164,7 @@ impl Lock {
             )));
         };
         let resolver = text_field(fields, RESOLVER)?;
-        let scheme = match field_of(fields, SCHEME) {
+        let scheme: Box<str> = match field_of(fields, SCHEME) {
             Some(payload) => crate::identity::version_scheme_name(payload)?.into(),
             None => return Err(diag(format!("the record carried no {SCHEME}"))),
         };
@@ -155,13 +179,7 @@ impl Lock {
                 entries.push(LockEntry::from_value(element)?);
             }
         }
-        Ok(Self {
-            resolver,
-            scheme,
-            universe,
-            preferences,
-            entries: entries.into(),
-        })
+        Self::new(resolver, scheme, universe, preferences, entries)
     }
 
     /// The document's own content identity: a digest over its canonical
@@ -207,13 +225,13 @@ impl Lock {
         for candidate in choice.iter() {
             entries.push(entry_of(candidate)?);
         }
-        Ok(Self::new(
+        Self::new(
             crate::resolve::resolver_revision_hex(),
             scheme,
             *universe,
             preferences.clone(),
             entries,
-        ))
+        )
     }
 
     /// The entries as pin constraints: exact ranges over the coordinates
@@ -248,11 +266,20 @@ pub enum LockChange {
     Preferences,
     Added(LockEntry),
     Removed(LockEntry),
-    /// The same package and features moved to a new version.
+    /// The same package moved to a new version, whether or not its feature
+    /// set moved with it.
     Upgraded {
         package: PackageIdentity,
         from: Box<str>,
         to: Box<str>,
+    },
+    /// The same package moved to a new feature set: features are coordinates
+    /// (0040), so this is one selection moving rather than a removal and an
+    /// addition.
+    Features {
+        package: PackageIdentity,
+        from: Box<[Box<str>]>,
+        to: Box<[Box<str>]>,
     },
     /// The same coordinates resolved to different content: 0039's drift.
     Drifted {
@@ -294,12 +321,14 @@ pub fn diff(before: &Lock, after: &Lock) -> LockDiff {
     }
 }
 
-/// Key an entry by its package identity and feature set: the coordinates an
-/// upgrade moves within.
-type EntryKey = (PackageIdentity, Box<[Box<str>]>);
+/// Key an entry by its package identity alone, the key `parse` and the
+/// solver's host maps key on: every other coordinate an entry carries moves
+/// within one key, so a moved version or feature set reads as one selection
+/// moving rather than as a removal paired with an addition.
+type EntryKey = PackageIdentity;
 
 fn key_of(entry: &LockEntry) -> EntryKey {
-    (entry.package.identity().clone(), entry.features.clone())
+    entry.package.identity().clone()
 }
 
 fn diff_entries(changes: &mut Vec<LockChange>, before: &Lock, after: &Lock) {
@@ -313,12 +342,25 @@ fn diff_entries(changes: &mut Vec<LockChange>, before: &Lock, after: &Lock) {
             Some(new) => {
                 if old.package.version() != new.package.version() {
                     changes.push(LockChange::Upgraded {
-                        package: old.package.identity().clone(),
+                        package: key.clone(),
                         from: old.package.version().into(),
                         to: new.package.version().into(),
                     });
                 }
-                if old.source != new.source {
+                if old.features != new.features {
+                    changes.push(LockChange::Features {
+                        package: key.clone(),
+                        from: old.features.clone(),
+                        to: new.features.clone(),
+                    });
+                }
+                // Content under moved coordinates is a new selection's content,
+                // not drift; drift is content that moved while no coordinate
+                // did.
+                if old.package.version() == new.package.version()
+                    && old.features == new.features
+                    && old.source != new.source
+                {
                     changes.push(LockChange::Drifted {
                         package: old.package.clone(),
                         from: old.source,
@@ -525,7 +567,8 @@ mod tests {
             ContentId::of_blob(b"another-universe"),
             base.preferences.clone(),
             base.entries.to_vec(),
-        );
+        )
+        .unwrap();
         assert_eq!(
             diff(&base, &moved_universe).changes,
             Box::from([LockChange::Universe(
@@ -540,7 +583,8 @@ mod tests {
             base.universe,
             base.preferences.clone(),
             base.entries.to_vec(),
-        );
+        )
+        .unwrap();
         assert_eq!(
             diff(&base, &moved_resolver).changes,
             Box::from([LockChange::Resolver])
@@ -552,7 +596,8 @@ mod tests {
             base.universe,
             PreferenceList(Box::new([Preference::Newest])),
             base.entries.to_vec(),
-        );
+        )
+        .unwrap();
         assert_eq!(
             diff(&base, &moved_preferences).changes,
             Box::from([LockChange::Preferences])
@@ -564,7 +609,8 @@ mod tests {
             base.universe,
             base.preferences.clone(),
             base.entries.to_vec(),
-        );
+        )
+        .unwrap();
         assert_eq!(
             diff(&base, &moved_scheme).changes,
             Box::from([LockChange::Scheme])
@@ -573,10 +619,10 @@ mod tests {
 
     #[test]
     fn entry_changes_are_reported_as_added_removed_upgraded_and_drifted() {
-        let entry = |name: &str, version: &str, source: &[u8]| {
+        let entry = |name: &str, version: &str, features: &[&str], source: &[u8]| {
             LockEntry::new(
                 PackageVersion::new(identity(name), version),
-                [] as [&str; 0],
+                features.iter().copied(),
                 ContentId::of_blob(source),
                 Origin::Registry("pkgs.pith-lang.org".into()),
             )
@@ -587,41 +633,144 @@ mod tests {
             ContentId::of_blob(b"u"),
             PreferenceList(Box::new([])),
             vec![
-                entry("zlib", "1.3", b"zlib-1.3"),
-                entry("left", "0.1", b"left-0.1"),
-                entry("drifted", "2.0", b"drifted-original"),
+                entry("zlib", "1.3", &[], b"zlib-1.3"),
+                entry("left", "0.1", &[], b"left-0.1"),
+                entry("drifted", "2.0", &[], b"drifted-original"),
             ],
-        );
+        )
+        .unwrap();
         let after = Lock::new(
             Box::from("r"),
             NUMERIC_SEGMENTS,
             ContentId::of_blob(b"u"),
             PreferenceList(Box::new([])),
             vec![
-                entry("zlib", "1.4", b"zlib-1.4"),
-                entry("openssl", "1.1.1", b"openssl-1.1.1"),
-                entry("drifted", "2.0", b"drifted-republished"),
+                entry("zlib", "1.4", &[], b"zlib-1.4"),
+                entry("openssl", "1.1.1", &[], b"openssl-1.1.1"),
+                entry("drifted", "2.0", &[], b"drifted-republished"),
             ],
-        );
+        )
+        .unwrap();
         let changes = diff(&before, &after).changes;
-        assert!(changes.contains(&LockChange::Upgraded {
-            package: identity("zlib"),
-            from: "1.3".into(),
-            to: "1.4".into(),
-        }));
-        assert!(changes.contains(&LockChange::Drifted {
-            package: PackageVersion::new(identity("drifted"), "2.0"),
-            from: ContentId::of_blob(b"drifted-original"),
-            to: ContentId::of_blob(b"drifted-republished"),
-        }));
-        assert!(changes.iter().any(|change| matches!(
-            change,
-            LockChange::Removed(removed) if removed.package.identity() == &identity("left")
-        )));
-        assert!(changes.iter().any(|change| matches!(
-            change,
-            LockChange::Added(added) if added.package.identity() == &identity("openssl")
-        )));
+        assert_eq!(
+            changes,
+            Box::from([
+                LockChange::Drifted {
+                    package: PackageVersion::new(identity("drifted"), "2.0"),
+                    from: ContentId::of_blob(b"drifted-original"),
+                    to: ContentId::of_blob(b"drifted-republished"),
+                },
+                LockChange::Removed(entry("left", "0.1", &[], b"left-0.1")),
+                LockChange::Upgraded {
+                    package: identity("zlib"),
+                    from: "1.3".into(),
+                    to: "1.4".into(),
+                },
+                LockChange::Added(entry("openssl", "1.1.1", &[], b"openssl-1.1.1")),
+            ]),
+            "an upgrade over new content is one upgrade, not an upgrade plus drift"
+        );
+    }
+
+    #[test]
+    fn a_moved_feature_set_is_one_selection_moving_not_a_removal_and_an_addition() {
+        // Keyed on the package identity, the key parse and the solver use: a
+        // feature set that moved reads as the same package's selection
+        // moving, and a version that moved alongside it still fires the
+        // upgrade.
+        let entry = |version: &str, features: &[&str], source: &[u8]| {
+            LockEntry::new(
+                PackageVersion::new(identity("openssl"), version),
+                features.iter().copied(),
+                ContentId::of_blob(source),
+                Origin::Registry("pkgs.pith-lang.org".into()),
+            )
+        };
+        let before = Lock::new(
+            Box::from("r"),
+            NUMERIC_SEGMENTS,
+            ContentId::of_blob(b"u"),
+            PreferenceList(Box::new([])),
+            vec![entry("1.1.1", &["shared"], b"openssl-shared")],
+        )
+        .unwrap();
+        let after = Lock::new(
+            Box::from("r"),
+            NUMERIC_SEGMENTS,
+            ContentId::of_blob(b"u"),
+            PreferenceList(Box::new([])),
+            vec![entry("1.1.1", &["static"], b"openssl-static")],
+        )
+        .unwrap();
+        assert_eq!(
+            diff(&before, &after).changes,
+            Box::from([LockChange::Features {
+                package: identity("openssl"),
+                from: feats(&["shared"]),
+                to: feats(&["static"]),
+            }])
+        );
+
+        let moved_both = Lock::new(
+            Box::from("r"),
+            NUMERIC_SEGMENTS,
+            ContentId::of_blob(b"u"),
+            PreferenceList(Box::new([])),
+            vec![entry("1.2.0", &["static"], b"openssl-static")],
+        )
+        .unwrap();
+        assert_eq!(
+            diff(&before, &moved_both).changes,
+            Box::from([
+                LockChange::Upgraded {
+                    package: identity("openssl"),
+                    from: "1.1.1".into(),
+                    to: "1.2.0".into(),
+                },
+                LockChange::Features {
+                    package: identity("openssl"),
+                    from: feats(&["shared"]),
+                    to: feats(&["static"]),
+                },
+            ]),
+            "the upgrade fires when the features moved alongside the version"
+        );
+    }
+
+    #[test]
+    fn a_document_cannot_bind_one_package_twice() {
+        // The set property parse enforces on files is the document's own, so
+        // a lock built in memory cannot render a file the reader refuses.
+        let error = Lock::new(
+            Box::from("r"),
+            NUMERIC_SEGMENTS,
+            ContentId::of_blob(b"u"),
+            PreferenceList(Box::new([])),
+            vec![
+                LockEntry::new(
+                    PackageVersion::new(identity("openssl"), "1.1.1"),
+                    ["shared"],
+                    ContentId::of_blob(b"openssl-shared"),
+                    Origin::Registry("pkgs.pith-lang.org".into()),
+                ),
+                LockEntry::new(
+                    PackageVersion::new(identity("openssl"), "1.1.1"),
+                    ["static"],
+                    ContentId::of_blob(b"openssl-static"),
+                    Origin::Registry("pkgs.pith-lang.org".into()),
+                ),
+            ],
+        )
+        .unwrap_err();
+        let message = error
+            .iter()
+            .next()
+            .map(|diagnostic| diagnostic.message.0.to_string())
+            .unwrap_or_default();
+        assert!(
+            message.contains("openssl") && message.contains("twice"),
+            "the diagnostic names the package and the conflict: {message}"
+        );
     }
 
     #[test]

@@ -139,7 +139,7 @@ pub fn parse(text: &str) -> PithResult<Lock> {
     }
     let (resolver, scheme, universe, preferences) = header.finish()?;
     let entries: Vec<LockEntry> = seen.into_values().map(|(_, entry)| entry).collect();
-    Ok(Lock::new(resolver, scheme, universe, preferences, entries))
+    Lock::new(resolver, scheme, universe, preferences, entries)
 }
 
 /// Fold one parsed binding into the entries-so-far. A binding whose package
@@ -729,6 +729,7 @@ mod tests {
                 ),
             ],
         )
+        .unwrap()
     }
 
     #[test]
@@ -1030,7 +1031,8 @@ mod tests {
             ContentId::of_blob(b"moved-universe"),
             base.preferences.clone(),
             base.entries.to_vec(),
-        );
+        )
+        .unwrap();
         assert_ne!(render(&base), render(&moved));
         let unchanged = Lock::new(
             base.resolver.clone(),
@@ -1038,7 +1040,8 @@ mod tests {
             base.universe,
             base.preferences.clone(),
             base.entries.iter().rev().cloned().collect::<Vec<_>>(),
-        );
+        )
+        .unwrap();
         assert_eq!(render(&base), render(&unchanged));
         assert_eq!(diff(&base, &moved).changes.len(), 1);
     }
