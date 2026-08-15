@@ -166,7 +166,10 @@ impl Environment {
         let operating_system = text_field(fields, OPERATING_SYSTEM)?;
         let architecture = text_field(fields, ARCHITECTURE)?;
         let toolchain = match field_of(fields, TOOLCHAIN) {
-            Some(payload) => payload.clone(),
+            Some(payload) => {
+                toolchain_driver(payload)?;
+                payload.clone()
+            }
             None => return Err(diag(format!("the declaration carried no {TOOLCHAIN}"))),
         };
         let mut origins = Vec::new();
@@ -346,7 +349,10 @@ impl EnvironmentDocument {
         let operating_system = text_field(fields, OPERATING_SYSTEM)?;
         let architecture = text_field(fields, ARCHITECTURE)?;
         let toolchain = match field_of(fields, TOOLCHAIN) {
-            Some(payload) => payload.clone(),
+            Some(payload) => {
+                toolchain_driver(payload)?;
+                payload.clone()
+            }
             None => return Err(diag(format!("the document carried no {TOOLCHAIN}"))),
         };
         let mut substitutions = Vec::new();
@@ -438,6 +444,47 @@ pub fn diff(before: &EnvironmentDocument, after: &EnvironmentDocument) -> Box<[E
     changes.into()
 }
 
+/// The toolchain's driver path. The declared type is the nominal alone, and
+/// `is_type` cannot see a nominal's representation, so the reader is where a
+/// toolchain value xylem never produces is refused rather than rendered.
+///
+/// # Errors
+/// A [`pith_diag::DiagnosticSink`] naming what was found when the value is
+/// not the nominal toolchain over the driver path text.
+fn toolchain_driver(toolchain: &Value) -> PithResult<&str> {
+    let Value::Nominal { representation, .. } = toolchain else {
+        return Err(diag(format!(
+            "the toolchain is {}, and the declared type is xylem's nominal toolchain over \
+             the driver path",
+            toolchain.describe()
+        )));
+    };
+    let Value::Text(driver) = representation.as_ref() else {
+        return Err(diag(format!(
+            "the toolchain's representation is {} rather than the driver path text",
+            representation.describe()
+        )));
+    };
+    Ok(driver)
+}
+
+/// The toolchain in this format's token spelling. The declaration's type is
+/// xylem's nominal toolchain, whose representation is the driver path, and
+/// the driver gets the same quoting every other text field on the line
+/// gets, so a path with a space renders a line this grammar still accepts.
+fn toolchain_token(toolchain: &Value) -> String {
+    let driver = match toolchain {
+        Value::Nominal { representation, .. } => match representation.as_ref() {
+            Value::Text(driver) => return token(driver),
+            // A toolchain value xylem never produces; quoted so the line
+            // still parses rather than borrowing a diagnostic spelling.
+            other => other.describe(),
+        },
+        other => other.describe(),
+    };
+    token(&driver)
+}
+
 /// The environment's rendered record: its projection, deterministic and
 /// line-oriented, on the terms of the lock's file. The text names the lock
 /// by digest, the realization coordinates, and every served substitution;
@@ -456,7 +503,7 @@ pub fn render(document: &EnvironmentDocument) -> String {
         token(&document.name),
         document.platform.operating_system,
         document.platform.architecture,
-        document.toolchain.describe(),
+        toolchain_token(&document.toolchain),
         document.lock.content_id().digest(),
     );
     let mut lines: Vec<String> = document
@@ -512,6 +559,66 @@ pub fn record_path(project: &Path, environment: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn document(toolchain: Value) -> EnvironmentDocument {
+        EnvironmentDocument {
+            name: DEFAULT_ENVIRONMENT.into(),
+            lock: Lock::new(
+                "r",
+                "numeric-segments",
+                ContentId::of_blob(b"universe"),
+                PreferenceList(Box::new([])),
+                Vec::new(),
+            )
+            .unwrap(),
+            platform: ExecutionPlatform {
+                operating_system: "linux".into(),
+                architecture: "x86_64".into(),
+            },
+            toolchain,
+            substitutions: Box::new([]),
+        }
+    }
+
+    #[test]
+    fn a_toolchain_path_with_a_space_renders_in_the_line_token_spelling() {
+        // The toolchain is a text field on the header line like the name and
+        // the platform, so it takes the quoting they take. `describe` would
+        // spell the value bare, and a driver path with a space would render
+        // a line whose own grammar cannot read back.
+        let rendered = render(&document(xylem::types::toolchain(
+            "/nix/store/my compiler toolchain",
+        )));
+        let header = rendered.lines().next().unwrap();
+        assert!(
+            header.contains("toolchain \"/nix/store/my compiler toolchain\""),
+            "the driver path renders quoted, the way every other field on the \
+             line does: {header}"
+        );
+        assert_eq!(
+            header.matches('"').count(),
+            2,
+            "one quoted token, no bare spaces leaking out of it: {header}"
+        );
+    }
+
+    #[test]
+    fn a_toolchain_whose_representation_is_not_the_driver_path_is_refused_on_read() {
+        let wrong = Value::Nominal {
+            name: xylem::types::TOOLCHAIN.into(),
+            representation: Box::new(Value::Int(7)),
+        };
+        let value = document(wrong.clone()).to_value();
+        assert!(
+            value.is_type(&environment_document_type()),
+            "the nominal type cannot see the representation; the reader must"
+        );
+        let error = EnvironmentDocument::from_value(&value).unwrap_err();
+        assert!(
+            error.iter().any(|d| d.message.0.contains("driver path")),
+            "the diagnostic names what the toolchain had to carry: {error:?}"
+        );
+    }
 
     #[test]
     fn the_lock_and_record_paths_derive_from_the_declaration() {
