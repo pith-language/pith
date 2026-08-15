@@ -25,6 +25,7 @@ pub mod description;
 pub mod document;
 pub mod identity;
 pub mod lock;
+pub mod lockfile;
 pub mod preference;
 pub mod request;
 pub mod resolution;
