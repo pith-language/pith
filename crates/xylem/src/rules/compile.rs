@@ -10,8 +10,8 @@ use pith_engine::{
 };
 
 use super::{
-    OBJECT_PATH, SOURCE_PATH, blob_of, compiler_environment, diag, input, requested_toolchain,
-    rule_revision,
+    OBJECT_PATH, SOURCE_PATH, blob_of, compiler_environment, diag, effective_headers, input,
+    provided_headers_of, requested_toolchain, rule_revision,
 };
 use crate::HeaderUniverse;
 use crate::depfile;
@@ -57,6 +57,8 @@ impl ActionRule for CompileAction {
                 "the compile request carried no discovered header list as its third input",
             ));
         };
+        let provided = provided_headers_of(input(inputs, 3)?)?;
+        let headers = effective_headers(&self.universe, &provided)?;
         let mut action_inputs = vec![ActionInput {
             path: SOURCE_PATH.into(),
             content: Content::Blob(source),
@@ -68,15 +70,21 @@ impl ActionRule for CompileAction {
                      only the depfile parser produces this list",
                 ));
             };
-            match self.universe.resolve(path) {
-                Some(id) => action_inputs.push(ActionInput {
-                    path: path.clone(),
-                    content: Content::Blob(id),
+            // A provided header that agrees with the registered universe is
+            // already staged by name; either spelling resolves to one content.
+            match headers
+                .iter()
+                .find(|(offered, _)| offered.as_ref() == path.as_ref())
+            {
+                Some((offered, id)) => action_inputs.push(ActionInput {
+                    path: offered.clone(),
+                    content: Content::Blob(*id),
                 }),
                 None => {
                     return Err(diag(&format!(
-                        "the depfile named `{path}`, which the registered header universe \
-                         does not offer; add it to the universe or fix the include"
+                        "the depfile named `{path}`, which neither the registered header \
+                         universe nor the provided headers offer; add it to the universe, \
+                         provide it, or fix the include"
                     )));
                 }
             }
@@ -148,9 +156,14 @@ impl PureRule for CompileRule {
             Ok(value) => value.clone(),
             Err(_) => unreachable!("selection checked the interface"),
         };
+        let provided = match input(inputs, 2) {
+            Ok(value) => value.clone(),
+            Err(_) => unreachable!("selection checked the interface"),
+        };
         Box::new(CompileEntryFrame {
             toolchain_value,
             source,
+            provided,
             phase: CompilePhase::Discover,
         })
     }
@@ -169,6 +182,7 @@ enum CompilePhase {
 struct CompileEntryFrame {
     toolchain_value: Value,
     source: Value,
+    provided: Value,
     phase: CompilePhase,
 }
 
@@ -180,7 +194,11 @@ impl PureRuleFrame for CompileEntryFrame {
                 let request = Request::<Action>::new(
                     "discover",
                     types::discovery_interface(),
-                    [self.toolchain_value.clone(), self.source.clone()],
+                    [
+                        self.toolchain_value.clone(),
+                        self.source.clone(),
+                        self.provided.clone(),
+                    ],
                     Span::none(),
                 );
                 Ok(PureStep::NeedAction(request))
@@ -220,6 +238,7 @@ impl PureRuleFrame for CompileEntryFrame {
                         self.toolchain_value.clone(),
                         self.source.clone(),
                         depfile::discovered_value(&headers),
+                        self.provided.clone(),
                     ],
                     Span::none(),
                 );
@@ -266,11 +285,12 @@ mod tests {
         CompileAction::new(Toolchains::one(toolchain), universe())
     }
 
-    fn compile_inputs(discovered: &[&str]) -> Vec<Value> {
+    fn compile_inputs(discovered: &[&str], provided: &[(Box<str>, ContentId)]) -> Vec<Value> {
         vec![
             types::toolchain("/bin/cc"),
             types::c_source(ContentId::of_blob(b"source")),
             types::headers(discovered.iter().copied()),
+            types::provided_headers(provided.to_vec()),
         ]
     }
 
@@ -282,7 +302,7 @@ mod tests {
         // exists to make. The entry frame has already dropped the source's own
         // prerequisite token, which is why it is absent from the list.
         let spec = compile_action()
-            .plan(&compile_inputs(&["answer.h"]))
+            .plan(&compile_inputs(&["answer.h"], &[]))
             .expect("the compile plans");
 
         let paths: Vec<&str> = spec.inputs.iter().map(|i| i.path.as_ref()).collect();
@@ -294,9 +314,40 @@ mod tests {
         // The loud half of declared-first: a depfile naming a path outside the
         // universe is a diagnostic, never a silently narrowed input set.
         let error = compile_action()
-            .plan(&compile_inputs(&["elsewhere.h"]))
+            .plan(&compile_inputs(&["elsewhere.h"], &[]))
             .expect_err("the path is not in the universe");
         let message = error.iter().next().map(|d| d.message.clone());
         assert!(message.is_some_and(|m| m.0.contains("elsewhere.h")));
+    }
+
+    #[test]
+    fn a_provided_header_resolves_a_path_the_universe_does_not_offer() {
+        // The package-dependency case: the include comes from another build's
+        // output, arrives as request data, and the contract stages its content.
+        let provided = [("util-1.0/util.h".into(), ContentId::of_blob(b"util header"))];
+        let spec = compile_action()
+            .plan(&compile_inputs(&["util-1.0/util.h"], &provided))
+            .expect("the compile plans over a provided header");
+        let staged: Vec<(&str, &pith_ids::ContentId)> = spec
+            .inputs
+            .iter()
+            .map(|i| (i.path.as_ref(), content_of(i)))
+            .collect();
+        assert_eq!(
+            staged,
+            [
+                ("source.c", &ContentId::of_blob(b"source")),
+                ("util-1.0/util.h", &ContentId::of_blob(b"util header")),
+            ],
+            "the contract stages the provided content under the include's own spelling"
+        );
+    }
+
+    /// The blob identity a staged input carries.
+    fn content_of(input: &pith_core::ActionInput) -> &ContentId {
+        match &input.content {
+            pith_core::Content::Blob(id) => id,
+            _ => unreachable!("the planned inputs are blobs"),
+        }
     }
 }

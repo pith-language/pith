@@ -133,7 +133,11 @@ impl PureRuleFrame for SourcesBuildFrame {
                         Request::new(
                             "compile",
                             types::compile_interface(),
-                            [self.toolchain_value.clone(), source.clone()],
+                            [
+                                self.toolchain_value.clone(),
+                                source.clone(),
+                                types::provided_headers([] as [(Box<str>, ContentId); 0]),
+                            ],
                             Span::none(),
                         )
                     })
@@ -198,6 +202,12 @@ fn action_computations(engine: &Engine) -> usize {
         .computations()
         .filter(|(_, node)| matches!(node.kind, ComputationKind::Action(_)))
         .count()
+}
+
+/// An empty provided-header set: the fixture's sources include nothing that a
+/// request declares beside them.
+fn no_headers() -> Value {
+    types::provided_headers([] as [(Box<str>, ContentId); 0])
 }
 
 fn run_build(engine: &mut Engine, request: &Request<Pure>) -> Evaluation {
@@ -670,7 +680,7 @@ fn an_undeclared_header_fails_rather_than_reading_the_host() {
 
     let diagnostics = run_build_expecting_failure(
         &mut engine,
-        &types::compile_request(toolchain.value(), source),
+        &types::compile_request(toolchain.value(), source, no_headers()),
     );
     let text: Vec<String> = diagnostics
         .iter()
@@ -747,11 +757,20 @@ fn two_toolchains_compile_the_same_source_without_sharing_a_cache_entry() {
     };
     let source = store_blob(&mut engine, SOURCE_A, "a.c");
 
-    let under_gcc = run_build(&mut engine, &types::compile_request(gcc.value(), source));
+    let under_gcc = run_build(
+        &mut engine,
+        &types::compile_request(gcc.value(), source, no_headers()),
+    );
     let after_gcc = action_computations(&engine);
-    let under_clang = run_build(&mut engine, &types::compile_request(clang.value(), source));
+    let under_clang = run_build(
+        &mut engine,
+        &types::compile_request(clang.value(), source, no_headers()),
+    );
     let after_clang = action_computations(&engine);
-    let gcc_again = run_build(&mut engine, &types::compile_request(gcc.value(), source));
+    let gcc_again = run_build(
+        &mut engine,
+        &types::compile_request(gcc.value(), source, no_headers()),
+    );
 
     // The toolchain is a request input, so clang's compile is a different
     // request that plans a different contract and cannot be answered from gcc's
@@ -794,7 +813,7 @@ fn a_toolchain_the_build_was_not_registered_with_is_refused() {
     // contract against a guessed one would be the ambient discovery 0007 forbids.
     let diagnostics = run_build_expecting_failure(
         &mut engine,
-        &types::compile_request(types::toolchain("/nowhere/cc"), source),
+        &types::compile_request(types::toolchain("/nowhere/cc"), source, no_headers()),
     );
     let message = diagnostics
         .iter()
@@ -1079,7 +1098,7 @@ fn two_cold_compiles_of_the_same_source_are_identical() {
     engine.set_action_caching(false);
     let source = store_blob(&mut engine, SOURCE_A, "a.c");
 
-    let compile = types::compile_request(toolchain_value, source);
+    let compile = types::compile_request(toolchain_value, source, no_headers());
     let first = blob_of(&run_build(&mut engine, &compile).value);
     let second = blob_of(&run_build(&mut engine, &compile).value);
     assert_eq!(

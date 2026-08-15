@@ -9,8 +9,8 @@ use pith_engine::{ActionExecution, ActionRule, ProducedOutput};
 use pith_ids::ContentId;
 
 use super::{
-    DEPFILE_PATH, SOURCE_PATH, blob_of, compiler_environment, diag, input, requested_toolchain,
-    rule_revision,
+    DEPFILE_PATH, SOURCE_PATH, blob_of, compiler_environment, diag, effective_headers, input,
+    provided_headers_of, requested_toolchain, rule_revision,
 };
 use crate::toolchain::Toolchains;
 use crate::types;
@@ -97,14 +97,16 @@ impl ActionRule for HeaderDiscoveryAction {
     fn plan(&self, inputs: &[Value]) -> PithResult<ActionSpec> {
         let toolchain = requested_toolchain(&self.toolchains, inputs)?;
         let source = blob_of(input(inputs, 1)?, types::C_SOURCE)?;
+        let provided = provided_headers_of(input(inputs, 2)?)?;
+        let headers = effective_headers(&self.universe, &provided)?;
         let mut action_inputs = vec![ActionInput {
             path: SOURCE_PATH.into(),
             content: Content::Blob(source),
         }];
-        for (path, id) in self.universe.iter() {
+        for (path, id) in headers {
             action_inputs.push(ActionInput {
-                path: path.clone(),
-                content: Content::Blob(*id),
+                path,
+                content: Content::Blob(id),
             });
         }
         Ok(ActionSpec {
@@ -173,6 +175,7 @@ mod tests {
         let inputs = vec![
             types::toolchain("/bin/cc"),
             types::c_source(ContentId::of_blob(b"source")),
+            types::provided_headers([] as [(Box<str>, ContentId); 0]),
         ];
         let spec = discovery.plan(&inputs).expect("the discovery plans");
 
@@ -183,6 +186,60 @@ mod tests {
                 .iter()
                 .any(|arg| arg.as_ref() == DEPFILE_PATH),
             "the discovery pass writes a depfile: {spec:?}"
+        );
+    }
+
+    #[test]
+    fn a_provided_header_joins_the_staged_set_and_a_conflicting_one_is_refused() {
+        let toolchain = Toolchain {
+            driver: "/bin/cc".into(),
+            closure: Box::new([]),
+            program_path: Some("/bin".into()),
+            tool_directory: "/bin".into(),
+        };
+        let discovery = HeaderDiscoveryAction::new(Toolchains::one(toolchain), universe());
+        let extra = ContentId::of_blob(b"from-elsewhere");
+        let inputs = vec![
+            types::toolchain("/bin/cc"),
+            types::c_source(ContentId::of_blob(b"source")),
+            types::provided_headers([("from-elsewhere.h", extra)]),
+        ];
+        let spec = discovery.plan(&inputs).expect("the discovery plans");
+        let paths: Vec<&str> = spec.inputs.iter().map(|i| i.path.as_ref()).collect();
+        assert_eq!(
+            paths,
+            ["source.c", "answer.h", "unused.h", "from-elsewhere.h"],
+            "a provided header is staged beside the registered universe"
+        );
+
+        let agreeing = universe()
+            .iter()
+            .find(|(path, _)| path.as_ref() == "answer.h")
+            .map(|(path, content)| (path.clone(), *content))
+            .unwrap_or_else(|| unreachable!("the fixture universe offers answer.h"));
+        let agrees = vec![
+            types::toolchain("/bin/cc"),
+            types::c_source(ContentId::of_blob(b"source")),
+            types::provided_headers([agreeing]),
+        ];
+        assert!(
+            discovery.plan(&agrees).is_ok(),
+            "a provided header naming the registered content collapses rather than duplicating"
+        );
+
+        let conflict = vec![
+            types::toolchain("/bin/cc"),
+            types::c_source(ContentId::of_blob(b"source")),
+            types::provided_headers([("answer.h", extra)]),
+        ];
+        let error = discovery
+            .plan(&conflict)
+            .expect_err("one spelling cannot name two headers");
+        assert!(
+            error
+                .iter()
+                .any(|d| d.message.0.contains("answer.h") && d.message.0.contains("two headers")),
+            "the refusal names the path and the conflict: {error:?}"
         );
     }
 }

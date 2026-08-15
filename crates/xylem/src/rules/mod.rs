@@ -59,7 +59,7 @@ pub(crate) const GENERATED_PATH: &str = "generated.c";
 /// rule body should do.
 pub(crate) fn rule_revision(label: &str) -> RuleRevision {
     let identity = RuleIdentity::of_module_declaration("xylem", label);
-    RuleRevision::of_manifest(identity, b"xylem-v2")
+    RuleRevision::of_manifest(identity, b"xylem-v3")
 }
 
 pub(crate) fn diag(message: &str) -> DiagnosticSink {
@@ -91,6 +91,94 @@ pub(crate) fn blob_of(value: &Value, expected_name: &str) -> PithResult<ContentI
             value.describe()
         ))),
     }
+}
+
+/// One header the request provided beside the source: the include spelling
+/// and the content it names, which is also the staged path.
+pub(crate) struct ProvidedHeader {
+    pub(crate) path: Box<str>,
+    pub(crate) content: ContentId,
+}
+
+/// Reads a provided-headers value into pairs, diagnosing a request that did
+/// not carry the declared record shape.
+pub(crate) fn provided_headers_of(value: &Value) -> PithResult<Vec<ProvidedHeader>> {
+    let Value::List(entries) = value else {
+        return Err(diag(&format!(
+            "expected a provided header set, found {}",
+            value.describe()
+        )));
+    };
+    let mut headers = Vec::with_capacity(entries.len());
+    for entry in entries.iter() {
+        let Value::Record(fields) = entry else {
+            return Err(diag(&format!(
+                "a provided header was {}, not a path-and-content record",
+                entry.describe()
+            )));
+        };
+        let mut path = None;
+        let mut content = None;
+        for field in fields.iter() {
+            match field.name.as_ref() {
+                types::HEADER_PATH => match &field.payload {
+                    Value::Text(text) => path = Some(text.clone()),
+                    other => {
+                        return Err(diag(&format!(
+                            "a provided header path was {other:?} rather than text"
+                        )));
+                    }
+                },
+                types::HEADER_CONTENT => match &field.payload {
+                    Value::Blob(id) => content = Some(*id),
+                    other => {
+                        return Err(diag(&format!(
+                            "a provided header content was {other:?} rather than a blob"
+                        )));
+                    }
+                },
+                _ => {}
+            }
+        }
+        match (path, content) {
+            (Some(path), Some(content)) => headers.push(ProvidedHeader { path, content }),
+            _ => {
+                return Err(diag(
+                    "a provided header record was missing its path or its content",
+                ));
+            }
+        }
+    }
+    Ok(headers)
+}
+
+/// The headers one compile may see: the registered universe plus the request's
+/// provided set, refusing a path the two spell with different content — the
+/// same include naming two headers is a conflict to report, and agreeing
+/// duplicates collapse.
+pub(crate) fn effective_headers(
+    universe: &HeaderUniverse,
+    provided: &[ProvidedHeader],
+) -> PithResult<Vec<(Box<str>, ContentId)>> {
+    let mut headers: Vec<(Box<str>, ContentId)> = universe.iter().cloned().collect();
+    for header in provided {
+        match universe.resolve(&header.path) {
+            Some(registered) if registered != header.content => {
+                return Err(diag(&format!(
+                    "the include path `{}` is provided as content `{}` and registered as \
+                     content `{}`: one spelling cannot name two headers",
+                    header.path,
+                    header.content.digest(),
+                    registered.digest(),
+                )));
+            }
+            // A provided header naming the registered content collapses into
+            // the entry the universe already contributed.
+            Some(_) => {}
+            None => headers.push((header.path.clone(), header.content)),
+        }
+    }
+    Ok(headers)
 }
 
 /// The search paths a driver needs to find the rest of itself. `COMPILER_PATH`

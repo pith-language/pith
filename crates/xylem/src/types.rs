@@ -12,7 +12,7 @@
 //! slice of 0026's `List<T>` constructor. Its content identities are resolved
 //! by the compile action against the header universe it was registered with.
 
-use pith_core::{Interface, Pure, Request, Type, Value};
+use pith_core::{Interface, Pure, RecordField, Request, Type, Value};
 use pith_diag::Span;
 use pith_ids::ContentId;
 
@@ -119,9 +119,66 @@ where
     )
 }
 
-/// `(Toolchain, CSource) -> Depfile`: the interface of the discovery pass. The
-/// preprocessor runs over the source with the whole header universe staged and
-/// captures the depfile naming what the source actually includes.
+/// The staged-path field of a provided header record.
+pub const HEADER_PATH: &str = "path";
+
+/// The content field of a provided header record.
+pub const HEADER_CONTENT: &str = "content";
+
+/// The type of a provided header set: `(path, content)` pairs a request
+/// declares beside a source, so a compile whose headers come from another
+/// build's output sees them as request data rather than engine registration.
+/// The path is both the include spelling and the staged path.
+#[must_use]
+pub fn provided_headers_type() -> Type {
+    let header = Type::record([
+        RecordField {
+            name: HEADER_PATH.into(),
+            payload: Type::Text,
+        },
+        RecordField {
+            name: HEADER_CONTENT.into(),
+            payload: Type::Blob,
+        },
+    ])
+    .unwrap_or_else(|error| unreachable!("{error}"));
+    Type::List(Box::new(header))
+}
+
+/// A provided header set value over `(path, content)` pairs.
+#[must_use]
+pub fn provided_headers<I, P>(pairs: I) -> Value
+where
+    I: IntoIterator<Item = (P, ContentId)>,
+    P: Into<Box<str>>,
+{
+    Value::List(
+        pairs
+            .into_iter()
+            .map(|(path, content)| {
+                Value::record([
+                    RecordField {
+                        name: HEADER_PATH.into(),
+                        payload: Value::Text(path.into()),
+                    },
+                    RecordField {
+                        name: HEADER_CONTENT.into(),
+                        payload: Value::Blob(content),
+                    },
+                ])
+                .unwrap_or_else(|error| unreachable!("{error}"))
+            })
+            .collect(),
+    )
+}
+
+/// `(Toolchain, CSource, Headers) -> Depfile`: the interface of the discovery
+/// pass. The preprocessor runs over the source with the registered header
+/// universe plus the request's provided headers staged, and captures the
+/// depfile naming what the source actually includes. Provided headers are how
+/// a compile whose headers come from another build's output — a package
+/// dependency's includes — sees them as request data rather than engine
+/// registration.
 #[must_use]
 pub fn discovery_interface() -> Interface {
     Interface {
@@ -132,6 +189,7 @@ pub fn discovery_interface() -> Interface {
             Type::Nominal {
                 name: C_SOURCE.into(),
             },
+            provided_headers_type(),
         ]),
         output: Type::Nominal {
             name: DEPFILE.into(),
@@ -139,10 +197,11 @@ pub fn discovery_interface() -> Interface {
     }
 }
 
-/// `(Toolchain, CSource, List<Text>) -> Object`: the compile action's
-/// interface. The third input is the discovered header set; the action resolves
-/// each path against the universe it was registered with and declares the
-/// resolved files as its inputs.
+/// `(Toolchain, CSource, List<Text>, Headers) -> Object`: the compile action's
+/// interface. The third input is the discovered header set; the fourth is the
+/// provided headers; the action resolves each discovered path against the
+/// registered universe plus the provided set and declares the resolved files
+/// as its inputs.
 #[must_use]
 pub fn compile_action_interface() -> Interface {
     Interface {
@@ -154,6 +213,7 @@ pub fn compile_action_interface() -> Interface {
                 name: C_SOURCE.into(),
             },
             headers_type(),
+            provided_headers_type(),
         ]),
         output: Type::Nominal {
             name: OBJECT.into(),
@@ -161,9 +221,11 @@ pub fn compile_action_interface() -> Interface {
     }
 }
 
-/// `(Toolchain, CSource) -> Object`: the compile entry a build requests. The
-/// entry runs discovery, parses the depfile, and requests the compile with the
-/// discovered set, so a caller names a source and nothing about its headers.
+/// `(Toolchain, CSource, Headers) -> Object`: the compile entry a build
+/// requests. The entry runs discovery over the registered universe plus the
+/// provided headers, parses the depfile, and requests the compile with the
+/// discovered set, so a caller names a source and — where its headers come
+/// from elsewhere — those headers, and nothing about the registered universe.
 #[must_use]
 pub fn compile_interface() -> Interface {
     Interface {
@@ -174,6 +236,7 @@ pub fn compile_interface() -> Interface {
             Type::Nominal {
                 name: C_SOURCE.into(),
             },
+            provided_headers_type(),
         ]),
         output: Type::Nominal {
             name: OBJECT.into(),
@@ -269,13 +332,19 @@ pub fn test_request(toolchain_value: Value, executable: ContentId) -> Request<Pu
 }
 
 /// A pure request to compile `source` under `toolchain_value`, discovering its
-/// header dependencies first.
+/// header dependencies first over the registered universe plus `provided`.
+/// The provided set is the request's own headers — `provided_headers(&[])`
+/// for a source whose includes all live in the registered universe.
 #[must_use]
-pub fn compile_request(toolchain_value: Value, source: ContentId) -> Request<Pure> {
+pub fn compile_request(
+    toolchain_value: Value,
+    source: ContentId,
+    provided: Value,
+) -> Request<Pure> {
     Request::<Pure>::new(
         "compile-entry",
         compile_interface(),
-        [toolchain_value, c_source(source)],
+        [toolchain_value, c_source(source), provided],
         Span::none(),
     )
 }
