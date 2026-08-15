@@ -725,6 +725,7 @@ dependencies = [
  "pith-engine",
  "pith-executor-local",
  "pith-ids",
+ "pith-state-sqlite",
  "pith-store",
  "serde_json",
  "tempfile",
