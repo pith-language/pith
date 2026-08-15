@@ -70,6 +70,7 @@ when an accepted decision changes, a new record supersedes it. the old record st
 - [0040: constraints are declared values with domain models, and resolution is a host-rule computation in the graph](0040-declared-constraints-and-resolution.md)
 - [0042: binary reuse is an admitted substitution over a lock binding, decided by policy over measured evidence](0042-binary-reuse-as-admitted-substitution.md)
 - [0043: the development environment is a value over the lock, and materializing and entering it are caller effects](0043-the-development-environment.md)
+- [0044: the first source adapter reads a registry as a caller-side effect, and the witness for a remote binding is a transparency log checked locally](0044-the-first-source-adapter.md)
 
 note: 0013 amends 0005 to add a fifth identity type. 0005 stands; the amendment is recorded in 0013.
 
