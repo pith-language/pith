@@ -70,6 +70,10 @@ what M-3 still owes its own statement: nothing named in it. "at least two toolch
 
 add package identity, basic constraints, lock data, binary reuse, and a reproducible development environment.
 
+status: complete.
+
+evidence: `crates/phloem` prototypes each item as a record plus a measured claim. a package is a declared name in a domain with versions as coordinates over the domain's declared ordering, and a realization is identified by the computation and content machinery the kernel already has (0039). constraints, ranges, and preferences are values over that ordering; resolution is a host-rule computation in the graph under 0040's protocol — four recorded inputs, an answer carrying its choice and explanation, underdetermination refusing rather than letting a search order pick. the written lock is a text projection of a lock document carrying the resolver revision, the scheme, the preference list, and the universe digest beside the entries; render is deterministic, parse inverts it, and both the write and the read are caller effects the engine never performs (0041). binary reuse is an admitted substitution over a lock binding — four legs checked in a fixed order with the failing one named, the policy leg shipping as local admission of named origins — and a served substitution publishes no engine attempt where a refused one's build publishes exactly that attempt (0042). the development environment is a value over the lock: one resolution plus the realization coordinates it declares and the substitution records it served, rendered deterministically, with the lock's placement derived from the declaration — one lock per environment, `pith.lock` for the default — and resolving touching no path until a caller writes (0043). the milestone's records are 0039 through 0043, each landing no kernel constructor: records, sums, and lists over the 0026 calculus carried every shape.
+
 ## M-5: Linux system library
 
 compose files, users, a service, and boot configuration into an immutable Linux artifact.
