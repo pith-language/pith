@@ -4,6 +4,7 @@
 //! test changes what the description or the coordinates carry and asserts
 //! the identity pair did not move.
 
+use phloem::build::PackageBuild;
 use phloem::description::Description;
 use phloem::identity::{DomainIdentity, PackageIdentity, PackageVersion};
 use phloem::source::SourceBinding;
@@ -11,12 +12,13 @@ use pith_ids::ContentId;
 
 const DOMAIN: &str = "pithpkgs";
 
-fn zlib(source: SourceBinding, options: &[&str]) -> Description {
+fn zlib(source: SourceBinding, sources: &[&str]) -> Description {
     Description {
         name: "zlib".into(),
         source,
-        inputs: Box::new([ContentId::of_blob(b"zlib.c")]),
-        options: options.iter().map(|option| (*option).into()).collect(),
+        build: PackageBuild {
+            sources: sources.iter().map(|path| (*path).into()).collect(),
+        },
     }
 }
 
@@ -36,8 +38,8 @@ fn an_identity_survives_a_version_bump_and_a_metadata_change() {
     assert_eq!(before.identity(), after.identity());
 
     // A metadata change moves the description revision, not the package.
-    let before_description = zlib(archive_source(), &["shared"]);
-    let after_description = zlib(archive_source(), &["shared", "minizip"]);
+    let before_description = zlib(archive_source(), &["zlib-1.3/zlib.c"]);
+    let after_description = zlib(archive_source(), &["zlib-1.3/zlib.c", "zlib-1.3/adler32.c"]);
     assert_eq!(
         before_description.name, after_description.name,
         "the declared name is the identity's name"
@@ -45,7 +47,7 @@ fn an_identity_survives_a_version_bump_and_a_metadata_change() {
     assert_ne!(
         before_description.content_id(),
         after_description.content_id(),
-        "an options change is a new description revision"
+        "a changed build declaration is a new description revision"
     );
     assert_eq!(before.identity(), after.identity());
 }
@@ -58,13 +60,13 @@ fn an_identity_survives_a_source_move() {
     // the description digest changing, as a revision should — moves nothing
     // at the identity level.
     let identity = PackageIdentity::declare(DomainIdentity::new(DOMAIN), "zlib");
-    let from_registry = zlib(archive_source(), &[]);
+    let from_registry = zlib(archive_source(), &["zlib-1.3/zlib.c"]);
     let from_git = zlib(
         SourceBinding::Git {
             revision: "9f11b1d".into(),
             tree: "e3b0c44".into(),
         },
-        &[],
+        &["zlib-1.3/zlib.c"],
     );
 
     assert_eq!(from_registry.name, from_git.name);

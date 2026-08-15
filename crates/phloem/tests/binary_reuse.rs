@@ -9,6 +9,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use phloem::build::{PackageBuild, PackageBuildRule, SourceFile, SourceTree};
 use phloem::constraint::{Bound, Constraint, Range, constraint_set_value};
 use phloem::description::Description;
 use phloem::document::Lock;
@@ -19,7 +20,7 @@ use phloem::resolution::{Resolution, resolve_request};
 use phloem::resolve::{ResolveSolver, Schemes};
 use phloem::source::SourceBinding;
 use phloem::substitution::{
-    Admission, AdmittedOrigins, BinaryOffer, Realization, Refusal, realization_requests, realize,
+    Admission, AdmittedOrigins, BinaryOffer, Refusal, Serving, serve, serving_request,
 };
 use phloem::universe::{Candidate, CandidateUniverse};
 use pith_core::{
@@ -62,27 +63,27 @@ fn newest() -> PreferenceList {
     PreferenceList(Box::new([Preference::Newest]))
 }
 
-/// A compile rule that stands in for xylem's, so the build a refusal leaves
-/// running can run through the engine and be recorded as an attempt. The
-/// object it completes is fixture content; the tests below read the engine's
-/// attempt records, not the object.
-struct FixtureCompile {
+/// A rule that completes immediately with fixture content, standing in for
+/// xylem's compile and link entries so the build a refusal leaves running
+/// can run through the engine and be recorded as an attempt. The tests
+/// below read the engine's attempt records, not the completed value.
+struct FixtureEntry {
     output: Value,
 }
 
-impl PureRule for FixtureCompile {
+impl PureRule for FixtureEntry {
     fn start(&self, _inputs: &[Value]) -> Box<dyn PureRuleFrame> {
-        Box::new(FixtureCompileFrame {
+        Box::new(FixtureEntryFrame {
             output: Some(self.output.clone()),
         })
     }
 }
 
-struct FixtureCompileFrame {
+struct FixtureEntryFrame {
     output: Option<Value>,
 }
 
-impl PureRuleFrame for FixtureCompileFrame {
+impl PureRuleFrame for FixtureEntryFrame {
     fn step(&mut self, _input: Option<Resumption>) -> PithResult<PureStep> {
         match self.output.take() {
             Some(output) => Ok(PureStep::Complete(output)),
@@ -103,11 +104,21 @@ fn failure(message: &str) -> pith_diag::DiagnosticSink {
 }
 
 fn fixture_compile_rule() -> Rule<Pure> {
-    let identity = RuleIdentity::of_module_declaration("phloem-fixture", "compile");
+    fixture_rule("compile", xylem::types::compile_interface())
+}
+
+/// A link entry that stands in for xylem's, so the package build a refusal
+/// leaves running can run to its artifact through the engine.
+fn fixture_link_rule() -> Rule<Pure> {
+    fixture_rule("link", xylem::types::link_interface())
+}
+
+fn fixture_rule(name: &str, interface: pith_core::Interface) -> Rule<Pure> {
+    let identity = RuleIdentity::of_module_declaration("phloem-fixture", name);
     Rule::<Pure>::new(
-        RuleRevision::of_manifest(identity, b"phloem-fixture-compile-v1"),
-        "compile",
-        xylem::types::compile_interface(),
+        RuleRevision::of_manifest(identity, b"phloem-fixture-v1"),
+        name,
+        interface,
         Span::none(),
     )
 }
@@ -119,10 +130,18 @@ fn engine_with(state: &SharedState) -> Engine {
     let compile = fixture_compile_rule();
     engine.register_rule(
         compile,
-        FixtureCompile {
+        FixtureEntry {
             output: xylem::types::object(ContentId::of_blob(b"zlib-fixture.o")),
         },
     );
+    let link = fixture_link_rule();
+    engine.register_rule(
+        link,
+        FixtureEntry {
+            output: xylem::types::executable(ContentId::of_blob(b"zlib-fixture.exe")),
+        },
+    );
+    engine.register_rule(PackageBuildRule::rule(), PackageBuildRule);
     engine
 }
 
@@ -314,8 +333,21 @@ fn description() -> Description {
         source: SourceBinding::Archive {
             archive: ContentId::of_blob(b"zlib-1.3.tar"),
         },
-        inputs: Box::new([ContentId::of_blob(b"zlib.c")]),
-        options: Box::new([]),
+        build: PackageBuild {
+            sources: Box::new(["zlib-1.3/zlib.c".into()]),
+        },
+    }
+}
+
+/// The tree the description's build runs over, holding the one path it
+/// prescribes. The fixture compile stands in for xylem's, so the file's
+/// content is fixture bytes.
+fn tree() -> SourceTree {
+    SourceTree {
+        files: Box::new([SourceFile {
+            path: "zlib-1.3/zlib.c".into(),
+            content: ContentId::of_blob(b"zlib.c"),
+        }]),
     }
 }
 
@@ -329,8 +361,8 @@ fn an_admitted_binary_substitutes_for_the_build_of_a_locked_binding() {
     let origins = origins();
 
     let admission = admission_over(entry, &platform, &origins, &toolchain);
-    let realization = realize(&admission, Some((&offer_over(entry, BINARY), BINARY)));
-    let Realization::Substituted(admitted) = &realization else {
+    let realization = serve(&admission, Some((&offer_over(entry, BINARY), BINARY)));
+    let Serving::Substituted(admitted) = &realization else {
         unreachable!("an offer passing every clause replaces the build: {realization:?}");
     };
     assert_eq!(admitted.built_from, entry.source);
@@ -344,7 +376,13 @@ fn an_admitted_binary_substitutes_for_the_build_of_a_locked_binding() {
     // The substitution's whole effect on the graph: the requests are simply
     // not made, and the lock — which records source only — is untouched.
     assert!(
-        realization_requests(&realization, toolchain.clone(), &description()).is_empty(),
+        serving_request(
+            &realization,
+            toolchain.clone(),
+            &tree(),
+            &description().build
+        )
+        .is_none(),
         "the build the binary stands in for is not requested"
     );
     assert_eq!(
@@ -365,8 +403,8 @@ fn a_refused_offer_builds_in_the_binarys_place_with_the_clause_named() {
     let offer = offer_over(entry, BINARY);
     let (platform, origins) = (platform(), origins());
     let admission = admission_over(entry, &platform, &origins, &toolchain);
-    let realization = realize(&admission, Some((&offer, tampered)));
-    let Realization::Built { refused } = &realization else {
+    let realization = serve(&admission, Some((&offer, tampered)));
+    let Serving::Built { refused } = &realization else {
         unreachable!("bytes measuring other than the claim refuse: {realization:?}");
     };
     assert_eq!(
@@ -377,10 +415,15 @@ fn a_refused_offer_builds_in_the_binarys_place_with_the_clause_named() {
         }),
         "the refusal names the clause and both digests"
     );
-    assert_eq!(
-        realization_requests(&realization, toolchain.clone(), &description()).len(),
-        1,
-        "the build runs in the refused offer's place, one request per input"
+    assert!(
+        serving_request(
+            &realization,
+            toolchain.clone(),
+            &tree(),
+            &description().build
+        )
+        .is_some(),
+        "the build runs in the refused offer's place, as the one package-build request"
     );
 }
 
@@ -406,41 +449,47 @@ fn the_engines_reuse_and_a_substitution_are_different_answers() {
         "the engine serves its own recorded attempt under its key"
     );
 
-    // The compile a build of this binding would issue, keyed under the rule
-    // that serves it. The toolchain in the request is the same value the
-    // admission leg read, which is what ties the leg to the build it guards.
-    let compile_rule = fixture_compile_rule();
-    let input = *description()
-        .inputs
-        .first()
-        .expect("the fixture prescribes one input");
-    let would_run = xylem::types::compile_request(toolchain.clone(), input);
-    let compile_key = PureComputationKey::new(&compile_rule, &would_run);
+    // The package build a build of this binding would issue, keyed under
+    // the rule that serves it. The toolchain in the request is the same
+    // value the admission leg read, which is what ties the leg to the build
+    // it guards.
+    let package_rule = PackageBuildRule::rule();
+    let would_run = serving_request(
+        &Serving::Built { refused: None },
+        toolchain.clone(),
+        &tree(),
+        &description().build,
+    )
+    .expect("a build is one package-build request");
+    let package_key = PureComputationKey::new(&package_rule, &would_run);
 
     let (platform, origins) = (platform(), origins());
     let admission = admission_over(entry, &platform, &origins, &toolchain);
-    let substituted = realize(&admission, Some((&offer_over(entry, BINARY), BINARY)));
-    assert!(matches!(substituted, Realization::Substituted(_)));
+    let substituted = serve(&admission, Some((&offer_over(entry, BINARY), BINARY)));
+    assert!(matches!(substituted, Serving::Substituted(_)));
     assert!(
-        realization_requests(&substituted, toolchain.clone(), &description()).is_empty(),
+        serving_request(
+            &substituted,
+            toolchain.clone(),
+            &tree(),
+            &description().build
+        )
+        .is_none(),
         "the substituted build issues no request"
     );
     assert!(
         state
-            .read(|store| store.attempt_history(compile_key))
+            .read(|store| store.attempt_history(package_key))
             .unwrap()
             .is_empty(),
         "a served substitution publishes no attempt: the computation never ran"
     );
 
     let tampered: &[u8] = b"zlib-1.3-tampered.so";
-    let refused = realize(&admission, Some((&offer_over(entry, BINARY), tampered)));
-    let requests = realization_requests(&refused, toolchain.clone(), &description());
-    assert_eq!(requests.len(), 1, "the refused offer's build is requested");
-    let request = requests
-        .first()
-        .expect("the refused offer's build is one request");
-    let computed = engine.evaluate_pure(request).unwrap();
+    let refused = serve(&admission, Some((&offer_over(entry, BINARY), tampered)));
+    let request = serving_request(&refused, toolchain.clone(), &tree(), &description().build)
+        .expect("the refused offer's build is requested");
+    let computed = engine.evaluate_pure(&request).unwrap();
     assert_eq!(
         computed.source,
         EvaluationSource::Computed,
@@ -448,7 +497,7 @@ fn the_engines_reuse_and_a_substitution_are_different_answers() {
     );
     assert_eq!(
         state
-            .read(|store| store.attempt_history(compile_key))
+            .read(|store| store.attempt_history(package_key))
             .unwrap()
             .len(),
         1,
@@ -467,12 +516,12 @@ fn a_refused_offer_is_refused_again_because_nothing_remembers_it() {
     let toolchain = toolchain();
     let (platform, narrow) = (platform(), AdmittedOrigins(Box::new([])));
     let admission = admission_over(entry, &platform, &narrow, &toolchain);
-    let first = realize(&admission, Some((&offer_over(entry, BINARY), BINARY)));
-    let second = realize(&admission, Some((&offer_over(entry, BINARY), BINARY)));
+    let first = serve(&admission, Some((&offer_over(entry, BINARY), BINARY)));
+    let second = serve(&admission, Some((&offer_over(entry, BINARY), BINARY)));
     assert_eq!(first, second);
     assert!(matches!(
         first,
-        Realization::Built {
+        Serving::Built {
             refused: Some(Refusal::Unauthorized { .. })
         }
     ));
@@ -480,7 +529,7 @@ fn a_refused_offer_is_refused_again_because_nothing_remembers_it() {
     let origins = origins();
     let widened = admission_over(entry, &platform, &origins, &toolchain);
     assert!(matches!(
-        realize(&widened, Some((&offer_over(entry, BINARY), BINARY))),
-        Realization::Substituted(_)
+        serve(&widened, Some((&offer_over(entry, BINARY), BINARY))),
+        Serving::Substituted(_)
     ));
 }

@@ -1,12 +1,13 @@
 //! Binary reuse as an admitted substitution (decision 0042).
 //!
-//! A binary offered for coordinates a lock binds replaces the *derivation of
-//! a realization*: the build requests a description would have issued, and
-//! the content they would have produced. It is not a cache hit. 0031's index
-//! answers a request this engine made, under a key this engine derived from
-//! it; nothing here has a key, because the computation whose key it would be
-//! never ran on this machine. What replaces the key is a test over evidence,
-//! and the evidence is what the test carries out with it.
+//! A binary offered for coordinates a lock binds replaces the *build of a
+//! realization*: the package-build request the description would have
+//! issued, and the content it would have produced. It is not a cache hit.
+//! 0031's index answers a request this engine made, under a key this
+//! engine derived from it; nothing here has a key, because the computation
+//! whose key it would be never ran on this machine. What replaces the key
+//! is a test over evidence, and the evidence is what the test carries out
+//! with it.
 //!
 //! Four legs — binding, environment, content, authorization — checked clause
 //! by clause in a fixed order, and the first failing clause is the one a
@@ -42,7 +43,6 @@ use crate::codec::{
     FIELD_TOOLCHAIN, FIELD_VERSION, blob_field, field_of, record_type, record_value, text_field,
     text_list,
 };
-use crate::description::Description;
 use crate::identity::{DomainIdentity, PackageIdentity, PackageVersion};
 use crate::lock::{LockEntry, Origin};
 
@@ -159,7 +159,7 @@ pub struct Admission<'a> {
     pub entry: &'a LockEntry,
     pub platform: &'a ExecutionPlatform,
     /// The toolchain this run's build requests carry. The same value a
-    /// caller hands to [`realization_requests`], so the leg cannot be spelled
+    /// caller hands to [`serving_request`], so the leg cannot be spelled
     /// independently of the build it guards.
     pub toolchain: &'a Value,
     pub origins: &'a AdmittedOrigins,
@@ -429,7 +429,8 @@ fn admitted_list(admitted: &[Origin]) -> String {
         .join(", ")
 }
 
-/// What served a locked package version's realization.
+/// What served a locked package version's binding: an admitted binary in
+/// place of the build, or the build itself.
 ///
 /// The two constructors are the record 0039 asks for: a build from source and
 /// a substituted binary are different provenance claims about one package
@@ -438,8 +439,15 @@ fn admitted_list(admitted: &[Origin]) -> String {
 /// engine's word about a computation it ran, reported as an
 /// `EvaluationSource`; a substitution is phloem's word about a computation
 /// nobody ran here, and it never reaches the engine at all.
+///
+/// The name is 0045's correction of an earlier one: this value says *how a
+/// binding was served*, not what a realization is. A realization is the
+/// attempt the engine already holds — the artifact's content identity and
+/// the computation that produced it — and nothing in this module
+/// constructs one. How-it-was-obtained and what-it-is are different
+/// facts, and a name shared by both blurs which one the type carries.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Realization {
+pub enum Serving {
     /// An admitted binary stands in, and the build does not run.
     Substituted(Admitted),
     /// The build runs. `refused` is present when an offer was made and the
@@ -512,42 +520,44 @@ pub fn admit(
     })
 }
 
-/// What will realize the locked package version: an admitted binary, or the
+/// What served the locked package version: an admitted binary, or the
 /// build. An absent offer builds with nothing to report.
 #[must_use]
-pub fn realize(admission: &Admission<'_>, offer: Option<(&BinaryOffer, &[u8])>) -> Realization {
+pub fn serve(admission: &Admission<'_>, offer: Option<(&BinaryOffer, &[u8])>) -> Serving {
     match offer {
-        None => Realization::Built { refused: None },
+        None => Serving::Built { refused: None },
         Some((offer, bytes)) => match admit(admission, offer, bytes) {
-            Ok(admitted) => Realization::Substituted(admitted),
-            Err(refusal) => Realization::Built {
+            Ok(admitted) => Serving::Substituted(admitted),
+            Err(refusal) => Serving::Built {
                 refused: Some(refusal),
             },
         },
     }
 }
 
-/// The build requests a realization issues: none under a substitution, one
-/// per prescribed input under a build.
-///
-/// This is the substitution's whole observable effect on the graph. Nothing
-/// is diverted, redirected, or served under another key; the requests are
-/// simply not made, which is what "in place of running the build" means.
+/// The build request a serving leaves standing: none under a substitution,
+/// the one package-build request under a build. This is the substitution's
+/// whole observable effect on the graph. Nothing is diverted, redirected,
+/// or served under another key; the request is simply not made, which is
+/// what "in place of running the build" means.
 #[must_use]
-pub fn realization_requests(
-    realization: &Realization,
+pub fn serving_request(
+    serving: &Serving,
     toolchain: Value,
-    description: &Description,
-) -> Box<[Request<Pure>]> {
-    match realization {
-        Realization::Substituted(_) => Box::new([]),
-        Realization::Built { .. } => crate::request::compile_requests(toolchain, description),
+    tree: &crate::build::SourceTree,
+    build: &crate::build::PackageBuild,
+) -> Option<Request<Pure>> {
+    match serving {
+        Serving::Substituted(_) => None,
+        Serving::Built { .. } => Some(crate::build::build_request(toolchain, tree, build)),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::build::{PackageBuild, SourceFile, SourceTree};
+    use crate::description::Description;
     use crate::identity::{DomainIdentity, PackageIdentity};
     use crate::source::SourceBinding;
 
@@ -613,11 +623,26 @@ mod tests {
         Description {
             name: "zlib".into(),
             source: SourceBinding::Archive { archive: source() },
-            inputs: Box::new([
-                ContentId::of_blob(b"zlib.c"),
-                ContentId::of_blob(b"adler32.c"),
+            build: PackageBuild {
+                sources: Box::new(["zlib-1.3/zlib.c".into(), "zlib-1.3/adler32.c".into()]),
+            },
+        }
+    }
+
+    /// The tree the description's build runs over, holding exactly the
+    /// paths it prescribes.
+    fn tree() -> SourceTree {
+        SourceTree {
+            files: Box::new([
+                SourceFile {
+                    path: "zlib-1.3/zlib.c".into(),
+                    content: ContentId::of_blob(b"zlib.c"),
+                },
+                SourceFile {
+                    path: "zlib-1.3/adler32.c".into(),
+                    content: ContentId::of_blob(b"adler32.c"),
+                },
             ]),
-            options: Box::new([]),
         }
     }
 
@@ -752,39 +777,44 @@ mod tests {
     }
 
     #[test]
-    fn a_substitution_issues_no_build_request_and_a_refusal_issues_them_all() {
+    fn a_substitution_issues_no_build_request_and_a_refusal_issues_the_build() {
         let (entry, platform, origins) = (entry(), platform(), origins());
         let toolchain = toolchain();
         let admission = admission(&entry, &platform, &origins, &toolchain);
 
-        let substituted = realize(&admission, Some((&offer(), BINARY)));
-        assert!(matches!(substituted, Realization::Substituted(_)));
+        let substituted = serve(&admission, Some((&offer(), BINARY)));
+        assert!(matches!(substituted, Serving::Substituted(_)));
         assert!(
-            realization_requests(&substituted, toolchain.clone(), &description()).is_empty(),
+            serving_request(
+                &substituted,
+                toolchain.clone(),
+                &tree(),
+                &description().build
+            )
+            .is_none(),
             "the build the binary stands in for is not requested"
         );
 
         let mut unknown = offer();
         unknown.origin = Origin::Registry("attacker.example".into());
-        let refused = realize(&admission, Some((&unknown, BINARY)));
-        let Realization::Built {
+        let refused = serve(&admission, Some((&unknown, BINARY)));
+        let Serving::Built {
             refused: Some(refusal),
         } = &refused
         else {
             unreachable!("an unauthorized offer builds and records the refusal");
         };
         assert!(matches!(refusal, Refusal::Unauthorized { .. }));
-        assert_eq!(
-            realization_requests(&refused, toolchain.clone(), &description()).len(),
-            description().inputs.len(),
+        assert!(
+            serving_request(&refused, toolchain.clone(), &tree(), &description().build).is_some(),
             "the build runs in the refused offer's place"
         );
 
-        let no_offer = realize(&admission, None);
-        assert_eq!(no_offer, Realization::Built { refused: None });
-        assert_eq!(
-            realization_requests(&no_offer, toolchain, &description()).len(),
-            description().inputs.len()
+        let no_offer = serve(&admission, None);
+        assert_eq!(no_offer, Serving::Built { refused: None });
+        assert!(
+            serving_request(&no_offer, toolchain, &tree(), &description().build).is_some(),
+            "the build with no offer to test runs the same way"
         );
     }
 
@@ -796,28 +826,28 @@ mod tests {
         let (entry, platform) = (entry(), platform());
         let toolchain = toolchain();
         let narrow = AdmittedOrigins(Box::new([]));
-        let first = realize(
+        let first = serve(
             &admission(&entry, &platform, &narrow, &toolchain),
             Some((&offer(), BINARY)),
         );
-        let second = realize(
+        let second = serve(
             &admission(&entry, &platform, &narrow, &toolchain),
             Some((&offer(), BINARY)),
         );
         assert_eq!(first, second);
         assert!(matches!(
             first,
-            Realization::Built {
+            Serving::Built {
                 refused: Some(Refusal::Unauthorized { .. })
             }
         ));
 
         let widened = origins();
-        let third = realize(
+        let third = serve(
             &admission(&entry, &platform, &widened, &toolchain),
             Some((&offer(), BINARY)),
         );
-        assert!(matches!(third, Realization::Substituted(_)));
+        assert!(matches!(third, Serving::Substituted(_)));
     }
 
     #[test]

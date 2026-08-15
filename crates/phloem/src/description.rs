@@ -1,42 +1,40 @@
 //! The package description: a record value (decision 0039).
 //!
-//! A package version's description is a value — a record carrying the source
-//! binding, the build inputs it prescribes, and the options it declares. The
-//! description's own content identity is a digest of that value, and it is
-//! not the package's identity; it is one revision of the description, on the
-//! same terms a rule revision is one revision of a rule. Options are a
-//! `List<Text>` of declared option names because `Map` has no constructor
-//! yet (0026's closure rule, 0039's explicit refusal to reserve one); if the
-//! constraints record shows a lookup that needs keys, that is the evidence
-//! to bring.
+//! A package version's description is a value — a record carrying the
+//! source binding and the build the package declares. The description's
+//! own content identity is a digest of that value, and it is not the
+//! package's identity; it is one revision of the description, on the same
+//! terms a rule revision is one revision of a rule. The build field is
+//! 0045's answer to what a package declares as its build: a procedure
+//! from a closed set, spelled as data over the tree the source unpacks
+//! into, not a script the package ships and not a bare list of inputs.
 
 use pith_core::{Type, Value};
 use pith_diag::PithResult;
 use pith_ids::ContentId;
 
-use crate::codec::{field_of, record_type, record_value, text_field, text_list, value_content_id};
+use crate::build::{PackageBuild, build_type};
+use crate::codec::{field_of, record_type, record_value, text_field, value_content_id};
 use crate::diag;
 use crate::source::{SourceBinding, source_type};
 
 const NAME: &str = "name";
 const SOURCE: &str = "source";
-const INPUTS: &str = "inputs";
-const OPTIONS: &str = "options";
+const BUILD: &str = "build";
 
 /// The digest domain for a description's content identity. NUL-terminated so
 /// it is self-delimiting against the canonical bytes that follow, mirroring
 /// the domain separation `pith-ids` applies to every digest kind it owns.
-const DESCRIPTION_DOMAIN: &[u8] = b"phloem.description-v1\0";
+const DESCRIPTION_DOMAIN: &[u8] = b"phloem.description-v2\0";
 
 /// The declared description type: a closed record over the source-binding
-/// sum, a list of prescribed build inputs, and a list of declared options.
+/// sum and the declared package build.
 #[must_use]
 pub fn description_type() -> Type {
     record_type([
         (NAME, Type::Text),
         (SOURCE, source_type()),
-        (INPUTS, Type::List(Box::new(Type::Blob))),
-        (OPTIONS, Type::List(Box::new(Type::Text))),
+        (BUILD, build_type()),
     ])
 }
 
@@ -45,13 +43,12 @@ pub fn description_type() -> Type {
 pub struct Description {
     pub name: Box<str>,
     pub source: SourceBinding,
-    /// The build inputs the description prescribes, as content identities.
-    /// Which interface consumes them is the request's business, on the terms
-    /// 0039 sets: a description names build interfaces and carries inputs,
-    /// it never wraps "build" as a sub-concept of "package".
-    pub inputs: Box<[ContentId]>,
-    /// The options the description declares, by name.
-    pub options: Box<[Box<str>]>,
+    /// The build the package declares: the sources that compile, in link
+    /// order, over the tree its archive unpacks into. Which interfaces
+    /// serve them is selection's business, on the terms 0039 sets: a
+    /// description names build interfaces and carries inputs, it never
+    /// wraps "build" as a sub-concept of "package".
+    pub build: PackageBuild,
 }
 
 impl Description {
@@ -61,25 +58,13 @@ impl Description {
         record_value([
             (NAME, Value::Text(self.name.clone())),
             (SOURCE, self.source.to_value()),
-            (
-                INPUTS,
-                Value::List(self.inputs.iter().map(|id| Value::Blob(*id)).collect()),
-            ),
-            (
-                OPTIONS,
-                Value::List(
-                    self.options
-                        .iter()
-                        .map(|option| Value::Text(option.clone()))
-                        .collect(),
-                ),
-            ),
+            (BUILD, self.build.to_value()),
         ])
     }
 
     /// Read a description from a value, checking inhabitation with
     /// `is_type` rather than comparing against `value_type`: an empty
-    /// options list inhabits `List<Text>` under `is_type` while
+    /// source list inhabits `List<Text>` under `is_type` while
     /// `value_type` must name `List<Unit>` (0026's asymmetry, inherited by
     /// every record whose fields can be empty).
     ///
@@ -104,27 +89,14 @@ impl Description {
             Some(payload) => SourceBinding::from_value(payload)?,
             None => return Err(diag(format!("the record carried no {SOURCE} binding"))),
         };
-        let mut inputs = Vec::new();
-        if let Some(Value::List(elements)) = field_of(fields, INPUTS) {
-            for element in elements.iter() {
-                let Value::Blob(id) = element else {
-                    return Err(diag(format!(
-                        "the {INPUTS} list carried {} rather than a blob",
-                        element.describe()
-                    )));
-                };
-                inputs.push(*id);
-            }
-        }
-        let options = match field_of(fields, OPTIONS) {
-            Some(payload) => text_list(payload, OPTIONS)?,
-            None => Vec::new(),
+        let build = match field_of(fields, BUILD) {
+            Some(payload) => PackageBuild::from_value(payload)?,
+            None => return Err(diag(format!("the record carried no {BUILD} declaration"))),
         };
         Ok(Self {
             name,
             source,
-            inputs: inputs.into(),
-            options: options.into(),
+            build,
         })
     }
 
@@ -150,8 +122,9 @@ mod tests {
                 revision: "9f11b1d".into(),
                 tree: "e3b0c44".into(),
             },
-            inputs: Box::new([ContentId::of_blob(b"zlib.c"), ContentId::of_blob(b"zlib.h")]),
-            options: Box::new(["shared".into()]),
+            build: PackageBuild {
+                sources: Box::new(["zlib-1.3/zlib.c".into(), "zlib-1.3/adler32.c".into()]),
+            },
         }
     }
 
@@ -174,20 +147,6 @@ mod tests {
         let decoded = Value::decode_canonical(&declared.to_value().encode_canonical()).unwrap();
         let read_back = Description::from_value(&decoded).unwrap();
         assert_eq!(read_back.content_id(), declared.content_id());
-    }
-
-    #[test]
-    fn an_empty_options_list_is_a_description() {
-        // The empty list is where value_type and is_type disagree (0026), so
-        // this is the description-level check that the asymmetry a record
-        // inherits from its fields does not reject honest declarations.
-        let mut sparse = description();
-        sparse.options = Box::new([]);
-        sparse.inputs = Box::new([]);
-        let value = sparse.to_value();
-        assert_ne!(value.value_type(), description_type());
-        assert!(value.is_type(&description_type()));
-        assert_eq!(Description::from_value(&value).unwrap(), sparse);
     }
 
     #[test]

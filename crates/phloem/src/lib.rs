@@ -25,7 +25,17 @@
 //! anchored in the checkpoint a person's configuration pins. Every adapter
 //! read is a caller-side effect, and the engine never learns that sources
 //! exist.
+//!
+//! A locked source becomes a built artifact (0045): the fetched archive
+//! unpacks into a measured tree — a parse, not a tool — and a package's
+//! build is data from a closed procedure the library owns, one pure rule
+//! that requests xylem's compile and link entries and reuses on the
+//! engine's machinery alone. A realization is nothing the library
+//! constructs: it is the attempt the engine already holds, and the value
+//! that says how a binding was served is a `Serving`, named for that.
 
+pub(crate) mod archive;
+pub mod build;
 pub(crate) mod codec;
 pub mod constraint;
 pub mod description;
@@ -43,7 +53,6 @@ pub mod lockpublish;
 pub(crate) mod locktext;
 pub mod preference;
 pub mod registry;
-pub mod request;
 pub mod resolution;
 pub mod resolve;
 pub mod search;

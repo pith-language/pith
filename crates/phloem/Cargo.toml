@@ -20,6 +20,7 @@ xylem.workspace = true
 [dev-dependencies]
 pith-engine.workspace = true
 pith-executor-local.workspace = true
+pith-state-sqlite.workspace = true
 pith-store.workspace = true
 tokio = { workspace = true, features = ["process", "fs", "io-util", "rt", "rt-multi-thread", "macros"] }
 tempfile.workspace = true

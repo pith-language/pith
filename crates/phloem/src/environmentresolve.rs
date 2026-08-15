@@ -8,7 +8,7 @@ use crate::environment::{Environment, EnvironmentDocument};
 use crate::identity::{PackageVersion, version_scheme_value};
 use crate::preference::{PreferenceList, preference_list_value};
 use crate::resolution::{Resolution, resolve_request};
-use crate::substitution::{Admission, Admitted, BinaryOffer, Realization, Refusal, realize};
+use crate::substitution::{Admission, Admitted, BinaryOffer, Refusal, Serving, serve};
 use crate::universe::CandidateUniverse;
 
 /// One offer an environment is realized against: the claim and the bytes it
@@ -140,18 +140,18 @@ fn realize_entries(
             .collect();
         claiming.sort_by_key(|offered| offered.offer.canonical_key());
         for offered in claiming {
-            match realize(&admission, Some((offered.offer, offered.bytes))) {
-                Realization::Substituted(record) => {
+            match serve(&admission, Some((offered.offer, offered.bytes))) {
+                Serving::Substituted(record) => {
                     admitted.push(record);
                     break;
                 }
-                Realization::Built {
+                Serving::Built {
                     refused: Some(refusal),
                 } => refused.push(Refused {
                     package: entry.package.clone(),
                     refusal,
                 }),
-                Realization::Built { refused: None } => {
+                Serving::Built { refused: None } => {
                     unreachable!("an offer was handed to the admission test")
                 }
             }
