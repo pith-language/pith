@@ -97,6 +97,18 @@ this file tracks sources already used or queued for a deeper pass. a link here d
 - [Sigstore](https://docs.sigstore.dev/)
 - [SPIFFE](https://spiffe.io/docs/latest/spiffe-specs/)
 
+## package builds
+
+- [nixpkgs stdenv setup.sh](https://raw.githubusercontent.com/NixOS/nixpkgs/master/pkgs/stdenv/generic/setup.sh)
+- [Spack packaging guide](https://spack.readthedocs.io/en/latest/packaging_guide.html)
+- [Guix build systems](https://guix.gnu.org/manual/en/html_node/Build-Systems.html)
+- [Guix g-expressions](https://guix.gnu.org/manual/en/html_node/G_002dExpressions.html)
+- [Debian policy chapter 5: source packages](https://www.debian.org/doc/debian-policy/ch-source.html)
+- [debhelper dh(1)](https://manpages.debian.org/testing/debhelper/dh.1.en.html)
+- [cargo build scripts](https://doc.rust-lang.org/cargo/reference/build-scripts.html)
+- [gentoo development guide](https://devmanual.gentoo.org/ebuild-writing/functions/)
+- [homebrew formula cookbook](https://docs.brew.sh/Formula-Cookbook)
+
 ## tooling
 
 - [Language Server Protocol](https://microsoft.github.io/language-server-protocol/)

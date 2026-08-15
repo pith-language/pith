@@ -35,10 +35,13 @@ each lineage starts with the pressure that created a system. it records the mech
 - [artifacts, identity, and trust](artifacts-and-trust.md)
 - [binary reuse and binary caches](binary-reuse.md)
 - [development environments](dev-environments.md)
+- [package builds](package-builds.md)
 - [tooling and inspectability](tooling.md)
 - [source ledger](sources.md)
 
 the development-environments note draws mkShell from its nixpkgs source, `nix develop` and `nix print-dev-env` from the Nix manual, direnv's caching from its wiki, Guix's shells and containers, Spack's `spack.yaml`/`spack.lock` split, conda's environment files and their lockfile history, rustup's toolchain overrides, mise and asdf's pin files, the devcontainers specification, and PEP 405 from primary sources. it grounds decision 0043 and records the disagreement those systems never settled about whether an environment is a lock consumer, a lock producer, or a lock of its own.
+
+the package-builds note draws stdenv's phases from nixpkgs's setup.sh, Spack's package.py and builder from its documentation and source, Guix's build systems and g-expressions from its manual, Debian's source-package format and `debian/rules` from policy and the debhelper and dpkg manuals, cargo's `.crate` and `build.rs` from its reference, portage's ebuild phases from the gentoo development guide, and Homebrew's formula DSL from its cookbook and API docs. it grounds decision 0045 and records the disagreement those systems never settled about whether a package's build is data the system can inspect or code it can only run.
 
 ## research depth
 
