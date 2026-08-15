@@ -30,12 +30,9 @@
 //! a property of build instructions, verified by rebuild, and nothing in
 //! this module asserts it.
 
-use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
-
 use pith_core::{Type, Value};
 use pith_diag::PithResult;
-use pith_engine::{Engine, ExecutionPlatform};
+use pith_engine::ExecutionPlatform;
 use pith_ids::ContentId;
 
 use crate::codec::{
@@ -44,17 +41,13 @@ use crate::codec::{
 };
 use crate::constraint::{Constraint, constraint_type};
 use crate::diag;
-use crate::document::{Lock, LockChange, diff as diff_locks, lock_type};
-use crate::identity::{PackageVersion, version_scheme_value};
+use crate::document::{Lock, lock_type};
 use crate::lock::{Origin, origin_type};
-use crate::locktext::{SHA256, token};
-use crate::preference::PreferenceList;
-use crate::resolution::{Resolution, resolve_request};
-use crate::substitution::{
-    Admission, Admitted, AdmittedOrigins, BinaryOffer, Realization, Refusal, realize,
-    substitution_type,
-};
-use crate::universe::CandidateUniverse;
+use crate::substitution::{Admitted, AdmittedOrigins, substitution_type};
+
+pub use crate::environmentdiff::{EnvironmentChange, diff};
+pub use crate::environmentfile::{lock_path, record_path, render};
+pub use crate::environmentresolve::{Offer, Realized, Refused};
 
 /// The digest domain for one revision of an environment document,
 /// NUL-terminated so it is self-delimiting against the canonical bytes that
@@ -65,19 +58,11 @@ const ENVIRONMENT_DOMAIN: &[u8] = b"phloem.environment-v1\0";
 /// The environment whose lock is the repository's default written lock.
 pub const DEFAULT_ENVIRONMENT: &str = "default";
 
-const DEFAULT_LOCK_FILE: &str = "pith.lock";
-const DEFAULT_RECORD_FILE: &str = "pith.env";
-const LOCK_SUFFIX: &str = ".pith.lock";
-const RECORD_SUFFIX: &str = ".pith.env";
-
 const NAME: &str = "name";
 const CONSTRAINTS: &str = "constraints";
 const ORIGINS: &str = "origins";
 const LOCK: &str = "lock";
 const SUBSTITUTIONS: &str = "substitutions";
-const PLATFORM: &str = "platform";
-const ENV: &str = "env";
-const SUBSTITUTE: &str = "substitute";
 
 /// A project's declaration of one environment: what it asks the package
 /// domain for, the realization coordinates its builds run under, and the
@@ -241,69 +226,7 @@ pub fn environment_document_type() -> Type {
     ])
 }
 
-/// One offer an environment is realized against: the claim and the bytes it
-/// claims an identity for.
-pub struct Offer<'a> {
-    pub offer: &'a BinaryOffer,
-    pub bytes: &'a [u8],
-}
-
 impl EnvironmentDocument {
-    /// Resolve the declaration through the engine, lock the answer, and
-    /// realize the lock's entries against `offers`.
-    ///
-    /// Pure on 0041's terms: the engine computes the resolution, the lock
-    /// and the document are values, and no path is touched until a caller
-    /// writes one. Only a solved resolution selects; the other three
-    /// constructors are facts about the problem, and an environment is not
-    /// one of them.
-    ///
-    /// The answer carries the refusals beside the document: an offer that
-    /// was tested and turned down returns 0042's value, so the caller sees
-    /// the explanation on every resolve that produces it.
-    ///
-    /// # Errors
-    /// The engine's diagnostics when the resolution fails, and the lock's
-    /// when the answer does not select or a candidate carries no content
-    /// identity to bind.
-    pub fn resolve(
-        declaration: &Environment,
-        engine: &mut Engine,
-        universe: &CandidateUniverse,
-        scheme: &str,
-        preferences: &PreferenceList,
-        budget: u64,
-        offers: &[Offer<'_>],
-    ) -> PithResult<Realized> {
-        let request = resolve_request(
-            &version_scheme_value(scheme),
-            &Value::List(
-                declaration
-                    .constraints
-                    .iter()
-                    .map(Constraint::to_value)
-                    .collect(),
-            ),
-            &universe.to_value(),
-            &crate::preference::preference_list_value(preferences),
-            budget,
-        );
-        let answer = engine.evaluate_pure(&request)?;
-        let resolution = Resolution::from_value(&answer.value)?;
-        let lock = Lock::from_resolution(scheme, preferences, &resolution)?;
-        let (substitutions, refusals) = realize_entries(declaration, &lock, offers);
-        Ok(Realized {
-            document: Self {
-                name: declaration.name.clone(),
-                lock,
-                platform: declaration.platform.clone(),
-                toolchain: declaration.toolchain.clone(),
-                substitutions: substitutions.into(),
-            },
-            refusals: refusals.into(),
-        })
-    }
-
     /// The document's own content identity: a digest over its canonical
     /// encoding, domain-separated the way every phloem digest is. The
     /// rendered record never feeds a digest; this is what "the same
@@ -386,128 +309,6 @@ impl EnvironmentDocument {
     }
 }
 
-/// One offer the realization tested and refused: the binding it claimed,
-/// carried by the entry's coordinates, and the clause that turned it down.
-/// The refusal is 0042's value, the failing clause and both sides of the
-/// comparison, so a caller can tell a tampered artifact from an
-/// unauthorized origin without re-running the test.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Refused {
-    pub package: PackageVersion,
-    pub refusal: Refusal,
-}
-
-/// A declaration realized: the environment document, and the refusals its
-/// realization produced.
-///
-/// The refusals are returned beside the document and kept out of it. A
-/// refused offer leaves the build running from source, the same
-/// realization an absent offer produces, so a refusal in the document
-/// would move its digest though nothing the environment serves changed.
-/// The refusals arrive in lock-entry order, each entry's offers in the
-/// canonical order over claims.
-pub struct Realized {
-    pub document: EnvironmentDocument,
-    pub refusals: Box<[Refused]>,
-}
-
-/// Realize every lock entry against the offers that claim it, collecting
-/// the admitted substitutions and the refusals. A refused or absent offer
-/// builds, which is 0042's fallback and not this module's concern.
-///
-/// Every offer claiming the entry's identity is tested, in the canonical
-/// order over claims, and the first that admits serves. a refusal is
-/// carried out for every offer that was tested and refused while none
-/// served. When a substitution serves, the offers after it in the
-/// canonical order are not examined: the build they stood in for is not
-/// running.
-fn realize_entries(
-    declaration: &Environment,
-    lock: &Lock,
-    offers: &[Offer<'_>],
-) -> (Vec<Admitted>, Vec<Refused>) {
-    let mut admitted = Vec::new();
-    let mut refused = Vec::new();
-    for entry in lock.entries.iter() {
-        let admission = Admission {
-            entry,
-            platform: &declaration.platform,
-            toolchain: &declaration.toolchain,
-            origins: &declaration.origins,
-        };
-        let mut claiming: Vec<&Offer<'_>> = offers
-            .iter()
-            .filter(|offered| offered.offer.package.identity() == entry.package.identity())
-            .collect();
-        claiming.sort_by_key(|offered| offered.offer.canonical_key());
-        for offered in claiming {
-            match realize(&admission, Some((offered.offer, offered.bytes))) {
-                Realization::Substituted(record) => {
-                    admitted.push(record);
-                    break;
-                }
-                Realization::Built {
-                    refused: Some(refusal),
-                } => refused.push(Refused {
-                    package: entry.package.clone(),
-                    refusal,
-                }),
-                Realization::Built { refused: None } => {
-                    unreachable!("an offer was handed to the admission test")
-                }
-            }
-        }
-    }
-    (admitted, refused)
-}
-
-/// One moved input of an environment diff.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum EnvironmentChange {
-    /// A moved input or entry of the lock the environment holds, reported
-    /// by the lock's own diff.
-    Lock(LockChange),
-    Platform {
-        from: ExecutionPlatform,
-        to: ExecutionPlatform,
-    },
-    Toolchain {
-        from: Value,
-        to: Value,
-    },
-    /// The set of served substitutions moved, which happens when offers or
-    /// the admission policy moved and the selection did not.
-    Substitutions,
-}
-
-/// What moved between two revisions of one environment: each moved lock
-/// input or entry, and each moved realization coordinate. The staleness
-/// check a caller runs before resolving again, on the same shape as the
-/// lock's own.
-#[must_use]
-pub fn diff(before: &EnvironmentDocument, after: &EnvironmentDocument) -> Box<[EnvironmentChange]> {
-    let mut changes = Vec::new();
-    for change in diff_locks(&before.lock, &after.lock).changes.iter() {
-        changes.push(EnvironmentChange::Lock(change.clone()));
-    }
-    if before.platform != after.platform {
-        changes.push(EnvironmentChange::Platform {
-            from: before.platform.clone(),
-            to: after.platform.clone(),
-        });
-    }
-    if before.toolchain != after.toolchain {
-        changes.push(EnvironmentChange::Toolchain {
-            from: before.toolchain.clone(),
-            to: after.toolchain.clone(),
-        });
-    }
-    if before.substitutions != after.substitutions {
-        changes.push(EnvironmentChange::Substitutions);
-    }
-    changes.into()
-}
-
 /// The toolchain's driver path. The declared type is the nominal alone, and
 /// `is_type` cannot see a nominal's representation, so the reader refuses a
 /// toolchain whose representation is not the driver path text.
@@ -532,131 +333,12 @@ fn toolchain_driver(toolchain: &Value) -> PithResult<&str> {
     Ok(driver)
 }
 
-/// The toolchain in this format's token spelling. The declaration's type is
-/// xylem's nominal toolchain, whose representation is the driver path, and
-/// the driver gets the same quoting every other text field on the line
-/// gets, so a path with a space renders a line this grammar still accepts.
-fn toolchain_token(toolchain: &Value) -> String {
-    let driver = match toolchain {
-        Value::Nominal { representation, .. } => match representation.as_ref() {
-            Value::Text(driver) => return token(driver),
-            // A toolchain value xylem never produces, quoted so the line
-            // still parses.
-            other => other.describe(),
-        },
-        other => other.describe(),
-    };
-    token(&driver)
-}
-
-/// The environment's rendered record: its projection, deterministic and
-/// line-oriented, on the terms of the lock's file. The text names the lock
-/// by digest, the realization coordinates, and every served substitution;
-/// the lock's own file is unchanged by all of it and stays the place the
-/// selection is read.
-///
-/// The record is a report over the value, not a format with a reader: the
-/// document is the artifact that crosses processes, and a consumer for
-/// this text waits until one exists (0043's unresolved).
-#[must_use]
-pub fn render(document: &EnvironmentDocument) -> String {
-    let mut out = String::new();
-    let _ = writeln!(
-        out,
-        "{ENV} {} {PLATFORM} {}/{} {FIELD_TOOLCHAIN} {} {LOCK} {SHA256}{}",
-        token(&document.name),
-        document.platform.operating_system,
-        document.platform.architecture,
-        toolchain_token(&document.toolchain),
-        document.lock.content_id().digest(),
-    );
-    let mut lines: Vec<String> = document
-        .substitutions
-        .iter()
-        .map(|substitution| {
-            format!(
-                "{SUBSTITUTE} {} {} {} [{}] {SHA256}{} {}",
-                token(substitution.package.identity().domain().as_str()),
-                token(substitution.package.identity().name()),
-                token(substitution.package.version()),
-                substitution
-                    .features
-                    .iter()
-                    .map(|feature| token(feature))
-                    .collect::<Vec<_>>()
-                    .join(","),
-                substitution.measured.digest(),
-                substitution.authorized_by,
-            )
-        })
-        .collect();
-    lines.sort();
-    for line in lines {
-        let _ = writeln!(out, "{line}");
-    }
-    out
-}
-
-/// The derivation's one rule: a declared environment name becomes a file
-/// name beside the lock, so it must be a single path component. A name with
-/// a separator or a `..` would derive a path outside the project root. the
-/// refusal surfaces at the derivation, before any caller acts on a path.
-///
-/// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming the name and why it cannot name an
-/// environment when it is empty or not one path component.
-fn component_name(environment: &str) -> PithResult<()> {
-    let mut components = Path::new(environment).components();
-    let single = matches!(
-        (components.next(), components.next()),
-        (Some(std::path::Component::Normal(_)), None)
-    );
-    if single {
-        return Ok(());
-    }
-    Err(diag(format!(
-        "the environment name `{environment}` is not a single path component, and a name \
-         that becomes a file name beside the lock cannot carry a separator or climb out \
-         of the project"
-    )))
-}
-
-/// Where the environment's lock lives: in `project`, named for the
-/// declaration that produced it — `pith.lock` for the default environment,
-/// `<name>.pith.lock` beside it for a named one. One lock per resolution,
-/// and an environment is one resolution (0043). The derivation is a pure
-/// function the library owns, and it refuses a name that is not a single
-/// path component.
-///
-/// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming the name when it cannot name an
-/// environment.
-pub fn lock_path(project: &Path, environment: &str) -> PithResult<PathBuf> {
-    component_name(environment)?;
-    if environment == DEFAULT_ENVIRONMENT {
-        Ok(project.join(DEFAULT_LOCK_FILE))
-    } else {
-        Ok(project.join(format!("{environment}{LOCK_SUFFIX}")))
-    }
-}
-
-/// Where the environment's own record lives, beside its lock.
-///
-/// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming the name when it cannot name an
-/// environment.
-pub fn record_path(project: &Path, environment: &str) -> PithResult<PathBuf> {
-    component_name(environment)?;
-    if environment == DEFAULT_ENVIRONMENT {
-        Ok(project.join(DEFAULT_RECORD_FILE))
-    } else {
-        Ok(project.join(format!("{environment}{RECORD_SUFFIX}")))
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
+    use crate::preference::PreferenceList;
 
     fn document(toolchain: Value) -> EnvironmentDocument {
         EnvironmentDocument {
