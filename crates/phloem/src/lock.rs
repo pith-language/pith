@@ -1,4 +1,5 @@
-//! Lock entries: coordinates bound to content, origin as evidence (decision 0039).
+//! Lock entries: coordinates bound to content, origin as evidence (decisions
+//! 0039, 0041).
 //!
 //! A lock entry is a pair plus evidence: the package version (what was
 //! chosen), the content identity of the source it resolved to (what the
@@ -8,19 +9,24 @@
 //! computed from the bytes read, valid wherever those bytes are found
 //! again — so content that no longer matches the binding is drift to
 //! report, never an identity transition. What makes a binding trustworthy
-//! is the artifacts-and-trust question 0039 leaves open; the entry here
-//! records the binding and checks it, and witnesses nothing.
+//! is the artifacts-and-trust question; 0041 answers it for M-4 as
+//! local-verification-only, and the entry here records the binding and
+//! checks it, and witnesses nothing.
 //!
 //! An entry is a value — a record over the origin sum — because a lock is
 //! data that crosses processes, and the record form is the other half of
 //! 0039's evidence for landing `Record`: a lock line is named fields the
-//! same way a description is.
+//! same way a description is. The coordinates carry the feature set beside
+//! the version, on 0040's terms: features are coordinates, so an entry
+//! without them would bind half a selection.
 
 use pith_core::{SumConstructor, Type, Value};
 use pith_diag::PithResult;
 use pith_ids::{ContentDigest, ContentId};
 
-use crate::codec::{blob_field, field_of, record_type, record_value, sum_value, text_field};
+use crate::codec::{
+    blob_field, field_of, record_type, record_value, sum_value, text_field, text_list,
+};
 use crate::diag;
 use crate::identity::PackageVersion;
 
@@ -39,6 +45,7 @@ const LOCAL_PATH: &str = "LocalPath";
 const DOMAIN: &str = "domain";
 const NAME: &str = "name";
 const VERSION: &str = "version";
+const FEATURES: &str = "features";
 const SOURCE: &str = "source";
 const ORIGIN_FIELD: &str = "origin";
 
@@ -149,16 +156,17 @@ pub fn origin_type() -> Type {
 }
 
 /// The declared lock-entry record type: the full coordinates — domain,
-/// name, version — the bound content identity, and the origin evidence. The
-/// domain is a field here and is not one on the description, because a lock
-/// is read far from the declaration site that carries the domain as its own
-/// fact.
+/// name, version, features — the bound content identity, and the origin
+/// evidence. The domain is a field here and is not one on the description,
+/// because a lock is read far from the declaration site that carries the
+/// domain as its own fact.
 #[must_use]
 pub fn entry_type() -> Type {
     record_type([
         (DOMAIN, Type::Text),
         (NAME, Type::Text),
         (VERSION, Type::Text),
+        (FEATURES, Type::List(Box::new(Type::Text))),
         (SOURCE, Type::Blob),
         (ORIGIN_FIELD, origin_type()),
     ])
@@ -170,6 +178,7 @@ pub fn entry_type() -> Type {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Binding {
     pub package: PackageVersion,
+    pub features: Box<[Box<str>]>,
     pub source: ContentId,
 }
 
@@ -177,15 +186,27 @@ pub struct Binding {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LockEntry {
     pub package: PackageVersion,
+    /// The feature coordinate: a canonically sorted set, because features
+    /// are coordinates (0040) and two spellings of one set are one
+    /// selection.
+    pub features: Box<[Box<str>]>,
     pub source: ContentId,
     pub origin: Origin,
 }
 
 impl LockEntry {
     #[must_use]
-    pub fn new(package: PackageVersion, source: ContentId, origin: Origin) -> Self {
+    pub fn new(
+        package: PackageVersion,
+        features: impl IntoIterator<Item = impl Into<Box<str>>>,
+        source: ContentId,
+        origin: Origin,
+    ) -> Self {
+        let mut features: Vec<Box<str>> = features.into_iter().map(Into::into).collect();
+        features.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
         Self {
             package,
+            features: features.into(),
             source,
             origin,
         }
@@ -196,6 +217,7 @@ impl LockEntry {
     pub fn binding(&self) -> Binding {
         Binding {
             package: self.package.clone(),
+            features: self.features.clone(),
             source: self.source,
         }
     }
@@ -210,6 +232,15 @@ impl LockEntry {
             ),
             (NAME, Value::Text(self.package.identity().name().into())),
             (VERSION, Value::Text(self.package.version().into())),
+            (
+                FEATURES,
+                Value::List(
+                    self.features
+                        .iter()
+                        .map(|feature| Value::Text(feature.clone()))
+                        .collect(),
+                ),
+            ),
             (SOURCE, Value::Blob(self.source)),
             (ORIGIN_FIELD, self.origin.to_value()),
         ])
@@ -237,6 +268,10 @@ impl LockEntry {
         let domain = text_field(fields, DOMAIN)?;
         let name = text_field(fields, NAME)?;
         let version = text_field(fields, VERSION)?;
+        let features = match field_of(fields, FEATURES) {
+            Some(payload) => text_list(payload, FEATURES)?,
+            None => return Err(diag(format!("the record carried no {FEATURES} set"))),
+        };
         let source = blob_field(fields, SOURCE)?;
         let origin = match field_of(fields, ORIGIN_FIELD) {
             Some(payload) => Origin::from_value(payload)?,
@@ -250,6 +285,7 @@ impl LockEntry {
                 ),
                 version,
             ),
+            features: features.into(),
             source,
             origin,
         })
@@ -314,6 +350,7 @@ mod tests {
     fn entry() -> LockEntry {
         LockEntry::new(
             package("1.3"),
+            [] as [Box<str>; 0],
             source(),
             Origin::Registry("pkgs.pith-lang.org".into()),
         )
@@ -327,11 +364,13 @@ mod tests {
         // depend on where it was downloaded from.
         let from_registry = LockEntry::new(
             package("1.3"),
+            [] as [Box<str>; 0],
             source(),
             Origin::Registry("pkgs.pith-lang.org".into()),
         );
         let from_mirror = LockEntry::new(
             package("1.3"),
+            [] as [Box<str>; 0],
             source(),
             Origin::Registry("mirror.example".into()),
         );
@@ -343,11 +382,13 @@ mod tests {
     fn a_version_bump_is_a_different_binding_over_one_package() {
         let before = LockEntry::new(
             package("1.3"),
+            [] as [Box<str>; 0],
             source(),
             Origin::Registry("pkgs.pith-lang.org".into()),
         );
         let after = LockEntry::new(
             package("1.3.1"),
+            [] as [Box<str>; 0],
             source(),
             Origin::Registry("pkgs.pith-lang.org".into()),
         );
@@ -356,6 +397,35 @@ mod tests {
             before.binding().package.identity(),
             after.binding().package.identity()
         );
+    }
+
+    #[test]
+    fn the_feature_set_is_a_sorted_coordinate_of_the_binding() {
+        // Features are coordinates (0040), so two feature sets are two
+        // bindings over one package version, and two spellings of one set —
+        // assembled in either order — are one entry with one digest.
+        let plain = entry();
+        let shared = LockEntry::new(
+            package("1.3"),
+            ["shared"],
+            source(),
+            Origin::Registry("pkgs.pith-lang.org".into()),
+        );
+        assert_ne!(plain.binding(), shared.binding());
+        let reordered = LockEntry::new(
+            package("1.3"),
+            ["zlib", "shared"],
+            source(),
+            Origin::Registry("pkgs.pith-lang.org".into()),
+        );
+        let canonical = LockEntry::new(
+            package("1.3"),
+            ["shared", "zlib"],
+            source(),
+            Origin::Registry("pkgs.pith-lang.org".into()),
+        );
+        assert_eq!(reordered, canonical);
+        assert_eq!(reordered.content_id(), canonical.content_id());
     }
 
     #[test]
@@ -408,6 +478,7 @@ mod tests {
         let from_registry = entry();
         let from_forge = LockEntry::new(
             package("1.3"),
+            [] as [Box<str>; 0],
             source(),
             Origin::Forge("git.pith-lang.org".into()),
         );
@@ -429,6 +500,7 @@ mod tests {
                 PackageIdentity::declare(DomainIdentity::new("deb"), "zlib"),
                 "1.3",
             ),
+            [] as [Box<str>; 0],
             source(),
             Origin::Registry("deb.debian.org".into()),
         );

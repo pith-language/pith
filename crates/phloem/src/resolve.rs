@@ -117,12 +117,32 @@ impl ResolveSolver {
     pub fn rule(&self) -> Rule<Pure> {
         let identity = RuleIdentity::of_module_declaration("phloem", "resolve");
         Rule::<Pure>::new(
-            RuleRevision::of_manifest(identity, b"phloem-resolve-v1"),
+            RuleRevision::of_manifest(identity, RESOLVER_MANIFEST),
             "resolve",
             resolve_interface(),
             Span::none(),
         )
     }
+}
+
+/// The revision manifest of the resolve rule. A lock records the digest of
+/// the revision it was resolved under (0041), because the selection is a
+/// function of the request under the revision as much as under the scheme,
+/// and a lock whose entries moved while no recorded input moved has this
+/// one explanation left to name.
+pub const RESOLVER_MANIFEST: &[u8] = b"phloem-resolve-v1";
+
+/// The resolver revision a lock records, as lowercase hex. The one spelling
+/// of the rule revision every registered solver shares, so the lock names
+/// the resolve rule's executable semantics and nothing about which solver
+/// body served it.
+#[must_use]
+pub fn resolver_revision_hex() -> Box<str> {
+    let identity = RuleIdentity::of_module_declaration("phloem", "resolve");
+    RuleRevision::of_manifest(identity, RESOLVER_MANIFEST)
+        .digest()
+        .to_string()
+        .into()
 }
 
 impl PureRule for ResolveSolver {
