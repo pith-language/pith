@@ -1,7 +1,7 @@
 use pith_core::{Pure, Request, Value};
 
-use crate::substitutionadmission::{Refusal, admit};
-use crate::substitutionmodel::{Admission, Admitted, BinaryOffer};
+use super::admission::{Refusal, admit};
+use super::model::{Admission, Admitted, BinaryOffer};
 
 /// What served a locked package version's binding: an admitted binary in
 /// place of the build, or the build itself.

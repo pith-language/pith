@@ -33,11 +33,15 @@
 //! and cheap, and a remembered refusal would be state neither a request nor
 //! a revision names (0038).
 
-pub use crate::substitutionadmission::{Refusal, admit};
-pub use crate::substitutionmodel::{
+mod admission;
+mod model;
+mod serving;
+
+pub use self::admission::{Refusal, admit};
+pub use self::model::{
     Admission, Admitted, AdmittedOrigins, BinaryOffer, SUBSTITUTION, substitution_type,
 };
-pub use crate::substitutionserving::{Serving, serve, serving_request};
+pub use self::serving::{Serving, serve, serving_request};
 
 #[cfg(test)]
 mod tests {

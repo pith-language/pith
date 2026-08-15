@@ -4,7 +4,8 @@ use pith_ids::ContentId;
 
 use crate::identity::PackageVersion;
 use crate::lock::Origin;
-use crate::substitutionmodel::{Admission, Admitted, BinaryOffer};
+
+use super::model::{Admission, Admitted, BinaryOffer};
 
 /// Which clause of the admission test turned an offer down.
 #[derive(Clone, Debug, PartialEq, Eq)]

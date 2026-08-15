@@ -58,9 +58,6 @@ pub mod resolve;
 pub mod search;
 pub mod source;
 pub mod substitution;
-mod substitutionadmission;
-mod substitutionmodel;
-mod substitutionserving;
 pub mod universe;
 pub mod witness;
 
