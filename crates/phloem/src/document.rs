@@ -13,8 +13,6 @@
 //! pins, exact constraints over the coordinates each entry carries, and a
 //! header field that moved is the staleness a diff names.
 
-use std::collections::BTreeMap;
-
 use pith_core::{Type, Value};
 use pith_diag::PithResult;
 use pith_ids::ContentId;
@@ -22,12 +20,14 @@ use pith_ids::ContentId;
 use crate::codec::{blob_field, field_of, record_type, record_value, text_field, value_content_id};
 use crate::constraint::{Constraint, Range};
 use crate::diag;
-use crate::identity::{PackageIdentity, PackageVersion, version_scheme_type, version_scheme_value};
+use crate::identity::{PackageVersion, version_scheme_type, version_scheme_value};
 use crate::lock::LockEntry;
 use crate::preference::{PreferenceList, preference_list_from_value, preference_list_value};
 use crate::resolution::Resolution;
 use crate::source::SourceBinding;
 use crate::universe::Candidate;
+
+pub use crate::lockdiff::{LockChange, LockDiff, diff};
 
 /// The digest domain for one revision of a lock document. NUL-terminated so
 /// it is self-delimiting against the canonical bytes that follow, mirroring
@@ -254,126 +254,6 @@ impl Lock {
     }
 }
 
-/// One moved header input, or one moved entry, of a lock diff.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum LockChange {
-    Resolver,
-    Scheme,
-    Universe(ContentId, ContentId),
-    Preferences,
-    Added(LockEntry),
-    Removed(LockEntry),
-    /// The same package moved to a new version, whether or not its feature
-    /// set moved with it.
-    Upgraded {
-        package: PackageIdentity,
-        from: Box<str>,
-        to: Box<str>,
-    },
-    /// The same package moved to a new feature set: features are coordinates
-    /// (0040), so this is one selection moving rather than a removal and an
-    /// addition.
-    Features {
-        package: PackageIdentity,
-        from: Box<[Box<str>]>,
-        to: Box<[Box<str>]>,
-    },
-    /// The same coordinates resolved to different content: 0039's drift.
-    Drifted {
-        package: PackageVersion,
-        from: ContentId,
-        to: ContentId,
-    },
-}
-
-/// What moved between two lock documents: each header input that changed,
-/// and each entry added, removed, upgraded, or drifted. This is the
-/// staleness check a caller runs before resolving again — a moved header
-/// field names the input that moved, on the shape of the ordinary
-/// invalidation explanation.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct LockDiff {
-    pub changes: Box<[LockChange]>,
-}
-
-/// Diff two lock documents, naming every moved input and entry.
-#[must_use]
-pub fn diff(before: &Lock, after: &Lock) -> LockDiff {
-    let mut changes = Vec::new();
-    if before.resolver != after.resolver {
-        changes.push(LockChange::Resolver);
-    }
-    if before.scheme != after.scheme {
-        changes.push(LockChange::Scheme);
-    }
-    if before.universe != after.universe {
-        changes.push(LockChange::Universe(before.universe, after.universe));
-    }
-    if before.preferences != after.preferences {
-        changes.push(LockChange::Preferences);
-    }
-    diff_entries(&mut changes, before, after);
-    LockDiff {
-        changes: changes.into(),
-    }
-}
-
-/// Key an entry by its package identity alone, the key `parse` and the
-/// solver's host maps key on: every other coordinate an entry carries moves
-/// within one key, so a moved version or feature set reads as one selection
-/// moving rather than as a removal paired with an addition.
-type EntryKey = PackageIdentity;
-
-fn key_of(entry: &LockEntry) -> EntryKey {
-    entry.package.identity().clone()
-}
-
-fn diff_entries(changes: &mut Vec<LockChange>, before: &Lock, after: &Lock) {
-    let before_by_key: BTreeMap<EntryKey, &LockEntry> =
-        before.entries.iter().map(|e| (key_of(e), e)).collect();
-    let after_by_key: BTreeMap<EntryKey, &LockEntry> =
-        after.entries.iter().map(|e| (key_of(e), e)).collect();
-    for (key, old) in before_by_key.iter() {
-        match after_by_key.get(key) {
-            None => changes.push(LockChange::Removed((*old).clone())),
-            Some(new) => {
-                if old.package.version() != new.package.version() {
-                    changes.push(LockChange::Upgraded {
-                        package: key.clone(),
-                        from: old.package.version().into(),
-                        to: new.package.version().into(),
-                    });
-                }
-                if old.features != new.features {
-                    changes.push(LockChange::Features {
-                        package: key.clone(),
-                        from: old.features.clone(),
-                        to: new.features.clone(),
-                    });
-                }
-                // Content under moved coordinates is a new selection's content,
-                // not drift; drift is content that moved while no coordinate
-                // did.
-                if old.package.version() == new.package.version()
-                    && old.features == new.features
-                    && old.source != new.source
-                {
-                    changes.push(LockChange::Drifted {
-                        package: old.package.clone(),
-                        from: old.source,
-                        to: new.source,
-                    });
-                }
-            }
-        }
-    }
-    for (key, new) in after_by_key.iter() {
-        if !before_by_key.contains_key(key) {
-            changes.push(LockChange::Added((*new).clone()));
-        }
-    }
-}
-
 fn constructor_of(resolution: &Resolution) -> &'static str {
     match resolution {
         Resolution::Solved { .. } => "solved",
@@ -420,7 +300,7 @@ fn entry_of(candidate: &Candidate) -> PithResult<LockEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::identity::{DomainIdentity, NUMERIC_SEGMENTS};
+    use crate::identity::{DomainIdentity, NUMERIC_SEGMENTS, PackageIdentity};
     use crate::lock::Origin;
     use crate::preference::Preference;
     use crate::resolution::TrailEntry;

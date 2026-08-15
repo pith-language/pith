@@ -34,6 +34,7 @@ pub mod environment;
 pub mod forge;
 pub mod identity;
 pub mod lock;
+mod lockdiff;
 pub mod lockfile;
 pub mod lockpublish;
 pub(crate) mod locktext;
