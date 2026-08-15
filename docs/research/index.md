@@ -30,6 +30,7 @@ each lineage starts with the pressure that created a system. it records the mech
 - [build-system lineage](build-systems.md)
 - [configuration and composition](configuration.md)
 - [dependency resolution](dependency-resolution.md)
+- [index formats](index-formats.md)
 - [desired state and deployment](deployment-and-state.md)
 - [reproducibility lineage](reproducibility.md)
 - [artifacts, identity, and trust](artifacts-and-trust.md)

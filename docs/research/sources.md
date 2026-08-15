@@ -109,6 +109,21 @@ this file tracks sources already used or queued for a deeper pass. a link here d
 - [gentoo development guide](https://devmanual.gentoo.org/ebuild-writing/functions/)
 - [homebrew formula cookbook](https://docs.brew.sh/Formula-Cookbook)
 
+## index formats
+
+- [cargo registry index format](https://doc.rust-lang.org/cargo/reference/registry-index.html)
+- [RFC 2141: alternative registries](https://rust-lang.github.io/rfcs/2141-alternative-registries.html)
+- [RFC 2789: sparse registry](https://rust-lang.github.io/rfcs/2789-sparse-index.html)
+- [Debian repository format](https://wiki.debian.org/DebianRepository/Format)
+- [Debian policy 5: control files and fields](https://www.debian.org/doc/debian-policy/ch-controlfields.html)
+- [dpkg-gencontrol(1)](https://manpages.org/dpkg-gencontrol/1) and [dpkg-scanpackages(1)](https://manpages.org/dpkg-scanpackages/1)
+- [Alpine Apk_spec](https://wiki.alpinelinux.org/wiki/Apk_spec) and [apk-package(5)](https://github.com/alpinelinux/apk-tools/blob/master/doc/apk-package.5.scd)
+- [PEP 503](https://peps.python.org/pep-0503/), [PEP 658](https://peps.python.org/pep-0658/), [PEP 691](https://peps.python.org/pep-0691/), and [PEP 714](https://peps.python.org/pep-0714/)
+- [libsolv](https://github.com/openSUSE/libsolv)
+- [dart pub solver](https://github.com/dart-lang/pub/blob/master/doc/solver.md) and [hosted repository spec v2](https://github.com/dart-lang/pub/blob/master/doc/repository-spec-v2.md)
+- [pubgrub-rs guide](https://pubgrub-rs-guide.netlify.app/)
+- [CUDF 2.0 specification](https://www.mancoosi.org/reports/tr3.pdf)
+
 ## tooling
 
 - [Language Server Protocol](https://microsoft.github.io/language-server-protocol/)
