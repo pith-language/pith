@@ -38,6 +38,7 @@ fn candidate(name: &str, version: &str, content: &[u8]) -> Candidate {
         provenance: SourceBinding::Archive {
             archive: ContentId::of_blob(content),
         },
+        origin: Origin::Registry("pkgs.pith-lang.org".into()),
         requires: Box::new([]),
     }
 }
@@ -125,10 +126,8 @@ fn offer_over(
 fn the_offer_that_serves_is_a_function_of_the_offer_set_not_the_slice_order() {
     // Three offers claim zlib's identity: one for a version the lock does
     // not bind, and two that both admit, from two origins the policy
-    // admits. Matching on identity and taking the first hit would let the
-    // wrong-version offer sitting first refuse on the binding leg with the
-    // right ones never examined, and would let slice order decide which of
-    // the admitting two serves.
+    // admits. The wrong version sits first in one slice and last in the
+    // other; which offer serves must not move with the slice.
     let mut declared = declaration();
     declared.origins = AdmittedOrigins(Box::new([
         Origin::Forge("builds.pith-lang.org".into()),
@@ -482,10 +481,9 @@ fn a_served_substitution_persists_in_the_record_and_not_in_the_lock() {
     );
 
     // A tampered offer serves nothing, and its refusal arrives beside the
-    // document with both sides of the comparison, so the caller can tell a
-    // tampered artifact from an unauthorized origin. The build the refusal
-    // left running is 0042's business; the document is the one an absent
-    // offer produces.
+    // document with both sides of the comparison. The build it leaves
+    // running is 0042's business; the document is the one an absent offer
+    // produces.
     let tampered: &[u8] = b"zlib-1.3-tampered.so";
     let refused = EnvironmentDocument::resolve(
         &declaration(),

@@ -75,11 +75,10 @@ pub struct BinaryOffer {
 
 impl BinaryOffer {
     /// The canonical order over offers: the claim's every field,
-    /// length-prefixed so no field can run into the next. Which offer a set
-    /// serves has to be a function of the set — an ordering nobody declared
-    /// is not an answer — so a caller holding several offers for one
-    /// identity orders them by this key before running the admission test
-    /// down the list.
+    /// length-prefixed so no field can run into the next. A caller holding
+    /// several offers for one identity orders them by this key before
+    /// running the admission test, so which offer serves is a function of
+    /// the offer set and not of the slice it arrived in.
     #[must_use]
     pub fn canonical_key(&self) -> Vec<u8> {
         fn push(key: &mut Vec<u8>, part: &[u8]) {

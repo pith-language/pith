@@ -7,10 +7,10 @@
 //! project declares one (`Environment`), resolves it through the ordinary
 //! solver, and realizes its entries against the offers this machine holds,
 //! which produces the document (`EnvironmentDocument`) beside the refusals
-//! the realization produced: a refused offer changes nothing about what
-//! the environment serves — the build runs, as it would with no offer at
-//! all — so its explanation returns with the answer rather than entering
-//! the document and moving its digest.
+//! the realization produced. A refused offer leaves the build running from
+//! source, the same realization an absent offer produces, so the refusals
+//! return with the answer and do not enter the document: they would move
+//! its digest without anything the environment serves having changed.
 //!
 //! Computing all of that is pure, on the ground 0041 put the lock's write
 //! on: resolving, locking, realizing, digesting, and rendering touch no
@@ -255,9 +255,9 @@ impl EnvironmentDocument {
     /// constructors are facts about the problem, and an environment is not
     /// one of them.
     ///
-    /// The answer carries the refusals beside the document: every offer
-    /// that was tested and turned down is returned as 0042's value, so the
-    /// explanation arrives every time rather than dying at this boundary.
+    /// The answer carries the refusals beside the document: an offer that
+    /// was tested and turned down returns 0042's value, so the caller sees
+    /// the explanation on every resolve that produces it.
     ///
     /// # Errors
     /// The engine's diagnostics when the resolution fails, and the lock's
@@ -400,13 +400,12 @@ pub struct Refused {
 /// A declaration realized: the environment document, and the refusals its
 /// realization produced.
 ///
-/// The refusals ride beside the document rather than inside it on purpose.
-/// A refused offer changes nothing about what the environment serves — the
-/// build runs from source, the same realization an absent offer produces —
-/// so a refusal in the document would make a stale mirror's rejected offer
-/// part of what "the same environment" means. The explanation still
-/// arrives every time, in the order the entries sort with each entry's
-/// offers in the canonical order over claims.
+/// The refusals are returned beside the document and kept out of it. A
+/// refused offer leaves the build running from source, the same
+/// realization an absent offer produces, so a refusal in the document
+/// would move its digest without anything the environment serves having
+/// changed. The refusals arrive in lock-entry order, each entry's offers
+/// in the canonical order over claims.
 pub struct Realized {
     pub document: EnvironmentDocument,
     pub refusals: Box<[Refused]>,
@@ -420,8 +419,8 @@ pub struct Realized {
 /// order over claims, and the first that admits serves; a refusal is
 /// carried out for every offer that was tested and refused while none
 /// served. When a substitution serves, the offers after it in the
-/// canonical order are not examined: the build they would have stood in
-/// for is not running, so their refusals explain nothing.
+/// canonical order are not examined: the build they stood in for is not
+/// running.
 fn realize_entries(
     declaration: &Environment,
     lock: &Lock,
@@ -510,8 +509,8 @@ pub fn diff(before: &EnvironmentDocument, after: &EnvironmentDocument) -> Box<[E
 }
 
 /// The toolchain's driver path. The declared type is the nominal alone, and
-/// `is_type` cannot see a nominal's representation, so the reader is where a
-/// toolchain value xylem never produces is refused rather than rendered.
+/// `is_type` cannot see a nominal's representation, so the reader refuses a
+/// toolchain whose representation is not the driver path text.
 ///
 /// # Errors
 /// A [`pith_diag::DiagnosticSink`] naming what was found when the value is
@@ -542,7 +541,7 @@ fn toolchain_token(toolchain: &Value) -> String {
         Value::Nominal { representation, .. } => match representation.as_ref() {
             Value::Text(driver) => return token(driver),
             // A toolchain value xylem never produces; quoted so the line
-            // still parses rather than borrowing a diagnostic spelling.
+            // still parses.
             other => other.describe(),
         },
         other => other.describe(),
@@ -600,9 +599,8 @@ pub fn render(document: &EnvironmentDocument) -> String {
 
 /// The derivation's one rule: a declared environment name becomes a file
 /// name beside the lock, so it must be a single path component. A name with
-/// a separator or a `..` would derive a path outside the project root, and
-/// the refusal surfaces here, at the derivation, rather than at whatever
-/// caller acted on the path.
+/// a separator or a `..` would derive a path outside the project root; the
+/// refusal surfaces at the derivation, before any caller acts on a path.
 ///
 /// # Errors
 /// A [`pith_diag::DiagnosticSink`] naming the name and why it cannot name an
