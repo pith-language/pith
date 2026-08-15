@@ -22,8 +22,9 @@
 //! 0042's origins are trusted, and 0044 says so.
 
 use pith_diag::PithResult;
-use pith_ids::{ContentDigest, DIGEST_LEN};
+use pith_ids::ContentDigest;
 
+use crate::codec::digest_from_hex;
 use crate::diag;
 
 /// The digest domain for one leaf: a binding line. NUL-terminated so it is
@@ -109,24 +110,7 @@ fn node_hash(left: &ContentDigest, right: &ContentDigest) -> ContentDigest {
 }
 
 fn digest_of(text: &str) -> Option<ContentDigest> {
-    if text.len() != DIGEST_LEN * 2 {
-        return None;
-    }
-    let nibbles: Vec<u8> = text
-        .chars()
-        .map(|character| {
-            character
-                .to_digit(16)
-                .and_then(|digit| u8::try_from(digit).ok())
-        })
-        .collect::<Option<Vec<u8>>>()?;
-    let collected: Vec<u8> = nibbles
-        .chunks_exact(2)
-        .map(|pair| pair.iter().fold(0u8, |byte, nibble| (byte << 4) | nibble))
-        .collect();
-    Some(ContentDigest::from_bytes(
-        collected.as_slice().try_into().ok()?,
-    ))
+    digest_from_hex(text)
 }
 
 /// The largest power of two strictly below `size`, for a size of at least

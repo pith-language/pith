@@ -24,7 +24,10 @@ use std::cmp::Ordering;
 use pith_core::{SumConstructor, Type, Value};
 use pith_diag::PithResult;
 
-use crate::codec::{field_of, record_type, record_value, sum_value, text_list, text_of};
+use crate::codec::{
+    FIELD_DOMAIN, FIELD_FEATURES, FIELD_PACKAGE, FIELD_VERSION, canonical_list, field_of,
+    record_type, record_value, sum_value, text_list, text_of,
+};
 use crate::diag;
 use crate::identity::{DomainIdentity, PackageIdentity, VersionScheme};
 
@@ -37,15 +40,14 @@ const AT_LEAST: &str = "AtLeast";
 const AT_MOST: &str = "AtMost";
 const BETWEEN: &str = "Between";
 
-const VERSION: &str = "version";
 const INCLUSIVE: &str = "inclusive";
 const LOWER: &str = "lower";
 const UPPER: &str = "upper";
 
-pub(crate) const DOMAIN: &str = "domain";
-pub(crate) const PACKAGE: &str = "package";
+const DOMAIN: &str = FIELD_DOMAIN;
+const PACKAGE: &str = FIELD_PACKAGE;
 pub(crate) const RANGE_FIELD: &str = "range";
-pub(crate) const FEATURES: &str = "features";
+const FEATURES: &str = FIELD_FEATURES;
 pub(crate) const ATTRIBUTION: &str = "attribution";
 
 /// One edge of a range: a version spelling plus whether the edge itself is
@@ -68,7 +70,7 @@ impl Bound {
 
     fn to_value(&self) -> Value {
         record_value([
-            (VERSION, Value::Text(self.version.clone())),
+            (FIELD_VERSION, Value::Text(self.version.clone())),
             (INCLUSIVE, Value::Bool(self.inclusive)),
         ])
     }
@@ -77,8 +79,8 @@ impl Bound {
         let Value::Record(fields) = value else {
             return Err(bound_error(value));
         };
-        let version = field_of(fields, VERSION)
-            .map(|payload| text_of(payload, VERSION))
+        let version = field_of(fields, FIELD_VERSION)
+            .map(|payload| text_of(payload, FIELD_VERSION))
             .transpose()?;
         let inclusive = match field_of(fields, INCLUSIVE) {
             Some(Value::Bool(flag)) => Some(flag),
@@ -103,7 +105,7 @@ fn bound_error(found: &Value) -> pith_diag::DiagnosticSink {
 }
 
 fn bound_type() -> Type {
-    record_type([(VERSION, Type::Text), (INCLUSIVE, Type::Bool)])
+    record_type([(FIELD_VERSION, Type::Text), (INCLUSIVE, Type::Bool)])
 }
 
 /// One version range: a closed constructor over the ordering the domain
@@ -204,7 +206,7 @@ impl Range {
                         "the {EXACTLY} constructor carried no version"
                     )));
                 };
-                Ok(Self::Exactly(text_of(payload, VERSION)?))
+                Ok(Self::Exactly(text_of(payload, FIELD_VERSION)?))
             }
             AT_LEAST => Ok(Self::AtLeast(bound_of(payload.as_deref(), AT_LEAST)?)),
             AT_MOST => Ok(Self::AtMost(bound_of(payload.as_deref(), AT_MOST)?)),
@@ -519,13 +521,7 @@ pub fn constraint_set_type() -> Type {
 /// computation key.
 #[must_use]
 pub fn constraint_set_value(constraints: &[Constraint]) -> Value {
-    let mut entries: Vec<(Vec<u8>, Value)> = constraints
-        .iter()
-        .map(|c| (c.to_value().encode_canonical(), c.to_value()))
-        .collect();
-    entries.sort_by(|left, right| left.0.cmp(&right.0));
-    entries.dedup_by(|front, back| front.0 == back.0);
-    Value::List(entries.into_iter().map(|(_, value)| value).collect())
+    canonical_list(constraints.iter().map(Constraint::to_value))
 }
 
 #[cfg(test)]

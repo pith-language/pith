@@ -17,9 +17,9 @@ use std::collections::BTreeMap;
 
 use pith_core::{Type, Value};
 use pith_diag::PithResult;
-use pith_ids::{ContentDigest, ContentId};
+use pith_ids::ContentId;
 
-use crate::codec::{blob_field, field_of, record_type, record_value, text_field};
+use crate::codec::{blob_field, field_of, record_type, record_value, text_field, value_content_id};
 use crate::constraint::{Constraint, Range};
 use crate::diag;
 use crate::identity::{PackageIdentity, PackageVersion, version_scheme_type, version_scheme_value};
@@ -187,10 +187,7 @@ impl Lock {
     /// never feeds a digest (0041); this is what "the same lock" means.
     #[must_use]
     pub fn content_id(&self) -> ContentId {
-        let canonical = self.to_value().encode_canonical();
-        let mut domain_prefixed = LOCK_DOMAIN.to_vec();
-        domain_prefixed.extend_from_slice(&canonical);
-        ContentId::from_digest(ContentDigest::of_bytes(&domain_prefixed))
+        value_content_id(LOCK_DOMAIN, &self.to_value())
     }
 
     /// The lock a resolution writes. The answer contributes the selection

@@ -36,9 +36,12 @@ use std::path::{Path, PathBuf};
 use pith_core::{Type, Value};
 use pith_diag::PithResult;
 use pith_engine::{Engine, ExecutionPlatform};
-use pith_ids::{ContentDigest, ContentId};
+use pith_ids::ContentId;
 
-use crate::codec::{field_of, record_type, record_value, text_field};
+use crate::codec::{
+    FIELD_ARCHITECTURE, FIELD_OPERATING_SYSTEM, FIELD_TOOLCHAIN, field_of, record_type,
+    record_value, text_field, value_content_id,
+};
 use crate::constraint::{Constraint, constraint_type};
 use crate::diag;
 use crate::document::{Lock, LockChange, diff as diff_locks, lock_type};
@@ -69,9 +72,6 @@ const RECORD_SUFFIX: &str = ".pith.env";
 
 const NAME: &str = "name";
 const CONSTRAINTS: &str = "constraints";
-const OPERATING_SYSTEM: &str = "operating-system";
-const ARCHITECTURE: &str = "architecture";
-const TOOLCHAIN: &str = "toolchain";
 const ORIGINS: &str = "origins";
 const LOCK: &str = "lock";
 const SUBSTITUTIONS: &str = "substitutions";
@@ -105,10 +105,10 @@ pub fn environment_type() -> Type {
     record_type([
         (NAME, Type::Text),
         (CONSTRAINTS, Type::List(Box::new(constraint_type()))),
-        (OPERATING_SYSTEM, Type::Text),
-        (ARCHITECTURE, Type::Text),
+        (FIELD_OPERATING_SYSTEM, Type::Text),
+        (FIELD_ARCHITECTURE, Type::Text),
         (
-            TOOLCHAIN,
+            FIELD_TOOLCHAIN,
             Type::Nominal {
                 name: xylem::types::TOOLCHAIN.into(),
             },
@@ -128,14 +128,14 @@ impl Environment {
                 Value::List(self.constraints.iter().map(Constraint::to_value).collect()),
             ),
             (
-                OPERATING_SYSTEM,
+                FIELD_OPERATING_SYSTEM,
                 Value::Text(self.platform.operating_system.clone()),
             ),
             (
-                ARCHITECTURE,
+                FIELD_ARCHITECTURE,
                 Value::Text(self.platform.architecture.clone()),
             ),
-            (TOOLCHAIN, self.toolchain.clone()),
+            (FIELD_TOOLCHAIN, self.toolchain.clone()),
             (
                 ORIGINS,
                 Value::List(self.origins.0.iter().map(Origin::to_value).collect()),
@@ -168,14 +168,18 @@ impl Environment {
                 constraints.push(Constraint::from_value(element)?);
             }
         }
-        let operating_system = text_field(fields, OPERATING_SYSTEM)?;
-        let architecture = text_field(fields, ARCHITECTURE)?;
-        let toolchain = match field_of(fields, TOOLCHAIN) {
+        let operating_system = text_field(fields, FIELD_OPERATING_SYSTEM)?;
+        let architecture = text_field(fields, FIELD_ARCHITECTURE)?;
+        let toolchain = match field_of(fields, FIELD_TOOLCHAIN) {
             Some(payload) => {
                 toolchain_driver(payload)?;
                 payload.clone()
             }
-            None => return Err(diag(format!("the declaration carried no {TOOLCHAIN}"))),
+            None => {
+                return Err(diag(format!(
+                    "the declaration carried no {FIELD_TOOLCHAIN}"
+                )));
+            }
         };
         let mut origins = Vec::new();
         if let Some(Value::List(elements)) = field_of(fields, ORIGINS) {
@@ -200,12 +204,11 @@ impl Environment {
 /// beside the realization coordinates it declares and the substitutions it
 /// served.
 ///
-/// Two documents over different declarations are different environments
-/// even where their constraints overlap, and one document re-resolved under
-/// a moved input is a different document whose diff names the input. Two
-/// platforms under one declaration share the lock — it binds source only —
-/// and differ in the realization coordinates, so per-platform environments
-/// are per-platform realizations of one selection.
+/// The document records the declaration name and every realized input. A
+/// moved recorded input produces a different document whose diff names the
+/// input. Two platforms under one declaration share the lock — it binds
+/// source only — and differ in the realization coordinates, so per-platform
+/// environments are per-platform realizations of one selection.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EnvironmentDocument {
     pub name: Box<str>,
@@ -226,10 +229,10 @@ pub fn environment_document_type() -> Type {
     record_type([
         (NAME, Type::Text),
         (LOCK, lock_type()),
-        (OPERATING_SYSTEM, Type::Text),
-        (ARCHITECTURE, Type::Text),
+        (FIELD_OPERATING_SYSTEM, Type::Text),
+        (FIELD_ARCHITECTURE, Type::Text),
         (
-            TOOLCHAIN,
+            FIELD_TOOLCHAIN,
             Type::Nominal {
                 name: xylem::types::TOOLCHAIN.into(),
             },
@@ -307,10 +310,7 @@ impl EnvironmentDocument {
     /// environment" means.
     #[must_use]
     pub fn content_id(&self) -> ContentId {
-        let canonical = self.to_value().encode_canonical();
-        let mut domain_prefixed = ENVIRONMENT_DOMAIN.to_vec();
-        domain_prefixed.extend_from_slice(&canonical);
-        ContentId::from_digest(ContentDigest::of_bytes(&domain_prefixed))
+        value_content_id(ENVIRONMENT_DOMAIN, &self.to_value())
     }
 
     /// The document as a value of the declared record type.
@@ -320,14 +320,14 @@ impl EnvironmentDocument {
             (NAME, Value::Text(self.name.clone())),
             (LOCK, self.lock.to_value()),
             (
-                OPERATING_SYSTEM,
+                FIELD_OPERATING_SYSTEM,
                 Value::Text(self.platform.operating_system.clone()),
             ),
             (
-                ARCHITECTURE,
+                FIELD_ARCHITECTURE,
                 Value::Text(self.platform.architecture.clone()),
             ),
-            (TOOLCHAIN, self.toolchain.clone()),
+            (FIELD_TOOLCHAIN, self.toolchain.clone()),
             (
                 SUBSTITUTIONS,
                 Value::List(self.substitutions.iter().map(Admitted::to_value).collect()),
@@ -358,14 +358,14 @@ impl EnvironmentDocument {
             Some(payload) => Lock::from_value(payload)?,
             None => return Err(diag(format!("the document carried no {LOCK}"))),
         };
-        let operating_system = text_field(fields, OPERATING_SYSTEM)?;
-        let architecture = text_field(fields, ARCHITECTURE)?;
-        let toolchain = match field_of(fields, TOOLCHAIN) {
+        let operating_system = text_field(fields, FIELD_OPERATING_SYSTEM)?;
+        let architecture = text_field(fields, FIELD_ARCHITECTURE)?;
+        let toolchain = match field_of(fields, FIELD_TOOLCHAIN) {
             Some(payload) => {
                 toolchain_driver(payload)?;
                 payload.clone()
             }
-            None => return Err(diag(format!("the document carried no {TOOLCHAIN}"))),
+            None => return Err(diag(format!("the document carried no {FIELD_TOOLCHAIN}"))),
         };
         let mut substitutions = Vec::new();
         if let Some(Value::List(elements)) = field_of(fields, SUBSTITUTIONS) {
@@ -563,7 +563,7 @@ pub fn render(document: &EnvironmentDocument) -> String {
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "{ENV} {} {PLATFORM} {}/{} {TOOLCHAIN} {} {LOCK} {SHA256}{}",
+        "{ENV} {} {PLATFORM} {}/{} {FIELD_TOOLCHAIN} {} {LOCK} {SHA256}{}",
         token(&document.name),
         document.platform.operating_system,
         document.platform.architecture,

@@ -67,14 +67,6 @@ impl PackageIdentity {
     pub fn name(&self) -> &str {
         &self.name
     }
-
-    /// A nominal value carrying this identity's package name. The domain is
-    /// the declaration site's fact and is not part of the value a description
-    /// records; the identity pair stays in the types that compare packages.
-    #[must_use]
-    pub fn name_value(&self) -> Value {
-        Value::Text(self.name.clone())
-    }
 }
 
 /// A package version: the identity plus a version, in the format and

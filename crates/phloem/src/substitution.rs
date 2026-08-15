@@ -37,7 +37,11 @@ use pith_diag::PithResult;
 use pith_engine::ExecutionPlatform;
 use pith_ids::ContentId;
 
-use crate::codec::{blob_field, field_of, record_type, record_value, text_field, text_list};
+use crate::codec::{
+    FIELD_ARCHITECTURE, FIELD_DOMAIN, FIELD_FEATURES, FIELD_OPERATING_SYSTEM, FIELD_PACKAGE,
+    FIELD_TOOLCHAIN, FIELD_VERSION, blob_field, field_of, record_type, record_value, text_field,
+    text_list,
+};
 use crate::description::Description;
 use crate::identity::{DomainIdentity, PackageIdentity, PackageVersion};
 use crate::lock::{LockEntry, Origin};
@@ -187,14 +191,7 @@ pub struct Admitted {
 /// The declared substitution record's name.
 pub const SUBSTITUTION: &str = "phloem.Substitution";
 
-const DOMAIN: &str = "domain";
-const PACKAGE: &str = "package";
-const VERSION: &str = "version";
-const FEATURES: &str = "features";
 const BUILT_FROM: &str = "built-from";
-const OPERATING_SYSTEM: &str = "operating-system";
-const ARCHITECTURE: &str = "architecture";
-const TOOLCHAIN: &str = "toolchain";
 const BINARY: &str = "binary";
 const AUTHORIZED_BY: &str = "authorized-by";
 
@@ -206,15 +203,15 @@ const AUTHORIZED_BY: &str = "authorized-by";
 #[must_use]
 pub fn substitution_type() -> Type {
     record_type([
-        (DOMAIN, Type::Text),
-        (PACKAGE, Type::Text),
-        (VERSION, Type::Text),
-        (FEATURES, Type::List(Box::new(Type::Text))),
+        (FIELD_DOMAIN, Type::Text),
+        (FIELD_PACKAGE, Type::Text),
+        (FIELD_VERSION, Type::Text),
+        (FIELD_FEATURES, Type::List(Box::new(Type::Text))),
         (BUILT_FROM, Type::Blob),
-        (OPERATING_SYSTEM, Type::Text),
-        (ARCHITECTURE, Type::Text),
+        (FIELD_OPERATING_SYSTEM, Type::Text),
+        (FIELD_ARCHITECTURE, Type::Text),
         (
-            TOOLCHAIN,
+            FIELD_TOOLCHAIN,
             Type::Nominal {
                 name: xylem::types::TOOLCHAIN.into(),
             },
@@ -230,13 +227,16 @@ impl Admitted {
     pub fn to_value(&self) -> Value {
         record_value([
             (
-                DOMAIN,
+                FIELD_DOMAIN,
                 Value::Text(self.package.identity().domain().as_str().into()),
             ),
-            (PACKAGE, Value::Text(self.package.identity().name().into())),
-            (VERSION, Value::Text(self.package.version().into())),
             (
-                FEATURES,
+                FIELD_PACKAGE,
+                Value::Text(self.package.identity().name().into()),
+            ),
+            (FIELD_VERSION, Value::Text(self.package.version().into())),
+            (
+                FIELD_FEATURES,
                 Value::List(
                     self.features
                         .iter()
@@ -246,14 +246,14 @@ impl Admitted {
             ),
             (BUILT_FROM, Value::Blob(self.built_from)),
             (
-                OPERATING_SYSTEM,
+                FIELD_OPERATING_SYSTEM,
                 Value::Text(self.platform.operating_system.clone()),
             ),
             (
-                ARCHITECTURE,
+                FIELD_ARCHITECTURE,
                 Value::Text(self.platform.architecture.clone()),
             ),
-            (TOOLCHAIN, self.toolchain.clone()),
+            (FIELD_TOOLCHAIN, self.toolchain.clone()),
             (BINARY, Value::Blob(self.measured)),
             (AUTHORIZED_BY, self.authorized_by.to_value()),
         ])
@@ -279,19 +279,27 @@ impl Admitted {
                 value.describe()
             )));
         };
-        let domain = text_field(fields, DOMAIN)?;
-        let package = text_field(fields, PACKAGE)?;
-        let version = text_field(fields, VERSION)?;
-        let features = match field_of(fields, FEATURES) {
-            Some(payload) => text_list(payload, FEATURES)?,
-            None => return Err(crate::diag(format!("the record carried no {FEATURES} set"))),
+        let domain = text_field(fields, FIELD_DOMAIN)?;
+        let package = text_field(fields, FIELD_PACKAGE)?;
+        let version = text_field(fields, FIELD_VERSION)?;
+        let features = match field_of(fields, FIELD_FEATURES) {
+            Some(payload) => text_list(payload, FIELD_FEATURES)?,
+            None => {
+                return Err(crate::diag(format!(
+                    "the record carried no {FIELD_FEATURES} set"
+                )));
+            }
         };
         let built_from = blob_field(fields, BUILT_FROM)?;
-        let operating_system = text_field(fields, OPERATING_SYSTEM)?;
-        let architecture = text_field(fields, ARCHITECTURE)?;
-        let toolchain = match field_of(fields, TOOLCHAIN) {
+        let operating_system = text_field(fields, FIELD_OPERATING_SYSTEM)?;
+        let architecture = text_field(fields, FIELD_ARCHITECTURE)?;
+        let toolchain = match field_of(fields, FIELD_TOOLCHAIN) {
             Some(payload) => payload.clone(),
-            None => return Err(crate::diag(format!("the record carried no {TOOLCHAIN}"))),
+            None => {
+                return Err(crate::diag(format!(
+                    "the record carried no {FIELD_TOOLCHAIN}"
+                )));
+            }
         };
         let measured = blob_field(fields, BINARY)?;
         let authorized_by = match field_of(fields, AUTHORIZED_BY) {

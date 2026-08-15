@@ -35,7 +35,7 @@ use crate::universe::Candidate;
 /// line the toolchain fixtures drew: an absent tool skips, a present tool
 /// that cannot resolve the repository fails.
 #[derive(Debug)]
-pub enum ForgeError {
+enum ForgeError {
     NotFound,
     Failed(String),
 }
@@ -152,9 +152,9 @@ pub fn materialize_resolution(repo: &Path, resolution: &Resolution) -> PithResul
     })
 }
 
-/// The archive of one revision's tree, as bytes, measured. `git archive`
-/// output is a function of the tree, because timestamps clamp to the
-/// commit's, so the measured archive and the tree hash name one content.
+/// The archive of one revision, as measured bytes. `git archive` uses the
+/// commit timestamp when given a commit, so the content identity belongs to
+/// this materialization and is not derived from the tree hash alone.
 ///
 /// A caller-side effect: this runs git.
 ///

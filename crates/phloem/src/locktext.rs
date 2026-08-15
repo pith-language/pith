@@ -15,11 +15,12 @@
 use std::fmt::Write as _;
 
 use pith_diag::PithResult;
-use pith_ids::{ContentDigest, ContentId};
+use pith_ids::{ContentId, DIGEST_LEN};
 
+use crate::codec::digest_from_hex;
 use crate::diag;
 
-const HEX_LEN: usize = 64;
+const HEX_LEN: usize = DIGEST_LEN * 2;
 
 /// One text field in its written spelling: bare when it contains none of
 /// the reserved characters, quoted with backslash escapes otherwise.
@@ -164,12 +165,19 @@ fn escape(chars: &mut std::str::Chars<'_>) -> Result<char, String> {
             if chars.next() != Some('{') {
                 return Err("a unicode escape opens with `\\u{`".into());
             }
+            let mut closed = false;
             for character in chars.by_ref() {
                 match character {
-                    '}' => break,
+                    '}' => {
+                        closed = true;
+                        break;
+                    }
                     digit if digit.is_ascii_hexdigit() => hex.push(digit),
                     other => return Err(format!("`{other}` is not a hexadecimal digit")),
                 }
+            }
+            if !closed {
+                return Err("a unicode escape is never closed with `}`".into());
             }
             u32::from_str_radix(&hex, 16)
                 .ok()
@@ -287,37 +295,21 @@ pub(crate) fn parse_digest(text: &str, field: &str, number: usize) -> PithResult
             "line {number}: {field} carried `{text}` rather than a `sha256:`-prefixed digest"
         )));
     };
-    let Some(nibbles) = hex
+    if !hex
         .chars()
-        .map(|character| {
-            character
-                .to_digit(16)
-                .and_then(|digit| u8::try_from(digit).ok())
-        })
-        .collect::<Option<Vec<u8>>>()
-    else {
+        .all(|character| character.to_digit(16).is_some())
+    {
         return Err(diag(format!(
             "line {number}: {field} carried `{hex}`, which is not hexadecimal"
         )));
-    };
-    let wrong_length = || {
+    }
+    let digest = digest_from_hex(hex).ok_or_else(|| {
         diag(format!(
             "line {number}: {field} carried {} hexadecimal digits rather than {HEX_LEN}",
-            nibbles.len()
+            hex.len()
         ))
-    };
-    if nibbles.len() != HEX_LEN {
-        return Err(wrong_length());
-    }
-    let collected: Vec<u8> = nibbles
-        .chunks_exact(2)
-        .map(|pair| pair.iter().fold(0u8, |byte, nibble| (byte << 4) | nibble))
-        .collect();
-    let bytes: [u8; 32] = collected
-        .as_slice()
-        .try_into()
-        .map_err(|_| wrong_length())?;
-    Ok(ContentId::from_digest(ContentDigest::from_bytes(bytes)))
+    })?;
+    Ok(ContentId::from_digest(digest))
 }
 
 /// The digest prefix the written form spells, shared by every directive and

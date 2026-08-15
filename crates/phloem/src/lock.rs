@@ -22,10 +22,11 @@
 
 use pith_core::{SumConstructor, Type, Value};
 use pith_diag::PithResult;
-use pith_ids::{ContentDigest, ContentId};
+use pith_ids::ContentId;
 
 use crate::codec::{
-    blob_field, field_of, record_type, record_value, sum_value, text_field, text_list,
+    FIELD_DOMAIN, FIELD_FEATURES, FIELD_VERSION, blob_field, field_of, record_type, record_value,
+    sum_value, text_field, text_list, value_content_id,
 };
 use crate::diag;
 use crate::identity::PackageVersion;
@@ -47,10 +48,7 @@ pub const KIND_REGISTRY: &str = "registry";
 pub const KIND_FORGE: &str = "forge";
 pub const KIND_LOCAL_PATH: &str = "local-path";
 
-const DOMAIN: &str = "domain";
 const NAME: &str = "name";
-const VERSION: &str = "version";
-const FEATURES: &str = "features";
 const SOURCE: &str = "source";
 const ORIGIN_FIELD: &str = "origin";
 
@@ -205,10 +203,10 @@ pub fn origin_type() -> Type {
 #[must_use]
 pub fn entry_type() -> Type {
     record_type([
-        (DOMAIN, Type::Text),
+        (FIELD_DOMAIN, Type::Text),
         (NAME, Type::Text),
-        (VERSION, Type::Text),
-        (FEATURES, Type::List(Box::new(Type::Text))),
+        (FIELD_VERSION, Type::Text),
+        (FIELD_FEATURES, Type::List(Box::new(Type::Text))),
         (SOURCE, Type::Blob),
         (ORIGIN_FIELD, origin_type()),
     ])
@@ -269,13 +267,13 @@ impl LockEntry {
     pub fn to_value(&self) -> Value {
         record_value([
             (
-                DOMAIN,
+                FIELD_DOMAIN,
                 Value::Text(self.package.identity().domain().as_str().into()),
             ),
             (NAME, Value::Text(self.package.identity().name().into())),
-            (VERSION, Value::Text(self.package.version().into())),
+            (FIELD_VERSION, Value::Text(self.package.version().into())),
             (
-                FEATURES,
+                FIELD_FEATURES,
                 Value::List(
                     self.features
                         .iter()
@@ -307,12 +305,12 @@ impl LockEntry {
                 value.describe()
             )));
         };
-        let domain = text_field(fields, DOMAIN)?;
+        let domain = text_field(fields, FIELD_DOMAIN)?;
         let name = text_field(fields, NAME)?;
-        let version = text_field(fields, VERSION)?;
-        let features = match field_of(fields, FEATURES) {
-            Some(payload) => text_list(payload, FEATURES)?,
-            None => return Err(diag(format!("the record carried no {FEATURES} set"))),
+        let version = text_field(fields, FIELD_VERSION)?;
+        let features = match field_of(fields, FIELD_FEATURES) {
+            Some(payload) => text_list(payload, FIELD_FEATURES)?,
+            None => return Err(diag(format!("the record carried no {FIELD_FEATURES} set"))),
         };
         let source = blob_field(fields, SOURCE)?;
         let origin = match field_of(fields, ORIGIN_FIELD) {
@@ -339,10 +337,7 @@ impl LockEntry {
     /// behavior; the binding, which the entry records, does not.
     #[must_use]
     pub fn content_id(&self) -> ContentId {
-        let canonical = self.to_value().encode_canonical();
-        let mut domain_prefixed = LOCK_ENTRY_DOMAIN.to_vec();
-        domain_prefixed.extend_from_slice(&canonical);
-        ContentId::from_digest(ContentDigest::of_bytes(&domain_prefixed))
+        value_content_id(LOCK_ENTRY_DOMAIN, &self.to_value())
     }
 
     /// Check freshly resolved content against the binding. Matching content

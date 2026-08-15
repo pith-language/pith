@@ -9,9 +9,17 @@
 
 use pith_core::{RecordField, Type, Value};
 use pith_diag::PithResult;
-use pith_ids::ContentId;
+use pith_ids::{ContentDigest, ContentId, DIGEST_LEN};
 
 use crate::diag;
+
+pub(crate) const FIELD_ARCHITECTURE: &str = "architecture";
+pub(crate) const FIELD_DOMAIN: &str = "domain";
+pub(crate) const FIELD_FEATURES: &str = "features";
+pub(crate) const FIELD_OPERATING_SYSTEM: &str = "operating-system";
+pub(crate) const FIELD_PACKAGE: &str = "package";
+pub(crate) const FIELD_TOOLCHAIN: &str = "toolchain";
+pub(crate) const FIELD_VERSION: &str = "version";
 
 /// Build a record type from `(name, payload)` pairs. Field names are
 /// distinct constants at every call site, so the duplicate-name rejection
@@ -42,6 +50,47 @@ pub(crate) fn sum_value(type_name: &str, constructor: &str, payload: Option<Valu
         constructor: constructor.into(),
         payload: payload.map(Box::new),
     }
+}
+
+/// Values in canonical byte order, with duplicate values collapsed.
+pub(crate) fn canonical_list(values: impl IntoIterator<Item = Value>) -> Value {
+    let mut entries: Vec<(Vec<u8>, Value)> = values
+        .into_iter()
+        .map(|value| (value.encode_canonical(), value))
+        .collect();
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    entries.dedup_by(|left, right| left.0 == right.0);
+    Value::List(entries.into_iter().map(|(_, value)| value).collect())
+}
+
+/// A value's content identity under a NUL-terminated domain prefix.
+pub(crate) fn value_content_id(domain: &[u8], value: &Value) -> ContentId {
+    debug_assert_eq!(domain.last(), Some(&0));
+    let canonical = value.encode_canonical();
+    let mut bytes = Vec::with_capacity(domain.len().saturating_add(canonical.len()));
+    bytes.extend_from_slice(domain);
+    bytes.extend_from_slice(&canonical);
+    ContentId::from_digest(ContentDigest::of_bytes(&bytes))
+}
+
+/// Decode exactly one SHA-256 digest written as hexadecimal.
+pub(crate) fn digest_from_hex(text: &str) -> Option<ContentDigest> {
+    if text.len() != DIGEST_LEN * 2 {
+        return None;
+    }
+    let nibbles: Vec<u8> = text
+        .chars()
+        .map(|character| {
+            character
+                .to_digit(16)
+                .and_then(|digit| u8::try_from(digit).ok())
+        })
+        .collect::<Option<_>>()?;
+    let bytes: Vec<u8> = nibbles
+        .chunks_exact(2)
+        .map(|pair| pair.iter().fold(0u8, |byte, nibble| (byte << 4) | nibble))
+        .collect();
+    Some(ContentDigest::from_bytes(bytes.as_slice().try_into().ok()?))
 }
 
 /// A record's field payload by name, or `None` when the record has no such
@@ -107,7 +156,11 @@ pub(crate) fn text_field(fields: &[RecordField<Value>], name: &str) -> PithResul
 pub(crate) fn blob_field(fields: &[RecordField<Value>], name: &str) -> PithResult<ContentId> {
     match field_of(fields, name) {
         Some(Value::Blob(id)) => Ok(*id),
-        _ => Err(diag(format!("the {name} field carried no blob"))),
+        Some(found) => Err(diag(format!(
+            "the {name} field carried {} rather than a blob",
+            found.describe()
+        ))),
+        None => Err(diag(format!("the record carried no {name} field"))),
     }
 }
 
@@ -121,6 +174,10 @@ pub(crate) fn int_field(fields: &[RecordField<Value>], name: &str) -> PithResult
     match field_of(fields, name) {
         Some(Value::Int(n)) => u64::try_from(*n)
             .map_err(|_| crate::diag(format!("the {name} field carried a negative integer"))),
-        _ => Err(diag(format!("the {name} field carried no integer"))),
+        Some(found) => Err(diag(format!(
+            "the {name} field carried {} rather than an integer",
+            found.describe()
+        ))),
+        None => Err(diag(format!("the record carried no {name} field"))),
     }
 }

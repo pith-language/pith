@@ -11,19 +11,18 @@
 
 use pith_core::{Type, Value};
 use pith_diag::PithResult;
-use pith_ids::{ContentDigest, ContentId};
+use pith_ids::ContentId;
 
-use crate::codec::{field_of, record_type, record_value, text_list, text_of};
+use crate::codec::{
+    FIELD_DOMAIN, FIELD_FEATURES, FIELD_PACKAGE, FIELD_VERSION, canonical_list, field_of,
+    record_type, record_value, text_list, text_of, value_content_id,
+};
 use crate::constraint::{Range, range_type};
 use crate::diag;
 use crate::identity::{DomainIdentity, PackageIdentity};
 use crate::lock::{Origin, origin_type};
 use crate::source::{SourceBinding, source_type};
 
-const DOMAIN: &str = "domain";
-const PACKAGE: &str = "package";
-const VERSION: &str = "version";
-const FEATURES: &str = "features";
 const PROVENANCE: &str = "provenance";
 const ORIGIN: &str = "origin";
 const REQUIRES: &str = "requires";
@@ -64,10 +63,10 @@ pub struct Candidate {
 #[must_use]
 pub fn requirement_type() -> Type {
     record_type([
-        (DOMAIN, Type::Text),
-        (PACKAGE, Type::Text),
+        (FIELD_DOMAIN, Type::Text),
+        (FIELD_PACKAGE, Type::Text),
         (crate::constraint::RANGE_FIELD, range_type()),
-        (FEATURES, Type::List(Box::new(Type::Text))),
+        (FIELD_FEATURES, Type::List(Box::new(Type::Text))),
     ])
 }
 
@@ -76,10 +75,10 @@ pub fn requirement_type() -> Type {
 #[must_use]
 pub fn candidate_type() -> Type {
     record_type([
-        (DOMAIN, Type::Text),
-        (PACKAGE, Type::Text),
-        (VERSION, Type::Text),
-        (FEATURES, Type::List(Box::new(Type::Text))),
+        (FIELD_DOMAIN, Type::Text),
+        (FIELD_PACKAGE, Type::Text),
+        (FIELD_VERSION, Type::Text),
+        (FIELD_FEATURES, Type::List(Box::new(Type::Text))),
         (PROVENANCE, source_type()),
         (ORIGIN, origin_type()),
         (REQUIRES, Type::List(Box::new(requirement_type()))),
@@ -96,11 +95,14 @@ impl Candidate {
     #[must_use]
     pub fn to_value(&self) -> Value {
         record_value([
-            (DOMAIN, Value::Text(self.identity.domain().as_str().into())),
-            (PACKAGE, Value::Text(self.identity.name().into())),
-            (VERSION, Value::Text(self.version.clone())),
             (
-                FEATURES,
+                FIELD_DOMAIN,
+                Value::Text(self.identity.domain().as_str().into()),
+            ),
+            (FIELD_PACKAGE, Value::Text(self.identity.name().into())),
+            (FIELD_VERSION, Value::Text(self.version.clone())),
+            (
+                FIELD_FEATURES,
                 Value::List(
                     self.features
                         .iter()
@@ -135,17 +137,17 @@ impl Candidate {
                 value.describe()
             )));
         };
-        let domain = field_of(fields, DOMAIN)
-            .map(|payload| text_of(payload, DOMAIN))
+        let domain = field_of(fields, FIELD_DOMAIN)
+            .map(|payload| text_of(payload, FIELD_DOMAIN))
             .transpose()?;
-        let package = field_of(fields, PACKAGE)
-            .map(|payload| text_of(payload, PACKAGE))
+        let package = field_of(fields, FIELD_PACKAGE)
+            .map(|payload| text_of(payload, FIELD_PACKAGE))
             .transpose()?;
-        let version = field_of(fields, VERSION)
-            .map(|payload| text_of(payload, VERSION))
+        let version = field_of(fields, FIELD_VERSION)
+            .map(|payload| text_of(payload, FIELD_VERSION))
             .transpose()?;
-        let features = match field_of(fields, FEATURES) {
-            Some(payload) => text_list(payload, FEATURES)?,
+        let features = match field_of(fields, FIELD_FEATURES) {
+            Some(payload) => text_list(payload, FIELD_FEATURES)?,
             None => Vec::new(),
         };
         let provenance = field_of(fields, PROVENANCE)
@@ -182,13 +184,16 @@ impl Candidate {
 fn requirement_value(requirement: &Requirement) -> Value {
     record_value([
         (
-            DOMAIN,
+            FIELD_DOMAIN,
             Value::Text(requirement.subject.domain().as_str().into()),
         ),
-        (PACKAGE, Value::Text(requirement.subject.name().into())),
+        (
+            FIELD_PACKAGE,
+            Value::Text(requirement.subject.name().into()),
+        ),
         (crate::constraint::RANGE_FIELD, requirement.range.to_value()),
         (
-            FEATURES,
+            FIELD_FEATURES,
             Value::List(
                 requirement
                     .features
@@ -213,17 +218,17 @@ fn read_requirement(value: &Value) -> PithResult<Requirement> {
             value.describe()
         )));
     };
-    let domain = field_of(fields, DOMAIN)
-        .map(|payload| text_of(payload, DOMAIN))
+    let domain = field_of(fields, FIELD_DOMAIN)
+        .map(|payload| text_of(payload, FIELD_DOMAIN))
         .transpose()?;
-    let package = field_of(fields, PACKAGE)
-        .map(|payload| text_of(payload, PACKAGE))
+    let package = field_of(fields, FIELD_PACKAGE)
+        .map(|payload| text_of(payload, FIELD_PACKAGE))
         .transpose()?;
     let range = field_of(fields, crate::constraint::RANGE_FIELD)
         .map(Range::from_value)
         .transpose()?;
-    let features = match field_of(fields, FEATURES) {
-        Some(payload) => text_list(payload, FEATURES)?,
+    let features = match field_of(fields, FIELD_FEATURES) {
+        Some(payload) => text_list(payload, FIELD_FEATURES)?,
         None => Vec::new(),
     };
     let (Some(domain), Some(package), Some(range)) = (domain, package, range) else {
@@ -239,10 +244,9 @@ fn read_requirement(value: &Value) -> PithResult<Requirement> {
 }
 
 /// The candidate universe: every candidate a resolution may choose among,
-/// with the provenance of each. Host-side the candidates are a map keyed by
-/// identity — the host containers a host rule has (0040's refusal of `Map`)
-/// — while the value spelling is a canonically sorted list, whose
-/// sortedness is what the digest needs.
+/// with the provenance of each. The solver groups this slice in a host map
+/// keyed by identity, while the value spelling is a canonically sorted list
+/// whose sortedness is what the digest needs (0040's refusal of `Map`).
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct CandidateUniverse {
     pub candidates: Box<[Candidate]>,
@@ -260,14 +264,7 @@ impl CandidateUniverse {
     /// universe, so the computation key does not depend on assembly order.
     #[must_use]
     pub fn to_value(&self) -> Value {
-        let mut entries: Vec<(Vec<u8>, Value)> = self
-            .candidates
-            .iter()
-            .map(|c| (c.to_value().encode_canonical(), c.to_value()))
-            .collect();
-        entries.sort_by(|left, right| left.0.cmp(&right.0));
-        entries.dedup_by(|front, back| front.0 == back.0);
-        Value::List(entries.into_iter().map(|(_, value)| value).collect())
+        canonical_list(self.candidates.iter().map(Candidate::to_value))
     }
 
     /// Read a universe from a value.
@@ -296,10 +293,7 @@ impl CandidateUniverse {
     /// name which universe it moved from.
     #[must_use]
     pub fn content_id(&self) -> ContentId {
-        let canonical = self.to_value().encode_canonical();
-        let mut domain_prefixed = UNIVERSE_DOMAIN.to_vec();
-        domain_prefixed.extend_from_slice(&canonical);
-        ContentId::from_digest(ContentDigest::of_bytes(&domain_prefixed))
+        value_content_id(UNIVERSE_DOMAIN, &self.to_value())
     }
 }
 

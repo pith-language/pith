@@ -130,7 +130,7 @@ impl ResolveSolver {
 /// function of the request under the revision as much as under the scheme,
 /// and a lock whose entries moved while no recorded input moved has this
 /// one explanation left to name.
-pub const RESOLVER_MANIFEST: &[u8] = b"phloem-resolve-v1";
+const RESOLVER_MANIFEST: &[u8] = b"phloem-resolve-v1";
 
 /// The resolver revision a lock records, as lowercase hex. The one spelling
 /// of the rule revision every registered solver shares, so the lock names

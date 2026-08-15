@@ -22,7 +22,8 @@ use pith_diag::{PithResult, Span};
 use pith_ids::ContentId;
 
 use crate::codec::{
-    blob_field, field_of, int_field, record_type, record_value, sum_value, text_field,
+    FIELD_DOMAIN, FIELD_PACKAGE, blob_field, field_of, int_field, record_type, record_value,
+    sum_value, text_field,
 };
 use crate::constraint::{Constraint, constraint_set_type, constraint_set_value};
 use crate::identity::{DomainIdentity, PackageIdentity, version_scheme_type};
@@ -105,8 +106,8 @@ pub enum Resolution {
 #[must_use]
 pub fn trail_entry_type() -> Type {
     record_type([
-        (crate::constraint::DOMAIN, Type::Text),
-        (crate::constraint::PACKAGE, Type::Text),
+        (FIELD_DOMAIN, Type::Text),
+        (FIELD_PACKAGE, Type::Text),
         (CONSIDERED, Type::Int),
         (DECIDED_BY, Type::Text),
     ])
@@ -116,8 +117,8 @@ pub fn trail_entry_type() -> Type {
 #[must_use]
 pub fn derivation_type() -> Type {
     record_type([
-        (crate::constraint::DOMAIN, Type::Text),
-        (crate::constraint::PACKAGE, Type::Text),
+        (FIELD_DOMAIN, Type::Text),
+        (FIELD_PACKAGE, Type::Text),
         (CONSTRAINTS, constraint_set_type()),
         (CANDIDATES, Type::List(Box::new(Type::Text))),
     ])
@@ -135,8 +136,8 @@ pub fn resolution_type() -> Type {
     ]);
     let unsatisfiable = record_type([(DERIVATION, derivation_type())]);
     let underdetermined = record_type([
-        (crate::constraint::DOMAIN, Type::Text),
-        (crate::constraint::PACKAGE, Type::Text),
+        (FIELD_DOMAIN, Type::Text),
+        (FIELD_PACKAGE, Type::Text),
         (TIED, Type::List(Box::new(candidate_type()))),
         (ORDERINGS, preference_list_type()),
     ]);
@@ -213,11 +214,8 @@ fn text_value(content: &str) -> Value {
 
 fn identity_fields(subject: &PackageIdentity) -> [(&'static str, Value); 2] {
     [
-        (
-            crate::constraint::DOMAIN,
-            Value::Text(subject.domain().as_str().into()),
-        ),
-        (crate::constraint::PACKAGE, text_value(subject.name())),
+        (FIELD_DOMAIN, Value::Text(subject.domain().as_str().into())),
+        (FIELD_PACKAGE, text_value(subject.name())),
     ]
 }
 
@@ -226,12 +224,12 @@ fn subject_of(fields: &[RecordField<Value>]) -> Option<PackageIdentity> {
     let mut package = None;
     for field in fields.iter() {
         match field.name.as_ref() {
-            crate::constraint::DOMAIN => {
+            FIELD_DOMAIN => {
                 if let Value::Text(text) = &field.payload {
                     domain = Some(text.clone());
                 }
             }
-            crate::constraint::PACKAGE => {
+            FIELD_PACKAGE => {
                 if let Value::Text(text) = &field.payload {
                     package = Some(text.clone());
                 }

@@ -12,9 +12,9 @@
 
 use pith_core::{Type, Value};
 use pith_diag::PithResult;
-use pith_ids::{ContentDigest, ContentId};
+use pith_ids::ContentId;
 
-use crate::codec::{field_of, record_type, record_value, text_field, text_list};
+use crate::codec::{field_of, record_type, record_value, text_field, text_list, value_content_id};
 use crate::diag;
 use crate::source::{SourceBinding, source_type};
 
@@ -134,10 +134,7 @@ impl Description {
     /// package (0039).
     #[must_use]
     pub fn content_id(&self) -> ContentId {
-        let canonical = self.to_value().encode_canonical();
-        let mut domain_prefixed = DESCRIPTION_DOMAIN.to_vec();
-        domain_prefixed.extend_from_slice(&canonical);
-        ContentId::from_digest(ContentDigest::of_bytes(&domain_prefixed))
+        value_content_id(DESCRIPTION_DOMAIN, &self.to_value())
     }
 }
 

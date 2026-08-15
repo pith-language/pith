@@ -81,10 +81,6 @@ fn binding_of(published: &Published) -> LockEntry {
 
 /// Publish a registry and its witnessing log: the index lines, the
 /// archives, the log's leaves in the lock's own binding spelling, and the
-/// checkpoint over them. The test is the log's operator here, which is the
-/// server's half done by hand.
-/// Publish a registry and its witnessing log: the index lines, the
-/// archives, the log's leaves in the lock's own binding spelling, and the
 /// checkpoint over them. The test is the log's operator here; the fallible
 /// filesystem work is carried as a result so the tests unwrap at their
 /// call sites, where unwrapping is allowed.
@@ -229,6 +225,18 @@ fn a_registry_index_becomes_a_universe_that_locks_content_actually_read() {
     // one.
     let evidence = registry::read_witness(&scratch.path().join("log"), &entry).unwrap();
     registry::verify(&entry, &evidence, &pinned).unwrap();
+
+    let leaves = scratch.path().join("log/leaves");
+    let malformed = std::fs::read_to_string(&leaves)
+        .unwrap()
+        .replacen("bind ", "record ", 1);
+    std::fs::write(&leaves, malformed).unwrap();
+    let error = registry::read_witness(&scratch.path().join("log"), &entry).unwrap_err();
+    assert!(
+        message_of(&error).contains("starts with `bind`"),
+        "the log uses the lock line parser, including its directive: {}",
+        message_of(&error)
+    );
 }
 
 #[test]
@@ -493,8 +501,8 @@ fn a_git_reference_locks_only_after_the_fetch_measures_the_tree() {
     assert_eq!(entry.source, expected);
     assert_eq!(entry.origin, Origin::Forge("git.pith-lang.org/pith".into()));
 
-    // The archive is a function of the tree: two materializations of one
-    // revision measure the same content.
+    // Two materializations of one revision use the same tree and commit
+    // metadata, so they measure the same content.
     let again = forge::materialize_resolution(&repo, &resolution).unwrap();
     let again = Lock::from_resolution(NUMERIC_SEGMENTS, &preferences(), &again).unwrap();
     assert_eq!(again.entries.first().unwrap().source, entry.source);

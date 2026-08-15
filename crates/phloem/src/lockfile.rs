@@ -24,7 +24,7 @@ use pith_ids::ContentId;
 use crate::diag;
 use crate::document::Lock;
 use crate::identity::{DomainIdentity, PackageIdentity, PackageVersion};
-use crate::lock::{LockEntry, Origin};
+use crate::lock::{Binding, LockEntry, Origin};
 use crate::locktext::{
     SHA256, features_token, parse_digest, parse_features, token as text_token, tokenize,
 };
@@ -294,6 +294,37 @@ pub fn binding_line(entry: &LockEntry) -> String {
     )
 }
 
+/// Parse the binding shape shared by a lock line and a log leaf.
+pub(crate) fn parse_binding_line(line: &str) -> PithResult<Binding> {
+    let tokens = tokenize(line).map_err(|message| diag(format!("a binding line: {message}")))?;
+    parse_binding_tokens(&tokens, 0)
+}
+
+fn parse_binding_tokens(tokens: &[String], number: usize) -> PithResult<Binding> {
+    let [directive, domain, name, version, features, source] = tokens else {
+        return Err(diag(format!(
+            "line {number}: a `{BIND}` binding carries domain, name, version, features, \
+             and source; found {} tokens",
+            tokens.len().saturating_sub(1)
+        )));
+    };
+    if directive != BIND {
+        return Err(diag(format!(
+            "line {number}: a binding starts with `{BIND}`, found `{directive}`"
+        )));
+    }
+    let mut features = parse_features(features, number)?;
+    features.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
+    Ok(Binding {
+        package: PackageVersion::new(
+            PackageIdentity::declare(DomainIdentity::new(domain.clone()), name.clone()),
+            version.clone(),
+        ),
+        features,
+        source: parse_digest(source, "the bind source", number)?,
+    })
+}
+
 /// One entry's whole written line: the binding, then where it was
 /// resolved from. The origin rides outside the binding because the log
 /// witnesses what the coordinates resolve to, not where any one client
@@ -308,15 +339,14 @@ fn bind_line(entry: &LockEntry) -> String {
 }
 
 fn bind_entry(tokens: &[String], number: usize) -> PithResult<LockEntry> {
-    let [_, domain, name, version, features, source, kind, location] = tokens else {
+    let [_, _, _, _, _, _, kind, location] = tokens else {
         return Err(diag(format!(
             "line {number}: a `{BIND}` line carries domain, name, version, features, \
              source, origin kind, and origin location; found {} tokens",
             tokens.len().saturating_sub(1)
         )));
     };
-    let features = parse_features(features, number)?;
-    let source = parse_digest(source, "the bind source", number)?;
+    let binding = parse_binding_tokens(&tokens[..6], number)?;
     let Some(origin) = Origin::from_kind(kind.as_str(), location.clone()) else {
         return Err(diag(format!(
             "line {number}: `{kind}` is not an origin kind; expected registry, forge, or \
@@ -324,12 +354,9 @@ fn bind_entry(tokens: &[String], number: usize) -> PithResult<LockEntry> {
         )));
     };
     Ok(LockEntry::new(
-        PackageVersion::new(
-            PackageIdentity::declare(DomainIdentity::new(domain.clone()), name.clone()),
-            version.clone(),
-        ),
-        features,
-        source,
+        binding.package,
+        binding.features,
+        binding.source,
         origin,
     ))
 }
@@ -651,6 +678,16 @@ mod tests {
         assert!(
             error.iter().any(|d| d.message.0.contains("line ")),
             "the diagnostic carries the line number: {error:?}"
+        );
+
+        let text = render(&lock()).replace(
+            "version-scheme numeric-segments",
+            r#"version-scheme "\u{41"#,
+        );
+        let error = parse(&text).unwrap_err();
+        assert!(
+            error.iter().any(|d| d.message.0.contains("never closed")),
+            "a unicode escape requires its closing brace: {error:?}"
         );
     }
 

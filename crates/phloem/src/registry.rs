@@ -32,6 +32,7 @@ use pith_ids::ContentId;
 use crate::diag;
 use crate::identity::{DomainIdentity, PackageIdentity};
 use crate::lock::{LockEntry, Origin};
+use crate::lockfile;
 use crate::locktext::{parse_digest, parse_features, tokenize};
 use crate::universe::{Candidate, CandidateUniverse};
 use crate::witness::{self, Checkpoint, Inclusion};
@@ -162,8 +163,9 @@ pub fn read_witness(log: &Path, entry: &LockEntry) -> PithResult<Witnessed> {
         if line.is_empty() {
             continue;
         }
-        if found.is_none() && same_coordinates(line, entry)? {
-            found = Some((records.len(), line_digest(line)?, line.into()));
+        let binding = lockfile::parse_binding_line(line)?;
+        if found.is_none() && same_coordinates(&binding, entry) {
+            found = Some((records.len(), binding.source, line.into()));
         }
         records.push(line.as_bytes().to_vec());
     }
@@ -231,29 +233,8 @@ pub fn verify(entry: &LockEntry, evidence: &Witnessed, pinned: &Checkpoint) -> P
 /// Whether a leaf line carries the entry's coordinates, ignoring the
 /// digest: a leaf that matches the coordinates under another digest is the
 /// disagreement the verification exists to report.
-fn same_coordinates(line: &str, entry: &LockEntry) -> PithResult<bool> {
-    let tokens = tokenize(line).map_err(|message| diag(format!("a log leaf line: {message}")))?;
-    let [_, domain, name, version, features, _digest] = tokens.as_slice() else {
-        return Err(diag(format!(
-            "a log leaf line carries domain, name, version, features, and a digest; found \
-             {} tokens",
-            tokens.len()
-        )));
-    };
-    let mut features = parse_features(features, 0)?;
-    features.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
-    Ok(domain == entry.package.identity().domain().as_str()
-        && name == entry.package.identity().name()
-        && version == entry.package.version()
-        && features == entry.features)
-}
-
-fn line_digest(line: &str) -> PithResult<ContentId> {
-    let tokens = tokenize(line).map_err(|message| diag(format!("a log leaf line: {message}")))?;
-    let [.., digest] = tokens.as_slice() else {
-        return Err(diag("a log leaf line ends in a digest".to_string()));
-    };
-    parse_digest(digest, "the witnessed digest", 0)
+fn same_coordinates(binding: &crate::lock::Binding, entry: &LockEntry) -> bool {
+    binding.package == entry.package && binding.features == entry.features
 }
 
 /// A name that becomes a path component under `root`, refused when it is
@@ -281,11 +262,18 @@ fn read(path: &Path) -> PithResult<String> {
 /// output depended on the directory's iteration order would be a universe
 /// whose digest depended on the filesystem.
 fn sorted_children(path: &Path) -> PithResult<Vec<String>> {
-    let mut names: Vec<String> = std::fs::read_dir(path)
-        .map_err(|error| diag(format!("reading {} failed: {error}", path.display())))?
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.file_name().to_string_lossy().into())
-        .collect();
+    let entries = std::fs::read_dir(path)
+        .map_err(|error| diag(format!("reading {} failed: {error}", path.display())))?;
+    let mut names = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            diag(format!(
+                "reading an entry in {} failed: {error}",
+                path.display()
+            ))
+        })?;
+        names.push(entry.file_name().to_string_lossy().into());
+    }
     names.sort();
     Ok(names)
 }
