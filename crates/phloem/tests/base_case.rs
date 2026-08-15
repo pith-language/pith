@@ -22,17 +22,18 @@ use xylem::{BuildEngine, DiscoveryError, HeaderUniverse, Toolchain, Toolchains, 
 const SOURCE: &[u8] = b"int main(void) { return 0; }\n";
 const ELF_MAGIC: &[u8] = b"\x7fELF";
 
-fn toolchain_or_skip(driver: &str) -> Option<Toolchain> {
+fn toolchain_or_skip(driver: &str) -> Result<Option<Toolchain>, String> {
     match Toolchain::discover(driver) {
-        Ok(toolchain) => Some(toolchain),
+        Ok(toolchain) => Ok(Some(toolchain)),
         Err(DiscoveryError::NotFound) => {
             eprintln!("skipping: no {driver} driver on this host");
-            None
+            Ok(None)
         }
         // Reachable by design: the driver is on the host but could not be
         // resolved into a closure, which is a failure to report rather than
-        // an absence to skip on.
-        Err(error) => panic!("{driver} is present but discovery failed: {error}"),
+        // an absence to skip on. The failure surfaces where the test body
+        // unwraps it, a helper's `panic!` being outside the lint posture.
+        Err(error) => Err(format!("{driver} is present but discovery failed: {error}")),
     }
 }
 
@@ -40,19 +41,28 @@ fn toolchain_or_skip(driver: &str) -> Option<Toolchain> {
 /// green run over skips would read as a verified base case. Fail instead.
 #[test]
 fn a_c_toolchain_is_available() {
-    for driver in ["cc", "gcc", "clang"] {
-        match Toolchain::discover(driver) {
-            Ok(_) => return,
-            Err(DiscoveryError::NotFound) => {}
-            Err(error) => panic!("{driver} is present but discovery failed: {error}"),
+    let outcomes: Vec<(&str, Result<Toolchain, DiscoveryError>)> = ["cc", "gcc", "clang"]
+        .into_iter()
+        .map(|driver| (driver, Toolchain::discover(driver)))
+        .collect();
+    for (driver, outcome) in &outcomes {
+        if let Err(error) = outcome {
+            assert!(
+                matches!(error, DiscoveryError::NotFound),
+                "{driver} is present but discovery failed: {error}"
+            );
         }
     }
-    panic!("no C compiler (cc, gcc, or clang) on this host: the base case cannot run");
+    assert!(
+        outcomes.iter().any(|(_, outcome)| outcome.is_ok()),
+        "no C compiler (cc, gcc, or clang) on this host: the base case cannot run, and its \
+         other test would skip green: {outcomes:?}"
+    );
 }
 
 #[test]
 fn an_executable_builds_with_no_package_defined_anywhere() {
-    let Some(toolchain) = toolchain_or_skip("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc").unwrap() else {
         return;
     };
     let root = tempfile::tempdir().unwrap();
@@ -62,12 +72,12 @@ fn an_executable_builds_with_no_package_defined_anywhere() {
     let source = engine.put_blob(SOURCE).unwrap();
 
     let compile = types::compile_request(toolchain.value(), source);
-    let evaluation = run(&mut engine, &compile);
-    let object = blob_of(&evaluation.value);
+    let evaluation = run(&mut engine, &compile).unwrap();
+    let object = blob_of(&evaluation.value).unwrap();
 
     let link = types::link_request(toolchain.value(), [object]);
-    let evaluation = run(&mut engine, &link);
-    let executable = blob_of(&evaluation.value);
+    let evaluation = run(&mut engine, &link).unwrap();
+    let executable = blob_of(&evaluation.value).unwrap();
 
     let store = FilesystemContentStore::open(root.path()).unwrap();
     let bytes = store.get_blob(executable).unwrap().unwrap();
@@ -80,7 +90,7 @@ fn an_executable_builds_with_no_package_defined_anywhere() {
     // just bytes with the right magic.
     let program = root.path().join("program");
     std::fs::write(&program, bytes.as_bytes()).unwrap();
-    make_executable(&program);
+    make_executable(&program).unwrap();
     let status = std::process::Command::new(&program).status().unwrap();
     assert!(
         status.success(),
@@ -88,26 +98,46 @@ fn an_executable_builds_with_no_package_defined_anywhere() {
     );
 }
 
-fn run(engine: &mut Engine, request: &pith_core::Request<pith_core::Pure>) -> Evaluation {
-    let runtime = TokioRuntime::new().unwrap();
-    match engine.run(request, &runtime, &AllowAllActions, &LocalExecutor::new()) {
-        Ok(Ok(evaluation)) => evaluation,
-        Ok(Err(diagnostics)) => panic!("the build failed: {diagnostics:?}"),
-        Err(error) => panic!("the runtime could not drive the run: {error:?}"),
-    }
+/// The fixture's own failure spelling, as `source_adapter.rs` states it: a
+/// helper outside a `#[test]` function cannot unwrap or panic under the
+/// crate's lint posture, so failures travel as diagnostics.
+fn fixture_error(message: String) -> pith_diag::DiagnosticSink {
+    let mut sink = pith_diag::DiagnosticSink::new();
+    sink.push(pith_diag::Diag::new(
+        pith_diag::Severity::Error,
+        pith_diag::StableCode(0),
+        pith_diag::Span::none(),
+        message,
+    ));
+    sink
 }
 
-fn blob_of(value: &Value) -> ContentId {
+fn run(
+    engine: &mut Engine,
+    request: &pith_core::Request<pith_core::Pure>,
+) -> pith_diag::PithResult<Evaluation> {
+    let runtime = TokioRuntime::new()
+        .map_err(|error| fixture_error(format!("constructing the runtime failed: {error:?}")))?;
+    engine
+        .run(request, &runtime, &AllowAllActions, &LocalExecutor::new())
+        .map_err(|error| fixture_error(format!("the runtime could not drive the run: {error:?}")))?
+}
+
+fn blob_of(value: &Value) -> pith_diag::PithResult<ContentId> {
     match value {
         Value::Nominal { representation, .. } => match representation.as_ref() {
-            Value::Blob(id) => *id,
-            _ => panic!("a nominal content value carried no blob"),
+            Value::Blob(id) => Ok(*id),
+            _ => Err(fixture_error(
+                "a nominal content value carried no blob".into(),
+            )),
         },
-        _ => panic!("the value was not a nominal content value"),
+        _ => Err(fixture_error(
+            "the value was not a nominal content value".into(),
+        )),
     }
 }
 
-fn make_executable(path: &std::path::Path) {
+fn make_executable(path: &std::path::Path) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
 }

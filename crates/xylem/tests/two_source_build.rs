@@ -295,17 +295,18 @@ fn blob_of(value: &Value) -> ContentId {
 /// visible under an uncaptured run (`cargo nextest run --no-capture`) — nextest
 /// captures the output of passing tests, so `a_c_toolchain_is_available` is
 /// what makes a compiler-less host fail rather than look green.
-fn toolchain_or_skip(driver: &str) -> Option<Toolchain> {
+fn toolchain_or_skip(driver: &str) -> Result<Option<Toolchain>, String> {
     match Toolchain::discover(driver) {
-        Ok(toolchain) => Some(toolchain),
+        Ok(toolchain) => Ok(Some(toolchain)),
         Err(DiscoveryError::NotFound) => {
             eprintln!("skipping: no {driver} driver on this host");
-            None
+            Ok(None)
         }
         // Reachable by design: the driver is on the host but could not be
         // resolved into a closure. `unreachable!` would be a lie about the
-        // state space; a plain panic with the reason is the honest form.
-        Err(error) => panic!("{driver} is present but discovery failed: {error}"),
+        // state space; the failure surfaces where the test body unwraps it,
+        // a helper's `panic!` being outside the crate's lint posture.
+        Err(error) => Err(format!("{driver} is present but discovery failed: {error}")),
     }
 }
 
@@ -314,16 +315,22 @@ fn toolchain_or_skip(driver: &str) -> Option<Toolchain> {
 /// installing a compiler is the fix, not reading the run as evidence.
 #[test]
 fn a_c_toolchain_is_available() {
-    for driver in ["cc", "gcc", "clang"] {
-        match Toolchain::discover(driver) {
-            Ok(_toolchain) => return,
-            Err(DiscoveryError::NotFound) => {}
-            Err(error) => panic!("{driver} is present but discovery failed: {error}"),
+    let outcomes: Vec<(&str, Result<Toolchain, DiscoveryError>)> = ["cc", "gcc", "clang"]
+        .into_iter()
+        .map(|driver| (driver, Toolchain::discover(driver)))
+        .collect();
+    for (driver, outcome) in &outcomes {
+        if let Err(error) = outcome {
+            assert!(
+                matches!(error, DiscoveryError::NotFound),
+                "{driver} is present but discovery failed: {error}"
+            );
         }
     }
-    panic!(
-        "no C compiler (cc, gcc, or clang) on this host: the M-3 fixture cannot run \
-         and its other tests all skipped"
+    assert!(
+        outcomes.iter().any(|(_, outcome)| outcome.is_ok()),
+        "no C compiler (cc, gcc, or clang) on this host: the M-3 fixture cannot run and its \
+         other tests all skipped: {outcomes:?}"
     );
 }
 
@@ -359,7 +366,7 @@ fn store_blob(engine: &mut Engine, bytes: &[u8], what: &str) -> ContentId {
 
 #[test]
 fn a_two_source_build_produces_an_executable() {
-    let Some(toolchain) = toolchain_or_skip("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc").unwrap() else {
         return;
     };
     let root = temp_root();
@@ -398,7 +405,7 @@ fn a_two_source_build_produces_an_executable() {
 /// produced a program that works, not just bytes with the right magic.
 #[test]
 fn the_built_executable_runs_and_exits_with_the_expected_code() {
-    let Some(toolchain) = toolchain_or_skip("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc").unwrap() else {
         return;
     };
     let root = temp_root();
@@ -446,7 +453,7 @@ fn the_built_executable_runs_and_exits_with_the_expected_code() {
 /// cold build runs nine actions: four discoveries, four compiles, one link.
 #[test]
 fn a_three_source_build_links_a_list_of_objects() {
-    let Some(toolchain) = toolchain_or_skip("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc").unwrap() else {
         return;
     };
     let root = temp_root();
@@ -513,7 +520,7 @@ fn a_three_source_build_links_a_list_of_objects() {
 /// `a`'s discovery, `a`'s compile, and the link — rather than five.
 #[test]
 fn touching_one_source_recompiles_only_its_object() {
-    let Some(toolchain) = toolchain_or_skip("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc").unwrap() else {
         return;
     };
     let root = temp_root();
@@ -556,7 +563,7 @@ fn touching_one_source_recompiles_only_its_object() {
 /// answers the touched header.
 #[test]
 fn a_rebuild_under_an_edited_header_recompiles_both_objects() {
-    let Some(toolchain) = toolchain_or_skip("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc").unwrap() else {
         return;
     };
     let root = temp_root();
@@ -647,7 +654,7 @@ fn a_rebuild_under_an_edited_header_recompiles_both_objects() {
 /// declared set can be read instead.
 #[test]
 fn an_undeclared_header_fails_rather_than_reading_the_host() {
-    let Some(toolchain) = toolchain_or_skip("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc").unwrap() else {
         return;
     };
     let root = temp_root();
@@ -717,10 +724,10 @@ fn two_toolchain_engine(
 
 #[test]
 fn two_toolchains_compile_the_same_source_without_sharing_a_cache_entry() {
-    let Some(gcc) = toolchain_or_skip("gcc") else {
+    let Some(gcc) = toolchain_or_skip("gcc").unwrap() else {
         return;
     };
-    let Some(clang) = toolchain_or_skip("clang") else {
+    let Some(clang) = toolchain_or_skip("clang").unwrap() else {
         return;
     };
     // Without this the test could be one compiler twice and still pass.
@@ -769,7 +776,7 @@ fn two_toolchains_compile_the_same_source_without_sharing_a_cache_entry() {
 
 #[test]
 fn a_toolchain_the_build_was_not_registered_with_is_refused() {
-    let Some(gcc) = toolchain_or_skip("gcc") else {
+    let Some(gcc) = toolchain_or_skip("gcc").unwrap() else {
         return;
     };
     let root = temp_root();
@@ -802,7 +809,7 @@ fn a_toolchain_the_build_was_not_registered_with_is_refused() {
 
 #[test]
 fn a_generated_source_is_compiled_and_linked_through_the_graph() {
-    let Some(toolchain) = toolchain_or_skip("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc").unwrap() else {
         return;
     };
     let root = temp_root();
@@ -837,7 +844,7 @@ fn a_generated_source_is_compiled_and_linked_through_the_graph() {
 
 #[test]
 fn touching_the_generator_regenerates_the_source_and_relinks() {
-    let Some(toolchain) = toolchain_or_skip("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc").unwrap() else {
         return;
     };
     let root = temp_root();
@@ -892,7 +899,7 @@ fn touching_the_generator_regenerates_the_source_and_relinks() {
 
 #[test]
 fn a_passing_test_reports_a_passing_verdict() {
-    let Some(toolchain) = toolchain_or_skip("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc").unwrap() else {
         return;
     };
     let root = temp_root();
@@ -918,7 +925,7 @@ fn a_passing_test_reports_a_passing_verdict() {
 
 #[test]
 fn a_failing_test_is_a_verdict_rather_than_a_failed_build() {
-    let Some(toolchain) = toolchain_or_skip("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc").unwrap() else {
         return;
     };
     let root = temp_root();
@@ -944,7 +951,7 @@ fn a_failing_test_is_a_verdict_rather_than_a_failed_build() {
 
 #[test]
 fn an_unchanged_failing_test_is_served_rather_than_re_run() {
-    let Some(toolchain) = toolchain_or_skip("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc").unwrap() else {
         return;
     };
     let root = temp_root();
@@ -978,7 +985,7 @@ fn an_unchanged_failing_test_is_served_rather_than_re_run() {
 
 #[test]
 fn a_second_build_of_unchanged_sources_reuses_its_root() {
-    let Some(toolchain) = toolchain_or_skip("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc").unwrap() else {
         return;
     };
     let root = temp_root();
@@ -1015,7 +1022,7 @@ fn a_second_build_of_unchanged_sources_reuses_its_root() {
 /// everything but name.
 #[test]
 fn a_fresh_engine_over_the_same_state_hydrates_the_build() {
-    let Some(toolchain) = toolchain_or_skip("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc").unwrap() else {
         return;
     };
     let root = temp_root();
@@ -1057,7 +1064,7 @@ fn a_fresh_engine_over_the_same_state_hydrates_the_build() {
 /// both compiles actually run.
 #[test]
 fn two_cold_compiles_of_the_same_source_are_identical() {
-    let Some(toolchain) = toolchain_or_skip("cc") else {
+    let Some(toolchain) = toolchain_or_skip("cc").unwrap() else {
         return;
     };
     let root = temp_root();
