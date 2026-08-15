@@ -533,26 +533,61 @@ pub fn render(document: &EnvironmentDocument) -> String {
     out
 }
 
+/// The derivation's one rule: a declared environment name becomes a file
+/// name beside the lock, so it must be a single path component. A name with
+/// a separator or a `..` would derive a path outside the project root, and
+/// the refusal surfaces here, at the derivation, rather than at whatever
+/// caller acted on the path.
+///
+/// # Errors
+/// A [`pith_diag::DiagnosticSink`] naming the name and why it cannot name an
+/// environment when it is empty or not one path component.
+fn component_name(environment: &str) -> PithResult<()> {
+    let mut components = Path::new(environment).components();
+    let single = matches!(
+        (components.next(), components.next()),
+        (Some(std::path::Component::Normal(_)), None)
+    );
+    if single {
+        return Ok(());
+    }
+    Err(diag(format!(
+        "the environment name `{environment}` is not a single path component, and a name \
+         that becomes a file name beside the lock cannot carry a separator or climb out \
+         of the project"
+    )))
+}
+
 /// Where the environment's lock lives: in `project`, named for the
 /// declaration that produced it — `pith.lock` for the default environment,
 /// `<name>.pith.lock` beside it for a named one. One lock per resolution,
-/// and an environment is one resolution (0043).
-#[must_use]
-pub fn lock_path(project: &Path, environment: &str) -> PathBuf {
+/// and an environment is one resolution (0043). The derivation is a pure
+/// function the library owns, and it refuses a name that is not a single
+/// path component.
+///
+/// # Errors
+/// A [`pith_diag::DiagnosticSink`] naming the name when it cannot name an
+/// environment.
+pub fn lock_path(project: &Path, environment: &str) -> PithResult<PathBuf> {
+    component_name(environment)?;
     if environment == DEFAULT_ENVIRONMENT {
-        project.join(DEFAULT_LOCK_FILE)
+        Ok(project.join(DEFAULT_LOCK_FILE))
     } else {
-        project.join(format!("{environment}{LOCK_SUFFIX}"))
+        Ok(project.join(format!("{environment}{LOCK_SUFFIX}")))
     }
 }
 
 /// Where the environment's own record lives, beside its lock.
-#[must_use]
-pub fn record_path(project: &Path, environment: &str) -> PathBuf {
+///
+/// # Errors
+/// A [`pith_diag::DiagnosticSink`] naming the name when it cannot name an
+/// environment.
+pub fn record_path(project: &Path, environment: &str) -> PithResult<PathBuf> {
+    component_name(environment)?;
     if environment == DEFAULT_ENVIRONMENT {
-        project.join(DEFAULT_RECORD_FILE)
+        Ok(project.join(DEFAULT_RECORD_FILE))
     } else {
-        project.join(format!("{environment}{RECORD_SUFFIX}"))
+        Ok(project.join(format!("{environment}{RECORD_SUFFIX}")))
     }
 }
 
@@ -624,20 +659,39 @@ mod tests {
     fn the_lock_and_record_paths_derive_from_the_declaration() {
         let project = Path::new("/repo");
         assert_eq!(
-            lock_path(project, DEFAULT_ENVIRONMENT),
+            lock_path(project, DEFAULT_ENVIRONMENT).unwrap(),
             Path::new("/repo/pith.lock")
         );
         assert_eq!(
-            lock_path(project, "cross"),
+            lock_path(project, "cross").unwrap(),
             Path::new("/repo/cross.pith.lock")
         );
         assert_eq!(
-            record_path(project, DEFAULT_ENVIRONMENT),
+            record_path(project, DEFAULT_ENVIRONMENT).unwrap(),
             Path::new("/repo/pith.env")
         );
         assert_eq!(
-            record_path(project, "cross"),
+            record_path(project, "cross").unwrap(),
             Path::new("/repo/cross.pith.env")
         );
+    }
+
+    #[test]
+    fn a_name_that_is_not_one_path_component_is_refused_at_the_derivation() {
+        // The derivation interpolates the name into the project root, so a
+        // separator or a `..` would name a path outside it. The refusal
+        // surfaces at the derivation, before any caller acts on a path.
+        for name in ["", "a/b", "..", ".", "a/../b", "/abs"] {
+            for result in [
+                lock_path(Path::new("/repo"), name),
+                record_path(Path::new("/repo"), name),
+            ] {
+                let error = result.unwrap_err();
+                assert!(
+                    error.iter().any(|d| d.message.0.contains(name)),
+                    "the diagnostic names the refused name `{name}`: {error:?}"
+                );
+            }
+        }
     }
 }

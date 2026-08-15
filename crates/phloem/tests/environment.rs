@@ -287,8 +287,9 @@ fn one_lock_per_environment_and_the_placement_is_derived() {
     cross.name = "cross".into();
     let cross_lock = resolve(&cross, &universe()).unwrap();
 
-    let default_path = environment::lock_path(scratch.path(), environment::DEFAULT_ENVIRONMENT);
-    let cross_path = environment::lock_path(scratch.path(), "cross");
+    let default_path =
+        environment::lock_path(scratch.path(), environment::DEFAULT_ENVIRONMENT).unwrap();
+    let cross_path = environment::lock_path(scratch.path(), "cross").unwrap();
     assert_eq!(
         default_path,
         scratch.path().join("pith.lock"),
@@ -333,8 +334,9 @@ fn resolving_an_environment_touches_no_path_until_the_caller_writes() {
         "computing the environment — resolving, locking, realizing, rendering — \
          wrote nothing"
     );
-    let lock = environment::lock_path(scratch.path(), environment::DEFAULT_ENVIRONMENT);
-    let record = environment::record_path(scratch.path(), environment::DEFAULT_ENVIRONMENT);
+    let lock = environment::lock_path(scratch.path(), environment::DEFAULT_ENVIRONMENT).unwrap();
+    let record =
+        environment::record_path(scratch.path(), environment::DEFAULT_ENVIRONMENT).unwrap();
     phloem::lockpublish::write(&document.lock, &lock).unwrap();
     std::fs::write(&record, rendered).unwrap();
     assert!(
