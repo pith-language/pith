@@ -16,6 +16,7 @@
 //! and writes. Publication follows 0024's content discipline: a flushed
 //! temporary file renamed into place, so a crash cannot leave a torn lock.
 
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::io::Write as _;
 use std::path::Path;
@@ -83,12 +84,17 @@ pub fn render(lock: &Lock) -> String {
 /// are normalized into the canonical order, so everything parse accepts is
 /// re-rendered to the canonical bytes.
 ///
+/// The entries are a set over package identities: a byte-identical line a
+/// union merge repeated collapses, and a second, different binding for a
+/// package already bound is refused, because that is the one conflict a
+/// union merge cannot represent and a person has to resolve.
+///
 /// # Errors
 /// A [`pith_diag::DiagnosticSink`] naming the line, what was expected, and
 /// what was found, for every form this format does not accept.
 pub fn parse(text: &str) -> PithResult<Lock> {
     let mut header = Header::default();
-    let mut entries = Vec::new();
+    let mut seen: BTreeMap<PackageIdentity, (usize, LockEntry)> = BTreeMap::new();
     let mut version_seen = false;
     for (number, raw) in text
         .lines()
@@ -120,7 +126,7 @@ pub fn parse(text: &str) -> PithResult<Lock> {
             VERSION_SCHEME => header.scheme(&tokens, number)?,
             UNIVERSE => header.universe(&tokens, number)?,
             PREFERENCE => header.preference(&tokens, number)?,
-            BIND => entries.push(bind_entry(&tokens, number)?),
+            BIND => record_binding(&mut seen, bind_entry(&tokens, number)?, number)?,
             other => {
                 return Err(diag(format!(
                     "line {number}: `{other}` is not a lock directive; expected one of \
@@ -135,7 +141,43 @@ pub fn parse(text: &str) -> PithResult<Lock> {
         )));
     }
     let (resolver, scheme, universe, preferences) = header.finish()?;
+    let entries: Vec<LockEntry> = seen.into_values().map(|(_, entry)| entry).collect();
     Ok(Lock::new(resolver, scheme, universe, preferences, entries))
+}
+
+/// Fold one parsed binding into the entries-so-far. A binding whose package
+/// is not yet bound is kept; a byte-identical repeat collapses; anything
+/// else over an already-bound package is the union-merge conflict.
+///
+/// # Errors
+/// A [`pith_diag::DiagnosticSink`] naming the package, both line numbers,
+/// and both versions when the package is already bound differently.
+fn record_binding(
+    seen: &mut BTreeMap<PackageIdentity, (usize, LockEntry)>,
+    entry: LockEntry,
+    number: usize,
+) -> PithResult<()> {
+    let identity = entry.package.identity().clone();
+    match seen.entry(identity.clone()) {
+        std::collections::btree_map::Entry::Vacant(slot) => {
+            slot.insert((number, entry));
+        }
+        std::collections::btree_map::Entry::Occupied(slot) => {
+            let (previous_line, previous) = slot.get();
+            if previous != &entry {
+                return Err(diag(format!(
+                    "line {number}: the lock binds `{}` in `{}` twice; line {previous_line} \
+                     bound version {}, and this line binds version {}: two selections of \
+                     one package is the conflict a union merge cannot represent",
+                    identity.name(),
+                    identity.domain().as_str(),
+                    previous.package.version(),
+                    entry.package.version(),
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Write the lock to `path`, through a flushed temporary file renamed into
@@ -769,6 +811,49 @@ mod tests {
         let parsed = parse(&hand).unwrap();
         assert_eq!(render(&parsed), canonical);
         assert_eq!(parsed, lock());
+    }
+
+    #[test]
+    fn a_union_merge_binding_one_package_twice_is_refused_naming_both_lines() {
+        // Two branches each moved openssl; a union driver concatenated both
+        // lines. The file is a set over package identities, so this is the
+        // one conflict a union cannot represent: refused with both line
+        // numbers and both versions, for a person to resolve.
+        let canonical = render(&lock());
+        let moved = canonical
+            .lines()
+            .find(|line| line.contains("openssl"))
+            .unwrap()
+            .replacen("1.1.1", "1.1.2", 1);
+        let merged = format!("{canonical}{moved}\n");
+        let error = parse(&merged).unwrap_err();
+        let message = error
+            .iter()
+            .next()
+            .map(|diagnostic| diagnostic.message.0.to_string())
+            .unwrap_or_default();
+        assert!(
+            message.contains("twice")
+                && message.contains("1.1.1")
+                && message.contains("1.1.2")
+                && message.contains("line 7")
+                && message.contains("line 9"),
+            "the diagnostic names both lines and both versions: {message}"
+        );
+    }
+
+    #[test]
+    fn a_byte_identical_line_a_union_merge_repeated_collapses() {
+        // The union of two branches that added the same binding yields the
+        // same line twice; that is one resolution recorded twice, not two.
+        let canonical = render(&lock());
+        let repeated = canonical
+            .lines()
+            .find(|line| line.starts_with(BIND))
+            .unwrap()
+            .to_string();
+        let merged = format!("{canonical}{repeated}\n");
+        assert_eq!(parse(&merged).unwrap(), lock());
     }
 
     #[test]
