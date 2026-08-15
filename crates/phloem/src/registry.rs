@@ -14,8 +14,11 @@ use crate::diag;
 use crate::identity::{DomainIdentity, PackageIdentity};
 use crate::lock::{LockEntry, Origin};
 use crate::lockfile;
-use crate::locktext::{parse_digest, parse_features, tokenize};
-use crate::universe::{Candidate, CandidateUniverse};
+use crate::locktext::{
+    features_token, parse_digest, parse_features, parse_range, range_token, tokenize,
+};
+use crate::source::SourceBinding;
+use crate::universe::{Candidate, CandidateUniverse, Requirement};
 use crate::witness::{self, Checkpoint, Inclusion};
 
 const INDEX: &str = "index";
@@ -45,13 +48,47 @@ pub fn read_index(root: &Path, registry: &str) -> PithResult<CandidateUniverse> 
     Ok(CandidateUniverse::new(candidates))
 }
 
-/// One index line as one candidate: `<version> <features> sha256:<digest>`,
-/// where the digest is the registry's claim about the archive. the fetch
-/// verifies it against bytes and the witness against the log.
+/// One candidate as one index line, the spelling [`read_index`] parses — the
+/// same one-spelling arrangement the lock's binding line has, so a publisher
+/// and a reader cannot drift into two formats. Requirements render in the
+/// order the candidate carries them.
+#[must_use]
+pub fn index_line(candidate: &Candidate) -> String {
+    let SourceBinding::Archive { archive } = candidate.provenance else {
+        unreachable!("a registry candidate binds an archive");
+    };
+    let mut line = format!(
+        "{} {} {}:{}",
+        candidate.version,
+        features_token(&candidate.features),
+        crate::locktext::SHA256,
+        archive.digest(),
+    );
+    for requirement in candidate.requires.iter() {
+        line.push_str(&format!(
+            " requires {}/{} {}",
+            requirement.subject.domain().as_str(),
+            requirement.subject.name(),
+            range_token(&requirement.range),
+        ));
+        if !requirement.features.is_empty() {
+            line.push_str(&format!(" {}", features_token(&requirement.features)));
+        }
+    }
+    line
+}
+
+/// One index line as one candidate: `<version> <features> sha256:<digest>`
+/// followed by zero or more `requires <domain>/<name> <range> [<features>]`
+/// clauses, where the digest is the registry's claim about the archive and
+/// each clause a version's claim about another package. The fetch verifies
+/// the digest against bytes and the witness against the log; the solver
+/// turns the requirements into constraints, so resolution reads what the
+/// index says and fetches nothing.
 fn index_candidate(domain: &str, name: &str, line: &str, registry: &str) -> PithResult<Candidate> {
     let tokens =
         tokenize(line).map_err(|message| diag(format!("`{name}` index line: {message}")))?;
-    let [version, features, digest] = tokens.as_slice() else {
+    let [version, features, digest, rest @ ..] = tokens.as_slice() else {
         return Err(diag(format!(
             "`{name}` index line: expected version, features, and a digest; found {} fields",
             tokens.len()
@@ -59,14 +96,62 @@ fn index_candidate(domain: &str, name: &str, line: &str, registry: &str) -> Pith
     };
     let features = parse_features(features, 0)?;
     let archive = parse_digest(digest, "the index archive digest", 0)?;
+    let requires = parse_requires(name, rest)?;
     Ok(Candidate {
         identity: PackageIdentity::declare(DomainIdentity::new(domain), name),
         version: version.as_str().into(),
         features,
         provenance: crate::source::SourceBinding::Archive { archive },
         origin: Origin::Registry(registry.into()),
-        requires: Box::new([]),
+        requires,
     })
+}
+
+/// The `requires <domain>/<name> <range> [<features>]` clauses that follow an
+/// index line's digest, as requirements. The clause's features are optional
+/// and last; each next clause begins with its own `requires`.
+fn parse_requires(name: &str, rest: &[String]) -> PithResult<Box<[Requirement]>> {
+    let mut clauses = Vec::new();
+    let mut tokens = rest;
+    while !tokens.is_empty() {
+        let [keyword, subject, range, tail @ ..] = tokens else {
+            return Err(diag(format!(
+                "`{name}` index line: a requirement is `requires <domain>/<name> <range> \
+                 [<features>]`",
+            )));
+        };
+        if keyword != "requires" {
+            return Err(diag(format!(
+                "`{name}` index line: `{keyword}` follows the digest, and only a requirement \
+                 clause may; spell it `requires`",
+            )));
+        }
+        let Some((subject_domain, subject_name)) = subject.split_once('/') else {
+            return Err(diag(format!(
+                "`{name}` index line: the requirement names `{subject}`, which is not \
+                 `<domain>/<name>`",
+            )));
+        };
+        if subject_domain.is_empty() || subject_name.is_empty() {
+            return Err(diag(format!(
+                "`{name}` index line: the requirement names `{subject}`, whose domain or \
+                 package side is empty",
+            )));
+        }
+        let parsed_range = parse_range(range, 0)?;
+        let no_features: Box<[Box<str>]> = Box::new([]);
+        let (features, consumed) = match tail.first() {
+            Some(token) if token.starts_with('[') => (parse_features(token, 0)?, 4),
+            _ => (no_features, 3),
+        };
+        clauses.push(Requirement {
+            subject: PackageIdentity::declare(DomainIdentity::new(subject_domain), subject_name),
+            range: parsed_range,
+            features,
+        });
+        tokens = tokens.get(consumed..).unwrap_or(&[]);
+    }
+    Ok(clauses.into())
 }
 
 /// One fetched entry: the bytes as read, and the content identity measured

@@ -335,6 +335,7 @@ fn description() -> Description {
         },
         build: PackageBuild {
             sources: Box::new(["zlib-1.3/zlib.c".into()]),
+            includes: Box::new([]),
         },
     }
 }

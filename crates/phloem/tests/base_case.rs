@@ -71,7 +71,11 @@ fn an_executable_builds_with_no_package_defined_anywhere() {
     engine.register_xylem(Toolchains::one(toolchain.clone()), HeaderUniverse::empty());
     let source = engine.put_blob(SOURCE).unwrap();
 
-    let compile = types::compile_request(toolchain.value(), source);
+    let compile = types::compile_request(
+        toolchain.value(),
+        source,
+        xylem::types::provided_headers([] as [(Box<str>, ContentId); 0]),
+    );
     let evaluation = run(&mut engine, &compile).unwrap();
     let object = blob_of(&evaluation.value).unwrap();
 

@@ -18,6 +18,7 @@ fn zlib(source: SourceBinding, sources: &[&str]) -> Description {
         source,
         build: PackageBuild {
             sources: sources.iter().map(|path| (*path).into()).collect(),
+            includes: Box::new([]),
         },
     }
 }

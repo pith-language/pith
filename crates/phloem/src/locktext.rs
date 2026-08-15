@@ -298,3 +298,143 @@ pub(crate) fn parse_digest(text: &str, field: &str, number: usize) -> PithResult
 /// The digest prefix the written form spells, shared by every directive and
 /// binding line that names content.
 pub(crate) const SHA256: &str = "sha256:";
+
+/// A version range in its written spelling: `*`, `=1.0`, `>=1.0`, `>1.0`,
+/// `<=2.0`, `<2.0`, or a comma-joined pair of a lower and an upper edge such
+/// as `>=1.0,<2.0`. Each edge carries its own inclusivity, so the closed
+/// constructor set of ranges reads and writes without loss.
+pub(crate) fn range_token(range: &crate::constraint::Range) -> String {
+    use crate::constraint::{Bound, Range};
+    fn edge(inclusive: &str, exclusive: &str, bound: &Bound) -> String {
+        format!(
+            "{}{}",
+            if bound.inclusive {
+                inclusive
+            } else {
+                exclusive
+            },
+            bound.version.as_ref()
+        )
+    }
+    match range {
+        Range::Any => "*".into(),
+        Range::Exactly(version) => format!("={version}"),
+        Range::AtLeast(bound) => edge(">=", ">", bound),
+        Range::AtMost(bound) => edge("<=", "<", bound),
+        Range::Between { lower, upper } => {
+            format!("{},{}", edge(">=", ">", lower), edge("<=", "<", upper))
+        }
+    }
+}
+
+/// Parses the range spelling [`range_token`] writes.
+///
+/// # Errors
+/// A [`pith_diag::DiagnosticSink`] naming the line and the text when it is
+/// not a range of this shape.
+pub(crate) fn parse_range(text: &str, number: usize) -> PithResult<crate::constraint::Range> {
+    use crate::constraint::{Bound, Range};
+    let bad = |what: &str| {
+        diag(format!(
+            "line {number}: `{text}` is not {what} a range of this format spells"
+        ))
+    };
+    // The version spelling belongs to the domain's scheme, but the operator
+    // characters belong to this grammar: a version carrying one would re-split
+    // the token, so the parse refuses it rather than guessing a cut.
+    fn version(spelled: &str) -> Option<&str> {
+        (!spelled.is_empty() && !spelled.contains(['=', '<', '>', '*', ','])).then_some(spelled)
+    }
+    let bound = |edge: &str, operator: &str| -> Option<Bound> {
+        edge.strip_prefix(operator)
+            .and_then(version)
+            .map(|spelled| Bound::new(spelled, true))
+    };
+    let exclusive = |edge: &str, operator: &str| -> Option<Bound> {
+        edge.strip_prefix(operator)
+            .and_then(version)
+            .map(|spelled| Bound::new(spelled, false))
+    };
+    let lower = |edge: &str| {
+        bound(edge, ">=")
+            .or_else(|| exclusive(edge, ">"))
+            .ok_or_else(|| bad("a lower edge of"))
+    };
+    let upper = |edge: &str| {
+        bound(edge, "<=")
+            .or_else(|| exclusive(edge, "<"))
+            .ok_or_else(|| bad("an upper edge of"))
+    };
+    if text == "*" {
+        return Ok(Range::Any);
+    }
+    match text.split(',').collect::<Vec<_>>().as_slice() {
+        [single] => {
+            if let Some(spelled) = single.strip_prefix('=').and_then(version) {
+                return Ok(Range::Exactly(spelled.into()));
+            }
+            lower(single)
+                .map(Range::AtLeast)
+                .or_else(|_| upper(single).map(Range::AtMost))
+        }
+        [low, high] => Ok(Range::Between {
+            lower: lower(low)?,
+            upper: upper(high)?,
+        }),
+        _ => Err(bad("within the edges of")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::constraint::{Bound, Range};
+
+    #[test]
+    fn every_range_constructor_round_trips_through_its_token() {
+        let ranges = [
+            Range::Any,
+            Range::Exactly("1.3".into()),
+            Range::AtLeast(Bound::new("1.0", true)),
+            Range::AtLeast(Bound::new("2.0", false)),
+            Range::AtMost(Bound::new("1.9", true)),
+            Range::AtMost(Bound::new("1.9", false)),
+            Range::Between {
+                lower: Bound::new("1.0", true),
+                upper: Bound::new("2.0", false),
+            },
+        ];
+        for range in &ranges {
+            let token = range_token(range);
+            assert!(
+                is_bare(&token),
+                "`{token}` stays one bare token, so a requirement clause cannot re-split it"
+            );
+            assert_eq!(&parse_range(&token, 0).unwrap(), range);
+        }
+        assert_eq!(
+            range_token(&Range::AtLeast(Bound::new("1.0", true))),
+            ">=1.0"
+        );
+        assert_eq!(
+            range_token(&Range::Between {
+                lower: Bound::new("1.0", true),
+                upper: Bound::new("2.0", false),
+            }),
+            ">=1.0,<2.0"
+        );
+    }
+
+    #[test]
+    fn a_malformed_range_is_refused_naming_the_line_and_the_text() {
+        for text in ["1.0", ">=1.0,>=2.0", ">=", ">=1.0,<2.0,>=3.0", ""] {
+            let error = parse_range(text, 7).unwrap_err();
+            assert!(
+                error
+                    .iter()
+                    .any(|d| d.message.0.contains("line 7") && d.message.0.contains(text)),
+                "the diagnostic names the line and the offending text `{text}`: {error:?}"
+            );
+        }
+    }
+}

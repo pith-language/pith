@@ -171,6 +171,7 @@ fn description(archive: ContentId) -> Description {
         source: SourceBinding::Archive { archive },
         build: PackageBuild {
             sources: Box::new([UTIL.0.into(), HELLO.0.into()]),
+            includes: Box::new([]),
         },
     }
 }
@@ -235,7 +236,7 @@ fn resolve_lock(root: &Path) -> pith_diag::PithResult<Lock> {
 }
 
 fn build_request(toolchain_value: Value, tree: &SourceTree, build: &PackageBuild) -> Request<Pure> {
-    build::build_request(toolchain_value, tree, build)
+    build::build_request(toolchain_value, tree, build, &[])
 }
 
 fn run_build(engine: &mut Engine, request: &Request<Pure>) -> pith_diag::PithResult<Evaluation> {

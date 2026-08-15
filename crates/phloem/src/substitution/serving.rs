@@ -26,7 +26,10 @@ pub fn serve(admission: &Admission<'_>, offer: Option<(&BinaryOffer, &[u8])>) ->
     }
 }
 
-/// Returns the build request required by `serving`.
+/// Returns the build request required by `serving`. A served substitution
+/// builds nothing; a built one drives the package build over the package's
+/// own tree with no dependencies, because a substitution stands in for one
+/// binding's realization and carries no edge of its own.
 #[must_use]
 pub fn serving_request(
     serving: &Serving,
@@ -36,6 +39,6 @@ pub fn serving_request(
 ) -> Option<Request<Pure>> {
     match serving {
         Serving::Substituted(_) => None,
-        Serving::Built { .. } => Some(crate::build::build_request(toolchain, tree, build)),
+        Serving::Built { .. } => Some(crate::build::build_request(toolchain, tree, build, &[])),
     }
 }

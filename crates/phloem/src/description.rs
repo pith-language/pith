@@ -107,6 +107,7 @@ mod tests {
             },
             build: PackageBuild {
                 sources: Box::new(["zlib-1.3/zlib.c".into(), "zlib-1.3/adler32.c".into()]),
+                includes: Box::new([]),
             },
         }
     }
