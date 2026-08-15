@@ -2,7 +2,7 @@
 //!
 //! `phloem` is the first-party package library (docs/foundation/name.md): the
 //! tissue that carries the products of builds outward, as packages. This
-//! slice prototypes decisions 0039 through 0043 over the constructors 0026
+//! slice prototypes decisions 0039 through 0044 over the constructors 0026
 //! landed: a package is named by declaration inside a domain, a package
 //! version adds coordinates in the comparison the domain declares, a
 //! description is a record value, a source binding is a declared sum with

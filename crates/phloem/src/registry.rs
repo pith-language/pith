@@ -18,11 +18,10 @@
 //! version (`<version> <features> sha256:<digest>`), and
 //! `pkg/<domain>/<name>-<version>.tar` holds the bytes. Beside it a log
 //! directory holds `checkpoint` and `leaves`, and the leaves are binding
-//! lines
-//! in the lock's own spelling, so the line the log witnesses and the line
+//! lines in the lock's own spelling, so the line the log witnesses and the line
 //! the file writes are one line. The digests in the index are the
 //! registry's claims, verified against fetched bytes and against the log.
-//! the whole claim structure is decided in 0044, not here.
+//! The whole claim structure is decided in 0044, not here.
 
 use std::path::Path;
 
@@ -48,7 +47,8 @@ const LEAVES_FILE: &str = "leaves";
 /// A caller-side effect: this reads the index directory and nothing else,
 /// and the universe it returns is the declared input a resolution runs
 /// against. Names come from the index layout itself, so a candidate's
-/// coordinates are the registry's own naming, in one canonical order.
+/// coordinates are the registry's own naming. Directory components are
+/// read in byte order; lines within one package retain the index's order.
 ///
 /// # Errors
 /// A [`pith_diag::DiagnosticSink`] naming the path and the failure when the
@@ -146,7 +146,7 @@ pub struct Witnessed {
 ///
 /// A caller-side effect over the log directory: the checkpoint, the leaf
 /// lines, and the proof derived from them. In the deployed arrangement the
-/// proof arrives from the log's server. here it is derived from the same
+/// proof arrives from the log's server. Here it is derived from the same
 /// leaves the checkpoint commits to.
 ///
 /// # Errors

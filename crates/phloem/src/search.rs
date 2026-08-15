@@ -11,10 +11,11 @@
 //! protocol: a depth-first walk over subjects in canonical identity order,
 //! candidates grouped by the preference list with tie groups refused rather
 //! than picked apart by search order, backtracking across groups, the
-//! budget charged per candidate tried. Every ordering it uses is either
-//! canonical (subjects in identity order, candidates in value order before
-//! preferences apply) or declared (the version ordering the request names,
-//! the preference list), so the answer is a pure function of its inputs.
+//! budget charged per candidate tried. Subjects use canonical identity
+//! order, while candidates retain their input order until the declared
+//! preferences group them. Engine requests supply canonical value order;
+//! direct callers supply the host slice order. An unresolved tie is refused,
+//! so neither order silently selects within it.
 
 use std::collections::BTreeMap;
 
@@ -225,10 +226,10 @@ impl<'a> Search<'a> {
             .collect()
     }
 
-    /// Candidates best-first under the declared orderings; the sort is
-    /// stable over the universe's canonical value order, so candidates the
-    /// list does not separate stay adjacent as one group and are refused by
-    /// the caller rather than picked apart by iteration order.
+    /// Candidates best-first under the declared orderings. The stable sort
+    /// retains the candidate slice's order within a tie; engine requests
+    /// obtain that slice from the universe's canonical value. Tied candidates
+    /// stay adjacent and are refused rather than picked by iteration order.
     fn ordered_by_preference(&self, satisfying: Vec<&'a Candidate>) -> Vec<&'a Candidate> {
         let mut ordered = satisfying;
         ordered.sort_by(|left, right| {

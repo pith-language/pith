@@ -24,8 +24,9 @@ const GIT: &str = "Git";
 const MATERIALIZED_TREE: &str = "GitTree";
 const PATH: &str = "Path";
 
-/// The record payload a git revision carries: the revision and the tree hash
-/// it resolved to, the pair go.sum pins as its `h1:` line does.
+/// The record payload a git reference carries: the revision and forge tree
+/// identifier it resolved to. Neither is the source binding until a fetch
+/// materializes the tree and measures its content.
 pub const GIT_REVISION: &str = "revision";
 pub const GIT_TREE: &str = "tree";
 
