@@ -27,6 +27,8 @@ pub mod document;
 pub mod identity;
 pub mod lock;
 pub mod lockfile;
+pub mod lockpublish;
+pub(crate) mod locktext;
 pub mod preference;
 pub mod request;
 pub mod resolution;

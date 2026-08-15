@@ -11,24 +11,23 @@
 //! preferences, the scheme, or the resolver moved — go.sum's line shape,
 //! with the pinning go.sum refuses.
 //!
-//! Writing and reading are caller effects at 0003's boundary. No rule sees
-//! a path; the engine computes the value, and whoever drives it renders
-//! and writes. Publication follows 0024's content discipline: a flushed
-//! temporary file renamed into place, so a crash cannot leave a torn lock.
+//! The character-level grammar lives in `locktext`; publishing the file to
+//! the filesystem lives in `lockpublish`, on 0003's side of the effect
+//! boundary. This module is the line codec between them.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
-use std::io::Write as _;
-use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use pith_diag::PithResult;
-use pith_ids::{ContentDigest, ContentId};
+use pith_ids::ContentId;
 
 use crate::diag;
 use crate::document::Lock;
 use crate::identity::{DomainIdentity, PackageIdentity, PackageVersion};
 use crate::lock::{LockEntry, Origin};
+use crate::locktext::{
+    SHA256, features_token, parse_digest, parse_features, token as text_token, tokenize,
+};
 use crate::preference::{Preference, PreferenceList};
 
 /// The lock file's format version, pinned at 1 on the same terms the state
@@ -42,9 +41,6 @@ const VERSION_SCHEME: &str = "version-scheme";
 const UNIVERSE: &str = "universe";
 const PREFERENCE: &str = "preference";
 const BIND: &str = "bind";
-
-const SHA256: &str = "sha256:";
-const HEX_LEN: usize = 64;
 
 /// The document as its canonical text: header directives, a blank line,
 /// then one binding line per entry sorted by the line's own bytes, LF line
@@ -62,7 +58,7 @@ pub fn render(lock: &Lock) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "{LOCK_VERSION} {LOCK_FILE_VERSION}");
     let _ = writeln!(out, "{RESOLVER} {SHA256}{}", lock.resolver);
-    let _ = writeln!(out, "{VERSION_SCHEME} {}", token(&lock.scheme));
+    let _ = writeln!(out, "{VERSION_SCHEME} {}", text_token(&lock.scheme));
     let _ = writeln!(out, "{UNIVERSE} {SHA256}{}", lock.universe.digest());
     for preference in lock.preferences.0.iter() {
         let _ = writeln!(out, "{PREFERENCE} {}", preference.name());
@@ -177,92 +173,6 @@ fn record_binding(
     Ok(())
 }
 
-/// Write the lock to `path` on the publication discipline the content
-/// store implements (0024): a temporary file named for this writer and
-/// created exclusively, so two writers cannot share one; flushed; renamed
-/// into place; the destination directory flushed after the rename so the
-/// rename itself survives a crash; and the temporary file removed on every
-/// failure path. A caller-side effect: no rule reaches this.
-///
-/// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming the path and the failure when the
-/// file cannot be written, flushed, renamed, or its directory flushed.
-pub fn write(lock: &Lock, path: &Path) -> PithResult<()> {
-    let text = render(lock);
-    let directory = destination_directory(path);
-    let (temporary, mut file) =
-        temporary_file(&directory).map_err(|error| io_diag("writing the lock", path, &error))?;
-    if let Err(error) = file
-        .write_all(text.as_bytes())
-        .and_then(|()| file.sync_all())
-    {
-        drop(file);
-        remove_temporary_file(&temporary);
-        return Err(io_diag("writing the lock", path, &error));
-    }
-    drop(file);
-    match std::fs::rename(&temporary, path) {
-        Ok(()) => std::fs::File::open(&directory)
-            .and_then(|directory| directory.sync_all())
-            .map_err(|error| io_diag("flushing the directory of the lock", path, &error)),
-        Err(error) => {
-            remove_temporary_file(&temporary);
-            Err(io_diag("publishing the lock", path, &error))
-        }
-    }
-}
-
-/// The directory a rename into `path` happens in; a bare file name
-/// publishes into the working directory.
-fn destination_directory(path: &Path) -> std::path::PathBuf {
-    match path.parent() {
-        Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
-        _ => std::path::PathBuf::from("."),
-    }
-}
-
-/// The process-wide sequence behind the store's per-instance one, so two
-/// writers in one process cannot share a temporary file either.
-static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
-
-fn temporary_file(directory: &Path) -> std::io::Result<(std::path::PathBuf, std::fs::File)> {
-    loop {
-        let sequence = NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed);
-        let path = directory.join(format!(
-            ".pith-lock-{}.{}.tmp",
-            std::process::id(),
-            sequence
-        ));
-        match std::fs::File::create_new(&path) {
-            Ok(file) => return Ok((path, file)),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(error) => return Err(error),
-        }
-    }
-}
-
-/// Best-effort removal on a failure path; a temporary left behind is inert
-/// and never parses as a lock under its hidden name.
-fn remove_temporary_file(path: &Path) {
-    let _ = std::fs::remove_file(path);
-}
-
-/// Read the lock at `path` and parse it. A caller-side effect, the read
-/// side of the same boundary.
-///
-/// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming the path and the failure when the
-/// file cannot be read, and the parse diagnostics when it is not a lock.
-pub fn read(path: &Path) -> PithResult<Lock> {
-    let text =
-        std::fs::read_to_string(path).map_err(|error| io_diag("reading the lock", path, &error))?;
-    parse(&text)
-}
-
-fn io_diag(what: &str, path: &Path, error: &std::io::Error) -> pith_diag::DiagnosticSink {
-    diag(format!("{what} at {} failed: {error}", path.display()))
-}
-
 #[derive(Default)]
 struct Header {
     resolver: Option<Box<str>>,
@@ -371,13 +281,13 @@ fn singleton<'a>(tokens: &'a [String], directive: &str, number: usize) -> PithRe
 fn bind_line(entry: &LockEntry) -> String {
     format!(
         "{BIND} {} {} {} {} {SHA256}{} {} {}",
-        token(entry.package.identity().domain().as_str()),
-        token(entry.package.identity().name()),
-        token(entry.package.version()),
+        text_token(entry.package.identity().domain().as_str()),
+        text_token(entry.package.identity().name()),
+        text_token(entry.package.version()),
         features_token(&entry.features),
         entry.source.digest(),
         entry.origin.kind(),
-        token(entry.origin.location()),
+        text_token(entry.origin.location()),
     )
 }
 
@@ -408,298 +318,10 @@ fn bind_entry(tokens: &[String], number: usize) -> PithResult<LockEntry> {
     ))
 }
 
-fn features_token(features: &[Box<str>]) -> String {
-    let mut out = String::from("[");
-    for (index, feature) in features.iter().enumerate() {
-        if index > 0 {
-            out.push(',');
-        }
-        out.push_str(&token(feature));
-    }
-    out.push(']');
-    out
-}
-
-fn parse_features(text: &str, number: usize) -> PithResult<Box<[Box<str>]>> {
-    let Some(inner) = text
-        .strip_prefix('[')
-        .and_then(|rest| rest.strip_suffix(']'))
-    else {
-        return Err(diag(format!(
-            "line {number}: `{text}` is not a bracketed feature list"
-        )));
-    };
-    if inner.is_empty() {
-        return Ok(Box::new([]));
-    }
-    let mut features = Vec::new();
-    for piece in split_commas(inner) {
-        features.push(
-            unquote(&piece)
-                .map_err(|message| diag(format!("line {number}: {message}")))?
-                .into(),
-        );
-    }
-    Ok(features.into())
-}
-
-/// One text field in its written spelling: bare when it contains none of
-/// the reserved characters, quoted with backslash escapes otherwise.
-fn token(text: &str) -> String {
-    if is_bare(text) {
-        return text.into();
-    }
-    let mut out = String::with_capacity(text.len().saturating_add(2));
-    out.push('"');
-    for character in text.chars() {
-        match character {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            control if control.is_control() => {
-                let _ = write!(out, "\\u{{{:x}}}", control as u32);
-            }
-            other => out.push(other),
-        }
-    }
-    out.push('"');
-    out
-}
-
-fn is_bare(text: &str) -> bool {
-    !text.is_empty()
-        && text.chars().all(|character| {
-            !character.is_whitespace()
-                && !character.is_control()
-                && !matches!(character, '"' | '#' | '\\' | '[' | ']')
-        })
-}
-
-/// Split a line into tokens on spaces. Double-quoted tokens may contain any
-/// character through backslash escapes; a `[`-bracketed group stays one
-/// token with quoting honored inside it; an unquoted `#` ends the line as a
-/// comment.
-fn tokenize(line: &str) -> Result<Vec<String>, String> {
-    let mut tokens = Vec::new();
-    let mut rest = line;
-    loop {
-        rest = rest.trim_start_matches(' ');
-        if rest.is_empty() {
-            return Ok(tokens);
-        }
-        if rest.starts_with('#') {
-            return Ok(tokens);
-        }
-        if let Some(remaining) = rest.strip_prefix('[') {
-            let (group, remaining) = bracket_group(remaining)?;
-            tokens.push(format!("[{group}]"));
-            rest = remaining;
-            continue;
-        }
-        let (token, remaining) = if rest.starts_with('"') {
-            quoted_token(rest)?
-        } else {
-            bare_token(rest)?
-        };
-        tokens.push(token);
-        rest = remaining;
-    }
-}
-
-fn bare_token(rest: &str) -> Result<(String, &str), String> {
-    let end = rest.find([' ', '"', '[', ']', '#']).unwrap_or(rest.len());
-    let (token, remaining) = rest.split_at(end);
-    if remaining.starts_with(['"', '[', ']']) {
-        return Err(format!(
-            "the bare token `{token}` runs into a reserved character; quote the whole token"
-        ));
-    }
-    Ok((token.into(), remaining))
-}
-
-fn quoted_token(rest: &str) -> Result<(String, &str), String> {
-    let mut token = String::new();
-    let mut chars = rest.chars();
-    // Consume the opening quote.
-    chars.next();
-    loop {
-        let Some(character) = chars.next() else {
-            return Err(format!("the quoted token `{rest}` is never closed"));
-        };
-        match character {
-            '"' => return Ok((token, chars.as_str())),
-            '\\' => token.push(escape(&mut chars)?),
-            other => token.push(other),
-        }
-    }
-}
-
-fn bracket_group(rest: &str) -> Result<(String, &str), String> {
-    let mut group = String::new();
-    let mut chars = rest.chars();
-    loop {
-        let Some(character) = chars.next() else {
-            return Err("the bracketed feature list is never closed".into());
-        };
-        match character {
-            ']' => return Ok((group, chars.as_str())),
-            '"' => {
-                group.push('"');
-                loop {
-                    let Some(inner) = chars.next() else {
-                        return Err("a quoted feature name is never closed".into());
-                    };
-                    group.push(inner);
-                    match inner {
-                        '\\' => {
-                            chars
-                                .next()
-                                .map(|escaped| group.push(escaped))
-                                .ok_or_else(|| {
-                                    "a quoted feature name ends on an escape".to_string()
-                                })?;
-                        }
-                        '"' => break,
-                        _ => {}
-                    }
-                }
-            }
-            other => group.push(other),
-        }
-    }
-}
-
-fn escape(chars: &mut std::str::Chars<'_>) -> Result<char, String> {
-    let Some(escaped) = chars.next() else {
-        return Err("a quoted token ends on an escape".into());
-    };
-    match escaped {
-        '\\' => Ok('\\'),
-        '"' => Ok('"'),
-        'n' => Ok('\n'),
-        'r' => Ok('\r'),
-        't' => Ok('\t'),
-        'u' => {
-            let mut hex = String::new();
-            if chars.next() != Some('{') {
-                return Err("a unicode escape opens with `\\u{`".into());
-            }
-            for character in chars.by_ref() {
-                match character {
-                    '}' => break,
-                    digit if digit.is_ascii_hexdigit() => hex.push(digit),
-                    other => return Err(format!("`{other}` is not a hexadecimal digit")),
-                }
-            }
-            u32::from_str_radix(&hex, 16)
-                .ok()
-                .and_then(char::from_u32)
-                .ok_or_else(|| format!("`\\u{{{hex}}}` is not a unicode scalar value"))
-        }
-        other => Err(format!("`\\{other}` is not an escape this format defines")),
-    }
-}
-
-/// Split bracket-group content on commas, keeping quoted pieces whole.
-fn split_commas(inner: &str) -> Vec<String> {
-    let mut pieces = Vec::new();
-    let mut current = String::new();
-    let mut chars = inner.chars();
-    while let Some(character) = chars.next() {
-        match character {
-            '"' => {
-                current.push('"');
-                while let Some(inner_character) = chars.next() {
-                    current.push(inner_character);
-                    match inner_character {
-                        '\\' => {
-                            if let Some(escaped) = chars.next() {
-                                current.push(escaped);
-                            }
-                        }
-                        '"' => break,
-                        _ => {}
-                    }
-                }
-            }
-            ',' => {
-                pieces.push(current.clone());
-                current.clear();
-            }
-            other => current.push(other),
-        }
-    }
-    pieces.push(current);
-    pieces
-}
-
-fn unquote(piece: &str) -> Result<String, String> {
-    let piece = piece.trim();
-    if piece.starts_with('"') {
-        let (token, remaining) = quoted_token(piece)?;
-        if !remaining.trim().is_empty() {
-            return Err(format!("`{piece}` carries text after its closing quote"));
-        }
-        return Ok(token);
-    }
-    if !is_bare(piece) {
-        return Err(format!(
-            "`{piece}` is not a bare token; quote it to carry the characters it has"
-        ));
-    }
-    Ok(piece.into())
-}
-
-/// A digest in its written spelling — `sha256:` followed by 64 hexadecimal
-/// digits — decoded to the identity it names. Uppercase digits parse and
-/// re-render lowercase, which is one instance of the canonicalization every
-/// parseable text gets.
-fn parse_digest(text: &str, field: &str, number: usize) -> PithResult<ContentId> {
-    let Some(hex) = text.strip_prefix("sha256:") else {
-        return Err(diag(format!(
-            "line {number}: {field} carried `{text}` rather than a `sha256:`-prefixed digest"
-        )));
-    };
-    let Some(nibbles) = hex
-        .chars()
-        .map(|character| {
-            character
-                .to_digit(16)
-                .and_then(|digit| u8::try_from(digit).ok())
-        })
-        .collect::<Option<Vec<u8>>>()
-    else {
-        return Err(diag(format!(
-            "line {number}: {field} carried `{hex}`, which is not hexadecimal"
-        )));
-    };
-    let wrong_length = || {
-        diag(format!(
-            "line {number}: {field} carried {} hexadecimal digits rather than {HEX_LEN}",
-            nibbles.len()
-        ))
-    };
-    if nibbles.len() != HEX_LEN {
-        return Err(wrong_length());
-    }
-    let collected: Vec<u8> = nibbles
-        .chunks_exact(2)
-        .map(|pair| pair.iter().fold(0u8, |byte, nibble| (byte << 4) | nibble))
-        .collect();
-    let bytes: [u8; 32] = collected
-        .as_slice()
-        .try_into()
-        .map_err(|_| wrong_length())?;
-    Ok(ContentId::from_digest(ContentDigest::from_bytes(bytes)))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::document::diff;
-    use tempfile::TempDir;
 
     fn lock() -> Lock {
         let universe = ContentId::of_blob(b"universe");
@@ -869,6 +491,25 @@ mod tests {
     }
 
     #[test]
+    fn a_union_merge_moving_a_feature_set_is_refused_the_same_way() {
+        // The set is over package identities, not feature sets: two feature
+        // selections of one package are as unrepresentable as two versions,
+        // and the document's own constructor agrees (see `document`).
+        let canonical = render(&lock());
+        let moved = canonical
+            .lines()
+            .find(|line| line.contains("openssl"))
+            .unwrap()
+            .replacen("[shared,zlib]", "[static]", 1);
+        let merged = format!("{canonical}{moved}\n");
+        let error = parse(&merged).unwrap_err();
+        assert!(
+            error.iter().any(|d| d.message.0.contains("twice")),
+            "the diagnostic names the conflict: {error:?}"
+        );
+    }
+
+    #[test]
     fn a_byte_identical_line_a_union_merge_repeated_collapses() {
         // The union of two branches that added the same binding yields the
         // same line twice; that is one resolution recorded twice, not two.
@@ -994,31 +635,6 @@ mod tests {
         assert!(
             error.iter().any(|d| d.message.0.contains("line ")),
             "the diagnostic carries the line number: {error:?}"
-        );
-    }
-
-    #[test]
-    fn writing_and_reading_round_trip_through_a_file() {
-        let directory = TempDir::new().unwrap();
-        let path = directory.path().join("pith.lock");
-        write(&lock(), &path).unwrap();
-        assert!(path.exists());
-        let remaining: Vec<std::ffi::OsString> = std::fs::read_dir(directory.path())
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name())
-            .collect();
-        assert_eq!(
-            remaining,
-            vec![std::ffi::OsString::from("pith.lock")],
-            "a successful write leaves the lock and no temporary behind"
-        );
-        assert_eq!(read(&path).unwrap(), lock());
-        let error = read(&directory.path().join("absent.lock")).unwrap_err();
-        assert!(
-            error
-                .iter()
-                .any(|d| d.message.0.contains("absent.lock") && d.message.0.contains("reading")),
-            "the diagnostic names the path and the operation: {error:?}"
         );
     }
 

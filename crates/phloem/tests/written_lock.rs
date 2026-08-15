@@ -14,6 +14,7 @@ use phloem::identity::{
     DEBIAN, DomainIdentity, NUMERIC_SEGMENTS, PackageIdentity, version_scheme_value,
 };
 use phloem::lockfile;
+use phloem::lockpublish;
 use phloem::preference::{Preference, PreferenceList, preference_list_value};
 use phloem::resolution::{Resolution, resolve_request};
 use phloem::resolve::{ResolveSolver, Schemes};
@@ -243,7 +244,7 @@ fn resolving_through_the_engine_writes_no_file() {
     assert!(!path.exists(), "resolving wrote no file");
     let resolution = Resolution::from_value(&answer.value).unwrap();
     let lock = Lock::from_resolution(NUMERIC_SEGMENTS, &newest(), &resolution).unwrap();
-    lockfile::write(&lock, &path).unwrap();
+    lockpublish::write(&lock, &path).unwrap();
     assert!(path.exists(), "the caller's write created the file");
 }
 
@@ -264,8 +265,8 @@ fn the_written_form_round_trips_through_a_real_file() {
     let resolution = Resolution::from_value(&answer.value).unwrap();
     let written = Lock::from_resolution(NUMERIC_SEGMENTS, &newest(), &resolution).unwrap();
 
-    lockfile::write(&written, &path).unwrap();
-    let read_back = lockfile::read(&path).unwrap();
+    lockpublish::write(&written, &path).unwrap();
+    let read_back = lockpublish::read(&path).unwrap();
     assert_eq!(read_back, written);
     assert_eq!(read_back.content_id(), written.content_id());
     for (back, wrote) in read_back.entries.iter().zip(written.entries.iter()) {
