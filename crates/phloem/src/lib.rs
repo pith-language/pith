@@ -2,7 +2,7 @@
 //!
 //! `phloem` is the first-party package library (docs/foundation/name.md): the
 //! tissue that carries the products of builds outward, as packages. This
-//! slice prototypes decisions 0039 through 0041 over the constructors 0026
+//! slice prototypes decisions 0039 through 0042 over the constructors 0026
 //! landed: a package is named by declaration inside a domain, a package
 //! version adds coordinates in the comparison the domain declares, a
 //! description is a record value, a source binding is a declared sum with
@@ -10,8 +10,9 @@
 //! the resolved source with the origin as evidence rather than as identity,
 //! constraints are values over the domain's ordering, resolution is a
 //! host-rule computation in the graph whose answer carries its explanation,
-//! and a written lock is a text projection of the lock document that the
-//! caller writes at the effect boundary.
+//! a written lock is a text projection of the lock document that the
+//! caller writes at the effect boundary, and a prebuilt binary stands in for
+//! a realization only through an admission test over that lock's binding.
 //!
 //! phloem is a peer of `xylem` and a consumer of it, never a wrapper
 //! (decisions 0009, 0039): it produces build requests against interfaces
@@ -32,6 +33,7 @@ pub mod resolution;
 pub mod resolve;
 pub mod search;
 pub mod source;
+pub mod substitution;
 pub mod universe;
 
 use pith_diag::{Diag, DiagnosticSink, Severity, Span, StableCode};
