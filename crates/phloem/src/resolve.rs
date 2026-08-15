@@ -47,12 +47,24 @@ pub struct Schemes {
 type Scheme = Box<dyn VersionScheme + Send + Sync>;
 
 impl Schemes {
-    /// A set over `(declared name, scheme)` pairs. A name appearing twice is
-    /// the caller's to avoid; resolution takes the first match, so a
-    /// duplicate is shadowed.
-    #[must_use]
-    pub fn new(entries: Box<[(Box<str>, Scheme)]>) -> Self {
-        Self { entries }
+    /// A set over `(declared name, scheme)` pairs, held in name order.
+    ///
+    /// # Errors
+    /// A [`pith_diag::DiagnosticSink`] naming a declared name when more than
+    /// one ordering claims it.
+    pub fn new(mut entries: Box<[(Box<str>, Scheme)]>) -> PithResult<Self> {
+        entries.sort_by(|left, right| left.0.cmp(&right.0));
+        if let Some(duplicate) = entries
+            .windows(2)
+            .find(|pair| pair[0].0 == pair[1].0)
+            .map(|pair| pair[0].0.as_ref())
+        {
+            return Err(crate::diag(format!(
+                "the version scheme `{duplicate}` was registered twice; one declared name \
+                 cannot select two orderings"
+            )));
+        }
+        Ok(Self { entries })
     }
 
     /// The two orderings phloem declares: the dot-separated numeric scheme
@@ -232,6 +244,20 @@ mod tests {
                 .iter()
                 .any(|d| d.message.0.contains("semver") && d.message.0.contains(NUMERIC_SEGMENTS)),
             "the diagnostic names the requested scheme and the registered ones: {error:?}"
+        );
+
+        let duplicate = Schemes::new(Box::new([
+            (Box::from("same"), Box::new(NumericSegments) as Scheme),
+            (Box::from("same"), Box::new(Debian) as Scheme),
+        ]))
+        .err()
+        .expect("two orderings cannot own one declared name");
+        assert!(
+            duplicate
+                .iter()
+                .any(|diagnostic| diagnostic.message.0.contains("same")
+                    && diagnostic.message.0.contains("twice")),
+            "the diagnostic names the duplicate semantic owner: {duplicate:?}"
         );
     }
 }
