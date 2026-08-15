@@ -178,7 +178,7 @@ fn path_of(index: u64, hashes: &[ContentDigest]) -> Vec<ContentDigest> {
     }
 }
 
-/// The log's operator half: a tree built over records, serving the root a
+/// The log's operator half: a tree over records that serves the root a
 /// checkpoint names and the proofs a client verifies. A pith-operated log
 /// and the prototype's fixture share this spelling; a third-party log
 /// needs only the checkpoint and proof format above.

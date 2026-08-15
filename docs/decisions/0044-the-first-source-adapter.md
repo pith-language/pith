@@ -66,7 +66,7 @@ the position in one line: pith detects tampering after a binding exists and dete
 
 ### what a source adapter is, in the model
 
-a caller-side effect, in the position 0041 put the lock's write and 0043 put the toolchain's discovery. the adapter's functions read a registry directory and produce values: the index becomes the candidate universe, an archive becomes bytes and their measured identity, the log becomes the evidence a verification consumes. the engine never learns that sources exist.
+a caller-side effect, in the position 0041 put the lock's write and 0043 put the toolchain's discovery. the adapter's functions read a registry directory and produce values: a universe from the index, measured bytes from an archive, evidence from the log. the engine never learns that sources exist.
 
 not a rule in the graph: 0007 forbids ambient discovery during evaluation, and a fetch inside evaluation would make the universe an ambient input, which is what 0040's reproducibility argument rules out. not an `Opaque`: 0032's consequences section records that `Opaque` still has no operational path in the engine — no registration, no scheduler step, no durable record — so choosing it here is choosing to build the engine's effect tier, and for a fetch that does not need it; a fetch also has a fully declarable contract, and 0019's progression runs from opaque to modeled, never the reverse. an `Action` is the honest future home and is deferred: one invocation of one tool, inputs the binding's coordinates, output the archive's bytes, expected digest declared in advance — Nix's fixed-output derivation shape, which makes network access safe from below. when an executor exists that admits network under a declared output digest, the fetch moves into the graph with the binding's digest as its fixed output, and nothing in this record's verification changes.
 
@@ -92,7 +92,7 @@ that the lifting costs nothing cryptographically is git's own doing. a revision 
 
 ### what the origin means
 
-a candidate carries where it was read, and the entry inherits it. the old spelling — an archive's own digest standing in as its registry locator, because an in-process universe named no registry — is gone: the registry identity is declared by the caller the way a forge's name and a local path are, and the origin records it. the policy leg still matches origins by exact equality, deliberately: an origin names a source, not content, and admitting a mirror is one configuration line naming it. 0042's separation of where-a-binary-came-from from who-authorizes-it stands unchanged, and the origins a substitution policy admits are the same values an entry now records.
+a candidate carries where it was read, and the entry inherits it. the old spelling, in which an archive's own digest stood in as its registry locator because an in-process universe named no registry, is gone: the registry identity is declared by the caller the way a forge's name and a local path are, and the origin records it. the policy leg still matches origins by exact equality, deliberately: an origin names a source, not content, and admitting a mirror is one configuration line naming it. 0042's separation of where-a-binary-came-from from who-authorizes-it stands unchanged, and the origins a substitution policy admits are the same values an entry now records.
 
 ## alternatives considered
 

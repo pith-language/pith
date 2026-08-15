@@ -7,10 +7,10 @@
 //! already authenticates the content it names; a fetch verifies every
 //! object it receives against its own hash. The ref is the part git does
 //! not authenticate: a branch is a mutable pointer no commit records, so
-//! the revision a moving ref resolved to is recorded in the candidate
-//! rather than trusted. The candidate carries the reference as provenance
-//! — a revision and the tree hash it resolved to, the shape a lock refuses
-//! to bind — and the fetch materializes the tree into bytes pith measures.
+//! the candidate carries the concrete revision and tree hash the ref
+//! resolved to, and nothing downstream re-reads the ref. That payload is
+//! the shape a lock refuses to bind, and the fetch materializes the tree
+//! into bytes pith measures.
 //!
 //! Running `git` is a caller-side effect on the same ground as reading a
 //! registry directory: it happens before any request exists, and what it

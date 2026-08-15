@@ -7,18 +7,19 @@
 //! universe as a declared input, fetching an entry's archive produces
 //! bytes and their measured identity, reading the log produces the
 //! evidence a binding's verification consumes. The engine never learns
-//! that sources exist, and the reconciliation with 0040 is the query being
-//! a separate step whose result becomes the declared input — a registry
-//! whose answer moved between two runs produces a different universe
-//! digest, which the lock's diff names like any other moved input.
+//! that sources exist, and the reconciliation with 0040 is direct: the
+//! query is a separate step whose result becomes the declared input, and a
+//! registry whose answer moved between two runs produces a different
+//! universe digest, which the lock's diff names like any other moved
+//! input.
 //!
 //! The on-disk shape is the sparse-index arrangement crates.io fixed,
 //! miniaturized to a directory: `index/<domain>/<name>` holds one line per
 //! version (`<version> <features> sha256:<digest>`), and
 //! `pkg/<domain>/<name>-<version>.tar` holds the bytes. Beside it a log
-//! directory holds `checkpoint` and `leaves`, the leaves being binding
-//! lines in the lock's own spelling, so the line the log witnesses and the
-//! line the file writes are one line. The digests in the index are the
+//! directory holds `checkpoint` and `leaves`; the leaves are binding lines
+//! in the lock's own spelling, so the line the log witnesses and the line
+//! the file writes are one line. The digests in the index are the
 //! registry's claims, verified against fetched bytes and against the log;
 //! the whole claim structure is decided in 0044, not here.
 
@@ -69,8 +70,8 @@ pub fn read_index(root: &Path, registry: &str) -> PithResult<CandidateUniverse> 
 }
 
 /// One index line as one candidate: `<version> <features> sha256:<digest>`,
-/// the digest being the registry's claim about the archive, which the
-/// fetch verifies against bytes and the witness verifies against the log.
+/// where the digest is the registry's claim about the archive; the fetch
+/// verifies it against bytes and the witness against the log.
 fn index_candidate(domain: &str, name: &str, line: &str, registry: &str) -> PithResult<Candidate> {
     let tokens =
         tokenize(line).map_err(|message| diag(format!("`{name}` index line: {message}")))?;

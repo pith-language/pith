@@ -10,7 +10,7 @@
 //! the realization produced. A refused offer leaves the build running from
 //! source, the same realization an absent offer produces, so the refusals
 //! return with the answer and do not enter the document: they would move
-//! its digest without anything the environment serves having changed.
+//! its digest though nothing the environment serves changed.
 //!
 //! Computing all of that is pure, on the ground 0041 put the lock's write
 //! on: resolving, locking, realizing, digesting, and rendering touch no
@@ -403,9 +403,9 @@ pub struct Refused {
 /// The refusals are returned beside the document and kept out of it. A
 /// refused offer leaves the build running from source, the same
 /// realization an absent offer produces, so a refusal in the document
-/// would move its digest without anything the environment serves having
-/// changed. The refusals arrive in lock-entry order, each entry's offers
-/// in the canonical order over claims.
+/// would move its digest though nothing the environment serves changed.
+/// The refusals arrive in lock-entry order, each entry's offers in the
+/// canonical order over claims.
 pub struct Realized {
     pub document: EnvironmentDocument,
     pub refusals: Box<[Refused]>,
