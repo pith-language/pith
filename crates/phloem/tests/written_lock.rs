@@ -13,6 +13,7 @@ use phloem::document::{Lock, LockChange, diff};
 use phloem::identity::{
     DEBIAN, DomainIdentity, NUMERIC_SEGMENTS, PackageIdentity, version_scheme_value,
 };
+use phloem::lock::Origin;
 use phloem::lockfile;
 use phloem::lockpublish;
 use phloem::preference::{Preference, PreferenceList, preference_list_value};
@@ -44,6 +45,7 @@ fn candidate(name: &str, version: &str, content: &[u8]) -> Candidate {
         provenance: SourceBinding::Archive {
             archive: ContentId::of_blob(content),
         },
+        origin: Origin::Registry("pkgs.pith-lang.org".into()),
         requires: Box::new([]),
     }
 }
@@ -481,7 +483,9 @@ fn a_lock_read_back_pins_the_same_selection_and_reports_drift() {
     let resolved = match &choice.first().unwrap().provenance {
         SourceBinding::Archive { archive } => *archive,
         SourceBinding::Path { content, .. } => *content,
-        SourceBinding::Git { .. } => unreachable!("the fixture binds archives"),
+        SourceBinding::Git { .. } | SourceBinding::GitTree { .. } => {
+            unreachable!("the fixture binds archives")
+        }
     };
     let error = lock
         .entries

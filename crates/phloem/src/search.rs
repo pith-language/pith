@@ -426,6 +426,7 @@ mod tests {
             provenance: SourceBinding::Archive {
                 archive: ContentId::of_blob(name.as_bytes()),
             },
+            origin: crate::lock::Origin::Registry("pkgs.pith-lang.org".into()),
             requires: Box::new([]),
         }
     }

@@ -539,6 +539,7 @@ mod tests {
                 path: "vendor/zlib".into(),
                 content: ContentId::of_blob(b"zlib-tree"),
             },
+            origin: crate::lock::Origin::LocalPath("vendor/zlib".into()),
             requires: Box::new([]),
         };
         let answers = [

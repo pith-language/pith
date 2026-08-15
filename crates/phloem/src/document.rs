@@ -23,7 +23,7 @@ use crate::codec::{blob_field, field_of, record_type, record_value, text_field};
 use crate::constraint::{Constraint, Range};
 use crate::diag;
 use crate::identity::{PackageIdentity, PackageVersion, version_scheme_type, version_scheme_value};
-use crate::lock::{LockEntry, Origin};
+use crate::lock::LockEntry;
 use crate::preference::{PreferenceList, preference_list_from_value, preference_list_value};
 use crate::resolution::Resolution;
 use crate::source::SourceBinding;
@@ -388,18 +388,20 @@ fn constructor_of(resolution: &Resolution) -> &'static str {
 
 /// One candidate as one entry. The content side comes from the candidate's
 /// provenance where provenance is content: a path records the path it was
-/// read at, and an archive records the archive's own content identity as
-/// its locator, because an in-process universe names no registry. A git
-/// reference refuses: a revision and a tree hash locate content nobody
-/// read, and binding coordinates to it would be a claim, not a measurement
-/// (0014).
+/// read at and the content found there, an archive carries the digest the
+/// registry's index claimed — which the fetch verifies against bytes — and
+/// a git tree a fetch materialized carries the content measured from the
+/// bytes that fetch read (0044). A bare git reference still refuses: a
+/// revision with a tree hash is content nobody read, and binding
+/// coordinates to it would be a claim, not a measurement (0014). The
+/// origin is where the candidate was read, a fact of the universe rather
+/// than something the provenance can spell: an archive's digest names its
+/// content, not the registry that served the claim.
 fn entry_of(candidate: &Candidate) -> PithResult<LockEntry> {
-    let (source, origin) = match &candidate.provenance {
-        SourceBinding::Path { path, content } => (*content, Origin::LocalPath(path.clone())),
-        SourceBinding::Archive { archive } => (
-            *archive,
-            Origin::Registry(archive.digest().to_string().into()),
-        ),
+    let source = match &candidate.provenance {
+        SourceBinding::Path { content, .. } => *content,
+        SourceBinding::Archive { archive } => *archive,
+        SourceBinding::GitTree { content, .. } => *content,
         SourceBinding::Git { .. } => {
             return Err(diag(format!(
                 "the candidate for `{}` version {} carries a git reference, and a revision \
@@ -414,7 +416,7 @@ fn entry_of(candidate: &Candidate) -> PithResult<LockEntry> {
         PackageVersion::new(candidate.identity.clone(), candidate.version.clone()),
         candidate.features.clone(),
         source,
-        origin,
+        candidate.origin.clone(),
     ))
 }
 
@@ -422,6 +424,7 @@ fn entry_of(candidate: &Candidate) -> PithResult<LockEntry> {
 mod tests {
     use super::*;
     use crate::identity::{DomainIdentity, NUMERIC_SEGMENTS};
+    use crate::lock::Origin;
     use crate::preference::Preference;
     use crate::resolution::TrailEntry;
     use pith_ids::ContentId;
@@ -442,6 +445,7 @@ mod tests {
             provenance: SourceBinding::Archive {
                 archive: ContentId::of_blob(format!("{name}-{version}").as_bytes()),
             },
+            origin: Origin::Registry("pkgs.pith-lang.org".into()),
             requires: Box::new([]),
         }
     }
@@ -523,6 +527,26 @@ mod tests {
                 .any(|d| d.message.0.contains("underdetermined")),
             "the diagnostic names the constructor: {error:?}"
         );
+    }
+
+    #[test]
+    fn a_materialized_git_tree_binds_the_content_the_fetch_measured() {
+        let mut git = candidate("zlib", "1.3", &[]);
+        git.provenance = SourceBinding::GitTree {
+            revision: "9f11b1d".into(),
+            tree: "e3b0c44".into(),
+            content: ContentId::of_blob(b"zlib-tree-archive"),
+        };
+        git.origin = Origin::Forge("git.pith-lang.org/pith".into());
+        let lock = Lock::from_resolution(
+            NUMERIC_SEGMENTS,
+            &PreferenceList(Box::new([])),
+            &solved(&[git]),
+        )
+        .unwrap();
+        let entry = lock.entries.first().unwrap();
+        assert_eq!(entry.source, ContentId::of_blob(b"zlib-tree-archive"));
+        assert_eq!(entry.origin, Origin::Forge("git.pith-lang.org/pith".into()));
     }
 
     #[test]

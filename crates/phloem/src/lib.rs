@@ -17,18 +17,28 @@
 //! plus the realization coordinates it declares and the substitutions it
 //! served — whose materialization is a projection and whose entering is a
 //! caller effect that does not exist yet.
+//!
+//! The source adapters read bytes the rest of the library only fabricated
+//! (0044): a registry index becomes the declared candidate universe, a
+//! fetched archive becomes the measured content a binding is verified
+//! against, and a transparency log over binding lines becomes the witness,
+//! anchored in the checkpoint a person's configuration pins. Every adapter
+//! read is a caller-side effect; the engine never learns that sources
+//! exist.
 
 pub(crate) mod codec;
 pub mod constraint;
 pub mod description;
 pub mod document;
 pub mod environment;
+pub mod forge;
 pub mod identity;
 pub mod lock;
 pub mod lockfile;
 pub mod lockpublish;
 pub(crate) mod locktext;
 pub mod preference;
+pub mod registry;
 pub mod request;
 pub mod resolution;
 pub mod resolve;
@@ -36,6 +46,7 @@ pub mod search;
 pub mod source;
 pub mod substitution;
 pub mod universe;
+pub mod witness;
 
 use pith_diag::{Diag, DiagnosticSink, Severity, Span, StableCode};
 

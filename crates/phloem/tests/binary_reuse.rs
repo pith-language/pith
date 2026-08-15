@@ -249,6 +249,7 @@ fn zlib_request() -> Request<Pure> {
         provenance: SourceBinding::Archive {
             archive: ContentId::of_blob(b"zlib-1.3.tar"),
         },
+        origin: Origin::Registry("pkgs.pith-lang.org".into()),
         requires: Box::new([]),
     }]);
     resolve_request(

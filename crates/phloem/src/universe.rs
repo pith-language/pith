@@ -17,6 +17,7 @@ use crate::codec::{field_of, record_type, record_value, text_list, text_of};
 use crate::constraint::{Range, range_type};
 use crate::diag;
 use crate::identity::{DomainIdentity, PackageIdentity};
+use crate::lock::{Origin, origin_type};
 use crate::source::{SourceBinding, source_type};
 
 const DOMAIN: &str = "domain";
@@ -24,6 +25,7 @@ const PACKAGE: &str = "package";
 const VERSION: &str = "version";
 const FEATURES: &str = "features";
 const PROVENANCE: &str = "provenance";
+const ORIGIN: &str = "origin";
 const REQUIRES: &str = "requires";
 
 /// The digest domain for a candidate universe's content identity.
@@ -42,12 +44,19 @@ pub struct Requirement {
 
 /// One candidate: a subject's coordinates, the provenance of those
 /// coordinates, and the requirements selecting this candidate imposes.
+///
+/// The origin is where the candidate was read — the registry identity an
+/// index names itself by, the forge a reference resolved against, the path
+/// a vendor tree sits at. It is the entry's evidence and cannot be derived
+/// from the provenance: a registry archive's digest names its content, not
+/// which registry served the claim (0044).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Candidate {
     pub identity: PackageIdentity,
     pub version: Box<str>,
     pub features: Box<[Box<str>]>,
     pub provenance: SourceBinding,
+    pub origin: Origin,
     pub requires: Box<[Requirement]>,
 }
 
@@ -63,7 +72,7 @@ pub fn requirement_type() -> Type {
 }
 
 /// The candidate record type: `{domain, package, version, features,
-/// provenance, requires}`.
+/// provenance, origin, requires}`.
 #[must_use]
 pub fn candidate_type() -> Type {
     record_type([
@@ -72,6 +81,7 @@ pub fn candidate_type() -> Type {
         (VERSION, Type::Text),
         (FEATURES, Type::List(Box::new(Type::Text))),
         (PROVENANCE, source_type()),
+        (ORIGIN, origin_type()),
         (REQUIRES, Type::List(Box::new(requirement_type()))),
     ])
 }
@@ -99,6 +109,7 @@ impl Candidate {
                 ),
             ),
             (PROVENANCE, self.provenance.to_value()),
+            (ORIGIN, self.origin.to_value()),
             (
                 REQUIRES,
                 Value::List(self.requires.iter().map(requirement_value).collect()),
@@ -140,6 +151,10 @@ impl Candidate {
         let provenance = field_of(fields, PROVENANCE)
             .map(SourceBinding::from_value)
             .transpose()?;
+        let origin = match field_of(fields, ORIGIN) {
+            Some(payload) => Origin::from_value(payload)?,
+            None => return Err(diag(format!("the candidate record carried no {ORIGIN}"))),
+        };
         let mut requires = Vec::new();
         if let Some(Value::List(entries)) = field_of(fields, REQUIRES) {
             for entry in entries.iter() {
@@ -158,6 +173,7 @@ impl Candidate {
             version,
             features: features.into(),
             provenance,
+            origin,
             requires: requires.into(),
         })
     }
@@ -291,6 +307,7 @@ impl CandidateUniverse {
 mod tests {
     use super::*;
     use crate::constraint::Bound;
+    use crate::lock::Origin;
     use crate::source::SourceBinding;
     use pith_ids::ContentId;
 
@@ -307,6 +324,7 @@ mod tests {
                 path: "vendor/zlib".into(),
                 content: ContentId::of_blob(b"zlib-tree"),
             },
+            origin: Origin::LocalPath("vendor/zlib".into()),
             requires,
         }
     }
@@ -360,6 +378,7 @@ mod tests {
                 path: "vendor/openssl".into(),
                 content: ContentId::of_blob(b"openssl"),
             },
+            origin: Origin::LocalPath("vendor/openssl".into()),
             requires: Box::new([]),
         };
         let universe = CandidateUniverse::new(vec![zlib("1.3", Box::new([])), openssl]);

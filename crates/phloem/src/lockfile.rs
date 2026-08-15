@@ -278,14 +278,30 @@ fn singleton<'a>(tokens: &'a [String], directive: &str, number: usize) -> PithRe
     }
 }
 
-fn bind_line(entry: &LockEntry) -> String {
+/// One binding in its written spelling: the fields a witnessed line
+/// carries — domain, name, version, features, and the bound content
+/// identity. The transparency log's leaf record is this line's bytes, so
+/// the log and the file share one spelling for one binding (0044).
+#[must_use]
+pub fn binding_line(entry: &LockEntry) -> String {
     format!(
-        "{BIND} {} {} {} {} {SHA256}{} {} {}",
+        "{BIND} {} {} {} {} {SHA256}{}",
         text_token(entry.package.identity().domain().as_str()),
         text_token(entry.package.identity().name()),
         text_token(entry.package.version()),
         features_token(&entry.features),
         entry.source.digest(),
+    )
+}
+
+/// One entry's whole written line: the binding, then where it was
+/// resolved from. The origin rides outside the binding because the log
+/// witnesses what the coordinates resolve to, not where any one client
+/// read it.
+fn bind_line(entry: &LockEntry) -> String {
+    format!(
+        "{} {} {}",
+        binding_line(entry),
         entry.origin.kind(),
         text_token(entry.origin.location()),
     )

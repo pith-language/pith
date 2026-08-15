@@ -12,6 +12,7 @@ use phloem::constraint::{Bound, Constraint, Range, constraint_set_value};
 use phloem::identity::{
     DEBIAN, DomainIdentity, NUMERIC_SEGMENTS, PackageIdentity, version_scheme_value,
 };
+use phloem::lock::Origin;
 use phloem::preference::{Preference, PreferenceList, preference_list_value};
 use phloem::resolution::{RESOLUTION, Resolution, resolve_interface, resolve_request};
 use phloem::resolve::{ResolveSolver, Schemes};
@@ -41,6 +42,7 @@ fn candidate(name: &str, version: &str) -> Candidate {
         provenance: SourceBinding::Archive {
             archive: ContentId::of_blob(format!("{name}-{version}").as_bytes()),
         },
+        origin: Origin::Registry("pkgs.pith-lang.org".into()),
         requires: Box::new([]),
     }
 }

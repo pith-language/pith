@@ -21,6 +21,7 @@ pub const SOURCE: &str = "phloem.Source";
 
 const ARCHIVE: &str = "Archive";
 const GIT: &str = "Git";
+const MATERIALIZED_TREE: &str = "GitTree";
 const PATH: &str = "Path";
 
 /// The record payload a git revision carries: the revision and the tree hash
@@ -28,16 +29,28 @@ const PATH: &str = "Path";
 pub const GIT_REVISION: &str = "revision";
 pub const GIT_TREE: &str = "tree";
 
+/// The record payload a materialized git tree carries: the revision and tree
+/// hash of the reference, beside the content identity measured from the
+/// bytes the fetch actually read.
+pub const TREE_CONTENT: &str = "content";
+
 /// The record payload a local path carries: the path and the content
 /// identity of what was found there when it was read.
 pub const PATH_PATH: &str = "path";
 pub const PATH_CONTENT: &str = "content";
 
-/// The declared source-binding sum type: `Archive(Blob)`, `Git({revision:
-/// Text, tree: Text})`, `Path({path: Text, content: Blob})`.
+/// The declared source-binding sum type: `Archive(Blob)`,
+/// `Git({revision: Text, tree: Text})`,
+/// `GitTree({revision: Text, tree: Text, content: Blob})`,
+/// `Path({path: Text, content: Blob})`.
 #[must_use]
 pub fn source_type() -> Type {
     let git = record_type([(GIT_REVISION, Type::Text), (GIT_TREE, Type::Text)]);
+    let git_tree = record_type([
+        (GIT_REVISION, Type::Text),
+        (GIT_TREE, Type::Text),
+        (TREE_CONTENT, Type::Blob),
+    ]);
     let path = record_type([(PATH_PATH, Type::Text), (PATH_CONTENT, Type::Blob)]);
     // The field and constructor names are distinct literals, so the
     // duplicate-name rejections are unreachable by construction.
@@ -53,6 +66,10 @@ pub fn source_type() -> Type {
                 payload: Some(git),
             },
             SumConstructor {
+                name: MATERIALIZED_TREE.into(),
+                payload: Some(git_tree),
+            },
+            SumConstructor {
                 name: PATH.into(),
                 payload: Some(path),
             },
@@ -64,10 +81,23 @@ pub fn source_type() -> Type {
 /// One source binding, as declared.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceBinding {
-    /// A registry archive, identified by its content.
+    /// A registry archive, identified by its content. The digest is the
+    /// index's claim until the fetch verifies bytes against it (0044).
     Archive { archive: ContentId },
-    /// A git revision and the tree hash it resolved to.
+    /// A git revision and the tree hash it resolved to. A reference nobody
+    /// fetched: the lock refuses to bind it (0041), and the refusal stands
+    /// until a fetch materializes the tree and the binding becomes a
+    /// [`SourceBinding::GitTree`].
     Git { revision: Box<str>, tree: Box<str> },
+    /// A git reference a fetch materialized: the revision and tree hash it
+    /// resolved to, beside the content identity measured from the bytes
+    /// read. A lock binds this where the unfetched reference refuses
+    /// (0044).
+    GitTree {
+        revision: Box<str>,
+        tree: Box<str>,
+        content: ContentId,
+    },
     /// A local path and the content identity of what was read there.
     Path { path: Box<str>, content: ContentId },
 }
@@ -84,6 +114,19 @@ impl SourceBinding {
                 Some(record_value([
                     (GIT_REVISION, Value::Text(revision.clone())),
                     (GIT_TREE, Value::Text(tree.clone())),
+                ])),
+            ),
+            Self::GitTree {
+                revision,
+                tree,
+                content,
+            } => sum_value(
+                SOURCE,
+                MATERIALIZED_TREE,
+                Some(record_value([
+                    (GIT_REVISION, Value::Text(revision.clone())),
+                    (GIT_TREE, Value::Text(tree.clone())),
+                    (TREE_CONTENT, Value::Blob(*content)),
                 ])),
             ),
             Self::Path { path, content } => sum_value(
@@ -129,6 +172,14 @@ impl SourceBinding {
                 let (revision, tree) = git_fields(record)?;
                 Ok(Self::Git { revision, tree })
             }
+            (MATERIALIZED_TREE, Some(record)) => {
+                let (revision, tree, content) = git_tree_fields(record)?;
+                Ok(Self::GitTree {
+                    revision,
+                    tree,
+                    content,
+                })
+            }
             (PATH, Some(record)) => {
                 let (path, content) = path_fields(record)?;
                 Ok(Self::Path { path, content })
@@ -154,6 +205,29 @@ fn git_fields(record: &Value) -> PithResult<(Box<str>, Box<str>)> {
         }
         _ => Err(diag(format!(
             "the {GIT} payload did not carry {GIT_REVISION} and {GIT_TREE} texts"
+        ))),
+    }
+}
+
+/// Extract `(revision, tree, content)` from a materialized-tree payload
+/// record that `is_type` has already accepted.
+fn git_tree_fields(record: &Value) -> PithResult<(Box<str>, Box<str>, ContentId)> {
+    let Value::Record(fields) = record else {
+        return Err(diag(format!(
+            "the {MATERIALIZED_TREE} constructor carried {record:?} rather than a record"
+        )));
+    };
+    match (
+        field_of(fields, GIT_REVISION),
+        field_of(fields, GIT_TREE),
+        field_of(fields, TREE_CONTENT),
+    ) {
+        (Some(Value::Text(revision)), Some(Value::Text(tree)), Some(Value::Blob(content))) => {
+            Ok((revision.clone(), tree.clone(), *content))
+        }
+        _ => Err(diag(format!(
+            "the {MATERIALIZED_TREE} payload did not carry {GIT_REVISION} and {GIT_TREE} texts \
+             and a {TREE_CONTENT} blob"
         ))),
     }
 }
@@ -189,6 +263,14 @@ mod tests {
         }
     }
 
+    fn git_tree() -> SourceBinding {
+        SourceBinding::GitTree {
+            revision: "9f11b1d".into(),
+            tree: "e3b0c44".into(),
+            content: ContentId::of_blob(b"tree-archive"),
+        }
+    }
+
     fn path() -> SourceBinding {
         SourceBinding::Path {
             path: "vendor/zlib".into(),
@@ -198,7 +280,7 @@ mod tests {
 
     #[test]
     fn every_binding_round_trips_through_its_value() {
-        for binding in [archive(), git(), path()] {
+        for binding in [archive(), git(), git_tree(), path()] {
             let value = binding.to_value();
             assert!(
                 value.is_type(&source_type()),
