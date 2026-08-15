@@ -93,7 +93,7 @@ fn resolve(
     declaration: &Environment,
     universe: &CandidateUniverse,
 ) -> pith_diag::PithResult<phloem::document::Lock> {
-    let document = EnvironmentDocument::resolve(
+    let realized = EnvironmentDocument::resolve(
         declaration,
         &mut engine(),
         universe,
@@ -102,7 +102,7 @@ fn resolve(
         100,
         &[],
     )?;
-    Ok(document.lock)
+    Ok(realized.document.lock)
 }
 
 fn offer_over(
@@ -154,6 +154,7 @@ fn the_offer_that_serves_is_a_function_of_the_offer_set_not_the_slice_order() {
             offers,
         )
         .unwrap()
+        .document
     };
     let wrong_first = [
         Offer {
@@ -219,7 +220,8 @@ fn an_environment_declared_as_a_value_resolves_and_locks_through_the_engine() {
         100,
         &[],
     )
-    .unwrap();
+    .unwrap()
+    .document;
     assert_eq!(document.name, declared.name);
     assert_eq!(document.platform, declared.platform);
     assert_eq!(document.toolchain, declared.toolchain);
@@ -248,7 +250,8 @@ fn materializing_one_declaration_twice_produces_the_same_environment() {
         100,
         &[],
     )
-    .unwrap();
+    .unwrap()
+    .document;
     let second = EnvironmentDocument::resolve(
         &declaration(),
         &mut engine(),
@@ -258,7 +261,8 @@ fn materializing_one_declaration_twice_produces_the_same_environment() {
         100,
         &[],
     )
-    .unwrap();
+    .unwrap()
+    .document;
     assert_eq!(environment::render(&first), environment::render(&second));
     assert_eq!(first.content_id(), second.content_id());
     assert_eq!(first.lock, second.lock);
@@ -408,7 +412,8 @@ fn resolving_an_environment_touches_no_path_until_the_caller_writes() {
         100,
         &[],
     )
-    .unwrap();
+    .unwrap()
+    .document;
     let rendered = environment::render(&document);
     assert!(
         std::fs::read_dir(scratch.path()).unwrap().next().is_none(),
@@ -437,7 +442,8 @@ fn a_served_substitution_persists_in_the_record_and_not_in_the_lock() {
         100,
         &[],
     )
-    .unwrap();
+    .unwrap()
+    .document;
     let entry = built.lock.entries.first().unwrap();
     let offer = offer_over(entry, BINARY, &built.toolchain);
     let offers = [Offer {
@@ -455,6 +461,11 @@ fn a_served_substitution_persists_in_the_record_and_not_in_the_lock() {
         &offers,
     )
     .unwrap();
+    assert!(
+        substituted.refusals.is_empty(),
+        "an offer that served leaves nothing to explain"
+    );
+    let substituted = substituted.document;
     assert_eq!(substituted.substitutions.len(), 1);
     let record = substituted.substitutions.first().unwrap();
     assert_eq!(record.built_from, entry.source);
@@ -470,8 +481,11 @@ fn a_served_substitution_persists_in_the_record_and_not_in_the_lock() {
         "the lock records source only and does not move"
     );
 
-    // A tampered offer serves nothing: the record holds it not, and the
-    // build the refusal left running is 0042's business.
+    // A tampered offer serves nothing, and its refusal arrives beside the
+    // document with both sides of the comparison, so the caller can tell a
+    // tampered artifact from an unauthorized origin. The build the refusal
+    // left running is 0042's business; the document is the one an absent
+    // offer produces.
     let tampered: &[u8] = b"zlib-1.3-tampered.so";
     let refused = EnvironmentDocument::resolve(
         &declaration(),
@@ -487,10 +501,23 @@ fn a_served_substitution_persists_in_the_record_and_not_in_the_lock() {
     )
     .unwrap();
     assert!(
-        refused.substitutions.is_empty(),
+        refused.document.substitutions.is_empty(),
         "bytes measuring other than the claim serve nothing"
     );
-    assert_eq!(refused.lock, built.lock);
+    assert_eq!(refused.document.lock, built.lock);
+    assert_eq!(
+        refused.document.content_id(),
+        built.content_id(),
+        "a refusal returns beside the document and does not move its identity"
+    );
+    let explanation = refused.refusals.first().expect("the refusal arrives");
+    assert_eq!(explanation.package, entry.package);
+    let message = format!("{}", explanation.refusal);
+    assert!(
+        message.contains(&ContentId::of_blob(BINARY).digest().to_string())
+            && message.contains(&ContentId::of_blob(tampered).digest().to_string()),
+        "the refusal names the claimed and the measured content: {message}"
+    );
 }
 
 #[test]
@@ -509,7 +536,8 @@ fn the_declaration_and_the_record_round_trip_through_their_values() {
         100,
         &[],
     )
-    .unwrap();
+    .unwrap()
+    .document;
     let entry = document.lock.entries.first().unwrap();
     let offer = offer_over(entry, BINARY, &document.toolchain);
     document = EnvironmentDocument::resolve(
@@ -524,7 +552,8 @@ fn the_declaration_and_the_record_round_trip_through_their_values() {
             bytes: BINARY,
         }],
     )
-    .unwrap();
+    .unwrap()
+    .document;
     let value = document.to_value();
     assert!(value.is_type(&phloem::environment::environment_document_type()));
     let decoded = pith_core::Value::decode_canonical(&value.encode_canonical()).unwrap();

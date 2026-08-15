@@ -6,7 +6,11 @@
 //! (0039) — and the substitution records 0042 returned to the caller. A
 //! project declares one (`Environment`), resolves it through the ordinary
 //! solver, and realizes its entries against the offers this machine holds,
-//! which produces the document (`EnvironmentDocument`).
+//! which produces the document (`EnvironmentDocument`) beside the refusals
+//! the realization produced: a refused offer changes nothing about what
+//! the environment serves — the build runs, as it would with no offer at
+//! all — so its explanation returns with the answer rather than entering
+//! the document and moving its digest.
 //!
 //! Computing all of that is pure, on the ground 0041 put the lock's write
 //! on: resolving, locking, realizing, digesting, and rendering touch no
@@ -38,13 +42,14 @@ use crate::codec::{field_of, record_type, record_value, text_field};
 use crate::constraint::{Constraint, constraint_type};
 use crate::diag;
 use crate::document::{Lock, LockChange, diff as diff_locks, lock_type};
-use crate::identity::version_scheme_value;
+use crate::identity::{PackageVersion, version_scheme_value};
 use crate::lock::{Origin, origin_type};
 use crate::locktext::{SHA256, token};
 use crate::preference::PreferenceList;
 use crate::resolution::{Resolution, resolve_request};
 use crate::substitution::{
-    Admission, Admitted, AdmittedOrigins, BinaryOffer, Realization, realize, substitution_type,
+    Admission, Admitted, AdmittedOrigins, BinaryOffer, Realization, Refusal, realize,
+    substitution_type,
 };
 use crate::universe::CandidateUniverse;
 
@@ -250,6 +255,10 @@ impl EnvironmentDocument {
     /// constructors are facts about the problem, and an environment is not
     /// one of them.
     ///
+    /// The answer carries the refusals beside the document: every offer
+    /// that was tested and turned down is returned as 0042's value, so the
+    /// explanation arrives every time rather than dying at this boundary.
+    ///
     /// # Errors
     /// The engine's diagnostics when the resolution fails, and the lock's
     /// when the answer does not select or a candidate carries no content
@@ -262,7 +271,7 @@ impl EnvironmentDocument {
         preferences: &PreferenceList,
         budget: u64,
         offers: &[Offer<'_>],
-    ) -> PithResult<Self> {
+    ) -> PithResult<Realized> {
         let request = resolve_request(
             &version_scheme_value(scheme),
             &Value::List(
@@ -279,13 +288,16 @@ impl EnvironmentDocument {
         let answer = engine.evaluate_pure(&request)?;
         let resolution = Resolution::from_value(&answer.value)?;
         let lock = Lock::from_resolution(scheme, preferences, &resolution)?;
-        let substitutions = realize_entries(declaration, &lock, offers);
-        Ok(Self {
-            name: declaration.name.clone(),
-            lock,
-            platform: declaration.platform.clone(),
-            toolchain: declaration.toolchain.clone(),
-            substitutions: substitutions.into(),
+        let (substitutions, refusals) = realize_entries(declaration, &lock, offers);
+        Ok(Realized {
+            document: Self {
+                name: declaration.name.clone(),
+                lock,
+                platform: declaration.platform.clone(),
+                toolchain: declaration.toolchain.clone(),
+                substitutions: substitutions.into(),
+            },
+            refusals: refusals.into(),
         })
     }
 
@@ -374,18 +386,49 @@ impl EnvironmentDocument {
     }
 }
 
+/// One offer the realization tested and refused: the binding it claimed,
+/// carried by the entry's coordinates, and the clause that turned it down.
+/// The refusal is 0042's value — the failing clause and both sides of the
+/// comparison — so a caller can tell a tampered artifact from an
+/// unauthorized origin without re-running the test.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Refused {
+    pub package: PackageVersion,
+    pub refusal: Refusal,
+}
+
+/// A declaration realized: the environment document, and the refusals its
+/// realization produced.
+///
+/// The refusals ride beside the document rather than inside it on purpose.
+/// A refused offer changes nothing about what the environment serves — the
+/// build runs from source, the same realization an absent offer produces —
+/// so a refusal in the document would make a stale mirror's rejected offer
+/// part of what "the same environment" means. The explanation still
+/// arrives every time, in the order the entries sort with each entry's
+/// offers in the canonical order over claims.
+pub struct Realized {
+    pub document: EnvironmentDocument,
+    pub refusals: Box<[Refused]>,
+}
+
 /// Realize every lock entry against the offers that claim it, collecting
-/// the admitted substitutions. A refused or absent offer builds, which is
-/// 0042's fallback and not this module's concern.
+/// the admitted substitutions and the refusals. A refused or absent offer
+/// builds, which is 0042's fallback and not this module's concern.
 ///
 /// Every offer claiming the entry's identity is tested, in the canonical
-/// order over claims, and the first that admits serves. Taking the first
-/// hit in the caller's slice instead would let a wrong-version offer
-/// sitting ahead of the right one refuse on the binding leg with the right
-/// one never examined, and which of two offers serves would depend on an
-/// order nobody declared.
-fn realize_entries(declaration: &Environment, lock: &Lock, offers: &[Offer<'_>]) -> Vec<Admitted> {
+/// order over claims, and the first that admits serves; a refusal is
+/// carried out for every offer that was tested and refused while none
+/// served. When a substitution serves, the offers after it in the
+/// canonical order are not examined: the build they would have stood in
+/// for is not running, so their refusals explain nothing.
+fn realize_entries(
+    declaration: &Environment,
+    lock: &Lock,
+    offers: &[Offer<'_>],
+) -> (Vec<Admitted>, Vec<Refused>) {
     let mut admitted = Vec::new();
+    let mut refused = Vec::new();
     for entry in lock.entries.iter() {
         let admission = Admission {
             entry,
@@ -399,15 +442,24 @@ fn realize_entries(declaration: &Environment, lock: &Lock, offers: &[Offer<'_>])
             .collect();
         claiming.sort_by_key(|offered| offered.offer.canonical_key());
         for offered in claiming {
-            if let Realization::Substituted(record) =
-                realize(&admission, Some((offered.offer, offered.bytes)))
-            {
-                admitted.push(record);
-                break;
+            match realize(&admission, Some((offered.offer, offered.bytes))) {
+                Realization::Substituted(record) => {
+                    admitted.push(record);
+                    break;
+                }
+                Realization::Built {
+                    refused: Some(refusal),
+                } => refused.push(Refused {
+                    package: entry.package.clone(),
+                    refusal,
+                }),
+                Realization::Built { refused: None } => {
+                    unreachable!("an offer was handed to the admission test")
+                }
             }
         }
     }
-    admitted
+    (admitted, refused)
 }
 
 /// One moved input of an environment diff.
