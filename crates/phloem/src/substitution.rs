@@ -15,10 +15,11 @@
 //! have built from comes from the offer and must equal the source the entry
 //! binds, which is what makes the offer a claim about a binding rather than
 //! about a name. The realization coordinates — the platform under the same
-//! [`ExecutionPlatform`] 0031's admission test reads, and the toolchain — come
-//! from the run and are compared against the offer's, because a binary built
-//! for another environment is a different realization, not a substitution
-//! candidate for this one. The binary's own content identity is measured from
+//! [`ExecutionPlatform`] 0031's admission test reads, and the toolchain as
+//! the value the run's build requests carry — come from the run and are
+//! compared against the offer's, because a binary built for another
+//! environment is a different realization, not a substitution candidate for
+//! this one. The binary's own content identity is measured from
 //! the bytes read, never taken from the offer. And an authorization covers the
 //! substitution: M-4 ships no keys, so it degrades to a local decision naming
 //! the origins whose offers this run considers at all, on the position Nix
@@ -58,11 +59,14 @@ pub struct BinaryOffer {
     /// this is the offer's statement that it realized that binding.
     pub built_from: ContentId,
     pub platform: ExecutionPlatform,
-    /// The toolchain identity the binary claims to have been built under, in
-    /// the spelling the run's build requests carry. Platform and toolchain
-    /// are the request-input half of a realization's identity (0039), so an
-    /// offer under another toolchain realizes something this run would not.
-    pub toolchain: Box<str>,
+    /// The toolchain the binary claims to have been built under, as the value
+    /// the run's build requests carry (xylem's toolchain value). Platform and
+    /// toolchain are the request-input half of a realization's identity
+    /// (0039), so an offer under another toolchain realizes something this
+    /// run would not. The leg compares the values, so a claim spelled any
+    /// other way is a claim about another toolchain rather than another
+    /// spelling of this one.
+    pub toolchain: Value,
     /// The digest the publisher claims for the binary's bytes, which the test
     /// measures rather than believes.
     pub claimed: ContentId,
@@ -76,7 +80,7 @@ impl BinaryOffer {
         features: impl IntoIterator<Item = impl Into<Box<str>>>,
         built_from: ContentId,
         platform: ExecutionPlatform,
-        toolchain: impl Into<Box<str>>,
+        toolchain: Value,
         claimed: ContentId,
         origin: Origin,
     ) -> Self {
@@ -87,7 +91,7 @@ impl BinaryOffer {
             features: features.into(),
             built_from,
             platform,
-            toolchain: toolchain.into(),
+            toolchain,
             claimed,
             origin,
         }
@@ -119,7 +123,10 @@ impl AdmittedOrigins {
 pub struct Admission<'a> {
     pub entry: &'a LockEntry,
     pub platform: &'a ExecutionPlatform,
-    pub toolchain: &'a str,
+    /// The toolchain this run's build requests carry. The same value a
+    /// caller hands to [`realization_requests`], so the leg cannot be spelled
+    /// independently of the build it guards.
+    pub toolchain: &'a Value,
     pub origins: &'a AdmittedOrigins,
 }
 
@@ -137,7 +144,9 @@ pub struct Admitted {
     /// The source the lock bound, which the offer's claim matched.
     pub built_from: ContentId,
     pub platform: ExecutionPlatform,
-    pub toolchain: Box<str>,
+    /// The toolchain the test matched, as the value the run's build requests
+    /// carry.
+    pub toolchain: Value,
     /// The digest computed from the bytes read, not the one the offer
     /// claimed. 0014's distinction: this is the measurement.
     pub measured: ContentId,
@@ -173,7 +182,12 @@ pub fn substitution_type() -> Type {
         (BUILT_FROM, Type::Blob),
         (OPERATING_SYSTEM, Type::Text),
         (ARCHITECTURE, Type::Text),
-        (TOOLCHAIN, Type::Text),
+        (
+            TOOLCHAIN,
+            Type::Nominal {
+                name: xylem::types::TOOLCHAIN.into(),
+            },
+        ),
         (BINARY, Type::Blob),
         (AUTHORIZED_BY, crate::lock::origin_type()),
     ])
@@ -208,7 +222,7 @@ impl Admitted {
                 ARCHITECTURE,
                 Value::Text(self.platform.architecture.clone()),
             ),
-            (TOOLCHAIN, Value::Text(self.toolchain.clone())),
+            (TOOLCHAIN, self.toolchain.clone()),
             (BINARY, Value::Blob(self.measured)),
             (AUTHORIZED_BY, self.authorized_by.to_value()),
         ])
@@ -244,7 +258,10 @@ impl Admitted {
         let built_from = blob_field(fields, BUILT_FROM)?;
         let operating_system = text_field(fields, OPERATING_SYSTEM)?;
         let architecture = text_field(fields, ARCHITECTURE)?;
-        let toolchain = text_field(fields, TOOLCHAIN)?;
+        let toolchain = match field_of(fields, TOOLCHAIN) {
+            Some(payload) => payload.clone(),
+            None => return Err(crate::diag(format!("the record carried no {TOOLCHAIN}"))),
+        };
         let measured = blob_field(fields, BINARY)?;
         let authorized_by = match field_of(fields, AUTHORIZED_BY) {
             Some(payload) => Origin::from_value(payload)?,
@@ -292,8 +309,8 @@ pub enum Refusal {
         offered: ExecutionPlatform,
     },
     Toolchain {
-        running: Box<str>,
-        offered: Box<str>,
+        running: Value,
+        offered: Value,
     },
     Content {
         claimed: ContentId,
@@ -343,7 +360,9 @@ impl std::fmt::Display for Refusal {
             ),
             Self::Toolchain { running, offered } => write!(
                 formatter,
-                "this run realizes under `{running}` and the binary was built under `{offered}`"
+                "this run realizes under {} and the binary was built under {}",
+                running.describe(),
+                offered.describe(),
             ),
             Self::Content { claimed, measured } => write!(
                 formatter,
@@ -424,9 +443,9 @@ pub fn admit(
             offered: offer.platform.clone(),
         });
     }
-    if admission.toolchain != offer.toolchain.as_ref() {
+    if admission.toolchain != &offer.toolchain {
         return Err(Refusal::Toolchain {
-            running: admission.toolchain.into(),
+            running: admission.toolchain.clone(),
             offered: offer.toolchain.clone(),
         });
     }
@@ -448,7 +467,7 @@ pub fn admit(
         features: entry.features.clone(),
         built_from: entry.source,
         platform: offer.platform.clone(),
-        toolchain: offer.toolchain.clone(),
+        toolchain: admission.toolchain.clone(),
         measured,
         authorized_by: authorized_by.clone(),
     })
@@ -494,7 +513,12 @@ mod tests {
     use crate::source::SourceBinding;
 
     const BINARY: &[u8] = b"zlib-1.3.so";
-    const TOOLCHAIN: &str = "gcc-13";
+
+    /// The run's toolchain as one value, the same spelling the build requests
+    /// carry, so the admission leg and the derived requests cannot drift.
+    fn toolchain() -> Value {
+        xylem::types::toolchain("/nix/store/gcc-13")
+    }
 
     fn platform() -> ExecutionPlatform {
         ExecutionPlatform {
@@ -540,7 +564,7 @@ mod tests {
             ["shared"],
             source(),
             platform(),
-            TOOLCHAIN,
+            toolchain(),
             ContentId::of_blob(BINARY),
             builder(),
         )
@@ -562,11 +586,12 @@ mod tests {
         entry: &'a LockEntry,
         platform: &'a ExecutionPlatform,
         origins: &'a AdmittedOrigins,
+        toolchain: &'a Value,
     ) -> Admission<'a> {
         Admission {
             entry,
             platform,
-            toolchain: TOOLCHAIN,
+            toolchain,
             origins,
         }
     }
@@ -577,12 +602,18 @@ mod tests {
         // the value the clause that produced it read, and the measured digest
         // is computed from the bytes rather than copied from the claim.
         let (entry, platform, origins) = (entry(), platform(), origins());
-        let admitted = admit(&admission(&entry, &platform, &origins), &offer(), BINARY).unwrap();
+        let toolchain = toolchain();
+        let admitted = admit(
+            &admission(&entry, &platform, &origins, &toolchain),
+            &offer(),
+            BINARY,
+        )
+        .unwrap();
         assert_eq!(admitted.package, package());
         assert_eq!(admitted.features, Box::from([Box::from("shared")]));
         assert_eq!(admitted.built_from, source());
         assert_eq!(admitted.platform, platform);
-        assert_eq!(admitted.toolchain, Box::from(TOOLCHAIN));
+        assert_eq!(admitted.toolchain, toolchain);
         assert_eq!(admitted.measured, ContentId::of_blob(BINARY));
         assert_eq!(admitted.authorized_by, builder());
     }
@@ -593,6 +624,7 @@ mod tests {
         // one input moved at a time, the rest held at their admitting values,
         // and the outcome is the refusal that names the moved one.
         let (entry, platform, origins) = (entry(), platform(), origins());
+        let toolchain = toolchain();
         let elsewhere = ExecutionPlatform {
             operating_system: "darwin".into(),
             architecture: "aarch64".into(),
@@ -607,7 +639,7 @@ mod tests {
         let mut wrong_platform = offer();
         wrong_platform.platform = elsewhere.clone();
         let mut wrong_toolchain = offer();
-        wrong_toolchain.toolchain = "clang-18".into();
+        wrong_toolchain.toolchain = xylem::types::toolchain("/nix/store/clang-18");
         let mut unknown_origin = offer();
         unknown_origin.origin = Origin::Registry("attacker.example".into());
 
@@ -648,8 +680,8 @@ mod tests {
                 wrong_toolchain,
                 BINARY,
                 Refusal::Toolchain {
-                    running: TOOLCHAIN.into(),
-                    offered: "clang-18".into(),
+                    running: toolchain.clone(),
+                    offered: xylem::types::toolchain("/nix/store/clang-18"),
                 },
             ),
             (
@@ -670,8 +702,12 @@ mod tests {
             ),
         ];
         for (perturbed, bytes, expected) in cases {
-            let refusal = admit(&admission(&entry, &platform, &origins), &perturbed, bytes)
-                .expect_err("the perturbed input is refused");
+            let refusal = admit(
+                &admission(&entry, &platform, &origins, &toolchain),
+                &perturbed,
+                bytes,
+            )
+            .expect_err("the perturbed input is refused");
             assert_eq!(refusal, expected, "the refusal names the moved input");
         }
     }
@@ -679,8 +715,8 @@ mod tests {
     #[test]
     fn a_substitution_issues_no_build_request_and_a_refusal_issues_them_all() {
         let (entry, platform, origins) = (entry(), platform(), origins());
-        let admission = admission(&entry, &platform, &origins);
-        let toolchain = xylem::types::toolchain("/nix/store/cc");
+        let toolchain = toolchain();
+        let admission = admission(&entry, &platform, &origins, &toolchain);
 
         let substituted = realize(&admission, Some((&offer(), BINARY)));
         assert!(matches!(substituted, Realization::Substituted(_)));
@@ -719,13 +755,14 @@ mod tests {
         // inputs and reaches the same answer, and an origin the policy
         // later admits is admitted with no state to clear.
         let (entry, platform) = (entry(), platform());
+        let toolchain = toolchain();
         let narrow = AdmittedOrigins(Box::new([]));
         let first = realize(
-            &admission(&entry, &platform, &narrow),
+            &admission(&entry, &platform, &narrow, &toolchain),
             Some((&offer(), BINARY)),
         );
         let second = realize(
-            &admission(&entry, &platform, &narrow),
+            &admission(&entry, &platform, &narrow, &toolchain),
             Some((&offer(), BINARY)),
         );
         assert_eq!(first, second);
@@ -738,7 +775,7 @@ mod tests {
 
         let widened = origins();
         let third = realize(
-            &admission(&entry, &platform, &widened),
+            &admission(&entry, &platform, &widened, &toolchain),
             Some((&offer(), BINARY)),
         );
         assert!(matches!(third, Realization::Substituted(_)));
@@ -747,10 +784,11 @@ mod tests {
     #[test]
     fn a_refusal_names_the_clause_and_both_sides_of_the_disagreement() {
         let (entry, platform, origins) = (entry(), platform(), origins());
+        let toolchain = toolchain();
         let mut republished = offer();
         republished.built_from = ContentId::of_blob(b"zlib-1.3-republished.tar");
         let refusal = admit(
-            &admission(&entry, &platform, &origins),
+            &admission(&entry, &platform, &origins, &toolchain),
             &republished,
             BINARY,
         )
@@ -776,7 +814,7 @@ mod tests {
             ["zlib", "shared"],
             source(),
             platform(),
-            TOOLCHAIN,
+            toolchain(),
             ContentId::of_blob(BINARY),
             builder(),
         );
@@ -785,7 +823,7 @@ mod tests {
             ["shared", "zlib"],
             source(),
             platform(),
-            TOOLCHAIN,
+            toolchain(),
             ContentId::of_blob(BINARY),
             builder(),
         );
@@ -797,7 +835,13 @@ mod tests {
         // The provenance claim crosses processes as its value, the piece the
         // lock's refusal of binaries leaves unwitnessed.
         let (entry, platform, origins) = (entry(), platform(), origins());
-        let admitted = admit(&admission(&entry, &platform, &origins), &offer(), BINARY).unwrap();
+        let toolchain = toolchain();
+        let admitted = admit(
+            &admission(&entry, &platform, &origins, &toolchain),
+            &offer(),
+            BINARY,
+        )
+        .unwrap();
         let value = admitted.to_value();
         assert!(value.is_type(&substitution_type()));
         let decoded = Value::decode_canonical(&value.encode_canonical()).unwrap();
