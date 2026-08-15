@@ -388,8 +388,8 @@ impl EnvironmentDocument {
 
 /// One offer the realization tested and refused: the binding it claimed,
 /// carried by the entry's coordinates, and the clause that turned it down.
-/// The refusal is 0042's value — the failing clause and both sides of the
-/// comparison — so a caller can tell a tampered artifact from an
+/// The refusal is 0042's value, the failing clause and both sides of the
+/// comparison, so a caller can tell a tampered artifact from an
 /// unauthorized origin without re-running the test.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Refused {
@@ -416,7 +416,7 @@ pub struct Realized {
 /// builds, which is 0042's fallback and not this module's concern.
 ///
 /// Every offer claiming the entry's identity is tested, in the canonical
-/// order over claims, and the first that admits serves; a refusal is
+/// order over claims, and the first that admits serves. a refusal is
 /// carried out for every offer that was tested and refused while none
 /// served. When a substitution serves, the offers after it in the
 /// canonical order are not examined: the build they stood in for is not
@@ -540,7 +540,7 @@ fn toolchain_token(toolchain: &Value) -> String {
     let driver = match toolchain {
         Value::Nominal { representation, .. } => match representation.as_ref() {
             Value::Text(driver) => return token(driver),
-            // A toolchain value xylem never produces; quoted so the line
+            // A toolchain value xylem never produces, quoted so the line
             // still parses.
             other => other.describe(),
         },
@@ -599,7 +599,7 @@ pub fn render(document: &EnvironmentDocument) -> String {
 
 /// The derivation's one rule: a declared environment name becomes a file
 /// name beside the lock, so it must be a single path component. A name with
-/// a separator or a `..` would derive a path outside the project root; the
+/// a separator or a `..` would derive a path outside the project root. the
 /// refusal surfaces at the derivation, before any caller acts on a path.
 ///
 /// # Errors

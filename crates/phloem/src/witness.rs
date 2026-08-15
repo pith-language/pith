@@ -7,7 +7,7 @@
 //! math both halves share. The log is an append-only Merkle tree over leaf
 //! records (a leaf is one binding line, spelled by the lock's own line
 //! codec); a checkpoint names the log's origin, its size, and the root hash
-//! of the tree it commits to; an inclusion proof is the sibling hashes that
+//! of the tree it commits to. an inclusion proof is the sibling hashes that
 //! recompute the root from one leaf. Verification recomputes the root from
 //! the leaf it holds and the path it was served and compares it against the
 //! checkpoint, which is what detects a log that never recorded the line the
@@ -36,7 +36,7 @@ const NODE_DOMAIN: &[u8] = b"phloem.log-node-v1\0";
 
 /// A log's signed-tree-head shape: which log this is, how many records it
 /// holds, and the root hash committing to them. The name follows Go's
-/// spelling because the shape does; unlike Go's, it carries no signature.
+/// spelling because the shape does. unlike Go's, it carries no signature.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Checkpoint {
     /// The log's declared identity, the thing a person's configuration
@@ -130,7 +130,7 @@ fn digest_of(text: &str) -> Option<ContentDigest> {
 }
 
 /// The largest power of two strictly below `size`, for a size of at least
-/// two; the split point the tree of `size` leaves folds at.
+/// two, which is the split point the tree of `size` leaves folds at.
 fn split_below(size: u64) -> u64 {
     // The shift lands at most at the word's highest bit, because the
     // leading zeros of a nonzero `size - 1` leave it in range.
@@ -141,7 +141,7 @@ fn split_below(size: u64) -> u64 {
 }
 
 /// The Merkle root over `hashes`, folding left-to-right at powers of two
-/// the transparent-log arrangement fixes. The empty tree has no root;
+/// the transparent-log arrangement fixes. The empty tree has no root, and
 /// [`MerkleTree::new`] refuses one, so every tree and checkpoint has
 /// `size >= 1`.
 fn root_of(hashes: &[ContentDigest]) -> ContentDigest {
@@ -180,7 +180,7 @@ fn path_of(index: u64, hashes: &[ContentDigest]) -> Vec<ContentDigest> {
 
 /// The log's operator half: a tree over records that serves the root a
 /// checkpoint names and the proofs a client verifies. A pith-operated log
-/// and the prototype's fixture share this spelling; a third-party log
+/// and the prototype's fixture share this spelling. a third-party log
 /// needs only the checkpoint and proof format above.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MerkleTree {

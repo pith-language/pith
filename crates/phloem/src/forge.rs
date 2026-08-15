@@ -4,7 +4,7 @@
 //! Git is the one source whose witness is intrinsic. An object's name is
 //! the hash of its exact bytes, a tree's hash covers everything beneath
 //! it, and a commit's hash covers its tree and parents, so a revision
-//! already authenticates the content it names; a fetch verifies every
+//! already authenticates the content it names, and a fetch verifies every
 //! object it receives against its own hash. The ref is the part git does
 //! not authenticate: a branch is a mutable pointer no commit records, so
 //! the candidate carries the concrete revision and tree hash the ref
@@ -14,7 +14,7 @@
 //!
 //! Running `git` is a caller-side effect on the same ground as reading a
 //! registry directory: it happens before any request exists, and what it
-//! produces — the candidate, then the measured archive — is a declared
+//! produces, the candidate and then the measured archive, is a declared
 //! input. The engine never runs here.
 
 use std::path::Path;
@@ -74,7 +74,7 @@ fn git(repo: &Path, arguments: &[&str]) -> Result<String, ForgeError> {
 /// reference resolved to and the tree hash it names, with `forge` recorded
 /// as where the reference was read. The candidate carries a reference, so
 /// a lock refuses to bind it until [`materialize_resolution`] has read the
-/// tree; resolution chooses among references, and only the choice is
+/// tree. resolution chooses among references, and only the choice is
 /// fetched.
 ///
 /// A caller-side effect: this resolves the reference by running git.
@@ -153,10 +153,8 @@ pub fn materialize_resolution(repo: &Path, resolution: &Resolution) -> PithResul
 }
 
 /// The archive of one revision's tree, as bytes, measured. `git archive`
-/// output is a function of the tree — timestamps clamp to the commit's —
-/// so the measured archive and the tree hash are two spellings of one
-/// content, and the revision's own hash is what authenticated it on the
-/// way in.
+/// output is a function of the tree, because timestamps clamp to the
+/// commit's, so the measured archive and the tree hash name one content.
 ///
 /// A caller-side effect: this runs git.
 ///

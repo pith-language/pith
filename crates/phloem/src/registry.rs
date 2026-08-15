@@ -17,10 +17,11 @@
 //! miniaturized to a directory: `index/<domain>/<name>` holds one line per
 //! version (`<version> <features> sha256:<digest>`), and
 //! `pkg/<domain>/<name>-<version>.tar` holds the bytes. Beside it a log
-//! directory holds `checkpoint` and `leaves`; the leaves are binding lines
+//! directory holds `checkpoint` and `leaves`, and the leaves are binding
+//! lines
 //! in the lock's own spelling, so the line the log witnesses and the line
 //! the file writes are one line. The digests in the index are the
-//! registry's claims, verified against fetched bytes and against the log;
+//! registry's claims, verified against fetched bytes and against the log.
 //! the whole claim structure is decided in 0044, not here.
 
 use std::path::Path;
@@ -70,7 +71,7 @@ pub fn read_index(root: &Path, registry: &str) -> PithResult<CandidateUniverse> 
 }
 
 /// One index line as one candidate: `<version> <features> sha256:<digest>`,
-/// where the digest is the registry's claim about the archive; the fetch
+/// where the digest is the registry's claim about the archive. the fetch
 /// verifies it against bytes and the witness against the log.
 fn index_candidate(domain: &str, name: &str, line: &str, registry: &str) -> PithResult<Candidate> {
     let tokens =
@@ -93,11 +94,10 @@ fn index_candidate(domain: &str, name: &str, line: &str, registry: &str) -> Pith
     })
 }
 
-#[derive(Clone, Debug)]
-pub struct FetchedPlaceholder;
-/// from them. The measurement is the fact; whether it matches what the
-/// entry binds is [`LockEntry::verify_resolution`]'s question, and whether
-/// it matches what the log witnessed is the witness verification's.
+/// One fetched entry: the bytes as read, and the content identity measured
+/// from them. Matching the measurement against the binding is
+/// [`LockEntry::verify_resolution`], and matching it against the log is the
+/// witness verification.
 #[derive(Debug)]
 pub struct Fetched {
     pub bytes: Vec<u8>,
@@ -145,7 +145,7 @@ pub struct Witnessed {
 ///
 /// A caller-side effect over the log directory: the checkpoint, the leaf
 /// lines, and the proof derived from them. In the deployed arrangement the
-/// proof arrives from the log's server; here it is derived from the same
+/// proof arrives from the log's server. here it is derived from the same
 /// leaves the checkpoint commits to.
 ///
 /// # Errors

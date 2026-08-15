@@ -45,7 +45,7 @@ pub struct Requirement {
 /// One candidate: a subject's coordinates, the provenance of those
 /// coordinates, and the requirements selecting this candidate imposes.
 ///
-/// The origin is where the candidate was read — the registry identity an
+/// The origin is where the candidate was read: the registry identity an
 /// index names itself by, the forge a reference resolved against, the path
 /// a vendor tree sits at. It is the entry's evidence and cannot be derived
 /// from the provenance: a registry archive's digest names its content, not

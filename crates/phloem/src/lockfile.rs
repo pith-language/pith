@@ -279,7 +279,7 @@ fn singleton<'a>(tokens: &'a [String], directive: &str, number: usize) -> PithRe
 }
 
 /// One binding in its written spelling: the fields a witnessed line
-/// carries — domain, name, version, features, and the bound content
+/// carries: domain, name, version, features, and the bound content
 /// identity. The transparency log's leaf record is this line's bytes, so
 /// the log and the file share one spelling for one binding (0044).
 #[must_use]

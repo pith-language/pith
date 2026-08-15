@@ -83,7 +83,7 @@ fn binding_of(published: &Published) -> LockEntry {
 /// archives, the log's leaves in the lock's own binding spelling, and the
 /// checkpoint over them. The test is the log's operator here, which is the
 /// server's half done by hand.
-/// Publish a registry and its witnessing log — the index lines, the
+/// Publish a registry and its witnessing log: the index lines, the
 /// archives, the log's leaves in the lock's own binding spelling, and the
 /// checkpoint over them. The test is the log's operator here; the fallible
 /// filesystem work is carried as a result so the tests unwrap at their

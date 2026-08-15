@@ -23,7 +23,7 @@
 //! fetched archive becomes the measured content a binding is verified
 //! against, and a transparency log over binding lines becomes the witness,
 //! anchored in the checkpoint a person's configuration pins. Every adapter
-//! read is a caller-side effect; the engine never learns that sources
+//! read is a caller-side effect, and the engine never learns that sources
 //! exist.
 
 pub(crate) mod codec;
