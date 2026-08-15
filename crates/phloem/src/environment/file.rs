@@ -6,8 +6,9 @@ use pith_diag::PithResult;
 
 use crate::codec::FIELD_TOOLCHAIN;
 use crate::diag;
-use crate::environment::{DEFAULT_ENVIRONMENT, EnvironmentDocument};
 use crate::locktext::{SHA256, token};
+
+use super::{DEFAULT_ENVIRONMENT, EnvironmentDocument};
 
 const DEFAULT_LOCK_FILE: &str = "pith.lock";
 const DEFAULT_RECORD_FILE: &str = "pith.env";

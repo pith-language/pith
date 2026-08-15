@@ -2,7 +2,8 @@ use pith_core::Value;
 use pith_engine::ExecutionPlatform;
 
 use crate::document::{LockChange, diff as diff_locks};
-use crate::environment::EnvironmentDocument;
+
+use super::EnvironmentDocument;
 
 /// One moved input of an environment diff.
 #[derive(Clone, Debug, PartialEq, Eq)]

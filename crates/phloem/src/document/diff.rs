@@ -4,9 +4,10 @@ use std::collections::BTreeMap;
 
 use pith_ids::ContentId;
 
-use crate::document::Lock;
 use crate::identity::{PackageIdentity, PackageVersion};
 use crate::lock::LockEntry;
+
+use super::Lock;
 
 /// One moved header input, or one moved entry, of a lock diff.
 #[derive(Clone, Debug, PartialEq, Eq)]

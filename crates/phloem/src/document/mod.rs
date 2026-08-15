@@ -27,7 +27,9 @@ use crate::resolution::Resolution;
 use crate::source::SourceBinding;
 use crate::universe::Candidate;
 
-pub use crate::lockdiff::{LockChange, LockDiff, diff};
+mod diff;
+
+pub use self::diff::{LockChange, LockDiff, diff};
 
 /// The digest domain for one revision of a lock document. NUL-terminated so
 /// it is self-delimiting against the canonical bytes that follow, mirroring

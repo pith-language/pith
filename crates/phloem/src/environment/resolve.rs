@@ -4,12 +4,13 @@ use pith_engine::Engine;
 
 use crate::constraint::Constraint;
 use crate::document::Lock;
-use crate::environment::{Environment, EnvironmentDocument};
 use crate::identity::{PackageVersion, version_scheme_value};
 use crate::preference::{PreferenceList, preference_list_value};
 use crate::resolution::{Resolution, resolve_request};
 use crate::substitution::{Admission, Admitted, BinaryOffer, Refusal, Serving, serve};
 use crate::universe::CandidateUniverse;
+
+use super::{Environment, EnvironmentDocument};
 
 /// One offer an environment is realized against: the claim and the bytes it
 /// claims an identity for.

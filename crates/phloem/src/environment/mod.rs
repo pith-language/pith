@@ -45,9 +45,13 @@ use crate::document::{Lock, lock_type};
 use crate::lock::{Origin, origin_type};
 use crate::substitution::{Admitted, AdmittedOrigins, substitution_type};
 
-pub use crate::environmentdiff::{EnvironmentChange, diff};
-pub use crate::environmentfile::{lock_path, record_path, render};
-pub use crate::environmentresolve::{Offer, Realized, Refused};
+mod diff;
+mod file;
+mod resolve;
+
+pub use self::diff::{EnvironmentChange, diff};
+pub use self::file::{lock_path, record_path, render};
+pub use self::resolve::{Offer, Realized, Refused};
 
 /// The digest domain for one revision of an environment document,
 /// NUL-terminated so it is self-delimiting against the canonical bytes that
