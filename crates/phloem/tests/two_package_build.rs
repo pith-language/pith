@@ -36,8 +36,7 @@ use phloem::preference::{Preference, PreferenceList, preference_list_value};
 use phloem::registry;
 use phloem::resolution::{Resolution, resolve_request};
 use phloem::resolve::{ResolveSolver, Schemes};
-use phloem::source::SourceBinding;
-use phloem::universe::{Candidate, Requirement};
+use phloem::universe::Requirement;
 use phloem::witness::{Checkpoint, MerkleTree};
 use pith_core::{Pure, Request, Value};
 use pith_engine::state::MemoryEngineStateStore;
@@ -173,15 +172,7 @@ fn publish(root: &Path, packages: &[Published]) -> pith_diag::PithResult<Checkpo
     for package in packages {
         let archive = archive_of_published(package);
         let digest = ContentId::of_blob(&archive);
-        let candidate = Candidate {
-            identity: identity(package.name),
-            version: package.version.into(),
-            features: Box::new([]),
-            provenance: SourceBinding::Archive { archive: digest },
-            origin: Origin::Registry(REGISTRY.into()),
-            requires: package.requires.clone(),
-        };
-        let line = registry::index_line(&candidate);
+        let line = registry::index_line(package.version, &[], digest, &package.requires);
         match index.iter_mut().find(|(name, _)| name == package.name) {
             Some((_, lines)) => lines.push_str(&format!("{line}\n")),
             None => index.push((package.name.into(), format!("{line}\n"))),

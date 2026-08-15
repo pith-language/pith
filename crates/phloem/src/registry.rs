@@ -17,7 +17,6 @@ use crate::lockfile;
 use crate::locktext::{
     features_token, parse_digest, parse_features, parse_range, range_token, tokenize,
 };
-use crate::source::SourceBinding;
 use crate::universe::{Candidate, CandidateUniverse, Requirement};
 use crate::witness::{self, Checkpoint, Inclusion};
 
@@ -48,23 +47,28 @@ pub fn read_index(root: &Path, registry: &str) -> PithResult<CandidateUniverse> 
     Ok(CandidateUniverse::new(candidates))
 }
 
-/// One candidate as one index line, the spelling [`read_index`] parses — the
-/// same one-spelling arrangement the lock's binding line has, so a publisher
-/// and a reader cannot drift into two formats. Requirements render in the
-/// order the candidate carries them.
+/// One index line from the fields a line carries — the spelling
+/// [`read_index`] parses, the same one-spelling arrangement the lock's
+/// binding line has, so a publisher and a reader cannot drift into two
+/// formats. The domain and package name are the file's path on the read
+/// side and never appear in the line, and the provenance is the archive the
+/// digest claims, so a candidate of another binding shape has no line to
+/// write. Requirements render in the order given.
 #[must_use]
-pub fn index_line(candidate: &Candidate) -> String {
-    let SourceBinding::Archive { archive } = candidate.provenance else {
-        unreachable!("a registry candidate binds an archive");
-    };
+pub fn index_line(
+    version: &str,
+    features: &[Box<str>],
+    archive: ContentId,
+    requires: &[Requirement],
+) -> String {
     let mut line = format!(
         "{} {} {}{}",
-        candidate.version,
-        features_token(&candidate.features),
+        version,
+        features_token(features),
         crate::locktext::SHA256,
         archive.digest(),
     );
-    for requirement in candidate.requires.iter() {
+    for requirement in requires {
         line.push_str(&format!(
             " requires {}/{} {}",
             requirement.subject.domain().as_str(),

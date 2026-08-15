@@ -20,7 +20,7 @@ use phloem::preference::{Preference, PreferenceList, preference_list_value};
 use phloem::registry;
 use phloem::resolution::{Resolution, resolve_request};
 use phloem::resolve::{ResolveSolver, Schemes};
-use phloem::universe::{Candidate, Requirement};
+use phloem::universe::Requirement;
 use phloem::witness::{Checkpoint, MerkleTree};
 use pith_engine::Engine;
 use pith_engine::state::MemoryEngineStateStore;
@@ -100,17 +100,12 @@ fn publish(root: &Path, packages: &[Published]) -> pith_diag::PithResult<Checkpo
     };
     let mut index: Vec<(String, String)> = Vec::new();
     for package in packages {
-        let candidate = Candidate {
-            identity: identity(package.name),
-            version: package.version.into(),
-            features: Box::new([]),
-            provenance: phloem::source::SourceBinding::Archive {
-                archive: ContentId::of_blob(package.bytes),
-            },
-            origin: Origin::Registry(REGISTRY.into()),
-            requires: package.requires.clone(),
-        };
-        let line = registry::index_line(&candidate);
+        let line = registry::index_line(
+            package.version,
+            &[],
+            ContentId::of_blob(package.bytes),
+            &package.requires,
+        );
         match index.iter_mut().find(|(name, _)| name == package.name) {
             Some((_, lines)) => lines.push_str(&format!("{line}\n")),
             None => index.push((package.name.into(), format!("{line}\n"))),

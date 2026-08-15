@@ -331,14 +331,12 @@ pub(crate) fn range_token(range: &crate::constraint::Range) -> String {
 ///
 /// # Errors
 /// A [`pith_diag::DiagnosticSink`] naming the line and the text when it is
-/// not a range of this shape.
+/// not a range of this shape. A malformed two-edge range names which edge
+/// failed; a malformed single token names the grammar rather than guessing
+/// which side it was meant to be.
 pub(crate) fn parse_range(text: &str, number: usize) -> PithResult<crate::constraint::Range> {
     use crate::constraint::{Bound, Range};
-    let bad = |what: &str| {
-        diag(format!(
-            "line {number}: `{text}` is not {what} a range of this format spells"
-        ))
-    };
+    let bad = |complaint: &str| diag(format!("line {number}: `{text}` is not {complaint}"));
     // The version spelling belongs to the domain's scheme, but the operator
     // characters belong to this grammar: a version carrying one would re-split
     // the token, so the parse refuses it rather than guessing a cut.
@@ -358,12 +356,12 @@ pub(crate) fn parse_range(text: &str, number: usize) -> PithResult<crate::constr
     let lower = |edge: &str| {
         bound(edge, ">=")
             .or_else(|| exclusive(edge, ">"))
-            .ok_or_else(|| bad("a lower edge of"))
+            .ok_or_else(|| bad("a lower edge (`>=1.0` or `>1.0`) of a two-edge range"))
     };
     let upper = |edge: &str| {
         bound(edge, "<=")
             .or_else(|| exclusive(edge, "<"))
-            .ok_or_else(|| bad("an upper edge of"))
+            .ok_or_else(|| bad("an upper edge (`<=2.0` or `<2.0`) of a two-edge range"))
     };
     if text == "*" {
         return Ok(Range::Any);
@@ -373,15 +371,24 @@ pub(crate) fn parse_range(text: &str, number: usize) -> PithResult<crate::constr
             if let Some(spelled) = single.strip_prefix('=').and_then(version) {
                 return Ok(Range::Exactly(spelled.into()));
             }
-            lower(single)
-                .map(Range::AtLeast)
-                .or_else(|_| upper(single).map(Range::AtMost))
+            if let Some(at_least) = bound(single, ">=").or_else(|| exclusive(single, ">")) {
+                return Ok(Range::AtLeast(at_least));
+            }
+            if let Some(at_most) = bound(single, "<=").or_else(|| exclusive(single, "<")) {
+                return Ok(Range::AtMost(at_most));
+            }
+            Err(bad(
+                "a range this format spells: `*`, `=1.0`, `>=1.0`, `>1.0`, `<=2.0`, `<2.0`, or \
+                 a comma-joined pair such as `>=1.0,<2.0`",
+            ))
         }
         [low, high] => Ok(Range::Between {
             lower: lower(low)?,
             upper: upper(high)?,
         }),
-        _ => Err(bad("within the edges of")),
+        _ => Err(bad(
+            "a range of at most two comma-joined edges, lower then upper",
+        )),
     }
 }
 

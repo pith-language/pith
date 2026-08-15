@@ -155,15 +155,18 @@ pub(crate) fn provided_headers_of(value: &Value) -> PithResult<Vec<ProvidedHeade
 /// The headers one compile may see: the registered universe plus the request's
 /// provided set, refusing a path the two spell with different content — the
 /// same include naming two headers is a conflict to report, and agreeing
-/// duplicates collapse.
+/// duplicates collapse, whether they agree with the registration or with an
+/// earlier provided header.
 pub(crate) fn effective_headers(
     universe: &HeaderUniverse,
     provided: &[ProvidedHeader],
 ) -> PithResult<Vec<(Box<str>, ContentId)>> {
     let mut headers: Vec<(Box<str>, ContentId)> = universe.iter().cloned().collect();
     for header in provided {
-        match universe.resolve(&header.path) {
-            Some(registered) if registered != header.content => {
+        // A provided header naming the registered content collapses into the
+        // entry the universe already contributed.
+        if let Some(registered) = universe.resolve(&header.path) {
+            if registered != header.content {
                 return Err(diag(&format!(
                     "the include path `{}` is provided as content `{}` and registered as \
                      content `{}`: one spelling cannot name two headers",
@@ -172,8 +175,18 @@ pub(crate) fn effective_headers(
                     registered.digest(),
                 )));
             }
-            // A provided header naming the registered content collapses into
-            // the entry the universe already contributed.
+            continue;
+        }
+        match headers.iter().find(|(offered, _)| *offered == header.path) {
+            Some((_, existing)) if *existing != header.content => {
+                return Err(diag(&format!(
+                    "the include path `{}` is provided twice, as content `{}` and as \
+                     content `{}`: one spelling cannot name two headers",
+                    header.path,
+                    existing.digest(),
+                    header.content.digest(),
+                )));
+            }
             Some(_) => {}
             None => headers.push((header.path.clone(), header.content)),
         }

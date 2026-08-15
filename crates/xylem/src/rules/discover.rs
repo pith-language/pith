@@ -241,5 +241,39 @@ mod tests {
                 .any(|d| d.message.0.contains("answer.h") && d.message.0.contains("two headers")),
             "the refusal names the path and the conflict: {error:?}"
         );
+
+        // Two provided headers naming one path: the conflict the merge
+        // cannot resolve, and the agreement that collapses.
+        let header = ContentId::of_blob(b"two providers, one header");
+        let other = ContentId::of_blob(b"another header");
+        let agreeing = vec![
+            types::toolchain("/bin/cc"),
+            types::c_source(ContentId::of_blob(b"source")),
+            types::provided_headers([("dep.h", header), ("dep.h", header)]),
+        ];
+        let spec = discovery
+            .plan(&agreeing)
+            .expect("agreeing duplicates collapse");
+        let paths: Vec<&str> = spec.inputs.iter().map(|i| i.path.as_ref()).collect();
+        assert_eq!(
+            paths,
+            ["source.c", "answer.h", "unused.h", "dep.h"],
+            "one path is staged once however many times it is named"
+        );
+
+        let disagreeing = vec![
+            types::toolchain("/bin/cc"),
+            types::c_source(ContentId::of_blob(b"source")),
+            types::provided_headers([("dep.h", header), ("dep.h", other)]),
+        ];
+        let error = discovery
+            .plan(&disagreeing)
+            .expect_err("one spelling cannot name two headers");
+        assert!(
+            error
+                .iter()
+                .any(|d| d.message.0.contains("dep.h") && d.message.0.contains("provided twice")),
+            "the refusal names the path and both sides of the disagreement: {error:?}"
+        );
     }
 }
