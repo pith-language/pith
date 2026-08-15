@@ -1,10 +1,8 @@
-//! Publishing the written lock to the filesystem (decision 0041).
+//! Atomic filesystem publication for written locks.
 //!
-//! Writing and reading are caller effects at 0003's boundary. No rule sees
-//! a path; the engine computes the value, and whoever drives it renders
-//! the document and writes the file. Publication follows 0024's content
-//! discipline, the same discipline the store adapters implement: a flushed
-//! temporary file renamed into place, so a crash cannot leave a torn lock.
+//! Publication writes and flushes a temporary file, renames it into place,
+//! then flushes the destination directory. These operations are caller-side
+//! effects.
 
 use std::io::Write as _;
 use std::path::Path;
@@ -16,16 +14,11 @@ use crate::diag;
 use crate::document::Lock;
 use crate::lockfile;
 
-/// Write the lock to `path` on the publication discipline the content
-/// store implements (0024): a temporary file named for this writer and
-/// created exclusively, so two writers cannot share one; flushed; renamed
-/// into place; the destination directory flushed after the rename so the
-/// rename itself survives a crash; and the temporary file removed on every
-/// failure path. A caller-side effect: no rule reaches this.
+/// Atomically writes a lock through an exclusive temporary file.
 ///
 /// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming the path and the failure when the
-/// file cannot be written, flushed, renamed, or its directory flushed.
+/// Returns a diagnostic when writing, flushing, renaming, or directory
+/// synchronization fails.
 pub fn write(lock: &Lock, path: &Path) -> PithResult<()> {
     let text = lockfile::render(lock);
     let directory = destination_directory(path);
@@ -86,12 +79,10 @@ fn remove_temporary_file(path: &Path) {
     let _ = std::fs::remove_file(path);
 }
 
-/// Read the lock at `path` and parse it. A caller-side effect, the read
-/// side of the same boundary.
+/// Reads and parses the lock at `path`.
 ///
 /// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming the path and the failure when the
-/// file cannot be read, and the parse diagnostics when it is not a lock.
+/// Returns a diagnostic when the file cannot be read or parsed.
 pub fn read(path: &Path) -> PithResult<Lock> {
     let text =
         std::fs::read_to_string(path).map_err(|error| io_diag("reading the lock", path, &error))?;
@@ -170,9 +161,6 @@ mod tests {
 
     #[test]
     fn the_written_first_line_names_the_format_version() {
-        // The publication half owns nothing about the format, but it is the
-        // half that crosses the process boundary, so the version line the
-        // reader refuses to misunderstand is asserted where the file is.
         let scratch = TempDir::new().unwrap();
         let path = scratch.path().join("pith.lock");
         write(&lock(), &path).unwrap();

@@ -1,17 +1,8 @@
-//! The lock document: what a written lock is a projection of (decision 0041).
+//! Lock documents and structural lock comparison.
 //!
-//! The document is a value that holds the entries and, beside them, every
-//! input a selection depended on that the declarations do not already hold:
-//! the resolver revision, the declared version scheme, the preference list,
-//! and the digest of the candidate universe the resolution ran against. The
-//! budget is absent because it shapes whether the deterministic walk
-//! finishes, never what it selects. The constraint set is absent because
-//! the lock records what resolution adds to the declarations, and
-//! staleness against them is a comparison of values rather than a hash.
-//!
-//! Reading a lock back is both a record and an input: the entries become
-//! pins, exact constraints over the coordinates each entry carries, and a
-//! header field that moved is the staleness a diff names.
+//! A lock records selected source bindings with the resolver, version scheme,
+//! preferences, and candidate universe used to select them. Lock entries can
+//! be converted to exact constraints for a later resolution.
 
 use pith_core::{Type, Value};
 use pith_diag::PithResult;
@@ -31,9 +22,7 @@ mod diff;
 
 pub use self::diff::{LockChange, LockDiff, diff};
 
-/// The digest domain for one revision of a lock document. NUL-terminated so
-/// it is self-delimiting against the canonical bytes that follow, mirroring
-/// the domain separation `pith-ids` applies to every digest kind it owns.
+/// Digest domain for lock document values.
 const LOCK_DOMAIN: &[u8] = b"phloem.lock-v1\0";
 
 const RESOLVER: &str = "resolver";
@@ -42,9 +31,7 @@ const UNIVERSE: &str = "universe";
 const PREFERENCES: &str = "preferences";
 const ENTRIES: &str = "entries";
 
-/// The declared lock-document record type: the resolver revision, the
-/// declared version scheme, the candidate-universe digest, the preference
-/// list, and the entries, as one value.
+/// Returns the declared lock document record type.
 #[must_use]
 pub fn lock_type() -> Type {
     record_type([
@@ -59,15 +46,7 @@ pub fn lock_type() -> Type {
     ])
 }
 
-/// One lock document: the entries a resolution selected, with every input
-/// the selection depended on that the declarations do not already hold.
-///
-/// The entries are a set over package identities, held in one canonical
-/// order — by each entry's canonical encoding — so the same selection set
-/// has one spelling and one digest regardless of the order the search
-/// reported. The rendered file orders the same entries by the line's own
-/// bytes instead, which is the diff's business rather than the digest's
-/// (0041).
+/// A resolved set of source bindings and the inputs that selected them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Lock {
     /// The resolve rule's revision digest, as lowercase hex.
@@ -83,18 +62,10 @@ pub struct Lock {
 }
 
 impl Lock {
-    /// A lock document over `entries`, sorted into the canonical order the
-    /// digest and the rendered file read.
-    ///
-    /// The entries are a set over package identities, the property `parse`
-    /// enforces when it reads a file: a document holding two bindings for one
-    /// package would render a file `parse` rejects, which falsifies the
-    /// round-trip guarantee on the document's own output. The constructor
-    /// refuses the document rather than sorting the conflict away.
+    /// Creates a lock with entries sorted by canonical encoding.
     ///
     /// # Errors
-    /// A [`pith_diag::DiagnosticSink`] naming the package and both versions
-    /// when `entries` binds one package twice.
+    /// Returns a diagnostic when `entries` binds one package more than once.
     pub fn new(
         resolver: impl Into<Box<str>>,
         scheme: impl Into<Box<str>>,
@@ -132,7 +103,7 @@ impl Lock {
         })
     }
 
-    /// The document as a value of the declared record type.
+    /// Encodes the lock as its declared record type.
     #[must_use]
     pub fn to_value(&self) -> Value {
         record_value([
@@ -147,11 +118,10 @@ impl Lock {
         ])
     }
 
-    /// Read a lock document from a value.
+    /// Decodes a lock document from `value`.
     ///
     /// # Errors
-    /// A [`pith_diag::DiagnosticSink`] naming the declared type and the
-    /// value found when the value is not a lock document.
+    /// Returns a diagnostic when `value` is not a lock document.
     pub fn from_value(value: &Value) -> PithResult<Self> {
         if !value.is_type(&lock_type()) {
             return Err(diag(format!(
@@ -184,27 +154,17 @@ impl Lock {
         Self::new(resolver, scheme, universe, preferences, entries)
     }
 
-    /// The document's own content identity: a digest over its canonical
-    /// encoding, identifying one revision of the lock. The rendered file
-    /// never feeds a digest (0041); this is what "the same lock" means.
+    /// Returns the content identity of the lock's canonical value encoding.
     #[must_use]
     pub fn content_id(&self) -> ContentId {
         value_content_id(LOCK_DOMAIN, &self.to_value())
     }
 
-    /// The lock a resolution writes. The answer contributes the selection
-    /// and the universe digest it resolved against; the scheme and the
-    /// preference list are request-side inputs the answer deliberately does
-    /// not repeat (0040's protocol: an answer names the choice and the
-    /// explanation), so the caller — the party holding both halves —
-    /// supplies them. Only a solved resolution selects; the other three
-    /// constructors are facts about the problem or the run, and a lock
-    /// records selections.
+    /// Creates a lock from a solved resolution.
     ///
     /// # Errors
-    /// A [`pith_diag::DiagnosticSink`] naming the constructor when the
-    /// resolution is not `Solved`, and naming the candidate when its
-    /// provenance carries no content identity to bind.
+    /// Returns a diagnostic when the resolution is not solved or a selected
+    /// candidate has no materialized content identity.
     pub fn from_resolution(
         scheme: &str,
         preferences: &PreferenceList,
@@ -233,10 +193,7 @@ impl Lock {
         )
     }
 
-    /// The entries as pin constraints: exact ranges over the coordinates
-    /// each entry carries, attributed to the lock. Fed to an ordinary
-    /// resolution as its constraint set, a pinned re-resolution under the
-    /// same universe reproduces the selection.
+    /// Converts each lock entry to an exact constraint.
     #[must_use]
     pub fn pins(&self) -> Box<[Constraint]> {
         self.entries
@@ -265,17 +222,7 @@ fn constructor_of(resolution: &Resolution) -> &'static str {
     }
 }
 
-/// One candidate as one entry. The content side comes from the candidate's
-/// provenance where provenance is content: a path records the path it was
-/// read at and the content found there, an archive carries the digest the
-/// registry's index claimed — which the fetch verifies against bytes — and
-/// a git tree a fetch materialized carries the content measured from the
-/// bytes that fetch read (0044). A bare git reference still refuses: a
-/// revision with a tree hash is content nobody read, and binding
-/// coordinates to it would be a claim, not a measurement (0014). The
-/// origin is where the candidate was read, a fact of the universe rather
-/// than something the provenance can spell: an archive's digest names its
-/// content, not the registry that served the claim.
+/// Converts a candidate with materialized content into a lock entry.
 fn entry_of(candidate: &Candidate) -> PithResult<LockEntry> {
     let source = match &candidate.provenance {
         SourceBinding::Path { content, .. } => *content,
@@ -577,10 +524,6 @@ mod tests {
 
     #[test]
     fn a_moved_feature_set_is_one_selection_moving_not_a_removal_and_an_addition() {
-        // Keyed on the package identity, the key parse and the solver use: a
-        // feature set that moved reads as the same package's selection
-        // moving, and a version that moved alongside it still fires the
-        // upgrade.
         let entry = |version: &str, features: &[&str], source: &[u8]| {
             LockEntry::new(
                 PackageVersion::new(identity("openssl"), version),
@@ -642,8 +585,6 @@ mod tests {
 
     #[test]
     fn a_document_cannot_bind_one_package_twice() {
-        // The set property parse enforces on files is the document's own, so
-        // a lock built in memory cannot render a file the reader refuses.
         let error = Lock::new(
             Box::from("r"),
             NUMERIC_SEGMENTS,

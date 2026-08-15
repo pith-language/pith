@@ -1,13 +1,7 @@
-//! The source binding: a declared sum with typed payloads (decision 0039).
+//! Typed source bindings for package candidates.
 //!
-//! A source is a fixed set of constructors carrying different payloads — a
-//! registry archive with its digest, a git revision with its tree hash, a
-//! local path with its content identity. 0039 argues this is a sum and not a
-//! record with a tag field: the tag spelling re-creates the flat-namespace
-//! ambiguity 0026 rejected polymorphic variants for, at a smaller scale. The
-//! payloads are typed: an archive carries its content identity, a git
-//! revision carries a record of its revision and tree hash, a local path
-//! carries a record of its path and content identity.
+//! Bindings represent registry archives, unresolved Git references,
+//! materialized Git trees, and local paths.
 
 use pith_core::{SumConstructor, Type, Value};
 use pith_diag::PithResult;
@@ -53,8 +47,7 @@ pub fn source_type() -> Type {
         (TREE_CONTENT, Type::Blob),
     ]);
     let path = record_type([(PATH_PATH, Type::Text), (PATH_CONTENT, Type::Blob)]);
-    // The field and constructor names are distinct literals, so the
-    // duplicate-name rejections are unreachable by construction.
+    // Field and constructor names are distinct literals.
     let sum = Type::sum(
         SOURCE,
         [
@@ -82,18 +75,11 @@ pub fn source_type() -> Type {
 /// One source binding, as declared.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceBinding {
-    /// A registry archive, identified by its content. The digest is the
-    /// index's claim until the fetch verifies bytes against it (0044).
+    /// A registry archive identified by its content.
     Archive { archive: ContentId },
-    /// A git revision and the tree hash it resolved to. A reference nobody
-    /// fetched: the lock refuses to bind it (0041), and the refusal stands
-    /// until a fetch materializes the tree and the binding becomes a
-    /// [`SourceBinding::GitTree`].
+    /// A Git revision and tree hash not yet materialized.
     Git { revision: Box<str>, tree: Box<str> },
-    /// A git reference a fetch materialized: the revision and tree hash it
-    /// resolved to, beside the content identity measured from the bytes
-    /// read. A lock binds this where the unfetched reference refuses
-    /// (0044).
+    /// A materialized Git tree and its measured content identity.
     GitTree {
         revision: Box<str>,
         tree: Box<str>,
@@ -141,14 +127,10 @@ impl SourceBinding {
         }
     }
 
-    /// Read a binding from a value, accepting every declared sum of this
-    /// name that contains the selected constructor with a matching payload —
-    /// `is_type`, not `value_type`, because a sum value cannot recover its
-    /// sibling constructors (0026's asymmetry).
+    /// Decodes a source binding from `value`.
     ///
     /// # Errors
-    /// A [`pith_diag::DiagnosticSink`] naming what was expected and what was
-    /// found when the value is not a source binding.
+    /// Returns a diagnostic when `value` is not a source binding.
     pub fn from_value(value: &Value) -> PithResult<Self> {
         if !value.is_type(&source_type()) {
             return Err(diag(format!(

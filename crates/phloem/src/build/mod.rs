@@ -1,26 +1,8 @@
-//! A locked source becomes a built artifact (decision 0045).
+//! Package build declarations and execution rules.
 //!
-//! A package's build is data: the description declares a procedure from a
-//! closed set — which sources of the unpacked tree compile, and that the
-//! objects link into one executable — and phloem owns the procedure the
-//! way nix's stdenv and Guix's build systems own theirs. The packager
-//! writes the declaration and inherits the procedure; the alternative,
-//! a script the package ships, is Debian's and Homebrew's position, and a
-//! fetched source cannot carry host code this engine could run. The door
-//! that position lives behind is 0038's represented rule bodies.
-//!
-//! The procedure runs as one pure rule in the graph, the peer-consumer
-//! shape 0009 and 0039 fix: the rule requests xylem's declared entry
-//! interfaces and plans no action itself, so every action in a package
-//! build is planned and confined by xylem's rules, and the whole build is
-//! one request that reuses and hydrates on the engine's machinery (0031,
-//! 0033) with phloem adding nothing — the measurement 0039 was owed.
-//!
-//! The tree the build runs over comes from the fetch: the caller unpacks
-//! the archive (parse in [`crate::archive`], import here) and the tree
-//! value — a canonically sorted list of paths and measured file
-//! identities — is the request input the computation key covers, so a
-//! republished archive is a different tree, a different key, a rebuild.
+//! A build selects source paths from a measured source tree. The pure build
+//! rule compiles those sources through xylem and links the resulting objects.
+//! Archive unpacking imports source files at the caller's effect boundary.
 
 mod model;
 mod rule;

@@ -1,21 +1,9 @@
-//! The unpack's pure half: a tar archive as measured files (decision 0045).
+//! POSIX ustar parsing for package source archives.
 //!
-//! An archive a fetch read is a deterministic encoding, and turning it into
-//! the files it carries invokes no tool — so the unpack is not an action
-//! running `tar` but a parse, and the parse is a total function the adapter
-//! owns. The impure half of the unpack — putting the measured files into
-//! the content store — is a caller effect in [`crate::build::unpack`], on
-//! the ground 0044 put the fetch on; the engine has no path by which a
-//! pure rule publishes new store content, and this module is the half that
-//! does not need one.
-//!
-//! The format read here is POSIX ustar: a 512-byte header per entry, the
-//! entry's bytes padded to the block size, two zero blocks at the end.
-//! Regular files and directories are understood; every other entry type —
-//! hard links, symlinks, the GNU long-name pseudo-entries — is refused
-//! naming the path and the type, because this reader cannot give those
-//! entries the meaning a build would depend on, and accepting bytes it
-//! cannot interpret would move the diagnostic away from the cause.
+//! The parser accepts regular files and directories. It rejects links,
+//! extension records, unsafe paths, invalid checksums, and truncated input.
+//! Importing parsed files into the content store is handled by
+//! [`crate::build::unpack`].
 
 const BLOCK: usize = 512;
 const NAME: usize = 100;
@@ -39,16 +27,11 @@ pub struct ArchiveFile {
     pub bytes: Vec<u8>,
 }
 
-/// Parse a ustar archive into the regular files it carries, in archive
-/// order. Directories carry no bytes and are skipped; everything the
-/// archive holds that this reader cannot interpret is refused.
+/// Parses regular files from a ustar archive in archive order.
 ///
 /// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming what was found and what was
-/// expected when the bytes are not a ustar archive: a bad magic, a failed
-/// checksum, a truncated header or body, an entry type this reader refuses,
-/// or a path that is not a normal relative path or that repeats an earlier
-/// entry's path.
+/// Returns a diagnostic for malformed archives, unsupported entries, unsafe
+/// paths, or repeated file paths.
 pub fn parse(bytes: &[u8]) -> pith_diag::PithResult<Box<[ArchiveFile]>> {
     let mut files = Vec::new();
     let mut seen: Vec<Box<str>> = Vec::new();
@@ -181,10 +164,7 @@ fn entry_path(bytes: &[u8], offset: usize) -> pith_diag::PithResult<Box<str>> {
     if joined.is_empty() {
         return Err(crate::diag("an archive entry carries an empty path"));
     }
-    // A path that becomes a location inside the package tree is refused
-    // when it is not a normal relative path: an absolute path or a `..`
-    // names somewhere outside the tree, and an empty component names
-    // nothing in particular.
+    // Only normal relative paths remain inside the package tree.
     let normal = joined
         .split('/')
         .all(|component| !component.is_empty() && component != "." && component != "..");
@@ -268,8 +248,7 @@ mod tests {
         if let Some(bytes) = size_field {
             bytes.copy_from_slice(octal.as_bytes());
         }
-        // The checksum is computed with the checksum field read as spaces,
-        // which is how the reader checks it.
+        // Tar checksums treat the checksum field as spaces.
         if let Some(field) = header.get_mut(CHKSUM..CHKSUM + CHECKSUM_LEN) {
             field.fill(b' ');
         }
@@ -330,8 +309,6 @@ mod tests {
 
     #[test]
     fn directory_entries_carry_no_file() {
-        // A directory entry ahead of the file it contains: the directory
-        // yields no ArchiveFile, and the file beneath it still reads.
         let mut bytes = header("zlib-1.3", 0, DIRECTORY).to_vec();
         bytes.extend(tar(&[("zlib-1.3/zlib.c", b"int zlib(void);\n")]));
         let files = parse(&bytes).unwrap();
@@ -355,7 +332,6 @@ mod tests {
     #[test]
     fn a_truncated_body_is_refused_naming_the_entry() {
         let mut bytes = tar(&[("zlib-1.3/zlib.c", b"int zlib(void);\n")]);
-        // Drop the tail: the end marker and part of the body.
         bytes.truncate(BLOCK + 8);
         let error = parse(&bytes).unwrap_err();
         assert!(
@@ -410,8 +386,6 @@ mod tests {
             "the diagnostic names the format expected: {error:?}"
         );
 
-        // A buffer that ends inside a header block is refused as truncated,
-        // whichever check it fails first: both diagnostics name the cause.
         let error = parse(b"not an archive, just bytes").unwrap_err();
         assert!(
             error

@@ -1,11 +1,7 @@
-//! The one spelling of the value operations every phloem module needs:
-//! build a record type, build a record value, build a sum value, pull a
-//! typed field out of a record by name.
+//! Shared constructors and readers for phloem value codecs.
 //!
-//! Every declared shape here is a record or a sum built from field-name
-//! constants, and every read walks a record's fields by those same
-//! constants. One home for those operations keeps the round-trip halves
-//! derivable from one list of names rather than re-spelled per module.
+//! Record and sum codecs use the field-name constants defined here so their
+//! encoders and decoders share one spelling.
 
 use pith_core::{RecordField, Type, Value};
 use pith_diag::PithResult;
@@ -164,11 +160,10 @@ pub(crate) fn blob_field(fields: &[RecordField<Value>], name: &str) -> PithResul
     }
 }
 
-/// A record's integer field by name, as a `u64`.
+/// Reads a record's integer field as a `u64`.
 ///
 /// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming what the field carried when the
-/// record has no such field, the field is not an integer, or the integer is
+/// Returns a diagnostic when the field is missing, not an integer, or
 /// negative.
 pub(crate) fn int_field(fields: &[RecordField<Value>], name: &str) -> PithResult<u64> {
     match field_of(fields, name) {

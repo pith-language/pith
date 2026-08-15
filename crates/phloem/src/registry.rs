@@ -1,27 +1,9 @@
-//! The first source adapter: a registry read as a caller-side effect
-//! (decision 0044).
+//! Filesystem-backed package registry adapter.
 //!
-//! The adapter's reads are the discovery a pure evaluation must not do
-//! (0007), so every function here is a caller-side effect in the position
-//! 0041 put the lock's write: reading the index produces the candidate
-//! universe as a declared input, fetching an entry's archive produces
-//! bytes and their measured identity, reading the log produces the
-//! evidence a binding's verification consumes. The engine never learns
-//! that sources exist, and the reconciliation with 0040 is direct: the
-//! query is a separate step whose result becomes the declared input, and a
-//! registry whose answer moved between two runs produces a different
-//! universe digest, which the lock's diff names like any other moved
-//! input.
-//!
-//! The on-disk shape is the sparse-index arrangement crates.io fixed,
-//! miniaturized to a directory: `index/<domain>/<name>` holds one line per
-//! version (`<version> <features> sha256:<digest>`), and
-//! `pkg/<domain>/<name>-<version>.tar` holds the bytes. Beside it a log
-//! directory holds `checkpoint` and `leaves`, and the leaves are binding
-//! lines in the lock's own spelling, so the line the log witnesses and the line
-//! the file writes are one line. The digests in the index are the
-//! registry's claims, verified against fetched bytes and against the log.
-//! The whole claim structure is decided in 0044, not here.
+//! Registry reads produce candidate universes, fetched archive bytes, and
+//! transparency-log evidence. The sparse index stores one version per line;
+//! package archives and log data live in adjacent directories. All reads are
+//! caller-side effects.
 
 use std::path::Path;
 
@@ -41,18 +23,10 @@ const PACKAGE: &str = "pkg";
 const CHECKPOINT_FILE: &str = "checkpoint";
 const LEAVES_FILE: &str = "leaves";
 
-/// Read a registry's index as a candidate universe, recording `registry`
-/// as the origin every candidate was read from.
-///
-/// A caller-side effect: this reads the index directory and nothing else,
-/// and the universe it returns is the declared input a resolution runs
-/// against. Names come from the index layout itself, so a candidate's
-/// coordinates are the registry's own naming. Directory components are
-/// read in byte order; lines within one package retain the index's order.
+/// Reads a registry index as a candidate universe.
 ///
 /// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming the path and the failure when the
-/// index cannot be read, and the line when one does not parse.
+/// Returns a diagnostic when the index cannot be read or parsed.
 pub fn read_index(root: &Path, registry: &str) -> PithResult<CandidateUniverse> {
     let index = root.join(INDEX);
     let mut candidates = Vec::new();
@@ -105,15 +79,10 @@ pub struct Fetched {
     pub measured: ContentId,
 }
 
-/// Fetch the archive an entry binds, reading the bytes and measuring them.
-///
-/// A caller-side effect: this reads one package file and nothing else. The
-/// coordinates become path components, so each must be a single component.
+/// Reads and measures the archive bound by a lock entry.
 ///
 /// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming the path and the failure when the
-/// archive cannot be read, and the coordinate that cannot become a path
-/// component.
+/// Returns a diagnostic for an invalid coordinate or unreadable archive.
 pub fn fetch(root: &Path, entry: &LockEntry) -> PithResult<Fetched> {
     let identity = entry.package.identity();
     let domain = component(identity.domain().as_str(), "domain")?;
@@ -142,17 +111,11 @@ pub struct Witnessed {
     pub proof: Inclusion,
 }
 
-/// Read the log's evidence for one entry's coordinates.
-///
-/// A caller-side effect over the log directory: the checkpoint, the leaf
-/// lines, and the proof derived from them. In the deployed arrangement the
-/// proof arrives from the log's server. Here it is derived from the same
-/// leaves the checkpoint commits to.
+/// Reads transparency-log evidence for a lock entry.
 ///
 /// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming the entry and the log when the
-/// checkpoint or leaves cannot be read or parsed, and naming the
-/// coordinates when the log holds no line for them.
+/// Returns a diagnostic when log data is unreadable, invalid, or missing the
+/// entry.
 pub fn read_witness(log: &Path, entry: &LockEntry) -> PithResult<Witnessed> {
     let checkpoint = Checkpoint::parse(&read(&log.join(CHECKPOINT_FILE))?)?;
     let leaves = read(&log.join(LEAVES_FILE))?;
@@ -188,20 +151,11 @@ pub fn read_witness(log: &Path, entry: &LockEntry) -> PithResult<Witnessed> {
     })
 }
 
-/// Verify one entry's binding against the evidence the log served and the
-/// checkpoint a person's configuration pinned: the served checkpoint is
-/// the pinned one, the inclusion proof carries the line the log served —
-/// the line it holds for these coordinates — into the tree the checkpoint
-/// commits to, and the digest that line witnesses is the digest the entry
-/// binds. The first leg is the policy leg — nothing vouches for the pinned
-/// checkpoint but the configuration naming it (0044) — and the other two
-/// are facts, in the order a lookup answers them: first that the log
-/// really committed to the line, then that the line agrees with the
-/// binding.
+/// Verifies an entry against a pinned checkpoint and inclusion evidence.
 ///
 /// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming what was expected and what was
-/// found for the first leg that disagreed.
+/// Returns a diagnostic for the first mismatched checkpoint, proof, or
+/// binding.
 pub fn verify(entry: &LockEntry, evidence: &Witnessed, pinned: &Checkpoint) -> PithResult<()> {
     if evidence.checkpoint != *pinned {
         return Err(diag(format!(

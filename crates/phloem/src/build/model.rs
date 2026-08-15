@@ -9,16 +9,13 @@ const PATH: &str = "path";
 const CONTENT: &str = "content";
 const SOURCES: &str = "sources";
 
-/// The tree one archive unpacked into: the measured files, sorted by path
-/// so the tree a build runs over is a function of the archive and not of
-/// the order the reader happened to hold.
+/// Measured source files in path order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceTree {
     pub files: Box<[SourceFile]>,
 }
 
-/// One file of an unpacked tree: its path within the tree and the content
-/// identity measured from its bytes when it was imported.
+/// A source path and its measured content identity.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceFile {
     pub path: Box<str>,
@@ -26,8 +23,7 @@ pub struct SourceFile {
 }
 
 impl SourceTree {
-    /// The content identity at `path`, or `None` when the tree does not
-    /// hold it. Binary search over the sorted files.
+    /// Returns the content identity at `path`.
     #[must_use]
     pub fn content_at(&self, path: &str) -> Option<ContentId> {
         self.files
@@ -36,8 +32,7 @@ impl SourceTree {
             .and_then(|index| self.files.get(index).map(|file| file.content))
     }
 
-    /// The tree as a value: `List<{path: Text, content: Blob}>`, sorted by
-    /// path.
+    /// Encodes the tree as a path-sorted list of records.
     #[must_use]
     pub fn to_value(&self) -> Value {
         Value::List(
@@ -63,18 +58,14 @@ pub fn tree_type() -> Type {
     ])))
 }
 
-/// What a package declares as its build: the sources that compile, in link
-/// order, over the tree its archive unpacked into. The procedure around
-/// them — compile each through xylem's entry, link the objects through
-/// xylem's link entry — is the library's, on the stdenv ground that a
-/// fixed, inspectable procedure beats a script per package.
+/// Source paths to compile, in link order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PackageBuild {
     pub sources: Box<[Box<str>]>,
 }
 
 impl PackageBuild {
-    /// The build as a value of the declared record type.
+    /// Encodes the build as its declared record type.
     #[must_use]
     pub fn to_value(&self) -> Value {
         record_value([(
@@ -88,11 +79,10 @@ impl PackageBuild {
         )])
     }
 
-    /// Read a build from a value.
+    /// Decodes a package build from `value`.
     ///
     /// # Errors
-    /// A [`pith_diag::DiagnosticSink`] naming the declared type and the
-    /// value found when the value is not a package build.
+    /// Returns a diagnostic when `value` is not a package build.
     pub fn from_value(value: &Value) -> PithResult<Self> {
         let build = record_type([(SOURCES, Type::List(Box::new(Type::Text)))]);
         if !value.is_type(&build) {
@@ -120,7 +110,7 @@ pub fn build_type() -> Type {
     record_type([(SOURCES, Type::List(Box::new(Type::Text)))])
 }
 
-/// Read a tree from its value, in the sorted order the value spells.
+/// Decodes a source tree without changing its file order.
 pub(super) fn tree_from_value(value: &Value) -> PithResult<SourceTree> {
     if !value.is_type(&tree_type()) {
         return Err(diag(format!(

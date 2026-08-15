@@ -1,23 +1,8 @@
-//! The solver as a host rule in the graph (decision 0040).
+//! Resolver registration and pure rule execution.
 //!
-//! The body is a host rule on 0038's declared tier: the search is not
-//! structurally recursive, so it has no represented spelling under 0018,
-//! and it owes the engine only the determinism contract — the answer is a
-//! pure function of the request under the ordering the request names. The
-//! search's interior (backtracking, host maps keyed by subject) is
-//! invisible to the engine, which is the same epistemic position it holds
-//! toward every host rule; the value spellings stay canonically sorted
-//! lists, whose sortedness is what the digest and the diff need.
-//!
-//! The declared ordering a resolution runs under is a request input, on the
-//! terms xylem made the toolchain one: the `phloem.VersionScheme` value
-//! carries the scheme's declared name, [`Schemes`] is the lookup table that
-//! name resolves against, and because the name participates in the
-//! computation key, a resolution under a different ordering is a different
-//! computation the reusable index cannot cross-serve. A scheme held as bare
-//! rule state would be the third class 0038 named, state neither the
-//! request nor the revision covers, and an answer recorded under one
-//! ordering would be served under another.
+//! [`Schemes`] maps declared version-scheme names to implementations. The
+//! resolver rule decodes request values, runs the search, and returns the
+//! encoded resolution.
 
 use pith_core::{Pure, Rule, RuleIdentity, RuleRevision, Value};
 use pith_diag::{PithResult, Span};
@@ -32,13 +17,7 @@ use crate::resolution::resolve_interface;
 use crate::search::{SolveRequest, resolve};
 use crate::universe::CandidateUniverse;
 
-/// The declared version orderings one registration serves, resolved by the
-/// name a request carries. Mirrors xylem's `Toolchains`: one registration of
-/// the rule serves every scheme, because the scheme value in the request is
-/// what dispatch and the computation key see. Holding one scheme per
-/// registration would mean one engine per ordering, and registering the rule
-/// twice would give two rules one interface and collide as `E-1102`
-/// (decision 0015).
+/// Declared version orderings indexed by request-visible name.
 #[derive(Default)]
 pub struct Schemes {
     entries: Box<[(Box<str>, Scheme)]>,
@@ -66,8 +45,7 @@ impl Schemes {
         Ok(Self { entries })
     }
 
-    /// The two orderings phloem declares: the dot-separated numeric scheme
-    /// and the Debian scheme with epochs and tilde ordering (0039).
+    /// Returns the numeric-segments and Debian schemes.
     #[must_use]
     pub fn standard() -> Self {
         Self {
@@ -136,17 +114,10 @@ impl ResolveSolver {
     }
 }
 
-/// The revision manifest of the resolve rule. A lock records the digest of
-/// the revision it was resolved under (0041), because the selection is a
-/// function of the request under the revision as much as under the scheme,
-/// and a lock whose entries moved while no recorded input moved has this
-/// one explanation left to name.
+/// Identity input for the resolver rule revision.
 const RESOLVER_MANIFEST: &[u8] = b"phloem-resolve-v1";
 
-/// The resolver revision a lock records, as lowercase hex. The one spelling
-/// of the rule revision every registered solver shares, so the lock names
-/// the resolve rule's executable semantics and nothing about which solver
-/// body served it.
+/// Returns the resolver revision digest as lowercase hexadecimal.
 #[must_use]
 pub fn resolver_revision_hex() -> Box<str> {
     let identity = RuleIdentity::of_module_declaration("phloem", "resolve");

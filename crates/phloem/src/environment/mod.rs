@@ -1,34 +1,9 @@
-//! The development environment: a value over the lock (decision 0043).
+//! Development environment declarations and resolved documents.
 //!
-//! An environment is one resolution plus the realization coordinates it
-//! declares: the lock 0041 fixed, held unchanged, beside the platform and
-//! the toolchain — the request-input half of a realization's identity
-//! (0039) — and the substitution records 0042 returned to the caller. A
-//! project declares one (`Environment`), resolves it through the ordinary
-//! solver, and realizes its entries against the offers this machine holds,
-//! which produces the document (`EnvironmentDocument`) beside the refusals
-//! the realization produced. A refused offer leaves the build running from
-//! source, the same realization an absent offer produces, so the refusals
-//! return with the answer and do not enter the document: they would move
-//! its digest though nothing the environment serves changed.
-//!
-//! Computing all of that is pure, on the ground 0041 put the lock's write
-//! on: resolving, locking, realizing, digesting, and rendering touch no
-//! path and read no process environment, and the toolchain a declaration
-//! carries was discovered caller-side before any request existed (0028,
-//! 0030). Writing the lock and the record, and one day entering the
-//! environment, are caller effects; `nix print-dev-env` is the precedent
-//! for what ships instead of entering — the environment as data. The
-//! confinement the executor owns is claimed nowhere here: an interactive
-//! shell is the caller's process, not a sandboxed action (0028, 0030), and
-//! the record says so rather than letting a reader infer a sandbox.
-//!
-//! "Reproducible" is scoped to 0014's first two properties: the selection
-//! is a pure function of recorded inputs (0040) and the rendering is a
-//! total deterministic function of the document (0041's render
-//! discipline). Bit-for-bit reproducibility of the packages themselves is
-//! a property of build instructions, verified by rebuild, and nothing in
-//! this module asserts it.
+//! An environment combines package constraints, realization coordinates,
+//! and admitted substitution origins. Resolving it produces a lock and the
+//! substitutions that served its entries. Rendering and path derivation do
+//! not write files.
 
 use pith_core::{Type, Value};
 use pith_diag::PithResult;
@@ -53,10 +28,7 @@ pub use self::diff::{EnvironmentChange, diff};
 pub use self::file::{lock_path, record_path, render};
 pub use self::resolve::{Offer, Realized, Refused};
 
-/// The digest domain for one revision of an environment document,
-/// NUL-terminated so it is self-delimiting against the canonical bytes that
-/// follow, mirroring the domain separation `pith-ids` applies to every
-/// digest kind it owns.
+/// Digest domain for environment document values.
 const ENVIRONMENT_DOMAIN: &[u8] = b"phloem.environment-v1\0";
 
 /// The environment whose lock is the repository's default written lock.
@@ -68,27 +40,18 @@ const ORIGINS: &str = "origins";
 const LOCK: &str = "lock";
 const SUBSTITUTIONS: &str = "substitutions";
 
-/// A project's declaration of one environment: what it asks the package
-/// domain for, the realization coordinates its builds run under, and the
-/// origins whose binary offers it admits.
-///
-/// The toolchain is the value the run's build requests carry, on the terms
-/// 0042's admission leg fixed — one value, so the declaration, the
-/// admission test, and the derived requests cannot drift apart. The
-/// origins are 0042's local policy, which is a person's configuration and
-/// therefore belongs to the declared thing rather than to any run.
+/// A project's package constraints and realization settings.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Environment {
     pub name: Box<str>,
-    /// What this environment asks for, as an ordinary constraint set.
+    /// Package constraints requested by the environment.
     pub constraints: Box<[Constraint]>,
     pub platform: ExecutionPlatform,
     pub toolchain: Value,
     pub origins: AdmittedOrigins,
 }
 
-/// The declared environment's record type: the name, the constraint set,
-/// the realization coordinates, and the admitted origins.
+/// Returns the declared environment record type.
 #[must_use]
 pub fn environment_type() -> Type {
     record_type([
@@ -107,7 +70,7 @@ pub fn environment_type() -> Type {
 }
 
 impl Environment {
-    /// The declaration as a value of the declared record type.
+    /// Encodes the declaration as its declared record type.
     #[must_use]
     pub fn to_value(&self) -> Value {
         record_value([
@@ -132,11 +95,10 @@ impl Environment {
         ])
     }
 
-    /// Read a declaration from a value.
+    /// Decodes an environment declaration from `value`.
     ///
     /// # Errors
-    /// A [`pith_diag::DiagnosticSink`] naming the declared type and the
-    /// value found when the value is not an environment declaration.
+    /// Returns a diagnostic when `value` is not an environment declaration.
     pub fn from_value(value: &Value) -> PithResult<Self> {
         if !value.is_type(&environment_type()) {
             return Err(diag(format!(
@@ -189,30 +151,18 @@ impl Environment {
     }
 }
 
-/// One environment as computed: the lock of its resolution, held unchanged,
-/// beside the realization coordinates it declares and the substitutions it
-/// served.
-///
-/// The document records the declaration name and every realized input. A
-/// moved recorded input produces a different document whose diff names the
-/// input. Two platforms under one declaration share the lock — it binds
-/// source only — and differ in the realization coordinates, so per-platform
-/// environments are per-platform realizations of one selection.
+/// A resolved environment and its admitted substitutions.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EnvironmentDocument {
     pub name: Box<str>,
     pub lock: Lock,
     pub platform: ExecutionPlatform,
     pub toolchain: Value,
-    /// The substitutions this environment admitted, in the order the lock's
-    /// entries sort. The lock records source only; these records are the
-    /// environment's own answer to which binaries it served (0042's third
-    /// option, decided here).
+    /// Admitted substitutions in lock-entry order.
     pub substitutions: Box<[Admitted]>,
 }
 
-/// The environment document's record type: the name, the lock, the
-/// realization coordinates, and the substitution records.
+/// Returns the declared environment document record type.
 #[must_use]
 pub fn environment_document_type() -> Type {
     record_type([
@@ -231,16 +181,13 @@ pub fn environment_document_type() -> Type {
 }
 
 impl EnvironmentDocument {
-    /// The document's own content identity: a digest over its canonical
-    /// encoding, domain-separated the way every phloem digest is. The
-    /// rendered record never feeds a digest; this is what "the same
-    /// environment" means.
+    /// Returns the content identity of the document's canonical value encoding.
     #[must_use]
     pub fn content_id(&self) -> ContentId {
         value_content_id(ENVIRONMENT_DOMAIN, &self.to_value())
     }
 
-    /// The document as a value of the declared record type.
+    /// Encodes the document as its declared record type.
     #[must_use]
     pub fn to_value(&self) -> Value {
         record_value([
@@ -262,11 +209,10 @@ impl EnvironmentDocument {
         ])
     }
 
-    /// Read a document from a value.
+    /// Decodes an environment document from `value`.
     ///
     /// # Errors
-    /// A [`pith_diag::DiagnosticSink`] naming the declared type and the
-    /// value found when the value is not an environment document.
+    /// Returns a diagnostic when `value` is not an environment document.
     pub fn from_value(value: &Value) -> PithResult<Self> {
         if !value.is_type(&environment_document_type()) {
             return Err(diag(format!(
@@ -313,13 +259,10 @@ impl EnvironmentDocument {
     }
 }
 
-/// The toolchain's driver path. The declared type is the nominal alone, and
-/// `is_type` cannot see a nominal's representation, so the reader refuses a
-/// toolchain whose representation is not the driver path text.
+/// Returns the driver path represented by a toolchain value.
 ///
 /// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming what was found when the value is
-/// not the nominal toolchain over the driver path text.
+/// Returns a diagnostic when the toolchain does not represent a text path.
 fn toolchain_driver(toolchain: &Value) -> PithResult<&str> {
     let Value::Nominal { representation, .. } = toolchain else {
         return Err(diag(format!(
@@ -366,10 +309,6 @@ mod tests {
 
     #[test]
     fn a_toolchain_path_with_a_space_renders_in_the_line_token_spelling() {
-        // The toolchain is a text field on the header line like the name and
-        // the platform, so it takes the quoting they take. `describe` would
-        // spell the value bare, and a driver path with a space would render
-        // a line whose own grammar cannot read back.
         let rendered = render(&document(xylem::types::toolchain(
             "/nix/store/my compiler toolchain",
         )));
@@ -427,9 +366,6 @@ mod tests {
 
     #[test]
     fn a_name_that_is_not_one_path_component_is_refused_at_the_derivation() {
-        // The derivation interpolates the name into the project root, so a
-        // separator or a `..` would name a path outside it. The refusal
-        // surfaces at the derivation, before any caller acts on a path.
         for name in ["", "a/b", "..", ".", "a/../b", "/abs"] {
             for result in [
                 lock_path(Path::new("/repo"), name),

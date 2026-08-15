@@ -108,11 +108,10 @@ fn admitted_list(admitted: &[Origin]) -> String {
         .join(", ")
 }
 
-/// Apply the admission test to `offer`, whose bytes are `bytes`.
+/// Applies the admission test to an offer and its bytes.
 ///
 /// # Errors
-/// The [`Refusal`] naming the first clause that disagreed. A refusal is a
-/// miss, not a diagnostic: the caller builds instead.
+/// Returns the first admission clause that rejects the offer.
 pub fn admit(
     admission: &Admission<'_>,
     offer: &BinaryOffer,

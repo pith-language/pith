@@ -8,8 +8,7 @@ use super::EnvironmentDocument;
 /// One moved input of an environment diff.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EnvironmentChange {
-    /// A moved input or entry of the lock the environment holds, reported
-    /// by the lock's own diff.
+    /// A change reported by the lock diff.
     Lock(LockChange),
     Platform {
         from: ExecutionPlatform,
@@ -19,15 +18,11 @@ pub enum EnvironmentChange {
         from: Value,
         to: Value,
     },
-    /// The set of served substitutions moved, which happens when offers or
-    /// the admission policy moved and the selection did not.
+    /// The admitted substitutions changed.
     Substitutions,
 }
 
-/// What moved between two revisions of one environment: each moved lock
-/// input or entry, and each moved realization coordinate. The staleness
-/// check a caller runs before resolving again, on the same shape as the
-/// lock's own.
+/// Compares two environment documents.
 #[must_use]
 pub fn diff(before: &EnvironmentDocument, after: &EnvironmentDocument) -> Box<[EnvironmentChange]> {
     let mut changes = Vec::new();

@@ -1,38 +1,9 @@
-//! Packaging over the pith kernel.
+//! Package management over the pith kernel.
 //!
-//! `phloem` is the first-party package library (docs/foundation/name.md): the
-//! tissue that carries the products of builds outward, as packages. This
-//! slice prototypes decisions 0039 through 0044 over the constructors 0026
-//! landed: a package is named by declaration inside a domain, a package
-//! version adds coordinates in the comparison the domain declares, a
-//! description is a record value, a source binding is a declared sum with
-//! typed payloads, a lock entry binds coordinates to the content identity of
-//! the resolved source with the origin as evidence rather than as identity,
-//! constraints are values over the domain's ordering, resolution is a
-//! host-rule computation in the graph whose answer carries its explanation,
-//! a written lock is a text projection of the lock document that the
-//! caller writes at the effect boundary, a prebuilt binary stands in for
-//! a realization only through an admission test over that lock's binding,
-//! and a development environment is a value over the lock — one resolution
-//! plus the realization coordinates it declares and the substitutions it
-//! served — whose materialization is a projection and whose entering is a
-//! caller effect that does not exist yet.
-//!
-//! The source adapters read bytes the rest of the library only fabricated
-//! (0044): a registry index becomes the declared candidate universe, a
-//! fetched archive becomes the measured content a binding is verified
-//! against, and a transparency log over binding lines becomes the witness,
-//! anchored in the checkpoint a person's configuration pins. Every adapter
-//! read is a caller-side effect, and the engine never learns that sources
-//! exist.
-//!
-//! A locked source becomes a built artifact (0045): the fetched archive
-//! unpacks into a measured tree — a parse, not a tool — and a package's
-//! build is data from a closed procedure the library owns, one pure rule
-//! that requests xylem's compile and link entries and reuses on the
-//! engine's machinery alone. A realization is nothing the library
-//! constructs: it is the attempt the engine already holds, and the value
-//! that says how a binding was served is a `Serving`, named for that.
+//! Phloem defines package identities, source bindings, constraints,
+//! resolution, lock documents, substitutions, builds, and development
+//! environments. Filesystem and network adapters remain outside engine rule
+//! evaluation.
 
 pub(crate) mod archive;
 pub mod build;
@@ -59,13 +30,10 @@ pub mod witness;
 
 use pith_diag::{Diag, DiagnosticSink, Severity, Span, StableCode};
 
-/// The stable code every phloem diagnostic carries. xylem's rules diagnose
-/// under 9002; packaging failures get their own so a report names the library
-/// the failure came from.
+/// The stable code carried by phloem diagnostics.
 pub(crate) const PHLOEM_CODE: u32 = 9004;
 
-/// An error diagnostic carrying `message`, in the shape the kernel's rule
-/// bodies hand back to the engine.
+/// Creates an error diagnostic containing `message`.
 pub(crate) fn diag(message: impl Into<Box<str>>) -> DiagnosticSink {
     let mut sink = DiagnosticSink::new();
     sink.push(Diag::new(

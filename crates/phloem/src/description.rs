@@ -1,13 +1,8 @@
-//! The package description: a record value (decision 0039).
+//! Package descriptions and their value encoding.
 //!
-//! A package version's description is a value — a record carrying the
-//! source binding and the build the package declares. The description's
-//! own content identity is a digest of that value, and it is not the
-//! package's identity; it is one revision of the description, on the same
-//! terms a rule revision is one revision of a rule. The build field is
-//! 0045's answer to what a package declares as its build: a procedure
-//! from a closed set, spelled as data over the tree the source unpacks
-//! into, not a script the package ships and not a bare list of inputs.
+//! A description records a package name, source binding, and build
+//! declaration. Its content identity is derived from the canonical record
+//! value.
 
 use pith_core::{Type, Value};
 use pith_diag::PithResult;
@@ -43,11 +38,7 @@ pub fn description_type() -> Type {
 pub struct Description {
     pub name: Box<str>,
     pub source: SourceBinding,
-    /// The build the package declares: the sources that compile, in link
-    /// order, over the tree its archive unpacks into. Which interfaces
-    /// serve them is selection's business, on the terms 0039 sets: a
-    /// description names build interfaces and carries inputs, it never
-    /// wraps "build" as a sub-concept of "package".
+    /// Source paths to compile, in link order.
     pub build: PackageBuild,
 }
 
@@ -62,15 +53,10 @@ impl Description {
         ])
     }
 
-    /// Read a description from a value, checking inhabitation with
-    /// `is_type` rather than comparing against `value_type`: an empty
-    /// source list inhabits `List<Text>` under `is_type` while
-    /// `value_type` must name `List<Unit>` (0026's asymmetry, inherited by
-    /// every record whose fields can be empty).
+    /// Decodes a package description from `value`.
     ///
     /// # Errors
-    /// A [`pith_diag::DiagnosticSink`] naming the declared type and the
-    /// value found when the value is not a description.
+    /// Returns a diagnostic when `value` is not a package description.
     pub fn from_value(value: &Value) -> PithResult<Self> {
         if !value.is_type(&description_type()) {
             return Err(diag(format!(
@@ -100,10 +86,7 @@ impl Description {
         })
     }
 
-    /// The description's own content identity: a digest over its canonical
-    /// encoding. This identifies one revision of the description; it is not
-    /// the package's identity, and two revisions of one description name one
-    /// package (0039).
+    /// Returns the content identity of the canonical description value.
     #[must_use]
     pub fn content_id(&self) -> ContentId {
         value_content_id(DESCRIPTION_DOMAIN, &self.to_value())
@@ -140,9 +123,6 @@ mod tests {
 
     #[test]
     fn a_description_digests_stably_across_the_codec_boundary() {
-        // The digest is taken over canonical bytes, so the same description
-        // reaching it through a decode — the shape a second process reading
-        // a stored description takes — produces the same content identity.
         let declared = description();
         let decoded = Value::decode_canonical(&declared.to_value().encode_canonical()).unwrap();
         let read_back = Description::from_value(&decoded).unwrap();

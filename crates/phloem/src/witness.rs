@@ -1,25 +1,9 @@
-//! The witness a remote source's binding rests on: a transparency log over
-//! binding lines, checked locally (decision 0044).
+//! Transparency-log witnesses for lock binding lines.
 //!
-//! A lock entry is the shape a witnessed-hash-line system records —
-//! coordinates bound to a digest, go.sum's line — so the witness 0041
-//! predicted is the log, and this module is its client half plus the tree
-//! math both halves share. The log is an append-only Merkle tree over leaf
-//! records (a leaf is one binding line, spelled by the lock's own line
-//! codec); a checkpoint names the log's origin, its size, and the root hash
-//! of the tree it commits to. an inclusion proof is the sibling hashes that
-//! recompute the root from one leaf. Verification recomputes the root from
-//! the leaf it holds and the path it was served and compares it against the
-//! checkpoint, which is what detects a log that never recorded the line the
-//! registry claims.
-//!
-//! The tree is the transparent-log arrangement Go's checksum database
-//! fixed: leaves hash with one domain and interior nodes with another, a
-//! tree of any size splits at the largest power of two below it, and the
-//! proof for a leaf is the sibling hashes along the path to the root.
-//! Nothing here verifies a signature over a checkpoint: a checkpoint is
-//! trusted because a person's configuration named it, on the same terms
-//! 0042's origins are trusted, and 0044 says so.
+//! The log is an append-only Merkle tree with distinct leaf and node hash
+//! domains. Checkpoints contain an origin, tree size, and root digest.
+//! Inclusion proofs recompute that root from one binding line and its sibling
+//! path. Checkpoint signature verification is outside this module.
 
 use pith_diag::PithResult;
 use pith_ids::ContentDigest;
@@ -116,8 +100,7 @@ fn digest_of(text: &str) -> Option<ContentDigest> {
 /// The largest power of two strictly below `size`, for a size of at least
 /// two, which is the split point the tree of `size` leaves folds at.
 fn split_below(size: u64) -> u64 {
-    // The shift lands at most at the word's highest bit, because the
-    // leading zeros of a nonzero `size - 1` leave it in range.
+    // `size - 1` is nonzero, so the shift remains within the word.
     let shift = u64::BITS
         .saturating_sub(1)
         .saturating_sub(size.saturating_sub(1).leading_zeros());
@@ -172,12 +155,10 @@ pub struct MerkleTree {
 }
 
 impl MerkleTree {
-    /// Build the tree over `records`, hashing each as a leaf.
+    /// Builds a Merkle tree over `records`.
     ///
     /// # Errors
-    /// A [`pith_diag::DiagnosticSink`] when `records` is empty: a log
-    /// commits to at least one record, and a tree with no root would give
-    /// a checkpoint nothing to name.
+    /// Returns a diagnostic when `records` is empty.
     pub fn new<'a>(records: impl IntoIterator<Item = &'a [u8]>) -> PithResult<Self> {
         let hashes: Box<[ContentDigest]> = records.into_iter().map(leaf_hash).collect();
         if hashes.is_empty() {
@@ -219,14 +200,10 @@ impl MerkleTree {
     }
 }
 
-/// Verify that `proof` carries `record` into the tree `checkpoint`
-/// commits to, by recomputing the root from the leaf and the path.
+/// Verifies an inclusion proof against a checkpoint.
 ///
 /// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming what was expected and what was
-/// found when the index is outside the tree, the path is longer or shorter
-/// than the index and size account for, or the recomputed root disagrees
-/// with the checkpoint's.
+/// Returns a diagnostic for an invalid index, path length, or root digest.
 pub fn verify_inclusion(
     record: &[u8],
     proof: &Inclusion,
@@ -257,13 +234,10 @@ pub fn verify_inclusion(
     Ok(())
 }
 
-/// Recompute a root from a leaf at `index` of a tree of `size` records,
-/// consuming the sibling hashes `path` supplies, mirroring the split the
-/// tree folds at.
+/// Recomputes a Merkle root from a leaf and sibling path.
 ///
 /// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming the size when the path runs out
-/// before the root.
+/// Returns a diagnostic when the path ends before reaching the root.
 fn fold(
     index: u64,
     size: u64,
@@ -356,10 +330,6 @@ mod tests {
 
     #[test]
     fn a_tampered_leaf_line_does_not_reach_the_root_it_claims() {
-        // The line on offer hashes differently than the line the log
-        // recorded. The inclusion proof was issued for the recorded line,
-        // so folding the tampered line through it computes a different
-        // root.
         let (tree, checkpoint) = tree_and_checkpoint("logs.pith-lang.org");
         let proof = tree.inclusion(4).unwrap();
         let original = String::from_utf8(records().get(4).unwrap().clone()).unwrap();

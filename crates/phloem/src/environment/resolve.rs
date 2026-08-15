@@ -12,56 +12,30 @@ use crate::universe::CandidateUniverse;
 
 use super::{Environment, EnvironmentDocument};
 
-/// One offer an environment is realized against: the claim and the bytes it
-/// claims an identity for.
+/// A binary offer and the bytes covered by its claim.
 pub struct Offer<'a> {
     pub offer: &'a BinaryOffer,
     pub bytes: &'a [u8],
 }
 
-/// One offer the realization tested and refused: the binding it claimed,
-/// carried by the entry's coordinates, and the clause that turned it down.
-/// The refusal is 0042's value, the failing clause and both sides of the
-/// comparison, so a caller can tell a tampered artifact from an
-/// unauthorized origin without re-running the test.
+/// A binary offer rejected while realizing a package binding.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Refused {
     pub package: PackageVersion,
     pub refusal: Refusal,
 }
 
-/// A declaration realized: the environment document, and the refusals its
-/// realization produced.
-///
-/// The refusals are returned beside the document and kept out of it. A
-/// refused offer leaves the build running from source, the same
-/// realization an absent offer produces, so a refusal in the document
-/// would move its digest though nothing the environment serves changed.
-/// The refusals arrive in lock-entry order, each entry's offers in the
-/// canonical order over claims.
+/// A resolved environment document and its rejected offers.
 pub struct Realized {
     pub document: EnvironmentDocument,
     pub refusals: Box<[Refused]>,
 }
 
 impl EnvironmentDocument {
-    /// Resolve the declaration through the engine, lock the answer, and
-    /// realize the lock's entries against `offers`.
-    ///
-    /// Pure on 0041's terms: the engine computes the resolution, the lock
-    /// and the document are values, and no path is touched until a caller
-    /// writes one. Only a solved resolution selects; the other three
-    /// constructors are facts about the problem, and an environment is not
-    /// one of them.
-    ///
-    /// The answer carries the refusals beside the document: an offer that
-    /// was tested and turned down returns 0042's value, so the caller sees
-    /// the explanation on every resolve that produces it.
+    /// Resolves a declaration and tests matching binary offers.
     ///
     /// # Errors
-    /// The engine's diagnostics when the resolution fails, and the lock's
-    /// when the answer does not select or a candidate carries no content
-    /// identity to bind.
+    /// Returns diagnostics from resolution or lock construction.
     pub fn resolve(
         declaration: &Environment,
         engine: &mut Engine,
@@ -111,16 +85,7 @@ fn realize_resolution(
     })
 }
 
-/// Realize every lock entry against the offers that claim it, collecting
-/// the admitted substitutions and the refusals. A refused or absent offer
-/// builds, which is 0042's fallback and not this module's concern.
-///
-/// Every offer claiming the entry's identity is tested, in the canonical
-/// order over claims, and the first that admits serves. A refusal is
-/// carried out for every offer that was tested and refused while none
-/// served. When a substitution serves, the offers after it in the
-/// canonical order are not examined: the build they stood in for is not
-/// running.
+/// Tests matching offers in canonical order for each lock entry.
 fn realize_entries(
     declaration: &Environment,
     lock: &Lock,

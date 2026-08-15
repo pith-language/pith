@@ -1,19 +1,8 @@
-//! The lock's written form: a text projection of the lock document
-//! (decision 0041).
+//! Text encoding for lock documents.
 //!
-//! Render is a total deterministic function of the document, parse inverts
-//! render on rendered output, and render canonicalizes whatever parse
-//! accepts, so a hand-edited file re-renders to the canonical bytes. The
-//! file's own bytes are never canonical and no digest is taken over them:
-//! canonical bytes are the value codec's job, and the text's job is to be
-//! read in a diff. One binding per line, entries sorted by the line's own
-//! bytes, header directives that conflict atomically when the universe, the
-//! preferences, the scheme, or the resolver moved — go.sum's line shape,
-//! with the pinning go.sum refuses.
-//!
-//! The character-level grammar lives in `locktext`; publishing the file to
-//! the filesystem lives in `lockpublish`, on 0003's side of the effect
-//! boundary. This module is the line codec between them.
+//! Rendering is deterministic and parsing accepts the rendered form plus
+//! equivalent non-canonical spellings. Character-level token handling lives
+//! in `locktext`; filesystem publication lives in `lockpublish`.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -42,17 +31,7 @@ const UNIVERSE: &str = "universe";
 const PREFERENCE: &str = "preference";
 const BIND: &str = "bind";
 
-/// The document as its canonical text: header directives, a blank line,
-/// then one binding line per entry sorted by the line's own bytes, LF line
-/// endings, and a trailing newline.
-///
-/// The file's order is not the value's. The document holds its entries in
-/// the canonical order of their value encodings, which length-prefixes
-/// every string and would order names by length before their first
-/// character; the file orders by the line's own bytes so adjacent packages
-/// stay adjacent in a diff (0041). The value's order is the digest's
-/// business, the file's is the diff's, and parse normalizes the file back
-/// into the value's order.
+/// Renders a lock document as canonical text with byte-sorted binding lines.
 #[must_use]
 pub fn render(lock: &Lock) -> String {
     let mut out = String::new();
@@ -72,19 +51,10 @@ pub fn render(lock: &Lock) -> String {
     out
 }
 
-/// Parse the written form back into a document. Blank lines and comments
-/// are skipped, header directives are accepted in any order, and entries
-/// are normalized into the canonical order, so everything parse accepts is
-/// re-rendered to the canonical bytes.
-///
-/// The entries are a set over package identities: a byte-identical line a
-/// union merge repeated collapses, and a second, different binding for a
-/// package already bound is refused, because that is the one conflict a
-/// union merge cannot represent and a person has to resolve.
+/// Parses lock text and normalizes entries into canonical value order.
 ///
 /// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming the line, what was expected, and
-/// what was found, for every form this format does not accept.
+/// Returns a diagnostic with the line number and invalid input.
 pub fn parse(text: &str) -> PithResult<Lock> {
     let mut header = Header::default();
     let mut seen: BTreeMap<PackageIdentity, (usize, LockEntry)> = BTreeMap::new();
@@ -138,13 +108,10 @@ pub fn parse(text: &str) -> PithResult<Lock> {
     Lock::new(resolver, scheme, universe, preferences, entries)
 }
 
-/// Fold one parsed binding into the entries-so-far. A binding whose package
-/// is not yet bound is kept; a byte-identical repeat collapses; anything
-/// else over an already-bound package is the union-merge conflict.
+/// Adds a parsed binding, collapsing identical duplicates.
 ///
 /// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming the package, both line numbers,
-/// and both versions when the package is already bound differently.
+/// Returns a diagnostic when the package is already bound differently.
 fn record_binding(
     seen: &mut BTreeMap<PackageIdentity, (usize, LockEntry)>,
     entry: LockEntry,
@@ -278,10 +245,7 @@ fn singleton<'a>(tokens: &'a [String], directive: &str, number: usize) -> PithRe
     }
 }
 
-/// One binding in its written spelling: the fields a witnessed line
-/// carries: domain, name, version, features, and the bound content
-/// identity. The transparency log's leaf record is this line's bytes, so
-/// the log and the file share one spelling for one binding (0044).
+/// Renders a binding line shared by lock files and transparency-log leaves.
 #[must_use]
 pub fn binding_line(entry: &LockEntry) -> String {
     format!(
@@ -403,11 +367,6 @@ mod tests {
 
     #[test]
     fn entries_are_ordered_by_the_line_bytes_not_the_canonical_encoding() {
-        // The value orders entries by canonical encoding, whose length
-        // prefixes put `zlib` (four bytes of name) before `openssl`
-        // (seven). The file orders by the line's own bytes so adjacent
-        // packages stay adjacent in a diff, which reverses the two. Both
-        // orders are deterministic; only the file's is this one.
         let written = lock();
         assert_eq!(
             written.entries.first().unwrap().package.identity().name(),
@@ -468,9 +427,6 @@ mod tests {
 
     #[test]
     fn a_hand_edited_file_normalizes_to_the_canonical_bytes() {
-        // A merge artifact: directives reordered, a comment added, the bind
-        // lines reversed, and one digest spelled in uppercase. Everything
-        // here parses, and re-rendering it produces the canonical bytes.
         let canonical = render(&lock());
         let directive = |prefix: &str| {
             canonical
@@ -510,10 +466,6 @@ mod tests {
 
     #[test]
     fn a_union_merge_binding_one_package_twice_is_refused_naming_both_lines() {
-        // Two branches each moved openssl; a union driver concatenated both
-        // lines. The file is a set over package identities, so this is the
-        // one conflict a union cannot represent: refused with both line
-        // numbers and both versions, for a person to resolve.
         let canonical = render(&lock());
         let moved = canonical
             .lines()
@@ -539,9 +491,6 @@ mod tests {
 
     #[test]
     fn a_union_merge_moving_a_feature_set_is_refused_the_same_way() {
-        // The set is over package identities, not feature sets: two feature
-        // selections of one package are as unrepresentable as two versions,
-        // and the document's own constructor agrees (see `document`).
         let canonical = render(&lock());
         let moved = canonical
             .lines()
@@ -558,8 +507,6 @@ mod tests {
 
     #[test]
     fn a_byte_identical_line_a_union_merge_repeated_collapses() {
-        // The union of two branches that added the same binding yields the
-        // same line twice; that is one resolution recorded twice, not two.
         let canonical = render(&lock());
         let repeated = canonical
             .lines()

@@ -1,14 +1,7 @@
-//! Package identity and version coordinates (decision 0039).
+//! Package identities and domain-specific version ordering.
 //!
-//! A package's identity is an author-declared name inside a declared domain:
-//! the pair (domain identity, package name). The construction parallels
-//! 0023's `RuleIdentity`, a module identity plus a declaration name, because
-//! the two questions are the same shape: a stable coordinate of a declaration
-//! site that survives changes to what is declared there. The identity is
-//! declared, not computed — it fills 0005's semantic-identity slot for this
-//! domain — so it survives version bumps, metadata changes, platform and
-//! toolchain changes, and source moves the domain's resolution survives, and
-//! only a rename breaks it.
+//! A package identity consists of a declared domain and package name.
+//! Version schemes compare version strings without changing package identity.
 
 use std::cmp::Ordering;
 
@@ -37,10 +30,7 @@ impl DomainIdentity {
     }
 }
 
-/// A package's identity: a declared name in a declared domain. Two packages
-/// are the same package exactly when both halves agree; nothing else — not a
-/// version, not a description digest, not a resolved source — enters the
-/// comparison.
+/// A package name within a declared domain.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PackageIdentity {
     domain: DomainIdentity,
@@ -48,8 +38,7 @@ pub struct PackageIdentity {
 }
 
 impl PackageIdentity {
-    /// Declare a package's identity. The declaration is the identity: no
-    /// content is read and no digest is taken.
+    /// Creates a package identity from its domain and name.
     #[must_use]
     pub fn declare(domain: DomainIdentity, name: impl Into<Box<str>>) -> Self {
         Self {
@@ -69,10 +58,7 @@ impl PackageIdentity {
     }
 }
 
-/// A package version: the identity plus a version, in the format and
-/// comparison the domain declares. This is the thing a constraint ranges
-/// over and a lock names, and it is deliberately a level below the package:
-/// an upgrade is a relation between two versions of one identity.
+/// A package identity and version string.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PackageVersion {
     identity: PackageIdentity,
@@ -98,14 +84,10 @@ impl PackageVersion {
         &self.version
     }
 
-    /// Compare two versions of one package under `scheme`. Versions of
-    /// different packages have no ordering to report — the upgrade relation
-    /// is between versions of one identity — so mismatched identities are a
-    /// diagnostic naming both.
+    /// Compares two versions of the same package with `scheme`.
     ///
     /// # Errors
-    /// A [`pith_diag::DiagnosticSink`] naming both identities when they
-    /// differ.
+    /// Returns a diagnostic when the package identities differ.
     pub fn compare(&self, scheme: &dyn VersionScheme, other: &Self) -> PithResult<Ordering> {
         if self.identity != other.identity {
             return Err(diag(format!(
@@ -120,14 +102,9 @@ impl PackageVersion {
     }
 }
 
-/// The version format and comparison a domain declares. 0039 leaves the
-/// format to the domain — semver for most, Debian's epoch-and-tilde ordering
-/// for a deb domain — so phloem takes the ordering as a declaration rather
-/// than baking one in. Version-range semantics over these comparisons are
-/// declared values over the ordering (0040).
+/// A domain-specific total ordering over version strings.
 pub trait VersionScheme {
-    /// How `left` and `right` order. Total: two spellings a domain accepts
-    /// as versions have an ordering, whatever the domain's rule is.
+    /// Compares two version strings.
     fn compare(&self, left: &str, right: &str) -> Ordering;
 }
 
@@ -157,12 +134,7 @@ pub fn version_scheme_type() -> Type {
     }
 }
 
-/// A version-scheme value naming `scheme`. The name, not the comparison, is
-/// what travels: the name is the identity a computation key covers, and the
-/// ordering it resolves to is looked up in the registered schemes the way a
-/// toolchain value names a driver whose closure the rule holds. A name whose
-/// ordering changes is a declaration that changed its meaning, on the terms
-/// a package name changing its meaning is domain policy to enforce.
+/// Creates a version-scheme value naming `scheme`.
 #[must_use]
 pub fn version_scheme_value(scheme: &str) -> Value {
     Value::Nominal {
@@ -194,10 +166,7 @@ pub fn version_scheme_name(value: &Value) -> PithResult<&str> {
     }
 }
 
-/// A dot-separated numeric scheme, the comparison most domains declare:
-/// segments compare numerically, a missing segment is zero. A non-numeric
-/// segment compares bytewise, so the ordering stays total without inventing
-/// precedence the domain did not declare.
+/// Dot-separated numeric comparison with bytewise non-numeric segments.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NumericSegments;
 
@@ -208,8 +177,7 @@ impl VersionScheme for NumericSegments {
         loop {
             let ordering = match (left.next(), right.next()) {
                 (None, None) => return Ordering::Equal,
-                // A missing segment is zero, so only a nonzero segment on
-                // the present side decides; trailing zeros are equal.
+                // Missing segments compare as zero.
                 (None, Some(present)) => zero().cmp(&segment(present)),
                 (Some(present), None) => segment(present).cmp(&zero()),
                 (Some(left_segment), Some(right_segment)) => {
@@ -223,16 +191,12 @@ impl VersionScheme for NumericSegments {
     }
 }
 
-/// The zero segment, against which a present segment is compared when the
-/// other side has run out.
+/// Returns the implicit segment used after one version runs out.
 fn zero() -> Segment<'static> {
     Segment::Number(0, "0")
 }
 
-/// One segment as comparable data: numeric segments compare by value, any
-/// other segment by bytes. The two kinds never cross-compare because
-/// `Number` sorts before `Text`, keeping the ordering total when a domain
-/// spells a segment the numeric rule does not parse.
+/// A numeric or bytewise version segment.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 enum Segment<'a> {
     Number(i64, &'a str),
@@ -246,15 +210,7 @@ fn segment(raw: &str) -> Segment<'_> {
     }
 }
 
-/// Debian version comparison: `[epoch:]upstream[-revision]`, the scheme a
-/// deb domain declares (0039 names it as the other canonical example beside
-/// semver). The epoch compares numerically and dominates everything; the
-/// upstream part compares with the Debian rule, where `~` sorts before
-/// anything including the empty string (so `1.0~rc1` precedes `1.0`); the
-/// revision compares numerically. The point of the scheme here is not
-/// fidelity to dpkg but a second declared ordering with genuinely different
-/// spellings, over which the range algebra in `constraint` must behave
-/// identically (0040).
+/// Debian-style comparison of `[epoch:]upstream[-revision]` versions.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Debian;
 
@@ -340,9 +296,7 @@ fn numeric_run(run: &str) -> (usize, Vec<u8>) {
     (trimmed.len(), trimmed.as_bytes().to_vec())
 }
 
-/// The rank of the next character, with `~` lowest and the end of the
-/// string just above it — the two facts that make `1.0~rc1 < 1.0 < 1.0+a`.
-/// Returns the rank and how many bytes to consume (zero at the end).
+/// Returns the next Debian character rank and its byte width.
 fn next_rank(text: &str) -> (i32, usize) {
     match text.as_bytes().first() {
         None => (0, 0),

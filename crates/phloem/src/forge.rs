@@ -1,21 +1,8 @@
-//! The forge adapter: a git reference resolved and materialized as
-//! caller-side effects (decision 0044).
+//! Git source discovery and materialization.
 //!
-//! Git is the one source whose witness is intrinsic. An object's name is
-//! the hash of its exact bytes, a tree's hash covers everything beneath
-//! it, and a commit's hash covers its tree and parents, so a revision
-//! already authenticates the content it names, and a fetch verifies every
-//! object it receives against its own hash. The ref is the part git does
-//! not authenticate: a branch is a mutable pointer no commit records, so
-//! the candidate carries the concrete revision and tree hash the ref
-//! resolved to, and nothing downstream re-reads the ref. That payload is
-//! the shape a lock refuses to bind, and the fetch materializes the tree
-//! into bytes pith measures.
-//!
-//! Running `git` is a caller-side effect on the same ground as reading a
-//! registry directory: it happens before any request exists, and what it
-//! produces, the candidate and then the measured archive, is a declared
-//! input. The engine never runs here.
+//! The adapter resolves a reference to a revision and tree, then archives
+//! that tree for content measurement. Git commands run at the caller's effect
+//! boundary and never during engine rule evaluation.
 
 use std::path::Path;
 use std::process::Command;
@@ -70,18 +57,11 @@ fn git(repo: &Path, arguments: &[&str]) -> Result<String, ForgeError> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().into())
 }
 
-/// One candidate for one package at one git reference: the revision the
-/// reference resolved to and the tree hash it names, with `forge` recorded
-/// as where the reference was read. The candidate carries a reference, so
-/// a lock refuses to bind it until [`materialize_resolution`] has read the
-/// tree. resolution chooses among references, and only the choice is
-/// fetched.
-///
-/// A caller-side effect: this resolves the reference by running git.
+/// Resolves a Git reference to a package candidate.
 ///
 /// # Errors
-/// A [`pith_diag::DiagnosticSink`] when git is absent or the reference
-/// does not resolve.
+/// Returns a diagnostic when Git is unavailable or the reference does not
+/// resolve.
 pub fn reference_candidate(
     identity: &PackageIdentity,
     version: &str,
@@ -105,19 +85,10 @@ pub fn reference_candidate(
     })
 }
 
-/// Materialize every git reference a solved resolution chose: archive each
-/// revision's tree to bytes and measure them, rewriting each chosen git
-/// candidate into the content its tree measured to, which is what a lock
-/// binds.
-///
-/// A caller-side effect: this runs git once per chosen reference and
-/// reads its output. The choice, the trail, and the universe digest are
-/// unchanged, so the materialized answer locks where the unmaterialized
-/// one refuses, and on nothing else.
+/// Materializes each Git reference selected by a solved resolution.
 ///
 /// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming the candidate when a reference
-/// cannot be archived, propagated from git.
+/// Returns a diagnostic when a selected revision cannot be archived.
 pub fn materialize_resolution(repo: &Path, resolution: &Resolution) -> PithResult<Resolution> {
     let Resolution::Solved {
         choice,
@@ -152,15 +123,10 @@ pub fn materialize_resolution(repo: &Path, resolution: &Resolution) -> PithResul
     })
 }
 
-/// The archive of one revision, as measured bytes. `git archive` uses the
-/// commit timestamp when given a commit, so the content identity belongs to
-/// this materialization and is not derived from the tree hash alone.
-///
-/// A caller-side effect: this runs git.
+/// Archives one Git revision and measures the resulting bytes.
 ///
 /// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming the revision when the archive
-/// cannot be produced.
+/// Returns a diagnostic when the revision cannot be archived.
 pub fn materialize(repo: &Path, revision: &str) -> PithResult<ContentId> {
     let output = Command::new("git")
         .arg("-C")

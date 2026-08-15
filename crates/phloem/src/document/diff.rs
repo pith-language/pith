@@ -18,22 +18,19 @@ pub enum LockChange {
     Preferences,
     Added(LockEntry),
     Removed(LockEntry),
-    /// The same package moved to a new version, whether or not its feature
-    /// set moved with it.
+    /// A package moved to a different version.
     Upgraded {
         package: PackageIdentity,
         from: Box<str>,
         to: Box<str>,
     },
-    /// The same package moved to a new feature set: features are coordinates
-    /// (0040), so this is one selection moving rather than a removal and an
-    /// addition.
+    /// A package moved to a different feature set.
     Features {
         package: PackageIdentity,
         from: Box<[Box<str>]>,
         to: Box<[Box<str>]>,
     },
-    /// The same coordinates resolved to different content: 0039's drift.
+    /// The same coordinates resolved to different content.
     Drifted {
         package: PackageVersion,
         from: ContentId,
@@ -41,15 +38,13 @@ pub enum LockChange {
     },
 }
 
-/// What moved between two lock documents: each header input that changed,
-/// and each entry added, removed, upgraded, or drifted. This is the
-/// staleness check a caller runs before resolving again.
+/// Structural changes between two lock documents.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LockDiff {
     pub changes: Box<[LockChange]>,
 }
 
-/// Diff two lock documents, naming every moved input and entry.
+/// Compares two lock documents.
 #[must_use]
 pub fn diff(before: &Lock, after: &Lock) -> LockDiff {
     let mut changes = Vec::new();
@@ -106,8 +101,7 @@ fn diff_entries(changes: &mut Vec<LockChange>, before: &Lock, after: &Lock) {
                         to: new.features.clone(),
                     });
                 }
-                // Content under moved coordinates is a new selection's content,
-                // not drift; drift is content that moved while no coordinate did.
+                // Drift requires unchanged coordinates.
                 if old.package.version() == new.package.version()
                     && old.features == new.features
                     && old.source != new.source

@@ -1,13 +1,8 @@
-//! The candidate universe: candidates as values carrying the provenance of
-//! every candidate (decision 0040).
+//! Candidate universes and their canonical value encoding.
 //!
-//! Candidates are 0025-queryable evidence rather than ambient repository
-//! state, which is what makes an answer reproducible under the same
-//! universe. A candidate carries its coordinates (version and features),
-//! the source binding it would resolve from as provenance, and the
-//! requirements it declares on other subjects — the requirements are how a
-//! choice for one subject constrains the choices for others, which is what
-//! makes resolution a search rather than a lookup.
+//! Each candidate records package coordinates, source provenance, origin,
+//! and requirements on other packages. A universe has a content identity
+//! derived from its canonical candidate list.
 
 use pith_core::{Type, Value};
 use pith_diag::PithResult;
@@ -41,14 +36,7 @@ pub struct Requirement {
     pub features: Box<[Box<str>]>,
 }
 
-/// One candidate: a subject's coordinates, the provenance of those
-/// coordinates, and the requirements selecting this candidate imposes.
-///
-/// The origin is where the candidate was read: the registry identity an
-/// index names itself by, the forge a reference resolved against, the path
-/// a vendor tree sits at. It is the entry's evidence and cannot be derived
-/// from the provenance: a registry archive's digest names its content, not
-/// which registry served the claim (0044).
+/// Package coordinates, source provenance, origin, and requirements.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Candidate {
     pub identity: PackageIdentity,
@@ -243,10 +231,7 @@ fn read_requirement(value: &Value) -> PithResult<Requirement> {
     })
 }
 
-/// The candidate universe: every candidate a resolution may choose among,
-/// with the provenance of each. The solver groups this slice in a host map
-/// keyed by identity, while the value spelling is a canonically sorted list
-/// whose sortedness is what the digest needs (0040's refusal of `Map`).
+/// Every candidate available to a resolution.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct CandidateUniverse {
     pub candidates: Box<[Candidate]>,
@@ -260,8 +245,7 @@ impl CandidateUniverse {
         }
     }
 
-    /// The universe as a canonically sorted value: one spelling for one
-    /// universe, so the computation key does not depend on assembly order.
+    /// Encodes the universe as a canonically sorted list.
     #[must_use]
     pub fn to_value(&self) -> Value {
         canonical_list(self.candidates.iter().map(Candidate::to_value))

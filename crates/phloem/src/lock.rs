@@ -1,24 +1,7 @@
-//! Lock entries: coordinates bound to content, origin as evidence (decisions
-//! 0039, 0041).
+//! Lock entries and source binding verification.
 //!
-//! A lock entry is a pair plus evidence: the package version (what was
-//! chosen), the content identity of the source it resolved to (what the
-//! choice means), and the origin it was resolved from (where that
-//! happened). The binding is the entry; the origin is not part of either
-//! identity. The content side is intrinsic, in Software Heritage's sense —
-//! computed from the bytes read, valid wherever those bytes are found
-//! again — so content that no longer matches the binding is drift to
-//! report, never an identity transition. What makes a binding trustworthy
-//! is the artifacts-and-trust question; 0041 answers it for M-4 as
-//! local-verification-only, and the entry here records the binding and
-//! checks it, and witnesses nothing.
-//!
-//! An entry is a value — a record over the origin sum — because a lock is
-//! data that crosses processes, and the record form is the other half of
-//! 0039's evidence for landing `Record`: a lock line is named fields the
-//! same way a description is. The coordinates carry the feature set beside
-//! the version, on 0040's terms: features are coordinates, so an entry
-//! without them would bind half a selection.
+//! A lock entry binds package coordinates to source content and records the
+//! origin as provenance. Origin does not participate in binding identity.
 
 use pith_core::{SumConstructor, Type, Value};
 use pith_diag::PithResult;
@@ -52,10 +35,7 @@ const NAME: &str = "name";
 const SOURCE: &str = "source";
 const ORIGIN_FIELD: &str = "origin";
 
-/// Where a resolution happened: the remote or local source the package was
-/// resolved from. Evidence for provenance, not part of the binding — the
-/// same content reached through two origins is one resolution recorded
-/// twice, not two resolutions.
+/// The remote or local origin of resolved package content.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Origin {
     Registry(Box<str>),
@@ -76,14 +56,10 @@ impl Origin {
         sum_value(ORIGIN, constructor, Some(Value::Text(location.clone())))
     }
 
-    /// Read an origin from a value, accepting every declared sum of this
-    /// name that contains the selected constructor with a text payload —
-    /// `is_type`, not `value_type`, because a sum value cannot recover its
-    /// sibling constructors (0026's asymmetry).
+    /// Decodes an origin from `value`.
     ///
     /// # Errors
-    /// A [`pith_diag::DiagnosticSink`] naming what was expected and what was
-    /// found when the value is not an origin.
+    /// Returns a diagnostic when `value` is not an origin.
     pub fn from_value(value: &Value) -> PithResult<Self> {
         if !value.is_type(&origin_type()) {
             return Err(diag(format!(
@@ -120,10 +96,7 @@ impl Origin {
 }
 
 impl Origin {
-    /// The origin's kind as the written lock spells it, the inverse of
-    /// [`Self::from_kind`]. Both spellings live here, beside the sum they
-    /// name, so a new kind lands where it is declared rather than in a
-    /// reader.
+    /// Returns the origin kind used by the written lock.
     #[must_use]
     pub fn kind(&self) -> &'static str {
         match self {
@@ -189,17 +162,12 @@ pub fn origin_type() -> Type {
     );
     match sum {
         Ok(sum) => sum,
-        // The constructor names are distinct literals, so the duplicate-name
-        // rejection is unreachable by construction.
+        // Constructor names are distinct literals.
         Err(error) => unreachable!("{error}"),
     }
 }
 
-/// The declared lock-entry record type: the full coordinates — domain,
-/// name, version, features — the bound content identity, and the origin
-/// evidence. The domain is a field here and is not one on the description,
-/// because a lock is read far from the declaration site that carries the
-/// domain as its own fact.
+/// Returns the declared lock-entry record type.
 #[must_use]
 pub fn entry_type() -> Type {
     record_type([
@@ -212,9 +180,7 @@ pub fn entry_type() -> Type {
     ])
 }
 
-/// What a lock entry pins: one package version, one content identity for the
-/// source it resolved to. Equality on the binding is the statement "these
-/// coordinates resolve to this content," with no origin in it.
+/// Package coordinates bound to source content.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Binding {
     pub package: PackageVersion,
@@ -226,9 +192,7 @@ pub struct Binding {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LockEntry {
     pub package: PackageVersion,
-    /// The feature coordinate: a canonically sorted set, because features
-    /// are coordinates (0040) and two spellings of one set are one
-    /// selection.
+    /// Canonically sorted feature coordinates.
     pub features: Box<[Box<str>]>,
     pub source: ContentId,
     pub origin: Origin,
@@ -286,12 +250,10 @@ impl LockEntry {
         ])
     }
 
-    /// Read an entry from a value, checking inhabitation with `is_type`
-    /// rather than comparing against `value_type` (0026's asymmetry).
+    /// Decodes a lock entry from `value`.
     ///
     /// # Errors
-    /// A [`pith_diag::DiagnosticSink`] naming the declared type and the
-    /// value found when the value is not a lock entry.
+    /// Returns a diagnostic when `value` is not a lock entry.
     pub fn from_value(value: &Value) -> PithResult<Self> {
         if !value.is_type(&entry_type()) {
             return Err(diag(format!(
@@ -340,15 +302,10 @@ impl LockEntry {
         value_content_id(LOCK_ENTRY_DOMAIN, &self.to_value())
     }
 
-    /// Check freshly resolved content against the binding. Matching content
-    /// confirms the entry; different content under the same coordinates is
-    /// drift — the failure a lock binding exists to catch when a domain does
-    /// not honor immutability — or a new resolution to record, and in both
-    /// cases it is reported rather than absorbed (0039).
+    /// Checks freshly resolved content against the bound source identity.
     ///
     /// # Errors
-    /// A [`pith_diag::DiagnosticSink`] naming the coordinates and both
-    /// content identities when `resolved` differs from the bound source.
+    /// Returns a diagnostic when `resolved` differs from the bound source.
     pub fn verify_resolution(&self, resolved: ContentId) -> PithResult<()> {
         if resolved == self.source {
             return Ok(());
@@ -395,10 +352,6 @@ mod tests {
 
     #[test]
     fn the_origin_is_evidence_not_identity() {
-        // The same coordinates resolving to the same content through two
-        // origins is one binding recorded twice. An origin that entered the
-        // binding would make "what was chosen and what it resolves to"
-        // depend on where it was downloaded from.
         let from_registry = LockEntry::new(
             package("1.3"),
             [] as [Box<str>; 0],
@@ -438,9 +391,6 @@ mod tests {
 
     #[test]
     fn the_feature_set_is_a_sorted_coordinate_of_the_binding() {
-        // Features are coordinates (0040), so two feature sets are two
-        // bindings over one package version, and two spellings of one set —
-        // assembled in either order — are one entry with one digest.
         let plain = entry();
         let shared = LockEntry::new(
             package("1.3"),
@@ -519,9 +469,6 @@ mod tests {
 
     #[test]
     fn an_entry_read_back_binds_what_was_written() {
-        // The lock crosses processes as its value, so the binding that comes
-        // back from a decode is the claim that matters: same coordinates,
-        // same content, whatever process reads the entry.
         let written = entry();
         let decoded = Value::decode_canonical(&written.to_value().encode_canonical()).unwrap();
         let read_back = LockEntry::from_value(&decoded).unwrap();
@@ -548,8 +495,6 @@ mod tests {
 
     #[test]
     fn an_entry_of_another_domain_does_not_collide_with_this_one() {
-        // The domain is a field of the entry value, so two domains' entries
-        // for a same-named package are distinct values and distinct digests.
         let foreign = LockEntry::new(
             PackageVersion::new(
                 PackageIdentity::declare(DomainIdentity::new("deb"), "zlib"),

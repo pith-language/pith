@@ -1,37 +1,8 @@
-//! Binary reuse as an admitted substitution (decision 0042).
+//! Binary substitutions for locked package builds.
 //!
-//! A binary offered for coordinates a lock binds replaces the *build of a
-//! realization*: the package-build request the description would have
-//! issued, and the content it would have produced. It is not a cache hit.
-//! 0031's index answers a request this engine made, under a key this
-//! engine derived from it; nothing here has a key, because the computation
-//! whose key it would be never ran on this machine. What replaces the key
-//! is a test over evidence, and the evidence is what the test carries out
-//! with it.
-//!
-//! Four legs — binding, environment, content, authorization — checked clause
-//! by clause in a fixed order, and the first failing clause is the one a
-//! refusal names. The coordinates and the feature
-//! set come from the lock entry. The source content the publisher claims to
-//! have built from comes from the offer and must equal the source the entry
-//! binds, which is what makes the offer a claim about a binding rather than
-//! about a name. The realization coordinates — the platform under the same
-//! [`pith_engine::ExecutionPlatform`] 0031's admission test reads, and the toolchain as
-//! the value the run's build requests carry — come from the run and are
-//! compared against the offer's, because a binary built for another
-//! environment is a different realization, not a substitution candidate for
-//! this one. The binary's own content identity is measured from
-//! the bytes read, never taken from the offer. And an authorization covers the
-//! substitution: M-4 ships no keys, so it degrades to a local decision naming
-//! the origins whose offers this run considers at all, on the position Nix
-//! reaches with `require-sigs = false`.
-//!
-//! A refused offer is not a fault. The build runs, and the refusal travels
-//! back as a value naming the clause that turned the offer down, so a caller
-//! can report which input disagreed. Nothing remembers a rejection: every
-//! input to the test is in the run or in the offer, so re-testing is total
-//! and cheap, and a remembered refusal would be state neither a request nor
-//! a revision names (0038).
+//! Admission compares an offer with the lock binding, realization
+//! coordinates, measured bytes, and admitted origins. A rejected or absent
+//! offer leaves the package build request in place.
 
 mod admission;
 mod model;
@@ -58,8 +29,6 @@ mod tests {
 
     const BINARY: &[u8] = b"zlib-1.3.so";
 
-    /// The run's toolchain as one value, the same spelling the build requests
-    /// carry, so the admission leg and the derived requests cannot drift.
     fn toolchain() -> Value {
         xylem::types::toolchain("/nix/store/gcc-13")
     }
@@ -124,8 +93,6 @@ mod tests {
         }
     }
 
-    /// The tree the description's build runs over, holding exactly the
-    /// paths it prescribes.
     fn tree() -> SourceTree {
         SourceTree {
             files: Box::new([
@@ -157,9 +124,6 @@ mod tests {
 
     #[test]
     fn an_admitted_binary_carries_every_input_the_test_consulted() {
-        // The vacuity guard's positive half: each field of the outcome holds
-        // the value the clause that produced it read, and the measured digest
-        // is computed from the bytes rather than copied from the claim.
         let (entry, platform, origins) = (entry(), platform(), origins());
         let toolchain = toolchain();
         let admitted = admit(
@@ -179,9 +143,6 @@ mod tests {
 
     #[test]
     fn perturbing_any_one_input_refuses_naming_that_clause() {
-        // The vacuity guard's negative half. Every clause is load-bearing:
-        // one input moved at a time, the rest held at their admitting values,
-        // and the outcome is the refusal that names the moved one.
         let (entry, platform, origins) = (entry(), platform(), origins());
         let toolchain = toolchain();
         let elsewhere = ExecutionPlatform {
@@ -315,9 +276,6 @@ mod tests {
 
     #[test]
     fn the_test_is_total_so_a_refused_offer_is_refused_again_and_a_fixed_one_is_admitted() {
-        // Nothing remembers a rejection: the second run reads the same
-        // inputs and reaches the same answer, and an origin the policy
-        // later admits is admitted with no state to clear.
         let (entry, platform) = (entry(), platform());
         let toolchain = toolchain();
         let narrow = AdmittedOrigins(Box::new([]));
@@ -371,8 +329,6 @@ mod tests {
 
     #[test]
     fn an_offers_feature_set_is_canonically_sorted_the_way_an_entries_is() {
-        // Two spellings of one feature set are one offer, on 0040's terms;
-        // the admission test compares sets, so the spelling cannot decide it.
         let reordered = BinaryOffer::new(
             package(),
             ["zlib", "shared"],
@@ -396,8 +352,6 @@ mod tests {
 
     #[test]
     fn a_substitution_record_round_trips_through_its_value() {
-        // The provenance claim crosses processes as its value, the piece the
-        // lock's refusal of binaries leaves unwitnessed.
         let (entry, platform, origins) = (entry(), platform(), origins());
         let toolchain = toolchain();
         let admitted = admit(

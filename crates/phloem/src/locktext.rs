@@ -1,16 +1,8 @@
-//! The written lock's text grammar: tokens, quoting, and the digest spelling
-//! (decision 0041).
+//! Tokens, quoting, feature lists, and digest spelling for lock text.
 //!
-//! The codec in `lockfile` renders and reads lines; this module is the
-//! character-level machinery under them, split out the way the solver split
-//! into its host-rule surface and its search. One text field is bare when it
-//! contains none of the reserved characters and quoted with backslash
-//! escapes otherwise, a `[`-bracketed group stays one token with quoting
-//! honored inside it, and a digest is `sha256:` followed by 64 hexadecimal
-//! digits. Render always emits the canonical spelling; parse accepts any
-//! spelling that resolves, so an uppercase digest or a reordered feature
-//! list reads back and re-renders canonical, which is one instance of the
-//! canonicalization every parseable text gets.
+//! Fields use bare tokens when possible and quoted tokens with backslash
+//! escapes otherwise. Digests render as `sha256:` followed by lowercase
+//! hexadecimal digits; parsing also accepts uppercase digits.
 
 use std::fmt::Write as _;
 
@@ -101,7 +93,6 @@ fn bare_token(rest: &str) -> Result<(String, &str), String> {
 fn quoted_token(rest: &str) -> Result<(String, &str), String> {
     let mut token = String::new();
     let mut chars = rest.chars();
-    // Consume the opening quote.
     chars.next();
     loop {
         let Some(character) = chars.next() else {
@@ -202,12 +193,10 @@ pub(crate) fn features_token(features: &[Box<str>]) -> String {
     out
 }
 
-/// Read a bracketed feature list back, splitting on commas with quoted
-/// pieces kept whole.
+/// Parses a bracketed, comma-separated feature list.
 ///
 /// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming the line when the text is not a
-/// bracketed list or a piece does not parse as a token.
+/// Returns a diagnostic when the list or one of its tokens is invalid.
 pub(crate) fn parse_features(text: &str, number: usize) -> PithResult<Box<[Box<str>]>> {
     let Some(inner) = text
         .strip_prefix('[')
@@ -281,10 +270,7 @@ fn unquote(piece: &str) -> Result<String, String> {
     Ok(piece.into())
 }
 
-/// A digest in its written spelling — `sha256:` followed by 64 hexadecimal
-/// digits — decoded to the identity it names. Uppercase digits parse and
-/// re-render lowercase, which is one instance of the canonicalization every
-/// parseable text gets.
+/// Parses `sha256:` followed by 64 hexadecimal digits.
 ///
 /// # Errors
 /// A [`pith_diag::DiagnosticSink`] naming the line and the field when the

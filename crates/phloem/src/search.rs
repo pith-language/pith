@@ -1,21 +1,8 @@
-//! The search: the provisional half of resolution (decision 0040).
+//! Deterministic backtracking search for package resolution.
 //!
-//! 0040's unresolved section leaves the solver algorithm open on the
-//! evidence that a candidate universe of real pith-package scale does not
-//! exist yet. What is settled is the protocol the search answers to — the
-//! request values, the answer values, the determinism contract — so this
-//! module is the part a second solver replaces: the types, codec, and host
-//! rule wiring around it stay.
-//!
-//! The algorithm here is deliberately the simplest one that satisfies the
-//! protocol: a depth-first walk over subjects in canonical identity order,
-//! candidates grouped by the preference list with tie groups refused rather
-//! than picked apart by search order, backtracking across groups, the
-//! budget charged per candidate tried. Subjects use canonical identity
-//! order, while candidates retain their input order until the declared
-//! preferences group them. Engine requests supply canonical value order;
-//! direct callers supply the host slice order. An unresolved tie is refused,
-//! so neither order silently selects within it.
+//! Subjects are visited in canonical identity order. Preferences group valid
+//! candidates, unresolved ties are reported as underdetermined, and the
+//! budget is charged once per candidate attempted.
 
 use std::collections::BTreeMap;
 
@@ -32,9 +19,7 @@ pub struct SolveRequest {
     pub constraints: Box<[Constraint]>,
     pub universe: CandidateUniverse,
     pub preferences: PreferenceList,
-    /// The search budget, in decisions taken. A deterministic unit, never
-    /// wall-clock: an exhausted answer is a function of the inputs like any
-    /// other and may be cached (0040).
+    /// Maximum number of candidate attempts.
     pub budget: u64,
 }
 
@@ -174,10 +159,7 @@ impl<'a> Search<'a> {
         }
         let ordered = self.ordered_by_preference(satisfying.clone());
         let decided_by = self.deciding_ordering(&ordered);
-        // Candidates in tie groups, best group first. A group of more than
-        // one candidate is underdetermination: no declared ordering
-        // separates its members, and trying them in order would be picking by
-        // search order, so the group is reached only to be refused.
+        // Selecting within a tie would make search order observable.
         for (candidate, group) in self.tie_groups(ordered) {
             if group.len() > 1 {
                 return Step::Underdetermined {
@@ -203,8 +185,7 @@ impl<'a> Search<'a> {
                 Step::Underdetermined { .. } | Step::BudgetExhausted => return outcome,
             }
         }
-        // Every candidate for this subject was tried and dead-ended below;
-        // the deepest dead end recorded on the way down is the derivation.
+        // The deepest rejected branch already set the derivation.
         Step::DeadEnd
     }
 
@@ -277,11 +258,7 @@ impl<'a> Search<'a> {
         groups
     }
 
-    /// Try one candidate for `subject`: put its requirements in force,
-    /// record the trail entry, and continue the walk underneath it. Every
-    /// addition is undone on the way out — here, in one body — unless the
-    /// walk underneath solved the request, because the answer is read from
-    /// the state a solving frame built.
+    /// Tries one candidate and restores search state after a failed branch.
     fn descend(
         &mut self,
         subject: &PackageIdentity,
@@ -292,10 +269,7 @@ impl<'a> Search<'a> {
         assigned: &mut Vec<&'a Candidate>,
     ) -> Step {
         self.push_constraints(added);
-        // A requirement may land on a subject already assigned higher in
-        // the walk; a choice that violates it is a dead end exactly like
-        // one that empties a later subject, and the derivation names the
-        // assigned subject with the violated requirement in force.
+        // New constraints may invalidate an earlier assignment.
         if let Some(violated) = self.violation(added, assigned) {
             let rejected: Box<[Box<str>]> = assigned
                 .iter()
@@ -477,10 +451,6 @@ mod tests {
 
     #[test]
     fn a_preference_picks_among_valid_solutions_and_never_decides_validity() {
-        // The same constraint set over the same universe: newest picks 1.3,
-        // oldest picks 1.2, and an unsatisfiable range fails under both
-        // preference lists — preferences never enter the intersection that
-        // defines valid.
         let constraints = &[root_constraint(
             "zlib",
             Range::AtLeast(Bound::new("1.0", true)),
@@ -514,9 +484,6 @@ mod tests {
         assert_eq!(newest_choice.first().unwrap().version, Box::from("1.3"));
         assert_eq!(oldest_choice.first().unwrap().version, Box::from("1.2"));
 
-        // The range admits nothing the universe offers, and every preference
-        // list says the same: an invalid solution stays invalid whichever
-        // ordering would have chosen among valid ones.
         let impossible = &[root_constraint(
             "zlib",
             Range::AtLeast(Bound::new("2.0", true)),
@@ -539,10 +506,6 @@ mod tests {
 
     #[test]
     fn an_underdetermined_preference_list_refuses_rather_than_picking() {
-        // Two candidates at one version, distinct provenance. No declared
-        // ordering separates them — newest compares versions, and the
-        // versions are one version — so the resolver refuses, naming the
-        // tied candidates and the orderings that failed to separate them.
         let mut second = candidate("zlib", "1.3");
         second.provenance = SourceBinding::Path {
             path: "vendor/zlib".into(),
@@ -563,8 +526,6 @@ mod tests {
         assert_eq!(tied.len(), 2, "the refusal names every tied candidate");
         assert_eq!(orderings, PreferenceList(Box::new([Preference::Newest])));
 
-        // An empty list underdetermines any choice among distinct versions:
-        // no declared fact distinguishes the candidates at all.
         let empty = request(
             &[root_constraint("zlib", Range::Any)],
             &[candidate("zlib", "1.2"), candidate("zlib", "1.3")],
@@ -579,11 +540,6 @@ mod tests {
 
     #[test]
     fn an_unsatisfiable_answer_carries_a_derivation_and_a_budget_exhaustion_does_not() {
-        // Three versions of `a`, each requiring `b >= 2` while the root
-        // requires `b < 2`: no solution exists, and the derivation names the
-        // subject that emptied and the constraints in force over it. The
-        // same request under a budget of one decision is exhaustion, a fact
-        // about the run, and says nothing about solvability.
         let requiring = |version: &str| Candidate {
             requires: Box::new([Requirement {
                 subject: identity("b"),
@@ -652,11 +608,6 @@ mod tests {
 
     #[test]
     fn a_feature_constraint_selects_against_the_newest_preference() {
-        // The newest candidate lacks the required feature, so the constraint
-        // — not the preference — selects: the choice is the older candidate
-        // whose coordinates carry `shared`. This is 0039's handed-over
-        // question made concrete: the feature constraint speaks over
-        // coordinates, before any realization exists.
         let mut shared = candidate("openssl", "1.1");
         shared.features = Box::new(["shared".into()]);
         let plain = candidate("openssl", "1.2");

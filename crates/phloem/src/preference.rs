@@ -1,14 +1,7 @@
-//! The preference list: a lexicographic list of orderings the domain declares
-//! (decision 0040).
+//! Lexicographic preferences over valid package candidates.
 //!
-//! A preference never appears in the intersection that defines validity; it
-//! is a third input value ordering valid solutions. Each ordering must be
-//! grounded in a declared ordering, never invented (0040's reconciliation
-//! with 0015): both constructors here read the version ordering the domain
-//! declares (0039's `VersionScheme`), which is what makes `newest` a
-//! domain-declared fact rather than engine policy. A list that underdetermines
-//! a choice is the resolver's refusal to answer, not a tie for a search order
-//! to break invisibly — the 0install lesson 0040 builds on.
+//! Preferences use the domain's declared version ordering. They order valid
+//! candidates but do not change constraint satisfaction.
 
 use std::cmp::Ordering;
 
@@ -34,8 +27,7 @@ const OLDEST_NAME: &str = "oldest";
 pub enum Preference {
     /// Newest under the domain's declared version ordering.
     Newest,
-    /// Oldest under the same declared ordering — its reversal, which is as
-    /// domain-declared as the ordering itself.
+    /// Oldest under the domain's declared version ordering.
     Oldest,
 }
 
@@ -106,8 +98,7 @@ impl Preference {
         }
     }
 
-    /// The name a decision trail records for this ordering, and the name
-    /// the written lock spells it by.
+    /// Returns the written name of this ordering.
     #[must_use]
     pub fn name(self) -> &'static str {
         match self {
@@ -136,9 +127,7 @@ impl Preference {
 pub struct PreferenceList(pub Box<[Preference]>);
 
 impl PreferenceList {
-    /// How two candidate versions compare under the list, over the ordering
-    /// `scheme` declares. `Ordering::Equal` means no declared ordering
-    /// separates them — underdetermination, for the resolver to refuse on.
+    /// Compares two versions lexicographically under this preference list.
     #[must_use]
     pub fn compare(&self, scheme: &dyn VersionScheme, left: &str, right: &str) -> Ordering {
         for preference in self.0.iter() {
@@ -153,9 +142,7 @@ impl PreferenceList {
         Ordering::Equal
     }
 
-    /// The first ordering in the list that separates the two versions, or
-    /// `None` when none does. This is the ordering a decision trail names as
-    /// having chosen the winner.
+    /// Returns the first preference that separates two versions.
     #[must_use]
     pub fn separator(
         &self,
@@ -214,10 +201,6 @@ mod tests {
 
     #[test]
     fn later_orderings_break_the_ties_earlier_ones_cannot_see() {
-        // Both orderings read the same declared comparison, so this checks
-        // direction and lexicographic composition without inventing a second
-        // ordering: newest decides distinct versions, and nothing separates
-        // equal ones.
         let newest = PreferenceList(Box::new([Preference::Newest]));
         let oldest = PreferenceList(Box::new([Preference::Oldest]));
         assert_eq!(

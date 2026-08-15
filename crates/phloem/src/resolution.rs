@@ -1,21 +1,8 @@
-//! The resolution protocol values: the answer as a value, its declared sum,
-//! and the interface a resolution is requested against (decision 0040).
+//! Resolution result values and the resolver interface.
 //!
-//! A solver answer names two things: the choice, one candidate per
-//! constrained subject, and the explanation. The four constructors of the
-//! `phloem.Resolution` sum keep the distinctions 0040 holds apart — a
-//! solution with its decision trail, a proof that no solution exists, a
-//! refusal the preference list could not ground, and a budget that ran out,
-//! which is a fact about the run and never about the problem.
-//!
-//! The interface carries the declared version ordering as its first input,
-//! nominal over the scheme's declared name, so the computation key covers
-//! which ordering a resolution ran under. A solver whose answer depended on
-//! an ordering the key did not name would be state neither the request nor
-//! the revision covers, the third class 0038 named; naming the scheme in the
-//! request closes it on the terms xylem closed the identical toolchain
-//! question — the value is the identity, the registered schemes are the
-//! lookup table.
+//! A result is solved, unsatisfiable, underdetermined, or budget exhausted.
+//! The resolver request includes the declared version scheme, constraints,
+//! candidate universe, preferences, and search budget.
 
 use pith_core::{Interface, Pure, RecordField, Request, SumConstructor, Type, Value};
 use pith_diag::{PithResult, Span};
@@ -51,10 +38,7 @@ const DECIDED_BY: &str = "decided_by";
 const CANDIDATES: &str = "candidates";
 const CONSTRAINTS: &str = "constraints";
 
-/// The derivation a failure carries: the subject that could not be
-/// satisfied, the constraints in force over it — with the attribution of
-/// each, root or chosen candidate — and the candidate versions that were
-/// available when it emptied.
+/// The subject, constraints, and candidates involved in an unsatisfied branch.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Derivation {
     pub subject: PackageIdentity,
@@ -62,10 +46,7 @@ pub struct Derivation {
     pub candidates: Box<[Box<str>]>,
 }
 
-/// One entry of a success's decision trail: which subject, how many
-/// candidates satisfied the constraints in force, and which declared
-/// ordering chose the winner — `sole-candidate` when no ordering was needed
-/// because only one candidate satisfied.
+/// One selected subject in a successful resolution trail.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TrailEntry {
     pub subject: PackageIdentity,
@@ -86,19 +67,13 @@ pub enum Resolution {
     /// No solution exists, and here is the derivation. Distinct from every
     /// other constructor: this is a fact about the problem.
     Unsatisfiable { derivation: Derivation },
-    /// The preference list failed to separate candidates it had to choose
-    /// among. A refusal on 0015's terms: no declared fact distinguishes the
-    /// tied candidates, and picking among them would record a choice nothing
-    /// explains. Distinct from `Unsatisfiable`: nothing here says no solution
-    /// exists.
+    /// The preference list did not separate otherwise valid candidates.
     Underdetermined {
         subject: PackageIdentity,
         tied: Box<[Candidate]>,
         orderings: PreferenceList,
     },
-    /// The search budget ran out. A fact about the run, never about the
-    /// problem: it does not say no solution exists (0040, on the ground 0022
-    /// drew between a failure and an interruption).
+    /// The search budget ran out before resolution completed.
     BudgetExhausted { budget: u64, decisions: u64 },
 }
 
@@ -166,10 +141,7 @@ pub fn resolution_type() -> Type {
     sum.unwrap_or_else(|error| unreachable!("{error}"))
 }
 
-/// The resolution interface: `(version scheme, constraint set, candidate
-/// universe, preference list, budget) -> phloem.Resolution`, selected by 0015
-/// like any other interface. The scheme input is the ordering the resolution
-/// runs under, named by its declared name so the computation key covers it.
+/// Returns the resolution interface over its five declared inputs.
 #[must_use]
 pub fn resolve_interface() -> Interface {
     Interface {
@@ -304,8 +276,7 @@ impl Resolution {
     }
 }
 
-/// The `Solved` constructor's payload: the choice, the decision trail, and
-/// the universe digest the choice resolved against.
+/// Encodes the `Solved` constructor payload.
 fn solved_value(choice: &[Candidate], trail: &[TrailEntry], universe: &ContentId) -> Value {
     sum_value(
         RESOLUTION,
@@ -468,8 +439,7 @@ fn underdetermined_from(payload: &Value) -> PithResult<Resolution> {
     })
 }
 
-/// The `BudgetExhausted` constructor's payload: the budget and the decisions
-/// taken, the two facts about the run.
+/// Encodes the `BudgetExhausted` constructor payload.
 fn budget_exhausted_value(budget: u64, decisions: u64) -> Value {
     sum_value(
         RESOLUTION,

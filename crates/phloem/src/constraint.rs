@@ -1,23 +1,8 @@
-//! Constraint values: ranges over the domain's ordering, and constraints over
-//! package coordinates (decision 0040).
+//! Version ranges and package constraints.
 //!
-//! A version range is a closed set of constructors — any, exactly, at least,
-//! at most, between — defined against the ordering the domain declares
-//! (0039's `VersionScheme`), never against a version spelling. PEP 440 and
-//! semver bundle spelling, ordering, and range semantics into one grammar;
-//! 0039 split the first two out and this module splits the third, which is
-//! why the same algebra runs over a semver-shaped domain and a Debian-shaped
-//! one without change.
-//!
-//! Bounds carry an inclusivity bit because negation must stay closed over
-//! the five constructors: the complement of `>= 1.0` is `< 1.0`, an open
-//! upper edge, and a constructor set of inclusive edges only could not say
-//! it. A domain that wants inclusive edges simply constructs them; the bit
-//! is what keeps the algebra total.
-//!
-//! Coordinates carry features beside the version (0040: features are
-//! coordinates), so a constraint over a feature is a constraint over
-//! coordinates and speaks before any realization exists.
+//! Ranges are evaluated with a domain's declared [`VersionScheme`]. Bounds
+//! retain inclusivity so intersection and negation remain closed over the
+//! range constructors. Constraints cover versions and feature coordinates.
 
 use std::cmp::Ordering;
 
@@ -108,9 +93,7 @@ fn bound_type() -> Type {
     record_type([(FIELD_VERSION, Type::Text), (INCLUSIVE, Type::Bool)])
 }
 
-/// One version range: a closed constructor over the ordering the domain
-/// declares (0040). Satisfaction, intersection, and negation are defined
-/// against that ordering alone.
+/// A version range evaluated against a declared ordering.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Range {
     Any,
@@ -172,14 +155,10 @@ impl Range {
         }
     }
 
-    /// Read a range from a value, checking inhabitation with `is_type` rather
-    /// than `value_type`: a sum value cannot recover its sibling constructors
-    /// (0026's asymmetry), so the declared sum is the check and the selected
-    /// constructor is the read.
+    /// Decodes a range from `value`.
     ///
     /// # Errors
-    /// A [`pith_diag::DiagnosticSink`] naming what was found when the value is
-    /// not a range of the declared sum.
+    /// Returns a diagnostic when `value` is not a declared range.
     pub fn from_value(value: &Value) -> PithResult<Self> {
         if !value.is_type(&range_type()) {
             return Err(diag(format!(
@@ -251,10 +230,7 @@ impl Range {
         }
     }
 
-    /// The intersection of two ranges: the set of versions both admit, when
-    /// that set is nonempty. `None` is the empty set — no constructor names
-    /// it, because a range is a set someone chose to speak about and the
-    /// empty intersection is the discovery that nobody did.
+    /// Returns the nonempty intersection of two ranges.
     #[must_use]
     pub fn intersect(&self, scheme: &dyn VersionScheme, other: &Self) -> Option<Self> {
         let (lower, upper) = (
@@ -405,9 +381,7 @@ fn interval_to_range(lower: Bound, upper: Bound) -> Range {
 pub struct Constraint {
     pub subject: PackageIdentity,
     pub range: Range,
-    /// The features the constraint requires. Features are coordinates (0040),
-    /// so this is part of what the constraint ranges over, not a side
-    /// condition on realization.
+    /// Required feature coordinates.
     pub features: Box<[Box<str>]>,
     pub attribution: Box<str>,
 }
@@ -445,12 +419,10 @@ impl Constraint {
         ])
     }
 
-    /// Read a constraint from a value, on the `is_type` terms every declared
-    /// shape here uses (0026's asymmetry).
+    /// Decodes a constraint from `value`.
     ///
     /// # Errors
-    /// A [`pith_diag::DiagnosticSink`] naming what was found when the value is
-    /// not a constraint record.
+    /// Returns a diagnostic when `value` is not a constraint record.
     pub fn from_value(value: &Value) -> PithResult<Self> {
         if !value.is_type(&constraint_type()) {
             return Err(diag(format!(
@@ -508,9 +480,7 @@ impl Constraint {
     }
 }
 
-/// A constraint set as a value: a canonically sorted list, so the same set
-/// has one spelling and one computation key (0040's keyed lookups as sorted
-/// lists).
+/// Returns the declared type of a canonical constraint list.
 #[must_use]
 pub fn constraint_set_type() -> Type {
     Type::List(Box::new(constraint_type()))
@@ -563,8 +533,6 @@ mod tests {
         let conflicting = Range::AtLeast(Bound::new("2.1", true));
         assert_eq!(at_most.intersect(&scheme, &conflicting), None);
 
-        // An exclusive edge at a tied version excludes the one version both
-        // name, so the intersection is empty rather than a point.
         let exclusive = Range::AtMost(Bound::new("1.2", false));
         assert_eq!(at_least.intersect(&scheme, &exclusive), None);
     }
@@ -611,9 +579,6 @@ mod tests {
 
     #[test]
     fn a_constraint_over_a_feature_selects_among_equal_versions() {
-        // Features are coordinates (0040): a constraint requiring `shared`
-        // rejects a candidate at the same version without it, which is the
-        // feature-selection subject M-4 names.
         let scheme = NumericSegments;
         let constraint = Constraint {
             subject: identity("openssl"),
