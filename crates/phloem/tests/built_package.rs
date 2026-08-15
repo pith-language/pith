@@ -39,7 +39,6 @@ use phloem::resolution::{Resolution, resolve_request};
 use phloem::resolve::{ResolveSolver, Schemes};
 use phloem::source::SourceBinding;
 use phloem::substitution::{Admission, AdmittedOrigins, BinaryOffer, Serving, serve};
-use phloem::universe::CandidateUniverse;
 use phloem::witness::{Checkpoint, MerkleTree};
 use pith_core::{Pure, Request, Value};
 use pith_engine::state::MemoryEngineStateStore;
@@ -121,7 +120,7 @@ fn archive() -> Vec<u8> {
         header[257..263].copy_from_slice(b"ustar\0");
         let octal = format!("{:011o}\0", data.len());
         header[124..124 + octal.len()].copy_from_slice(octal.as_bytes());
-        let sum: u64 = header.iter().map(u64::from).sum();
+        let sum: u64 = header.iter().copied().map(u64::from).sum();
         let checksum = format!("{sum:06o}\0 ");
         header[148..156].copy_from_slice(checksum.as_bytes());
         bytes.extend_from_slice(&header);
