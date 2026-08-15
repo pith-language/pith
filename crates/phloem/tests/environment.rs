@@ -122,6 +122,87 @@ fn offer_over(
 }
 
 #[test]
+fn the_offer_that_serves_is_a_function_of_the_offer_set_not_the_slice_order() {
+    // Three offers claim zlib's identity: one for a version the lock does
+    // not bind, and two that both admit, from two origins the policy
+    // admits. Matching on identity and taking the first hit would let the
+    // wrong-version offer sitting first refuse on the binding leg with the
+    // right ones never examined, and would let slice order decide which of
+    // the admitting two serves.
+    let mut declared = declaration();
+    declared.origins = AdmittedOrigins(Box::new([
+        Origin::Forge("builds.pith-lang.org".into()),
+        Origin::Registry("mirror.example".into()),
+    ]));
+    let locked = resolve(&declared, &universe()).unwrap();
+    let entry = locked.entries.first().unwrap();
+
+    let mut wrong_version = offer_over(entry, BINARY, &toolchain());
+    wrong_version.package = phloem::identity::PackageVersion::new(identity("zlib"), "1.4");
+    let forge = offer_over(entry, BINARY, &toolchain());
+    let mut mirror = offer_over(entry, b"zlib-1.3-mirror.so", &toolchain());
+    mirror.origin = Origin::Registry("mirror.example".into());
+
+    let realize_with = |offers: &[Offer<'_>]| {
+        EnvironmentDocument::resolve(
+            &declared,
+            &mut engine(),
+            &universe(),
+            NUMERIC_SEGMENTS,
+            &PreferenceList(Box::new([Preference::Newest])),
+            100,
+            offers,
+        )
+        .unwrap()
+    };
+    let wrong_first = [
+        Offer {
+            offer: &wrong_version,
+            bytes: BINARY,
+        },
+        Offer {
+            offer: &forge,
+            bytes: BINARY,
+        },
+        Offer {
+            offer: &mirror,
+            bytes: b"zlib-1.3-mirror.so",
+        },
+    ];
+    let wrong_last = [
+        Offer {
+            offer: &mirror,
+            bytes: b"zlib-1.3-mirror.so",
+        },
+        Offer {
+            offer: &forge,
+            bytes: BINARY,
+        },
+        Offer {
+            offer: &wrong_version,
+            bytes: BINARY,
+        },
+    ];
+    let one = realize_with(&wrong_first);
+    let two = realize_with(&wrong_last);
+    assert_eq!(
+        one.substitutions.len(),
+        1,
+        "the wrong-version offer does not swallow the entry it claims"
+    );
+    assert_eq!(
+        two.substitutions.len(),
+        1,
+        "and it does not matter where in the slice it sits"
+    );
+    assert_eq!(
+        one.substitutions.first().unwrap().measured,
+        two.substitutions.first().unwrap().measured,
+        "the same offer serves under either assembly order"
+    );
+}
+
+#[test]
 fn an_environment_declared_as_a_value_resolves_and_locks_through_the_engine() {
     let declared = declaration();
     assert_eq!(

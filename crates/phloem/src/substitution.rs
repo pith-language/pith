@@ -74,6 +74,38 @@ pub struct BinaryOffer {
 }
 
 impl BinaryOffer {
+    /// The canonical order over offers: the claim's every field,
+    /// length-prefixed so no field can run into the next. Which offer a set
+    /// serves has to be a function of the set — an ordering nobody declared
+    /// is not an answer — so a caller holding several offers for one
+    /// identity orders them by this key before running the admission test
+    /// down the list.
+    #[must_use]
+    pub fn canonical_key(&self) -> Vec<u8> {
+        fn push(key: &mut Vec<u8>, part: &[u8]) {
+            key.extend_from_slice(&(part.len() as u64).to_be_bytes());
+            key.extend_from_slice(part);
+        }
+        let mut key = Vec::new();
+        push(
+            &mut key,
+            self.package.identity().domain().as_str().as_bytes(),
+        );
+        push(&mut key, self.package.identity().name().as_bytes());
+        push(&mut key, self.package.version().as_bytes());
+        for feature in self.features.iter() {
+            push(&mut key, feature.as_bytes());
+        }
+        push(&mut key, self.built_from.digest().as_bytes());
+        push(&mut key, self.platform.operating_system.as_bytes());
+        push(&mut key, self.platform.architecture.as_bytes());
+        push(&mut key, &self.toolchain.encode_canonical());
+        push(&mut key, self.claimed.digest().as_bytes());
+        push(&mut key, self.origin.kind().as_bytes());
+        push(&mut key, self.origin.location().as_bytes());
+        key
+    }
+
     #[must_use]
     pub fn new(
         package: PackageVersion,

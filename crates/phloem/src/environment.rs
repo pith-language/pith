@@ -377,21 +377,34 @@ impl EnvironmentDocument {
 /// Realize every lock entry against the offers that claim it, collecting
 /// the admitted substitutions. A refused or absent offer builds, which is
 /// 0042's fallback and not this module's concern.
+///
+/// Every offer claiming the entry's identity is tested, in the canonical
+/// order over claims, and the first that admits serves. Taking the first
+/// hit in the caller's slice instead would let a wrong-version offer
+/// sitting ahead of the right one refuse on the binding leg with the right
+/// one never examined, and which of two offers serves would depend on an
+/// order nobody declared.
 fn realize_entries(declaration: &Environment, lock: &Lock, offers: &[Offer<'_>]) -> Vec<Admitted> {
     let mut admitted = Vec::new();
     for entry in lock.entries.iter() {
-        let matching = offers
-            .iter()
-            .find(|offered| offered.offer.package.identity() == entry.package.identity());
-        let offered = matching.map(|offered| (offered.offer, offered.bytes));
         let admission = Admission {
             entry,
             platform: &declaration.platform,
             toolchain: &declaration.toolchain,
             origins: &declaration.origins,
         };
-        if let Realization::Substituted(record) = realize(&admission, offered) {
-            admitted.push(record);
+        let mut claiming: Vec<&Offer<'_>> = offers
+            .iter()
+            .filter(|offered| offered.offer.package.identity() == entry.package.identity())
+            .collect();
+        claiming.sort_by_key(|offered| offered.offer.canonical_key());
+        for offered in claiming {
+            if let Realization::Substituted(record) =
+                realize(&admission, Some((offered.offer, offered.bytes)))
+            {
+                admitted.push(record);
+                break;
+            }
         }
     }
     admitted
