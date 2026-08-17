@@ -32,7 +32,7 @@ fmt-check:
 # Run clippy across the workspace with the project's lint posture.
 [group('lint')]
 clippy:
-    cargo clippy --workspace --all-targets -- -D warnings
+    cargo clippy --locked --workspace --all-targets -- -D warnings
 
 # A fast combined check: format + clippy. No tests.
 [group('lint')]
@@ -65,24 +65,24 @@ watch-clippy:
 
 # Everything CI checks, in one target. Use before pushing.
 [group('ci')]
-ci: fmt-check clippy test test-doc docs-check deny typos repo-check zizmor just-fmt-check
+ci: treefmt-check clippy test-ci docs-check deny repo-check zizmor
 
-# Check all formats managed by treefmt, including Rust, Nix, and this justfile,
-# and run the configured spelling check.
+# Check Rust and Nix formatting, spelling, and the justfile's canonical format.
 [group('ci')]
 treefmt-check:
     treefmt --ci
+    just --fmt --check
 
 # Use Cargo's built-in runner to match the historical GitHub Actions check.
 # Unlike `test`, this also runs doctests.
 [group('ci')]
 test-ci:
-    cargo test --workspace
+    cargo test --locked --workspace
 
 # Run every repository-specific check maintained by xtask.
 [group('ci')]
 repo-check:
-    cargo run -p xtask -- check
+    cargo run --locked -p xtask -- check
 
 # The xtask determinism guard (no HashMap in source, decision 0021).
 [group('ci')]
@@ -102,7 +102,7 @@ docs:
 # Check docs without leaving build artifacts (what CI does).
 [group('ci')]
 docs-check:
-    RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
+    RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --no-deps --document-private-items
 
 # cargo-deny: licenses, advisories, bans, sources.
 [group('ci')]

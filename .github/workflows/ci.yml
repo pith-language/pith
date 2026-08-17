@@ -4,6 +4,9 @@ on:
   push:
     branches: [master]
   pull_request:
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,28 +17,51 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
   RUSTFLAGS: "-D warnings"
 
 jobs:
   checks:
     name: ${{ matrix.name }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: Formatting and spelling
             task: treefmt-check
+            dev_shell: ci-format
+            cargo_cache: false
           - name: Clippy
             task: clippy
+            dev_shell: ci-rust
+            cargo_cache: true
+            cache_key: clippy
           - name: Tests
             task: test-ci
+            dev_shell: ci-rust
+            cargo_cache: true
+            cache_key: tests
+          - name: Documentation
+            task: docs-check
+            dev_shell: ci-rust
+            cargo_cache: true
+            cache_key: docs
           - name: Dependency policy
             task: deny
+            dev_shell: ci-deny
+            cargo_cache: false
           - name: Repository invariants
             task: repo-check
+            dev_shell: ci-rust
+            cargo_cache: true
+            cache_key: repository
           - name: GitHub Actions security
             task: zizmor
+            dev_shell: ci-zizmor
+            cargo_cache: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -43,7 +69,21 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
         with:
           determinate: false
+      - name: Restore Nix store paths
+        uses: DeterminateSystems/magic-nix-cache-action@908b263ff629f4cc17666315b7fd3ec127c6244d # v14
+        with:
+          diagnostic-endpoint: ""
+          use-flakehub: false
+          use-gha-cache: true
+      - name: Restore Cargo dependencies
+        if: matrix.cargo_cache
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          cache-bin: false
+          cmd-format: nix develop --print-build-logs .#ci-rust --command {0}
+          key: ${{ matrix.cache_key }}
       - name: Run ${{ matrix.name }}
         env:
+          DEV_SHELL: ${{ matrix.dev_shell }}
           TASK: ${{ matrix.task }}
-        run: nix develop .#ci --command just "$TASK"
+        run: nix develop --print-build-logs ".#$DEV_SHELL" --command just "$TASK"

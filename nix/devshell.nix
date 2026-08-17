@@ -25,26 +25,43 @@
     );
 
     craneLib = (inputs.crane.mkLib pkgs).overrideToolchain rustToolchain;
+
+    ciRustPackages = [
+      rustToolchain
+      pkgs.just
+      pkgs.git
+      pkgs.clang
+    ];
+    ciFormatPackages = [
+      config.treefmt.build.wrapper
+      pkgs.just
+    ];
+    ciDenyPackages = [
+      pkgs.cargo-deny
+      pkgs.just
+    ];
+    ciZizmorPackages = [
+      pkgs.zizmor
+      pkgs.just
+    ];
   in {
     _module.args = {
       inherit pkgs pkgsUnstable craneLib rustToolchain nightlyToolchain;
     };
 
     devShells = {
-      # Keep CI focused on the tools used by the required checks. In
-      # particular, avoid downloading the nightly and investigative tooling in
-      # every parallel GitHub Actions job.
+      # The combined shell is convenient locally. CI uses the task-specific
+      # shells below so each isolated runner realizes only what its job needs.
       ci = pkgs.mkShell {
-        packages = [
-          rustToolchain
-          config.treefmt.build.wrapper
-          pkgs.cargo-deny
-          pkgs.just
-          pkgs.git
-          pkgs.clang
-          pkgs.zizmor
-        ];
+        packages = pkgs.lib.unique (
+          ciRustPackages ++ ciFormatPackages ++ ciDenyPackages ++ ciZizmorPackages
+        );
       };
+
+      ci-rust = pkgs.mkShell {packages = ciRustPackages;};
+      ci-format = pkgs.mkShell {packages = ciFormatPackages;};
+      ci-deny = pkgs.mkShell {packages = ciDenyPackages;};
+      ci-zizmor = pkgs.mkShell {packages = ciZizmorPackages;};
 
       default = pkgs.mkShell {
         packages = [
