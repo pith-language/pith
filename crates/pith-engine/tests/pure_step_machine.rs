@@ -164,6 +164,39 @@ impl PureRuleFrame for CountdownFrame {
     }
 }
 
+/// Needs the same request twice in sequence, then completes with the second
+/// result. The two requests are siblings, not nested: the first has completed
+/// and left the stack before the second is made.
+struct TwiceRule {
+    dependency: Request,
+}
+
+impl PureRule for TwiceRule {
+    fn start(&self, _inputs: &[Value]) -> Box<dyn PureRuleFrame> {
+        Box::new(TwiceFrame {
+            dependency: self.dependency.clone(),
+            made: 0,
+        })
+    }
+}
+
+struct TwiceFrame {
+    dependency: Request,
+    made: u8,
+}
+
+impl PureRuleFrame for TwiceFrame {
+    fn step(&mut self, input: Option<Resumption>) -> PithResult<PureStep> {
+        if self.made < 2 {
+            self.made = self.made.saturating_add(1);
+            return Ok(PureStep::Need(self.dependency.clone()));
+        }
+        Ok(PureStep::Complete(
+            input.and_then(Resumption::one).unwrap_or(Value::Unit),
+        ))
+    }
+}
+
 fn interface(inputs: &[Type], output: Type) -> Interface {
     Interface {
         inputs: inputs.to_vec().into_boxed_slice(),
@@ -553,4 +586,42 @@ fn computation_ids_do_not_cross_engine_instances() {
             .computation(second_evaluation.computation)
             .is_none()
     );
+}
+
+#[test]
+fn the_same_request_twice_in_sequence_is_reuse_and_not_a_cycle() {
+    // The property the cycle predicate's bookkeeping has to get right
+    // (decision 0050): a frame's digest is live only while its own frame is on
+    // the stack. Two sibling requests for one value are ordinary reuse, and the
+    // cycle check runs before the reuse lookup, so a digest left behind by the
+    // first would refuse the second.
+    let mut engine = Engine::new();
+    let root = interface(&[Type::Bool], Type::Int);
+    let leaf = interface(&[Type::Int], Type::Int);
+    engine.register_rule(rule("leaf", leaf.clone()), FirstInputRule);
+    engine.register_rule(
+        rule("root", root.clone()),
+        TwiceRule {
+            dependency: request("leaf", leaf, [Value::Int(7)]),
+        },
+    );
+
+    let evaluation = engine
+        .evaluate_pure(&request("root", root, [Value::Bool(false)]))
+        .unwrap();
+
+    assert_eq!(evaluation.value, Value::Int(7));
+    // Both requests recorded an edge, and both name the one computation the
+    // first request allocated.
+    let dependencies = engine
+        .query()
+        .dependencies_of(evaluation.computation)
+        .unwrap();
+    assert_eq!(dependencies.len(), 2);
+    let targets: Vec<_> = dependencies
+        .iter()
+        .filter_map(DependencyEdge::computation_id)
+        .collect();
+    assert_eq!(targets.len(), 2);
+    assert_eq!(targets.first(), targets.last());
 }
