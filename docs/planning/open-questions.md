@@ -49,7 +49,7 @@ milestone M-1 used decisions 0015 and 0019 as prototype hypotheses and is comple
 - how are multiple valid providers ranked without introducing invisible policy? (decision 0015 proposes refusing rather than ranking)
 - what equality is used for change pruning when values contain opaque or external references? (canonical equality prunes across a pure edge and, since [0033](../decisions/0033-consumer-of-action-reuse.md), across an action edge; opaque and external references are untouched because neither category is operational yet)
 - how much dynamic graph structure can be allowed while keeping queries useful before execution?
-- which parts of the graph persist between daemon versions? ([0024](../decisions/0024-persistent-engine-state.md) persists attempts, edges, provenance, and the reusable index; [0027](../decisions/0027-retention-and-gc.md) frames what is retained and for how long)
+- which parts of the graph persist between daemon versions? ([0024](../decisions/0024-persistent-engine-state.md) persists attempts, edges, provenance, and the reusable index; [0027](../decisions/0027-retention-and-gc.md) frames what is retained and for how long, with [0051](../decisions/0051-transitive-revalidation.md)'s closure as the lower bound it has to clear)
 
 ## constraints
 
@@ -80,7 +80,7 @@ milestone M-1 used decisions 0015 and 0019 as prototype hypotheses and is comple
 - when is an external object adopted, replaced, or treated as unrelated? (decision 0013)
 - where does the binding between semantic and external identity live? (decision 0013)
 - how are ownership transfers made safe? (decision 0013 names the primitive; transfer safety is open)
-- what is the retention and migration model for historical observations and plans? ([decision 0027](../decisions/0027-retention-and-gc.md) frames the problem: roots, policy axes, cross-store ordering. the default numeric parameters wait on workload evidence)
+- what is the retention and migration model for historical observations and plans? ([decision 0027](../decisions/0027-retention-and-gc.md) frames the problem: roots, policy axes, cross-store ordering. the default numeric parameters wait on workload evidence, and [0051](../decisions/0051-transitive-revalidation.md) puts a floor under them: revalidation walks a reusable attempt's recorded subtree, so the cache tier is that subtree's closure rather than the reusable index alone, and results are needed throughout it)
 
 ## first-party domains
 

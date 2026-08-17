@@ -31,6 +31,7 @@ this file tracks sources already used or queued for a deeper pass. a link here d
 
 - [Nix language manual](https://nix.dev/manual/nix/latest/language/)
 - [Nix store manual](https://nix.dev/manual/nix/latest/store/)
+- [Nix manual: garbage collection](https://nix.dev/manual/nix/2.24/package-management/garbage-collection.html)
 - [Nix advanced attributes: fixed-output derivations](https://nix.dev/manual/nix/stable/language/advanced-attributes)
 - [NixOS module-system manual](https://nixos.org/manual/nixos/stable/#sec-writing-modules)
 - [Eelco Dolstra's publications](https://edolstra.github.io/pubs/)
@@ -55,6 +56,13 @@ this file tracks sources already used or queued for a deeper pass. a link here d
 - [Adapton](https://matthewhammer.org/adapton/)
 - [Build Systems à la Carte](https://www.microsoft.com/en-us/research/publication/build-systems-a-la-carte/)
 - [Bazel Remote Execution API](https://github.com/bazelbuild/remote-apis)
+- [Bazel Skyframe reference](https://bazel.build/reference/skyframe)
+- [Bazel: optimize memory, `--discard_analysis_cache` and Skyfocus](https://bazel.build/advanced/performance/memory)
+- [Salsa RFC0004: LRU](https://github.com/salsa-rs/salsa-rfcs/blob/master/RFC0004-LRU.md)
+- [Salsa tuning: LRU and durability](https://salsa-rs.netlify.app/tuning)
+- [rust-analyzer: durable incrementality](https://rust-analyzer.github.io/blog/2023/07/24/durable-incrementality.html)
+- [rustc dev guide: incremental compilation in detail](https://rustc-dev-guide.rust-lang.org/queries/incremental-compilation-in-detail.html)
+- [Build systems à la carte: theory and practice](https://www.cambridge.org/core/services/aop-cambridge-core/content/view/097CE52C750E69BD16B78C318754C7A4/S0956796820000088a.pdf/build_systems_a_la_carte_theory_and_practice.pdf)
 
 ## configuration languages
 
