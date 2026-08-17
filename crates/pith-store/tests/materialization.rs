@@ -1,44 +1,11 @@
 use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::path::Path;
 
 use pith_ids::ContentId;
 use pith_store::{
     ContentStore, FileContent, MemoryContentStore, Tree, TreeEntry, TreeEntryContent,
     materialize_tree,
 };
-
-static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
-
-struct TestDirectory(PathBuf);
-
-impl TestDirectory {
-    fn new() -> io::Result<Self> {
-        loop {
-            let sequence = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
-            let path = std::env::temp_dir().join(format!(
-                "pith-materialization-test-{}-{sequence}",
-                std::process::id()
-            ));
-            match fs::create_dir(&path) {
-                Ok(()) => return Ok(Self(path)),
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-                Err(error) => return Err(error),
-            }
-        }
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TestDirectory {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
 
 fn file(name: &str, content: ContentId, executable: bool) -> TreeEntry<FileContent, ContentId> {
     match TreeEntry::new(
@@ -55,7 +22,7 @@ fn file(name: &str, content: ContentId, executable: bool) -> TreeEntry<FileConte
 
 #[test]
 fn materializes_files_child_trees_executability_and_symlinks() {
-    let Ok(directory) = TestDirectory::new() else {
+    let Ok(directory) = tempfile::tempdir() else {
         return;
     };
     let mut store = MemoryContentStore::default();
@@ -129,7 +96,7 @@ fn materializes_files_child_trees_executability_and_symlinks() {
 
 #[test]
 fn missing_referenced_content_leaves_no_destination() {
-    let Ok(directory) = TestDirectory::new() else {
+    let Ok(directory) = tempfile::tempdir() else {
         return;
     };
     let missing = ContentId::of_blob(b"not stored");
@@ -162,7 +129,7 @@ fn missing_referenced_content_leaves_no_destination() {
 
 #[test]
 fn refuses_to_replace_an_existing_destination() {
-    let Ok(directory) = TestDirectory::new() else {
+    let Ok(directory) = tempfile::tempdir() else {
         return;
     };
     let output = directory.path().join("output");

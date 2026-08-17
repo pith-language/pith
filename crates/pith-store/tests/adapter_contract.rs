@@ -1,46 +1,12 @@
 //! Cross-adapter acceptance tests for immutable content storage (A-3/A-4).
 
 use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use pith_ids::ContentId;
 use pith_store::{
     ContentStore, FileContent, FilesystemContentStore, MemoryContentStore, StoreError, Tree,
     TreeEntry, TreeEntryContent,
 };
-
-static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
-
-struct TestDirectory(PathBuf);
-
-impl TestDirectory {
-    fn new() -> io::Result<Self> {
-        loop {
-            let sequence = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
-            let path = std::env::temp_dir().join(format!(
-                "pith-store-contract-{}-{sequence}",
-                std::process::id()
-            ));
-            match fs::create_dir(&path) {
-                Ok(()) => return Ok(Self(path)),
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-                Err(error) => return Err(error),
-            }
-        }
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TestDirectory {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
 
 fn file_entry(
     name: &str,
@@ -108,7 +74,7 @@ fn memory_adapter_satisfies_the_basic_content_contract() {
 
 #[test]
 fn filesystem_adapter_satisfies_the_basic_content_contract() {
-    let Some(directory) = TestDirectory::new().ok() else {
+    let Some(directory) = tempfile::tempdir().ok() else {
         return;
     };
     let Some(mut store) = FilesystemContentStore::open(directory.path()).ok() else {
@@ -174,7 +140,7 @@ fn a_tree_may_name_content_that_is_not_materialized_locally() {
 
 #[test]
 fn filesystem_open_creates_a_nested_store_root() {
-    let Some(directory) = TestDirectory::new().ok() else {
+    let Some(directory) = tempfile::tempdir().ok() else {
         return;
     };
     let root = directory.path().join("nested/store/root");
@@ -186,7 +152,7 @@ fn filesystem_open_creates_a_nested_store_root() {
 
 #[test]
 fn multiple_filesystem_instances_observe_the_same_objects() {
-    let Some(directory) = TestDirectory::new().ok() else {
+    let Some(directory) = tempfile::tempdir().ok() else {
         return;
     };
     let (blob_id, tree) = {
@@ -220,7 +186,7 @@ fn multiple_filesystem_instances_observe_the_same_objects() {
 
 #[test]
 fn successful_filesystem_publication_leaves_no_temporary_objects() {
-    let Some(directory) = TestDirectory::new().ok() else {
+    let Some(directory) = tempfile::tempdir().ok() else {
         return;
     };
     let Some(mut store) = FilesystemContentStore::open(directory.path()).ok() else {
@@ -249,7 +215,7 @@ fn successful_filesystem_publication_leaves_no_temporary_objects() {
 
 #[test]
 fn putting_over_a_corrupt_existing_blob_fails_closed() {
-    let Some(directory) = TestDirectory::new().ok() else {
+    let Some(directory) = tempfile::tempdir().ok() else {
         return;
     };
     let Some(mut store) = FilesystemContentStore::open(directory.path()).ok() else {
@@ -271,7 +237,7 @@ fn putting_over_a_corrupt_existing_blob_fails_closed() {
 
 #[test]
 fn putting_over_a_corrupt_existing_tree_fails_closed() {
-    let Some(directory) = TestDirectory::new().ok() else {
+    let Some(directory) = tempfile::tempdir().ok() else {
         return;
     };
     let Some(mut store) = FilesystemContentStore::open(directory.path()).ok() else {

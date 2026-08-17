@@ -866,6 +866,7 @@ dependencies = [
  "indexmap",
  "pith-ids",
  "proptest",
+ "tempfile",
 ]
 
 [[package]]
