@@ -784,6 +784,7 @@ checksum = "d211803b9b6b570f68772237e415a029d5a50c65d382910b879fb19d3271f94d"
 name = "phloem"
 version = "0.1.0"
 dependencies = [
+ "miette",
  "pith-core",
  "pith-diag",
  "pith-engine",

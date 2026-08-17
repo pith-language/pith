@@ -4,6 +4,8 @@
 //! `text-size` and `line-index` are wrapped behind [`Span`] / [`SourceFile`]
 //! so they never appear in public types outside this module.
 
+use std::sync::Arc;
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ByteOffset(pub u32);
 
@@ -15,6 +17,10 @@ pub struct Span {
 }
 
 impl Span {
+    pub const fn new(start: ByteOffset, end: ByteOffset) -> Self {
+        Self { start, end }
+    }
+
     pub const fn point(at: ByteOffset) -> Self {
         Self { start: at, end: at }
     }
@@ -34,6 +40,15 @@ pub struct SourceFile {
     text: Box<str>,
 }
 
+/// One line of a [`SourceFile`]: its 1-based number, the span of its content
+/// without the terminator, and the content itself.
+#[derive(Clone, Copy, Debug)]
+pub struct FileLine<'a> {
+    pub number: usize,
+    pub span: Span,
+    pub text: &'a str,
+}
+
 impl SourceFile {
     pub fn new(id: SourceId, label: impl Into<Box<str>>, text: impl Into<Box<str>>) -> Self {
         Self {
@@ -47,6 +62,35 @@ impl SourceFile {
         &self.text
     }
 
+    /// The span of a slice of this file's text. The slice must come from
+    /// [`SourceFile::source_text`] — a slice of some other string, including
+    /// the one this file was built from, yields a meaningless span, silently.
+    pub fn span_of(&self, slice: &str) -> Span {
+        let text = self.text.as_ptr() as usize;
+        let start = (slice.as_ptr() as usize).saturating_sub(text);
+        let end = start.saturating_add(slice.len());
+        debug_assert_eq!(
+            self.text.get(start..end),
+            Some(slice),
+            "span_of was handed a slice of some other string"
+        );
+        Span {
+            start: offset_from(start),
+            end: offset_from(end),
+        }
+    }
+
+    /// The file's lines in order, numbered from 1, with `\n` and a preceding
+    /// `\r` stripped from the text and excluded from the span — the same
+    /// line split `str::lines` performs, with the positions kept.
+    pub fn lines(&self) -> Lines<'_> {
+        Lines {
+            inner: self.text.split_inclusive('\n'),
+            offset: 0,
+            number: 0,
+        }
+    }
+
     pub fn line_col(&self, offset: ByteOffset) -> (usize, usize) {
         let index = line_index::LineIndex::new(self.source_text());
         let pos = line_index::TextSize::new(offset.0);
@@ -55,6 +99,40 @@ impl SourceFile {
             line_col.line.saturating_add(1) as usize,
             line_col.col.saturating_add(1) as usize,
         )
+    }
+}
+
+fn offset_from(at: usize) -> ByteOffset {
+    ByteOffset(u32::try_from(at).unwrap_or(u32::MAX))
+}
+
+/// The iterator behind [`SourceFile::lines`].
+#[derive(Clone, Debug)]
+pub struct Lines<'a> {
+    inner: std::str::SplitInclusive<'a, char>,
+    offset: usize,
+    number: usize,
+}
+
+impl<'a> Iterator for Lines<'a> {
+    type Item = FileLine<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let raw = self.inner.next()?;
+        let text = raw.strip_suffix('\n').unwrap_or(raw);
+        let text = text.strip_suffix('\r').unwrap_or(text);
+        self.number = self.number.saturating_add(1);
+        let start = self.offset;
+        self.offset = self.offset.saturating_add(raw.len());
+        let end = start.saturating_add(text.len());
+        Some(FileLine {
+            number: self.number,
+            span: Span {
+                start: offset_from(start),
+                end: offset_from(end),
+            },
+            text,
+        })
     }
 }
 
@@ -164,11 +242,18 @@ pub enum Severity {
 
 /// A single diagnostic with typed context. Rendered at the CLI boundary via
 /// miette; libraries emit `Diag`, the binary decides how to show it.
+///
+/// A diagnostic that knows the text it talks about carries it in `source`,
+/// and its span and its notes' spans index that text. One produced away from
+/// any text — engine evaluation, durable reads — carries none, and renders
+/// without a snippet. The source is context for whoever renders it; it is
+/// not part of the diagnostic's identity and does not persist.
 #[derive(Clone, Debug)]
 pub struct Diag {
     pub severity: Severity,
     pub code: StableCode,
     pub span: Span,
+    pub source: Option<Arc<SourceFile>>,
     pub message: Text,
     pub notes: Box<[Note]>,
 }
@@ -199,6 +284,7 @@ impl Diag {
             severity,
             code,
             span,
+            source: None,
             message: Text::new(message),
             notes: Box::new([]),
         }
@@ -208,6 +294,12 @@ impl Diag {
     /// diagnostic today is an error, so this is the usual construction path.
     pub fn engine(code: EngineCode, span: Span, message: impl Into<Box<str>>) -> Self {
         Self::new(Severity::Error, code.into(), span, message)
+    }
+
+    /// Attaches the text the span and its notes index.
+    pub fn with_source(mut self, source: Arc<SourceFile>) -> Self {
+        self.source = Some(source);
+        self
     }
 
     pub fn with_note(mut self, span: Span, message: impl Into<Box<str>>) -> Self {
@@ -270,6 +362,36 @@ impl std::fmt::Display for Diag {
 
 impl std::error::Error for Diag {}
 
+impl miette::SourceCode for SourceFile {
+    fn read_span<'a>(
+        &'a self,
+        span: &miette::SourceSpan,
+        context_lines_before: usize,
+        context_lines_after: usize,
+    ) -> Result<Box<dyn miette::SpanContents<'a> + 'a>, miette::MietteError> {
+        let contents = miette::SourceCode::read_span(
+            self.text.as_ref(),
+            span,
+            context_lines_before,
+            context_lines_after,
+        )?;
+        Ok(Box::new(miette::MietteSpanContents::new_named(
+            self.label.to_string(),
+            contents.data(),
+            *contents.span(),
+            contents.line(),
+            contents.column(),
+            contents.line_count(),
+        )))
+    }
+}
+
+fn miette_span(span: Span) -> miette::SourceSpan {
+    let start = usize::try_from(span.start.0).unwrap_or(usize::MAX);
+    let length = usize::try_from(span.end.0.saturating_sub(span.start.0)).unwrap_or(usize::MAX);
+    miette::SourceSpan::new(miette::SourceOffset::from(start), length)
+}
+
 impl miette::Diagnostic for Diag {
     fn severity(&self) -> Option<miette::Severity> {
         Some(match self.severity {
@@ -282,6 +404,24 @@ impl miette::Diagnostic for Diag {
 
     fn code<'a>(&'a self) -> Option<Box<dyn std::fmt::Display + 'a>> {
         Some(Box::new(format!("E-{}", self.code.0)))
+    }
+
+    fn source_code(&self) -> Option<&dyn miette::SourceCode> {
+        self.source
+            .as_deref()
+            .map(|file| file as &dyn miette::SourceCode)
+    }
+
+    fn labels(&self) -> Option<Box<dyn Iterator<Item = miette::LabeledSpan> + '_>> {
+        self.source.as_ref()?;
+        let primary = miette::LabeledSpan::underline(miette_span(self.span));
+        let notes = self.notes.iter().map(|note| {
+            miette::LabeledSpan::new_with_span(
+                Some(note.message.0.to_string()),
+                miette_span(note.span),
+            )
+        });
+        Some(Box::new(std::iter::once(primary).chain(notes)))
     }
 }
 
@@ -343,5 +483,108 @@ mod tests {
         let diag = Diag::engine(EngineCode::DependencyCycle, Span::none(), "cyclical");
         assert_eq!(diag.severity, Severity::Error);
         assert_eq!(diag.code, EngineCode::DependencyCycle.into());
+    }
+
+    #[test]
+    fn span_of_names_a_slice_of_the_file() {
+        let text = "lock-version 1\nresolver sha256:00\n";
+        let file = SourceFile::new(SourceId::from_raw(0), "pith.lock", text);
+        let word = file.source_text().get(16..23).unwrap();
+        let span = file.span_of(word);
+        assert_eq!(span.start, ByteOffset(16));
+        assert_eq!(span.end, ByteOffset(23));
+        assert_eq!(file.source_text().get(16..23), Some(word));
+    }
+
+    #[test]
+    fn lines_match_str_lines_and_carry_spans_without_terminators() {
+        let text = "one\ntwo\r\n\nthree";
+        let file = SourceFile::new(SourceId::from_raw(0), "f", text);
+        let lines: Vec<FileLine> = file.lines().collect();
+        let plain: Vec<&str> = text.lines().collect();
+        assert_eq!(
+            lines.iter().map(|line| line.text).collect::<Vec<_>>(),
+            plain
+        );
+        for (index, line) in lines.iter().enumerate() {
+            assert_eq!(line.number, index + 1);
+            assert_eq!(
+                text.get(line.span.start.0 as usize..line.span.end.0 as usize),
+                Some(line.text),
+                "each span selects its line without the terminator"
+            );
+        }
+        assert_eq!(
+            lines.first().map(|line| line.span),
+            Some(Span::new(ByteOffset(0), ByteOffset(3)))
+        );
+        assert_eq!(
+            lines.get(1).map(|line| line.span),
+            Some(Span::new(ByteOffset(4), ByteOffset(4 + 3)))
+        );
+        assert_eq!(
+            lines.get(2).map(|line| line.span),
+            Some(Span::new(ByteOffset(9), ByteOffset(9)))
+        );
+        assert_eq!(
+            lines.get(3).map(|line| line.span.start),
+            Some(ByteOffset(10))
+        );
+    }
+
+    #[test]
+    fn an_attached_source_renders_its_label_line_and_column() {
+        let text = "lock-version 1\nresolver not-a-digest\n";
+        let file = SourceFile::new(SourceId::from_raw(0), "pith.lock", text);
+        let bad = file.span_of(file.source_text().get(24..37).unwrap());
+        let diag = Diag::new(
+            Severity::Error,
+            StableCode::compose(1),
+            bad,
+            "the resolver is not a digest",
+        )
+        .with_source(std::sync::Arc::new(file));
+        let handler = miette::GraphicalReportHandler::new();
+        let report = miette::Report::new(diag);
+        let mut rendered = String::new();
+        handler
+            .render_report(&mut rendered, report.as_ref())
+            .unwrap();
+        assert!(
+            rendered.contains("pith.lock:2:10"),
+            "the rendered header names the source, line, and column: {rendered}"
+        );
+        assert!(
+            rendered.contains("not-a-digest"),
+            "the rendered snippet quotes the spanned text: {rendered}"
+        );
+    }
+
+    #[test]
+    fn a_note_becomes_a_second_label_in_the_rendered_report() {
+        let file = SourceFile::new(SourceId::from_raw(0), "f", "first\nsecond\n");
+        let (first, second) = (
+            file.span_of(file.source_text().get(0..5).unwrap()),
+            file.span_of(file.source_text().get(6..12).unwrap()),
+        );
+        let file = std::sync::Arc::new(file);
+        let diag = Diag::new(
+            Severity::Error,
+            StableCode::compose(2),
+            second,
+            "the second line",
+        )
+        .with_source(std::sync::Arc::clone(&file))
+        .with_note(first, "the first line");
+        let handler = miette::GraphicalReportHandler::new();
+        let report = miette::Report::new(diag);
+        let mut rendered = String::new();
+        handler
+            .render_report(&mut rendered, report.as_ref())
+            .unwrap();
+        assert!(
+            rendered.contains("first") && rendered.contains("second"),
+            "both the primary span and the note's span render: {rendered}"
+        );
     }
 }

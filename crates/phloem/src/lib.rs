@@ -29,7 +29,9 @@ pub mod substitution;
 pub mod universe;
 pub mod witness;
 
-use pith_diag::{Diag, DiagnosticSink, Severity, Span, StableCode};
+use std::sync::Arc;
+
+use pith_diag::{Diag, DiagnosticSink, Severity, SourceFile, Span, StableCode};
 
 /// The stable code carried by phloem diagnostics.
 pub(crate) const PHLOEM_CODE: u32 = 9004;
@@ -43,5 +45,21 @@ pub(crate) fn diag(message: impl Into<Box<str>>) -> DiagnosticSink {
         Span::none(),
         message,
     ));
+    sink
+}
+
+/// Creates an error diagnostic that names where in a parsed text it
+/// happened: the span selects the offending field or line, and the attached
+/// source names the file both index.
+pub(crate) fn text_diag(
+    source: &Arc<SourceFile>,
+    span: Span,
+    message: impl Into<Box<str>>,
+) -> DiagnosticSink {
+    let mut sink = DiagnosticSink::new();
+    sink.push(
+        Diag::new(Severity::Error, StableCode(PHLOEM_CODE), span, message)
+            .with_source(Arc::clone(source)),
+    );
     sink
 }

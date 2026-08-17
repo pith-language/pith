@@ -1,23 +1,30 @@
 //! Text encoding for lock documents.
 //!
 //! Rendering is deterministic and parsing accepts the rendered form plus
-//! equivalent non-canonical spellings. Character-level token handling lives
-//! in `locktext`; filesystem publication lives in `lockpublish`.
+//! equivalent non-canonical spellings. Every parse refusal carries a span
+//! into the parsed text and the source file itself, so a reader renders the
+//! line and the field rather than a number baked into prose. Character-level
+//! token handling lives in `locktext`; filesystem publication lives in
+//! `lockpublish`.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
+use std::sync::Arc;
 
-use pith_diag::PithResult;
+use pith_diag::{
+    ByteOffset, Diag, DiagnosticSink, FileLine, PithResult, Severity, SourceFile, SourceId, Span,
+    StableCode,
+};
 use pith_ids::ContentId;
 
-use crate::diag;
 use crate::document::Lock;
 use crate::identity::{DomainIdentity, PackageIdentity, PackageVersion};
 use crate::lock::{Binding, LockEntry, Origin};
 use crate::locktext::{
-    SHA256, features_token, parse_digest, parse_features, token as text_token, tokenize,
+    SHA256, Token, features_token, parse_digest, parse_features, token as text_token, tokenize,
 };
 use crate::preference::{Preference, PreferenceList};
+use crate::text_diag;
 
 /// The lock file's format version, pinned at 1 on the same terms the state
 /// store pins its own: nothing is released, and a format change breaks the
@@ -51,59 +58,71 @@ pub fn render(lock: &Lock) -> String {
     out
 }
 
-/// Parses lock text and normalizes entries into canonical value order.
+/// Parses lock text and normalizes entries into canonical value order. The
+/// label names the text in diagnostics; a reader that parsed a file passes
+/// its path.
 ///
 /// # Errors
-/// Returns a diagnostic with the line number and invalid input.
-pub fn parse(text: &str) -> PithResult<Lock> {
+/// Returns a diagnostic attached to the parsed text, its span selecting the
+/// field or line that was refused.
+pub fn parse(label: &str, text: &str) -> PithResult<Lock> {
+    let file = Arc::new(SourceFile::new(SourceId::from_raw(0), label, text));
+    parse_file(&file)
+}
+
+fn parse_file(file: &Arc<SourceFile>) -> PithResult<Lock> {
     let mut header = Header::default();
-    let mut seen: BTreeMap<PackageIdentity, (usize, LockEntry)> = BTreeMap::new();
+    let mut seen: BTreeMap<PackageIdentity, (Span, LockEntry)> = BTreeMap::new();
     let mut version_seen = false;
-    for (number, raw) in text
-        .lines()
-        .enumerate()
-        .map(|(index, line)| (index.saturating_add(1), line))
-    {
-        let line = raw.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let tokens = tokenize(line).map_err(|message| diag(format!("line {number}: {message}")))?;
+    for line in file.lines() {
+        let tokens = tokenize(line.text, line.span.start)
+            .map_err(|refusal| text_diag(file, refusal.span, refusal.message))?;
         let Some(first) = tokens.first() else {
             continue;
         };
-        let directive = first.as_str();
+        let directive = first.text.as_str();
         if !version_seen {
-            if tokens.first().map(String::as_str) == Some(LOCK_VERSION) {
+            if directive == LOCK_VERSION {
                 version_seen = true;
-                header.lock_version(&tokens, number)?;
+                header.lock_version(file, &tokens, line)?;
                 continue;
             }
-            return Err(diag(format!(
-                "line {number}: expected `{LOCK_VERSION} {LOCK_FILE_VERSION}` as the first \
-                 line, found `{line}`"
-            )));
+            return Err(text_diag(
+                file,
+                line.span,
+                format!(
+                    "expected `{LOCK_VERSION} {LOCK_FILE_VERSION}` as the first line, found \
+                     `{}`",
+                    line.text.trim()
+                ),
+            ));
         }
         match directive {
-            RESOLVER => header.resolver(&tokens, number)?,
-            VERSION_SCHEME => header.scheme(&tokens, number)?,
-            UNIVERSE => header.universe(&tokens, number)?,
-            PREFERENCE => header.preference(&tokens, number)?,
-            BIND => record_binding(&mut seen, bind_entry(&tokens, number)?, number)?,
+            RESOLVER => header.resolver(file, &tokens, line)?,
+            VERSION_SCHEME => header.scheme(file, &tokens, line)?,
+            UNIVERSE => header.universe(file, &tokens, line)?,
+            PREFERENCE => header.preference(file, &tokens, line)?,
+            BIND => record_binding(file, &mut seen, bind_entry(file, &tokens, line)?, line)?,
             other => {
-                return Err(diag(format!(
-                    "line {number}: `{other}` is not a lock directive; expected one of \
-                     {RESOLVER}, {VERSION_SCHEME}, {UNIVERSE}, {PREFERENCE}, {BIND}"
-                )));
+                return Err(text_diag(
+                    file,
+                    first.span,
+                    format!(
+                        "`{other}` is not a lock directive; expected one of {RESOLVER}, \
+                         {VERSION_SCHEME}, {UNIVERSE}, {PREFERENCE}, {BIND}"
+                    ),
+                ));
             }
         }
     }
     if !version_seen {
-        return Err(diag(format!(
-            "the lock carried no `{LOCK_VERSION} {LOCK_FILE_VERSION}` first line"
-        )));
+        return Err(text_diag(
+            file,
+            Span::point(ByteOffset(0)),
+            format!("the lock carried no `{LOCK_VERSION} {LOCK_FILE_VERSION}` first line"),
+        ));
     }
-    let (resolver, scheme, universe, preferences) = header.finish()?;
+    let (resolver, scheme, universe, preferences) = header.finish(file)?;
     let entries: Vec<LockEntry> = seen.into_values().map(|(_, entry)| entry).collect();
     Lock::new(resolver, scheme, universe, preferences, entries)
 }
@@ -111,29 +130,45 @@ pub fn parse(text: &str) -> PithResult<Lock> {
 /// Adds a parsed binding, collapsing identical duplicates.
 ///
 /// # Errors
-/// Returns a diagnostic when the package is already bound differently.
+/// Returns a diagnostic when the package is already bound differently: the
+/// span selects this line, and a note selects the earlier one.
 fn record_binding(
-    seen: &mut BTreeMap<PackageIdentity, (usize, LockEntry)>,
+    file: &Arc<SourceFile>,
+    seen: &mut BTreeMap<PackageIdentity, (Span, LockEntry)>,
     entry: LockEntry,
-    number: usize,
+    line: FileLine,
 ) -> PithResult<()> {
     let identity = entry.package.identity().clone();
     match seen.entry(identity.clone()) {
         std::collections::btree_map::Entry::Vacant(slot) => {
-            slot.insert((number, entry));
+            slot.insert((line.span, entry));
         }
         std::collections::btree_map::Entry::Occupied(slot) => {
-            let (previous_line, previous) = slot.get();
+            let (previous_span, previous) = slot.get();
             if previous != &entry {
-                return Err(diag(format!(
-                    "line {number}: the lock binds `{}` in `{}` twice; line {previous_line} \
-                     bound version {}, and this line binds version {}: two selections of \
-                     one package is the conflict a union merge cannot represent",
-                    identity.name(),
-                    identity.domain().as_str(),
-                    previous.package.version(),
-                    entry.package.version(),
-                )));
+                let mut sink = DiagnosticSink::new();
+                sink.push(
+                    Diag::new(
+                        Severity::Error,
+                        StableCode(crate::PHLOEM_CODE),
+                        line.span,
+                        format!(
+                            "the lock binds `{}` in `{}` twice: the first line bound version \
+                             {}, and this line binds version {}: two selections of one package \
+                             is the conflict a union merge cannot represent",
+                            identity.name(),
+                            identity.domain().as_str(),
+                            previous.package.version(),
+                            entry.package.version(),
+                        ),
+                    )
+                    .with_source(Arc::clone(file))
+                    .with_note(
+                        *previous_span,
+                        format!("the first binding, version {}", previous.package.version()),
+                    ),
+                );
+                return Err(sink);
             }
         }
     }
@@ -149,26 +184,44 @@ struct Header {
 }
 
 impl Header {
-    fn lock_version(&mut self, tokens: &[String], number: usize) -> PithResult<()> {
-        let found = singleton(tokens, LOCK_VERSION, number)?;
-        let version = found
-            .parse::<u32>()
-            .map_err(|_| diag(format!("line {number}: `{found}` is not a lock version")))?;
+    fn lock_version(
+        &mut self,
+        file: &Arc<SourceFile>,
+        tokens: &[Token],
+        line: FileLine,
+    ) -> PithResult<()> {
+        let found = singleton(file, tokens, LOCK_VERSION, line)?;
+        let version = found.text.parse::<u32>().map_err(|_| {
+            text_diag(
+                file,
+                found.span,
+                format!("`{}` is not a lock version", found.text),
+            )
+        })?;
         if version != LOCK_FILE_VERSION {
-            return Err(diag(format!(
-                "line {number}: the lock names format version {version}, and this reader \
-                 understands only {LOCK_FILE_VERSION}; the format was changed after this \
-                 reader was built"
-            )));
+            return Err(text_diag(
+                file,
+                found.span,
+                format!(
+                    "the lock names format version {version}, and this reader understands only \
+                     {LOCK_FILE_VERSION}; the format was changed after this reader was built"
+                ),
+            ));
         }
         Ok(())
     }
 
-    fn resolver(&mut self, tokens: &[String], number: usize) -> PithResult<()> {
-        let found = singleton(tokens, RESOLVER, number)?;
-        self.if_absent(RESOLVER, number)?;
+    fn resolver(
+        &mut self,
+        file: &Arc<SourceFile>,
+        tokens: &[Token],
+        line: FileLine,
+    ) -> PithResult<()> {
+        let found = singleton(file, tokens, RESOLVER, line)?;
+        self.if_absent(file, line, RESOLVER)?;
         self.resolver = Some(
-            parse_digest(found, RESOLVER, number)?
+            parse_digest(found, RESOLVER)
+                .map_err(|refusal| text_diag(file, refusal.span, refusal.message))?
                 .digest()
                 .to_string()
                 .into(),
@@ -176,33 +229,55 @@ impl Header {
         Ok(())
     }
 
-    fn scheme(&mut self, tokens: &[String], number: usize) -> PithResult<()> {
-        let found = singleton(tokens, VERSION_SCHEME, number)?;
-        self.if_absent(VERSION_SCHEME, number)?;
-        self.scheme = Some(found.into());
+    fn scheme(
+        &mut self,
+        file: &Arc<SourceFile>,
+        tokens: &[Token],
+        line: FileLine,
+    ) -> PithResult<()> {
+        let found = singleton(file, tokens, VERSION_SCHEME, line)?;
+        self.if_absent(file, line, VERSION_SCHEME)?;
+        self.scheme = Some(found.text.as_str().into());
         Ok(())
     }
 
-    fn universe(&mut self, tokens: &[String], number: usize) -> PithResult<()> {
-        let found = singleton(tokens, UNIVERSE, number)?;
-        self.if_absent(UNIVERSE, number)?;
-        self.universe = Some(parse_digest(found, UNIVERSE, number)?);
+    fn universe(
+        &mut self,
+        file: &Arc<SourceFile>,
+        tokens: &[Token],
+        line: FileLine,
+    ) -> PithResult<()> {
+        let found = singleton(file, tokens, UNIVERSE, line)?;
+        self.if_absent(file, line, UNIVERSE)?;
+        self.universe = Some(
+            parse_digest(found, UNIVERSE)
+                .map_err(|refusal| text_diag(file, refusal.span, refusal.message))?,
+        );
         Ok(())
     }
 
-    fn preference(&mut self, tokens: &[String], number: usize) -> PithResult<()> {
-        let found = singleton(tokens, PREFERENCE, number)?;
-        let Some(preference) = Preference::from_name(found) else {
-            return Err(diag(format!(
-                "line {number}: `{found}` is not a declared preference; expected newest \
-                 or oldest"
-            )));
+    fn preference(
+        &mut self,
+        file: &Arc<SourceFile>,
+        tokens: &[Token],
+        line: FileLine,
+    ) -> PithResult<()> {
+        let found = singleton(file, tokens, PREFERENCE, line)?;
+        let Some(preference) = Preference::from_name(found.text.as_str()) else {
+            return Err(text_diag(
+                file,
+                found.span,
+                format!(
+                    "`{}` is not a declared preference; expected newest or oldest",
+                    found.text
+                ),
+            ));
         };
         self.preferences.push(preference);
         Ok(())
     }
 
-    fn if_absent(&self, directive: &str, number: usize) -> PithResult<()> {
+    fn if_absent(&self, file: &Arc<SourceFile>, line: FileLine, directive: &str) -> PithResult<()> {
         let present = match directive {
             RESOLVER => self.resolver.is_some(),
             VERSION_SCHEME => self.scheme.is_some(),
@@ -210,18 +285,22 @@ impl Header {
             _ => false,
         };
         if present {
-            return Err(diag(format!(
-                "line {number}: the `{directive}` directive appears twice; a lock carries \
-                 it once"
-            )));
+            return Err(text_diag(
+                file,
+                line.span,
+                format!("the `{directive}` directive appears twice; a lock carries it once"),
+            ));
         }
         Ok(())
     }
 
-    fn finish(self) -> PithResult<(Box<str>, Box<str>, ContentId, PreferenceList)> {
-        let resolver = self.resolver.ok_or_else(|| missing(RESOLVER))?;
-        let scheme = self.scheme.ok_or_else(|| missing(VERSION_SCHEME))?;
-        let universe = self.universe.ok_or_else(|| missing(UNIVERSE))?;
+    fn finish(
+        self,
+        file: &Arc<SourceFile>,
+    ) -> PithResult<(Box<str>, Box<str>, ContentId, PreferenceList)> {
+        let resolver = self.resolver.ok_or_else(|| missing(file, RESOLVER))?;
+        let scheme = self.scheme.ok_or_else(|| missing(file, VERSION_SCHEME))?;
+        let universe = self.universe.ok_or_else(|| missing(file, UNIVERSE))?;
         Ok((
             resolver,
             scheme,
@@ -231,17 +310,30 @@ impl Header {
     }
 }
 
-fn missing(directive: &'static str) -> pith_diag::DiagnosticSink {
-    diag(format!("the lock carried no `{directive}` directive"))
+fn missing(file: &Arc<SourceFile>, directive: &'static str) -> DiagnosticSink {
+    text_diag(
+        file,
+        Span::point(ByteOffset(0)),
+        format!("the lock carried no `{directive}` directive"),
+    )
 }
 
-fn singleton<'a>(tokens: &'a [String], directive: &str, number: usize) -> PithResult<&'a str> {
+fn singleton<'a>(
+    file: &Arc<SourceFile>,
+    tokens: &'a [Token],
+    directive: &str,
+    line: FileLine,
+) -> PithResult<&'a Token> {
     match tokens {
-        [_, value] => Ok(value.as_str()),
-        _ => Err(diag(format!(
-            "line {number}: the `{directive}` directive takes one value; found {}",
-            tokens.len().saturating_sub(1)
-        ))),
+        [_, value] => Ok(value),
+        _ => Err(text_diag(
+            file,
+            line.span,
+            format!(
+                "the `{directive}` directive takes one value; found {}",
+                tokens.len().saturating_sub(1)
+            ),
+        )),
     }
 }
 
@@ -258,34 +350,51 @@ pub fn binding_line(entry: &LockEntry) -> String {
     )
 }
 
-/// Parse the binding shape shared by a lock line and a log leaf.
-pub(crate) fn parse_binding_line(line: &str) -> PithResult<Binding> {
-    let tokens = tokenize(line).map_err(|message| diag(format!("a binding line: {message}")))?;
-    parse_binding_tokens(&tokens, 0)
+/// Parse the binding shape shared by a lock line and a log leaf, attaching
+/// the leaf's file to every refusal.
+pub(crate) fn parse_binding_line(source: &Arc<SourceFile>, line: &FileLine) -> PithResult<Binding> {
+    let tokens = tokenize(line.text, line.span.start)
+        .map_err(|refusal| text_diag(source, refusal.span, refusal.message))?;
+    parse_binding_tokens(source, &tokens, line.span)
 }
 
-fn parse_binding_tokens(tokens: &[String], number: usize) -> PithResult<Binding> {
-    let [directive, domain, name, version, features, source] = tokens else {
-        return Err(diag(format!(
-            "line {number}: a `{BIND}` binding carries domain, name, version, features, \
-             and source; found {} tokens",
-            tokens.len().saturating_sub(1)
-        )));
+fn parse_binding_tokens(
+    source: &Arc<SourceFile>,
+    tokens: &[Token],
+    line_span: Span,
+) -> PithResult<Binding> {
+    let [directive, domain, name, version, features, digest] = tokens else {
+        return Err(text_diag(
+            source,
+            line_span,
+            format!(
+                "a `{BIND}` binding carries domain, name, version, features, and source; found \
+                 {} tokens",
+                tokens.len().saturating_sub(1)
+            ),
+        ));
     };
-    if directive != BIND {
-        return Err(diag(format!(
-            "line {number}: a binding starts with `{BIND}`, found `{directive}`"
-        )));
+    if directive.text != BIND {
+        return Err(text_diag(
+            source,
+            directive.span,
+            format!("a binding starts with `{BIND}`, found `{}`", directive.text),
+        ));
     }
-    let mut features = parse_features(features, number)?;
+    let mut features = parse_features(features)
+        .map_err(|refusal| text_diag(source, refusal.span, refusal.message))?;
     features.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
     Ok(Binding {
         package: PackageVersion::new(
-            PackageIdentity::declare(DomainIdentity::new(domain.clone()), name.clone()),
-            version.clone(),
+            PackageIdentity::declare(
+                DomainIdentity::new(domain.text.as_str()),
+                name.text.as_str(),
+            ),
+            version.text.as_str(),
         ),
         features,
-        source: parse_digest(source, "the bind source", number)?,
+        source: parse_digest(digest, "bind source")
+            .map_err(|refusal| text_diag(source, refusal.span, refusal.message))?,
     })
 }
 
@@ -302,24 +411,32 @@ fn bind_line(entry: &LockEntry) -> String {
     )
 }
 
-fn bind_entry(tokens: &[String], number: usize) -> PithResult<LockEntry> {
+fn bind_entry(source: &Arc<SourceFile>, tokens: &[Token], line: FileLine) -> PithResult<LockEntry> {
     let [_, _, _, _, _, _, kind, location] = tokens else {
-        return Err(diag(format!(
-            "line {number}: a `{BIND}` line carries domain, name, version, features, \
-             source, origin kind, and origin location; found {} tokens",
-            tokens.len().saturating_sub(1)
-        )));
+        return Err(text_diag(
+            source,
+            line.span,
+            format!(
+                "a `{BIND}` line carries domain, name, version, features, source, origin kind, \
+                 and origin location; found {} tokens",
+                tokens.len().saturating_sub(1)
+            ),
+        ));
     };
     let binding_tokens = match tokens.get(..6) {
         Some(binding_tokens) => binding_tokens,
         None => unreachable!("the binding prefix exists in the eight-token pattern"),
     };
-    let binding = parse_binding_tokens(binding_tokens, number)?;
-    let Some(origin) = Origin::from_kind(kind.as_str(), location.clone()) else {
-        return Err(diag(format!(
-            "line {number}: `{kind}` is not an origin kind; expected registry, forge, or \
-             local-path"
-        )));
+    let binding = parse_binding_tokens(source, binding_tokens, line.span)?;
+    let Some(origin) = Origin::from_kind(kind.text.as_str(), location.text.clone()) else {
+        return Err(text_diag(
+            source,
+            kind.span,
+            format!(
+                "`{}` is not an origin kind; expected registry, forge, or local-path",
+                kind.text
+            ),
+        ));
     };
     Ok(LockEntry::new(
         binding.package,
@@ -333,6 +450,10 @@ fn bind_entry(tokens: &[String], number: usize) -> PithResult<LockEntry> {
 mod tests {
     use super::*;
     use crate::document::diff;
+
+    fn select(source: &str, span: Span) -> Option<&str> {
+        source.get(span.start.0 as usize..span.end.0 as usize)
+    }
 
     fn lock() -> Lock {
         let universe = ContentId::of_blob(b"universe");
@@ -397,9 +518,9 @@ mod tests {
         let written = lock();
         let text = render(&written);
         assert!(text.starts_with("lock-version 1\n"));
-        assert_eq!(parse(&text).unwrap(), written);
+        assert_eq!(parse("pith.lock", &text).unwrap(), written);
         assert_eq!(
-            render(&parse(&text).unwrap()),
+            render(&parse("pith.lock", &text).unwrap()),
             text,
             "render is deterministic"
         );
@@ -422,7 +543,7 @@ mod tests {
             text.contains('"'),
             "the reserved characters force quoting: {text}"
         );
-        assert_eq!(parse(&text).unwrap(), quoted);
+        assert_eq!(parse("pith.lock", &text).unwrap(), quoted);
     }
 
     #[test]
@@ -459,7 +580,7 @@ mod tests {
             first_bind,
         );
         assert_ne!(hand, canonical);
-        let parsed = parse(&hand).unwrap();
+        let parsed = parse("pith.lock", &hand).unwrap();
         assert_eq!(render(&parsed), canonical);
         assert_eq!(parsed, lock());
     }
@@ -473,19 +594,28 @@ mod tests {
             .unwrap()
             .replacen("1.1.1", "1.1.2", 1);
         let merged = format!("{canonical}{moved}\n");
-        let error = parse(&merged).unwrap_err();
-        let message = error
-            .iter()
-            .next()
-            .map(|diagnostic| diagnostic.message.0.to_string())
-            .unwrap_or_default();
+        let error = parse("pith.lock", &merged).unwrap_err();
+        let diagnostic = error.iter().next().unwrap();
+        let message = diagnostic.message.0.to_string();
         assert!(
-            message.contains("twice")
-                && message.contains("1.1.1")
-                && message.contains("1.1.2")
-                && message.contains("line 7")
-                && message.contains("line 9"),
-            "the diagnostic names both lines and both versions: {message}"
+            message.contains("twice") && message.contains("1.1.1") && message.contains("1.1.2"),
+            "the diagnostic names the conflict and both versions: {message}"
+        );
+        assert_eq!(
+            select(&merged, diagnostic.span),
+            Some(moved.trim_end()),
+            "the span selects the second binding line"
+        );
+        let note = diagnostic.notes.first().unwrap();
+        assert_eq!(
+            select(&merged, note.span),
+            Some(
+                canonical
+                    .lines()
+                    .find(|line| line.contains("openssl"))
+                    .unwrap()
+            ),
+            "the note's span selects the first binding line"
         );
     }
 
@@ -498,7 +628,7 @@ mod tests {
             .unwrap()
             .replacen("[shared,zlib]", "[static]", 1);
         let merged = format!("{canonical}{moved}\n");
-        let error = parse(&merged).unwrap_err();
+        let error = parse("pith.lock", &merged).unwrap_err();
         assert!(
             error.iter().any(|d| d.message.0.contains("twice")),
             "the diagnostic names the conflict: {error:?}"
@@ -514,18 +644,22 @@ mod tests {
             .unwrap()
             .to_string();
         let merged = format!("{canonical}{repeated}\n");
-        assert_eq!(parse(&merged).unwrap(), lock());
+        assert_eq!(parse("pith.lock", &merged).unwrap(), lock());
     }
 
     #[test]
     fn a_wrong_format_version_is_refused_naming_the_found_version() {
         let text = render(&lock()).replacen("lock-version 1", "lock-version 7", 1);
-        let error = parse(&text).unwrap_err();
+        let error = parse("pith.lock", &text).unwrap_err();
+        let diagnostic = error.iter().next().unwrap();
         assert!(
-            error
-                .iter()
-                .any(|d| d.message.0.contains("7") && d.message.0.contains("understands")),
+            diagnostic.message.0.contains("7") && diagnostic.message.0.contains("understands"),
             "the diagnostic names the found version: {error:?}"
+        );
+        assert_eq!(
+            select(&text, diagnostic.span),
+            Some("7"),
+            "the span selects the version field"
         );
     }
 
@@ -536,14 +670,14 @@ mod tests {
             .filter(|line| !line.starts_with("lock-version"))
             .collect::<Vec<_>>()
             .join("\n");
-        let error = parse(&text).unwrap_err();
+        let error = parse("pith.lock", &text).unwrap_err();
         assert!(
             error
                 .iter()
                 .any(|d| d.message.0.contains("expected `lock-version")),
             "the diagnostic names what the first line had to be: {error:?}"
         );
-        let empty = parse("").unwrap_err();
+        let empty = parse("pith.lock", "").unwrap_err();
         assert!(
             empty
                 .iter()
@@ -555,12 +689,16 @@ mod tests {
     #[test]
     fn an_unknown_directive_is_refused_naming_it() {
         let text = format!("lock-version 1\nfog sha256:00\n{}", render(&lock()));
-        let error = parse(&text).unwrap_err();
+        let error = parse("pith.lock", &text).unwrap_err();
         assert!(
             error.iter().any(
                 |d| d.message.0.contains("fog") && d.message.0.contains("not a lock directive")
             ),
             "the diagnostic names the directive: {error:?}"
+        );
+        assert!(
+            error.iter().any(|d| select(&text, d.span) == Some("fog")),
+            "the span selects the directive's own field: {error:?}"
         );
     }
 
@@ -571,7 +709,7 @@ mod tests {
             .filter(|line| !line.starts_with("universe "))
             .collect::<Vec<_>>()
             .join("\n");
-        let error = parse(&text).unwrap_err();
+        let error = parse("pith.lock", &text).unwrap_err();
         assert!(
             error.iter().any(|d| d.message.0.contains("no `universe`")),
             "the diagnostic names the missing directive: {error:?}"
@@ -579,17 +717,22 @@ mod tests {
     }
 
     #[test]
-    fn a_bad_digest_is_refused_naming_the_field_and_the_text() {
+    fn a_bad_digest_is_refused_with_the_field_and_its_span() {
         let text = render(&lock()).replace(
             &format!("universe sha256:{}", lock().universe.digest()),
             "universe sha256:not-hex",
         );
-        let error = parse(&text).unwrap_err();
+        let error = parse("pith.lock", &text).unwrap_err();
+        let diagnostic = error.iter().next().unwrap();
         assert!(
-            error
-                .iter()
-                .any(|d| d.message.0.contains("not hexadecimal") && d.message.0.contains("line ")),
-            "the diagnostic names the field, the text, and the line: {error:?}"
+            diagnostic.message.0.contains("not hexadecimal")
+                && diagnostic.message.0.contains("universe"),
+            "the diagnostic names the field and the complaint: {error:?}"
+        );
+        assert_eq!(
+            select(&text, diagnostic.span),
+            Some("sha256:not-hex"),
+            "the span selects the digest field, prefix included"
         );
     }
 
@@ -601,7 +744,7 @@ mod tests {
             lock().resolver,
             lock().universe.digest(),
         );
-        let error = parse(&truncated).unwrap_err();
+        let error = parse("pith.lock", &truncated).unwrap_err();
         assert!(
             error
                 .iter()
@@ -611,31 +754,39 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_origin_kind_is_refused() {
+    fn an_unknown_origin_kind_is_refused_at_its_own_field() {
         let text = render(&lock()).replace(" registry pkgs", " mirror pkgs");
-        let error = parse(&text).unwrap_err();
+        let error = parse("pith.lock", &text).unwrap_err();
         assert!(
             error
                 .iter()
                 .any(|d| d.message.0.contains("mirror") && d.message.0.contains("origin kind")),
             "the diagnostic names the kind and the expected ones: {error:?}"
         );
+        assert!(
+            error
+                .iter()
+                .any(|d| select(&text, d.span) == Some("mirror")),
+            "the span selects the origin-kind field: {error:?}"
+        );
     }
 
     #[test]
-    fn an_unterminated_quote_is_refused_naming_the_line() {
+    fn an_unterminated_quote_is_refused_spanning_the_rest_of_the_line() {
         let text = format!("{}\"never closed", render(&lock()));
-        let error = parse(&text).unwrap_err();
+        let error = parse("pith.lock", &text).unwrap_err();
         assert!(
-            error.iter().any(|d| d.message.0.contains("line ")),
-            "the diagnostic carries the line number: {error:?}"
+            error
+                .iter()
+                .any(|d| select(&text, d.span) == Some("\"never closed")),
+            "the refusal spans from the opening quote to the end of the line: {error:?}"
         );
 
         let text = render(&lock()).replace(
             "version-scheme numeric-segments",
             r#"version-scheme "\u{41"#,
         );
-        let error = parse(&text).unwrap_err();
+        let error = parse("pith.lock", &text).unwrap_err();
         assert!(
             error.iter().any(|d| d.message.0.contains("never closed")),
             "a unicode escape requires its closing brace: {error:?}"

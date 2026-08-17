@@ -26,3 +26,4 @@ pith-store.workspace = true
 tokio = { workspace = true, features = ["process", "fs", "io-util", "rt", "rt-multi-thread", "macros"] }
 tempfile.workspace = true
 serde_json.workspace = true
+miette.workspace = true

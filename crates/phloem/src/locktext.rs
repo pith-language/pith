@@ -3,16 +3,52 @@
 //! Fields use bare tokens when possible and quoted tokens with backslash
 //! escapes otherwise. Digests render as `sha256:` followed by lowercase
 //! hexadecimal digits; parsing also accepts uppercase digits.
+//!
+//! Every parse here refuses with a span selecting the offending field in the
+//! source, and the message naming what is wrong with it; the caller holds
+//! the source and attaches it.
 
 use std::fmt::Write as _;
 
-use pith_diag::PithResult;
+use pith_diag::{ByteOffset, Span};
 use pith_ids::{ContentId, DIGEST_LEN};
 
 use crate::codec::digest_from_hex;
-use crate::diag;
 
 const HEX_LEN: usize = DIGEST_LEN * 2;
+
+/// One written field: the text after quoting is resolved, and the span of
+/// its written spelling in the source.
+#[derive(Debug)]
+pub(crate) struct Token {
+    pub text: String,
+    pub span: Span,
+}
+
+/// A refusal from token or field parsing: what is wrong, and the span it
+/// happened in.
+#[derive(Debug)]
+pub(crate) struct Refusal {
+    pub message: String,
+    pub span: Span,
+}
+
+/// The byte offset of `rest`, a tail of `line`, when `line` begins at
+/// `base` in the source.
+fn at(base: ByteOffset, line: &str, rest: &str) -> ByteOffset {
+    let consumed = line.len().saturating_sub(rest.len());
+    ByteOffset(
+        base.0
+            .saturating_add(u32::try_from(consumed).unwrap_or(u32::MAX)),
+    )
+}
+
+fn end_of(base: ByteOffset, line: &str) -> ByteOffset {
+    ByteOffset(
+        base.0
+            .saturating_add(u32::try_from(line.len()).unwrap_or(u32::MAX)),
+    )
+}
 
 /// One text field in its written spelling: bare when it contains none of
 /// the reserved characters, quoted with backslash escapes otherwise.
@@ -48,33 +84,51 @@ pub(crate) fn is_bare(text: &str) -> bool {
         })
 }
 
-/// Split a line into tokens on spaces. Double-quoted tokens may contain any
-/// character through backslash escapes; a `[`-bracketed group stays one
-/// token with quoting honored inside it; an unquoted `#` ends the line as a
-/// comment.
-pub(crate) fn tokenize(line: &str) -> Result<Vec<String>, String> {
+/// Split a line into tokens on spaces, keeping each token's span. A span
+/// runs from the token's first character to the character after its last,
+/// quoted material included; a `[`-bracketed group stays one token with
+/// quoting honored inside it; an unquoted `#` ends the line as a comment.
+/// A refusal spans the offending token's start through the end of the line,
+/// because every way a token fails leaves the rest of the line suspect.
+pub(crate) fn tokenize(line: &str, base: ByteOffset) -> Result<Vec<Token>, Refusal> {
     let mut tokens = Vec::new();
     let mut rest = line;
     loop {
         rest = rest.trim_start_matches(' ');
-        if rest.is_empty() {
+        if rest.is_empty() || rest.starts_with('#') {
             return Ok(tokens);
         }
-        if rest.starts_with('#') {
-            return Ok(tokens);
-        }
-        if let Some(remaining) = rest.strip_prefix('[') {
-            let (group, remaining) = bracket_group(remaining)?;
-            tokens.push(format!("[{group}]"));
-            rest = remaining;
-            continue;
-        }
-        let (token, remaining) = if rest.starts_with('"') {
-            quoted_token(rest)?
+        let start = at(base, line, rest);
+        let (text, remaining) = if let Some(inner) = rest.strip_prefix('[') {
+            match bracket_group(inner) {
+                Ok((group, remaining)) => (format!("[{group}]"), remaining),
+                Err(message) => {
+                    return Err(Refusal {
+                        message,
+                        span: Span::new(start, end_of(base, line)),
+                    });
+                }
+            }
+        } else if rest.starts_with('"') {
+            match quoted_token(rest) {
+                Ok((token, remaining)) => (token, remaining),
+                Err(message) => {
+                    return Err(Refusal {
+                        message,
+                        span: Span::new(start, end_of(base, line)),
+                    });
+                }
+            }
         } else {
-            bare_token(rest)?
+            bare_token(rest).map_err(|message| Refusal {
+                message,
+                span: Span::new(start, end_of(base, line)),
+            })?
         };
-        tokens.push(token);
+        tokens.push(Token {
+            text,
+            span: Span::new(start, at(base, line, remaining)),
+        });
         rest = remaining;
     }
 }
@@ -193,39 +247,51 @@ pub(crate) fn features_token(features: &[Box<str>]) -> String {
     out
 }
 
-/// Parses a bracketed, comma-separated feature list.
+/// Parses the bracketed, comma-separated feature list a token carries.
 ///
 /// # Errors
-/// Returns a diagnostic when the list or one of its tokens is invalid.
-pub(crate) fn parse_features(text: &str, number: usize) -> PithResult<Box<[Box<str>]>> {
-    let Some(inner) = text
+/// A [`Refusal`] whose span selects the field when the list or one of its
+/// tokens is invalid.
+pub(crate) fn parse_features(field: &Token) -> Result<Box<[Box<str>]>, Refusal> {
+    let Some(inner) = field
+        .text
         .strip_prefix('[')
         .and_then(|rest| rest.strip_suffix(']'))
     else {
-        return Err(diag(format!(
-            "line {number}: `{text}` is not a bracketed feature list"
-        )));
+        return Err(Refusal {
+            message: format!("`{}` is not a bracketed feature list", field.text),
+            span: field.span,
+        });
     };
     if inner.is_empty() {
         return Ok(Box::new([]));
     }
+    // The bracket token's text is its written spelling verbatim, so offsets
+    // inside it are offsets in the source.
+    let inner_base = ByteOffset(field.span.start.0.saturating_add(1));
     let mut features = Vec::new();
-    for piece in split_commas(inner) {
+    for piece in split_commas(inner, inner_base) {
         features.push(
             unquote(&piece)
-                .map_err(|message| diag(format!("line {number}: {message}")))?
+                .map_err(|message| Refusal {
+                    message,
+                    span: piece.span,
+                })?
                 .into(),
         );
     }
     Ok(features.into())
 }
 
-/// Split bracket-group content on commas, keeping quoted pieces whole.
-fn split_commas(inner: &str) -> Vec<String> {
+/// Split bracket-group content on commas, keeping quoted pieces whole and
+/// each piece's span.
+fn split_commas(inner: &str, base: ByteOffset) -> Vec<Token> {
     let mut pieces = Vec::new();
     let mut current = String::new();
     let mut chars = inner.chars();
+    let mut start = base;
     while let Some(character) = chars.next() {
+        let consumed = inner.len().saturating_sub(chars.as_str().len());
         match character {
             '"' => {
                 current.push('"');
@@ -243,18 +309,34 @@ fn split_commas(inner: &str) -> Vec<String> {
                 }
             }
             ',' => {
-                pieces.push(current.clone());
+                // The comma is one byte, so the piece ends one byte before
+                // the consumed prefix and the next begins at it.
+                let end =
+                    ByteOffset(base.0.saturating_add(
+                        u32::try_from(consumed.saturating_sub(1)).unwrap_or(u32::MAX),
+                    ));
+                pieces.push(Token {
+                    text: current.clone(),
+                    span: Span::new(start, end),
+                });
                 current.clear();
+                start = ByteOffset(
+                    base.0
+                        .saturating_add(u32::try_from(consumed).unwrap_or(u32::MAX)),
+                );
             }
             other => current.push(other),
         }
     }
-    pieces.push(current);
+    pieces.push(Token {
+        text: current,
+        span: Span::new(start, end_of(base, inner)),
+    });
     pieces
 }
 
-fn unquote(piece: &str) -> Result<String, String> {
-    let piece = piece.trim();
+fn unquote(field: &Token) -> Result<String, String> {
+    let piece = field.text.trim();
     if piece.starts_with('"') {
         let (token, remaining) = quoted_token(piece)?;
         if !remaining.trim().is_empty() {
@@ -273,24 +355,30 @@ fn unquote(piece: &str) -> Result<String, String> {
 /// Parses `sha256:` followed by 64 hexadecimal digits.
 ///
 /// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming the line and the field when the
-/// text is not a digest of this shape.
-pub(crate) fn parse_digest(text: &str, field: &str, number: usize) -> PithResult<ContentId> {
-    let Some(hex) = text.strip_prefix(SHA256) else {
-        return Err(diag(format!(
-            "line {number}: {field} carried `{text}` rather than a `sha256:`-prefixed digest"
-        )));
+/// A [`Refusal`] whose span selects the field when the text is not a digest
+/// of this shape.
+pub(crate) fn parse_digest(field: &Token, name: &str) -> Result<ContentId, Refusal> {
+    let Some(hex) = field.text.strip_prefix(SHA256) else {
+        return Err(Refusal {
+            message: format!(
+                "the {name} carried `{}`, rather than a `sha256:`-prefixed digest",
+                field.text
+            ),
+            span: field.span,
+        });
     };
     if !hex.chars().all(|character| character.is_ascii_hexdigit()) {
-        return Err(diag(format!(
-            "line {number}: {field} carried `{hex}`, which is not hexadecimal"
-        )));
+        return Err(Refusal {
+            message: format!("the {name} carried `{hex}`, which is not hexadecimal"),
+            span: field.span,
+        });
     }
-    let digest = digest_from_hex(hex).ok_or_else(|| {
-        diag(format!(
-            "line {number}: {field} carried {} hexadecimal digits rather than {HEX_LEN}",
+    let digest = digest_from_hex(hex).ok_or_else(|| Refusal {
+        message: format!(
+            "the {name} carried {} hexadecimal digits rather than {HEX_LEN}",
             hex.len()
-        ))
+        ),
+        span: field.span,
     })?;
     Ok(ContentId::from_digest(digest))
 }
@@ -330,13 +418,17 @@ pub(crate) fn range_token(range: &crate::constraint::Range) -> String {
 /// Parses the range spelling [`range_token`] writes.
 ///
 /// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming the line and the text when it is
-/// not a range of this shape. A malformed two-edge range names which edge
-/// failed; a malformed single token names the grammar rather than guessing
-/// which side it was meant to be.
-pub(crate) fn parse_range(text: &str, number: usize) -> PithResult<crate::constraint::Range> {
+/// A [`Refusal`] whose span selects the field when the text is not a range
+/// of this shape. A malformed two-edge range names which edge failed; a
+/// malformed single token names the grammar rather than guessing which side
+/// it was meant to be.
+pub(crate) fn parse_range(field: &Token) -> Result<crate::constraint::Range, Refusal> {
     use crate::constraint::{Bound, Range};
-    let bad = |complaint: &str| diag(format!("line {number}: `{text}` is not {complaint}"));
+    let text = field.text.as_str();
+    let bad = |complaint: &str| Refusal {
+        message: format!("`{text}` is not {complaint}"),
+        span: field.span,
+    };
     // The version spelling belongs to the domain's scheme, but the operator
     // characters belong to this grammar: a version carrying one would re-split
     // the token, so the parse refuses it rather than guessing a cut.
@@ -397,6 +489,22 @@ mod tests {
     use super::*;
     use crate::constraint::{Bound, Range};
 
+    fn field(text: &str, base: u32) -> Token {
+        Token {
+            text: text.into(),
+            span: Span::new(
+                ByteOffset(base),
+                ByteOffset(base.saturating_add(text.len() as u32)),
+            ),
+        }
+    }
+
+    fn select(source: &str, span: Span) -> &str {
+        source
+            .get(span.start.0 as usize..span.end.0 as usize)
+            .unwrap()
+    }
+
     #[test]
     fn every_range_constructor_round_trips_through_its_token() {
         let ranges = [
@@ -417,7 +525,7 @@ mod tests {
                 is_bare(&token),
                 "`{token}` stays one bare token, so a requirement clause cannot re-split it"
             );
-            assert_eq!(&parse_range(&token, 0).unwrap(), range);
+            assert_eq!(&parse_range(&field(&token, 0)).unwrap(), range);
         }
         assert_eq!(
             range_token(&Range::AtLeast(Bound::new("1.0", true))),
@@ -433,15 +541,76 @@ mod tests {
     }
 
     #[test]
-    fn a_malformed_range_is_refused_naming_the_line_and_the_text() {
+    fn a_malformed_range_is_refused_with_the_field_and_its_span() {
         for text in ["1.0", ">=1.0,>=2.0", ">=", ">=1.0,<2.0,>=3.0", ""] {
-            let error = parse_range(text, 7).unwrap_err();
+            let field = field(text, 12);
+            let refusal = parse_range(&field).unwrap_err();
+            assert_eq!(refusal.span, field.span, "the span selects the field");
             assert!(
-                error
-                    .iter()
-                    .any(|d| d.message.0.contains("line 7") && d.message.0.contains(text)),
-                "the diagnostic names the line and the offending text `{text}`: {error:?}"
+                refusal.message.contains(text),
+                "the message names the offending text `{text}`: {}",
+                refusal.message
             );
         }
+    }
+
+    #[test]
+    fn tokens_carry_spans_of_their_written_spelling_at_their_base() {
+        let line = "bind zlib 1.3 [shared,zlib]";
+        let base = ByteOffset(31);
+        let source = format!("{}{line}", " ".repeat(base.0 as usize));
+        let tokens = tokenize(line, base).unwrap();
+        let spelled: Vec<&str> = tokens
+            .iter()
+            .map(|token| select(&source, token.span))
+            .collect();
+        assert_eq!(spelled, ["bind", "zlib", "1.3", "[shared,zlib]"]);
+        let bracket = tokens.last().unwrap();
+        assert_eq!(bracket.text, "[shared,zlib]");
+    }
+
+    #[test]
+    fn a_quoted_token_spans_its_escapes_at_written_length() {
+        let line = r#""a b" plain"#;
+        let tokens = tokenize(line, ByteOffset(0)).unwrap();
+        let quoted = tokens.first().unwrap();
+        assert_eq!(quoted.text, "a b");
+        assert_eq!(select(line, quoted.span), r#""a b""#);
+        let line = r#"  "tab\tthere""#;
+        let tokens = tokenize(line, ByteOffset(0)).unwrap();
+        let quoted = tokens.first().unwrap();
+        assert_eq!(quoted.text, "tab\tthere");
+        assert_eq!(select(line, quoted.span), r#""tab\tthere""#);
+    }
+
+    #[test]
+    fn a_refusal_spans_the_rest_of_the_line_from_the_offending_token() {
+        let line = "bind \"unclosed zlib";
+        let refusal = tokenize(line, ByteOffset(0)).unwrap_err();
+        assert_eq!(select(line, refusal.span), "\"unclosed zlib");
+        let line = "bind running]into";
+        let refusal = tokenize(line, ByteOffset(0)).unwrap_err();
+        assert_eq!(
+            select(line, refusal.span),
+            "running]into",
+            "the bare token's refusal spans from the token, not the whole line"
+        );
+    }
+
+    #[test]
+    fn a_comma_piece_of_a_feature_list_spans_its_written_spelling() {
+        let line = r#"[ok,"two words"]"#;
+        let tokens = tokenize(line, ByteOffset(0)).unwrap();
+        let list = tokens.first().unwrap();
+        let inner = list.text.get(1..list.text.len().saturating_sub(1)).unwrap();
+        let pieces = split_commas(inner, ByteOffset(1));
+        assert_eq!(
+            pieces.first().map(|piece| select(line, piece.span)),
+            Some("ok")
+        );
+        assert_eq!(
+            pieces.get(1).map(|piece| select(line, piece.span)),
+            Some("\"two words\"")
+        );
     }
 }

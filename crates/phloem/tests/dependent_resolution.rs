@@ -346,11 +346,12 @@ fn an_unrelated_publication_moves_the_universe_and_no_entry() {
     );
 }
 
-/// A malformed requirement is refused at the read, naming the package and
-/// the line, because a registry that spells a requirement this format cannot
-/// parse is a registry answer to refuse rather than silently narrow.
+/// A malformed requirement is refused at the read, the span selecting the
+/// clause's field in the package's own index file, because a registry that
+/// spells a requirement this format cannot parse is a registry answer to
+/// refuse rather than silently narrow.
 #[test]
-fn a_malformed_requirement_is_refused_naming_the_line() {
+fn a_malformed_requirement_is_refused_at_its_field_in_the_package_file() {
     let root = TempDir::new().unwrap();
     publish(root.path(), &[hello(requires_util()), util()]).unwrap();
     let index = root.path().join("index/pithpkgs/hello");
@@ -361,11 +362,23 @@ fn a_malformed_requirement_is_refused_naming_the_line() {
     )
     .unwrap();
     let error = registry::read_index(root.path(), REGISTRY).unwrap_err();
+    let diagnostic = error.iter().next().unwrap();
     assert!(
-        error
-            .iter()
-            .any(|diagnostic| diagnostic.message.0.contains("hello")
-                && diagnostic.message.0.contains("range")),
-        "the diagnostic names the package and the malformed clause: {error:?}"
+        diagnostic.message.0.contains("range"),
+        "the diagnostic names the malformed clause: {error:?}"
+    );
+    let Some(file) = diagnostic.source.as_ref() else {
+        unreachable!("the refusal carries its index file: {error:?}")
+    };
+    assert!(
+        file.label.contains("hello"),
+        "the attached source is hello's index file: {}",
+        file.label
+    );
+    assert_eq!(
+        file.source_text()
+            .get(diagnostic.span.start.0 as usize..diagnostic.span.end.0 as usize),
+        Some("1.0"),
+        "the span selects the malformed range field in that file"
     );
 }

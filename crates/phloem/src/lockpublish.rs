@@ -79,14 +79,15 @@ fn remove_temporary_file(path: &Path) {
     let _ = std::fs::remove_file(path);
 }
 
-/// Reads and parses the lock at `path`.
+/// Reads and parses the lock at `path`, which names the parsed text in
+/// every diagnostic a malformed lock produces.
 ///
 /// # Errors
 /// Returns a diagnostic when the file cannot be read or parsed.
 pub fn read(path: &Path) -> PithResult<Lock> {
     let text =
         std::fs::read_to_string(path).map_err(|error| io_diag("reading the lock", path, &error))?;
-    lockfile::parse(&text)
+    lockfile::parse(&path.display().to_string(), &text)
 }
 
 fn io_diag(what: &str, path: &Path, error: &std::io::Error) -> pith_diag::DiagnosticSink {
