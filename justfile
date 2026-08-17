@@ -107,6 +107,11 @@ hack-features:
 hack-no-default:
     cargo hack --workspace --each-feature --no-dev-deps nextest run
 
+# Measure pure evaluation at graph sizes the test suite does not reach.
+[group('test')]
+bench:
+    cargo bench -p pith-engine
+
 # Generate a coverage report (HTML + text summary) into target/llvm-cov/html.
 [group('coverage')]
 cov:
