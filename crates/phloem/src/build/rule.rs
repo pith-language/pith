@@ -1,4 +1,4 @@
-use pith_core::{Interface, Pure, Request, Rule, RuleIdentity, RuleRevision, Value};
+use pith_core::{Interface, Pure, Request, Rule, Value};
 use pith_diag::{PithResult, Span};
 use pith_engine::{PureRule, PureRuleFrame, PureStep, Resumption};
 use pith_ids::ContentId;
@@ -9,10 +9,6 @@ use super::model::{
     Dependency, HeaderPair, HeaderSet, Library, PackageBuild, SourceTree, build_type,
     dependency_list_type, dependency_list_value, library_type, tree_from_value, tree_type,
 };
-
-/// Identity inputs for the package rule revisions.
-const PACKAGE_BUILD_MANIFEST: &[u8] = b"phloem-package-build-v2";
-const PACKAGE_LIBRARY_MANIFEST: &[u8] = b"phloem-package-library-v1";
 
 /// Returns the `(Toolchain, Tree, Build, Dependencies) -> Executable`
 /// interface, where `Dependencies` is a list of `{tree, build}` records in
@@ -159,9 +155,8 @@ impl PackageBuildRule {
     /// Creates the package build rule declaration.
     #[must_use]
     pub fn rule() -> Rule<Pure> {
-        let identity = RuleIdentity::of_module_declaration("phloem", "package-build");
-        Rule::<Pure>::new(
-            RuleRevision::of_manifest(identity, PACKAGE_BUILD_MANIFEST),
+        Rule::<Pure>::declared(
+            crate::declarations::MODULE,
             "package-build",
             package_build_interface(),
             Span::none(),
@@ -281,9 +276,8 @@ impl PackageLibraryRule {
     /// Creates the package library rule declaration.
     #[must_use]
     pub fn rule() -> Rule<Pure> {
-        let identity = RuleIdentity::of_module_declaration("phloem", "package-library");
-        Rule::<Pure>::new(
-            RuleRevision::of_manifest(identity, PACKAGE_LIBRARY_MANIFEST),
+        Rule::<Pure>::declared(
+            crate::declarations::MODULE,
             "package-library",
             package_library_interface(),
             Span::none(),

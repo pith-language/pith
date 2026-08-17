@@ -4,7 +4,7 @@
 //! resolver rule decodes request values, runs the search, and returns the
 //! encoded resolution.
 
-use pith_core::{Pure, Rule, RuleIdentity, RuleRevision, Value};
+use pith_core::{Pure, Rule, Value};
 use pith_diag::{PithResult, Span};
 use pith_engine::{PureRule, PureRuleFrame, PureStep, Resumption};
 
@@ -104,9 +104,8 @@ impl ResolveSolver {
     /// The rule, ready to register against the resolution interface.
     #[must_use]
     pub fn rule(&self) -> Rule<Pure> {
-        let identity = RuleIdentity::of_module_declaration("phloem", "resolve");
-        Rule::<Pure>::new(
-            RuleRevision::of_manifest(identity, RESOLVER_MANIFEST),
+        Rule::<Pure>::declared(
+            crate::declarations::MODULE,
             "resolve",
             resolve_interface(),
             Span::none(),
@@ -114,17 +113,26 @@ impl ResolveSolver {
     }
 }
 
-/// Identity input for the resolver rule revision.
-const RESOLVER_MANIFEST: &[u8] = b"phloem-resolve-v1";
-
-/// Returns the resolver revision digest as lowercase hexadecimal.
+/// The resolver revision digest as lowercase hexadecimal, for the lock document
+/// that records which resolver produced a resolution (decision 0041).
+///
+/// Read off the rule rather than re-derived, so the lock records the revision the
+/// engine actually keys on. Since decision 0047 that revision derives from the
+/// resolve interface, which means a change to the version-scheme, constraint,
+/// universe, or preference declarations moves it — and a pre-release lock
+/// carrying the old one breaks freely, on 0043's terms.
 #[must_use]
 pub fn resolver_revision_hex() -> Box<str> {
-    let identity = RuleIdentity::of_module_declaration("phloem", "resolve");
-    RuleRevision::of_manifest(identity, RESOLVER_MANIFEST)
-        .digest()
-        .to_string()
-        .into()
+    Rule::<Pure>::declared(
+        crate::declarations::MODULE,
+        "resolve",
+        resolve_interface(),
+        Span::none(),
+    )
+    .revision
+    .digest()
+    .to_string()
+    .into()
 }
 
 impl PureRule for ResolveSolver {
