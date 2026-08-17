@@ -20,7 +20,7 @@ use super::ir::{
     EvaluationSource, PureStep, Resumption, StopReason,
 };
 use super::reuse::ReuseContext;
-use super::scheduler::{ChainId, Scheduler, cycle_key};
+use super::scheduler::{ChainId, Scheduler};
 use super::{Engine, PureComputationKey};
 
 /// Why [`Engine::advance_chain`] stopped.
@@ -127,7 +127,8 @@ impl Engine {
         chain: ChainId,
         value: Value,
     ) -> PithResult<bool> {
-        let completed = self.finish_frame(scheduler.stack_mut(chain)?, value)?;
+        let completed = self.finish_frame(scheduler.top(chain)?, value)?;
+        scheduler.pop_frame(chain)?;
         match scheduler.stack_mut(chain)?.last_mut() {
             Some(parent) => {
                 parent.resume_with = Some(Resumption::One(completed.value.clone()));
@@ -158,7 +159,7 @@ impl Engine {
                 };
                 frame.resume_with = Some(Resumption::One(value));
             }
-            PreparedRequest::Fresh(frame) => scheduler.stack_mut(chain)?.push(frame),
+            PreparedRequest::Fresh(frame) => scheduler.push_frame(chain, frame)?,
         }
         Ok(())
     }
@@ -219,8 +220,8 @@ impl Engine {
         context: &ReuseContext<'_>,
     ) -> PithResult<PreparedRequest> {
         let rule = self.resolve_pure_rule(&request)?;
-        let (interface, inputs, label) = cycle_key(&request);
-        if let Some(labels) = scheduler.cycle_chain(chain, rule, interface, inputs, label) {
+        let key = self.pure_key_for(rule, &request)?;
+        if let Some(labels) = scheduler.cycle_chain(chain, key.digest, &request.label) {
             let cycle: Vec<&str> = labels.iter().map(AsRef::as_ref).collect();
             return Err(cycle_diag(&cycle, request.span));
         }
@@ -234,7 +235,7 @@ impl Engine {
             )?;
             return Ok(PreparedRequest::Reused(reused.value));
         }
-        let frame = self.start_frame(request.clone(), rule)?;
+        let frame = self.start_frame(request.clone(), rule, key)?;
         self.record_edge(
             parent,
             DependencyEdge::Request {
@@ -286,7 +287,14 @@ impl Engine {
         let rule = self.resolve_pure_rule(request)?;
         match self.reusable_pure_evaluation(rule, request, context)? {
             Some(evaluation) => Ok(OpenedRoot::Reused(evaluation)),
-            None => Ok(OpenedRoot::Fresh(self.start_frame(request.clone(), rule)?)),
+            None => {
+                let key = self.pure_key_for(rule, request)?;
+                Ok(OpenedRoot::Fresh(self.start_frame(
+                    request.clone(),
+                    rule,
+                    key,
+                )?))
+            }
         }
     }
 
@@ -297,15 +305,32 @@ impl Engine {
             .map_err(one_diag)
     }
 
-    fn start_frame(&mut self, request: Request<Pure>, rule: RuleId) -> PithResult<EvalFrame> {
+    /// The computation key for applying `rule` to `request`.
+    ///
+    /// Derived once per prepared request and carried on the frame, because three
+    /// things want it: the cycle predicate, the reusable index, and the durable
+    /// attempt (decision 0050).
+    fn pure_key_for(
+        &self,
+        rule: RuleId,
+        request: &Request<Pure>,
+    ) -> PithResult<PureComputationKey> {
+        let Some(rule_metadata) = self.rules.get(rule) else {
+            return Err(internal_diag(InternalInvariant::SelectedRuleHasNoMetadata));
+        };
+        Ok(PureComputationKey::new(rule_metadata, request))
+    }
+
+    fn start_frame(
+        &mut self,
+        request: Request<Pure>,
+        rule: RuleId,
+        key: PureComputationKey,
+    ) -> PithResult<EvalFrame> {
         let Some(body) = self.bodies.get(&rule) else {
             return Err(internal_diag(InternalInvariant::SelectedRuleHasNoBody));
         };
         let body = body.start(&request.inputs);
-        let Some(rule_metadata) = self.rules.get(rule) else {
-            return Err(internal_diag(InternalInvariant::SelectedRuleHasNoMetadata));
-        };
-        let key = PureComputationKey::new(rule_metadata, &request);
         let computation = self.computations.push(ComputationNode {
             kind: ComputationKind::Pure(request.clone()),
             rule,
@@ -328,15 +353,17 @@ impl Engine {
             computation,
             rule,
             request,
+            key_digest: key.digest,
             body,
             resume_with: None,
         })
     }
 
-    fn finish_frame(&mut self, stack: &mut Vec<EvalFrame>, value: Value) -> PithResult<Evaluation> {
-        let Some(completed) = stack.last() else {
-            return Err(internal_diag(InternalInvariant::PureCompletedWithoutFrame));
-        };
+    /// Complete `completed` with `value`: type-check the result, mark the arena
+    /// node terminal, and publish the durable record. The caller pops the frame
+    /// afterwards, so the frame's computation id is still valid for the store
+    /// call (decision 0024).
+    fn finish_frame(&mut self, completed: &EvalFrame, value: Value) -> PithResult<Evaluation> {
         let Some(rule) = self.rules.get(completed.rule) else {
             return Err(internal_diag(
                 InternalInvariant::PureLostSelectedRuleMetadata,
@@ -374,11 +401,7 @@ impl Engine {
         };
         node.capabilities = capabilities;
         let computation = completed.computation;
-        // The arena node is terminal; publish the durable record at this
-        // scheduling boundary (decision 0024). `pop` after publishing so the
-        // frame's computation id stays valid for the store call.
         self.publish_pure_completion(computation)?;
-        stack.pop();
         Ok(Evaluation {
             value,
             computation,

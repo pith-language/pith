@@ -6,7 +6,7 @@ use pith_core::{
     RuleId, Value,
 };
 use pith_diag::{Diag, PithResult};
-use pith_ids::{ActionSpecDigest, ComputationId, ContentId};
+use pith_ids::{ActionSpecDigest, ComputationId, ContentId, PureComputationDigest};
 use smallvec::SmallVec;
 
 /// One bounded transition made by a pure rule body.
@@ -246,6 +246,13 @@ pub struct RuleSelection {
 pub(crate) struct EvalFrame {
     pub(crate) computation: ComputationId,
     pub(crate) rule: RuleId,
+    /// The digest half of this application's computation key. The scheduler
+    /// indexes a chain's live frames by it so a cycle is a set lookup rather
+    /// than a walk (decision 0050). The digest alone, because it already covers
+    /// the rule identity, revision, interface, and inputs the walk compared by
+    /// hand, and carrying the whole key would grow every frame by 64 bytes it
+    /// has no other use for.
+    pub(crate) key_digest: PureComputationDigest,
     pub(crate) request: Request<Pure>,
     pub(crate) body: Box<dyn PureRuleFrame>,
     pub(crate) resume_with: Option<Resumption>,

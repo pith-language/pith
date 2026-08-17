@@ -19,8 +19,10 @@
 
 use std::collections::VecDeque;
 
-use pith_core::{Interface, Pure, Request, RuleId, Value};
+use indexmap::IndexSet;
+use pith_core::Value;
 use pith_diag::PithResult;
+use pith_ids::PureComputationDigest;
 
 use super::diagnostics::{InternalInvariant, internal_diag};
 use super::ir::{EvalFrame, Evaluation, Resumption};
@@ -38,7 +40,31 @@ enum ChainSink {
 
 struct Chain {
     stack: Vec<EvalFrame>,
+    /// The computation digests of the frames in `stack`, for the cycle
+    /// predicate (decision 0050). Maintained by [`Scheduler::push_frame`] and
+    /// [`Scheduler::pop_frame`], which are the only ways the stack's membership
+    /// changes; `stack_mut` hands out the stack for resumption edits, which
+    /// change no frame's identity.
+    ///
+    /// `IndexSet` rather than `HashSet` because decision 0021 forbids
+    /// nondeterministic iteration order in crate source, and this set is
+    /// iterated when a cycle diagnostic names the frames it found.
+    active: IndexSet<PureComputationDigest>,
     sink: ChainSink,
+}
+
+impl Chain {
+    /// A chain over one root frame, with `active` seeded from it. The two chain
+    /// origins — a run's roots and a fan-out group's slots — both start this way,
+    /// so seeding lives here rather than at each site.
+    fn new(frame: EvalFrame, sink: ChainSink) -> Self {
+        let active = std::iter::once(frame.key_digest).collect();
+        Self {
+            stack: vec![frame],
+            active,
+            sink,
+        }
+    }
 }
 
 /// One `NeedAll` in flight: the frame that opened it waits until every slot is
@@ -66,12 +92,7 @@ impl Scheduler {
         let chains = roots
             .into_iter()
             .enumerate()
-            .map(|(index, frame)| {
-                Some(Chain {
-                    stack: vec![frame],
-                    sink: ChainSink::Root(index),
-                })
-            })
+            .map(|(index, frame)| Some(Chain::new(frame, ChainSink::Root(index))))
             .collect();
         Self {
             chains,
@@ -104,6 +125,33 @@ impl Scheduler {
             Some(chain) => Ok(&mut chain.stack),
             None => Err(internal_diag(InternalInvariant::SchedulerLostChain)),
         }
+    }
+
+    /// Push a requested frame onto `chain`, recording its digest as live.
+    pub(super) fn push_frame(&mut self, chain: ChainId, frame: EvalFrame) -> PithResult<()> {
+        let Some(chain) = self.chains.get_mut(chain).and_then(Option::as_mut) else {
+            return Err(internal_diag(InternalInvariant::SchedulerLostChain));
+        };
+        chain.active.insert(frame.key_digest);
+        chain.stack.push(frame);
+        Ok(())
+    }
+
+    /// Pop the completed top frame of `chain`, retiring its digest.
+    ///
+    /// The digest leaves `active` here rather than at completion, so a request
+    /// that reappears *beside* an earlier one — two siblings needing the same
+    /// value in sequence — is reuse and not a cycle. Only a request that
+    /// reappears while its own frame is still on the stack is circular.
+    pub(super) fn pop_frame(&mut self, chain: ChainId) -> PithResult<()> {
+        let Some(chain) = self.chains.get_mut(chain).and_then(Option::as_mut) else {
+            return Err(internal_diag(InternalInvariant::SchedulerLostChain));
+        };
+        let Some(frame) = chain.stack.pop() else {
+            return Err(internal_diag(InternalInvariant::PureCompletedWithoutFrame));
+        };
+        chain.active.shift_remove(&frame.key_digest);
+        Ok(())
     }
 
     /// Make `chain` runnable again. Private because a chain must never become
@@ -143,10 +191,8 @@ impl Scheduler {
         frame: EvalFrame,
     ) -> ChainId {
         let chain = self.chains.len();
-        self.chains.push(Some(Chain {
-            stack: vec![frame],
-            sink: ChainSink::Group { group, slot },
-        }));
+        self.chains
+            .push(Some(Chain::new(frame, ChainSink::Group { group, slot })));
         self.ready.push_back(chain);
         chain
     }
@@ -232,26 +278,41 @@ impl Scheduler {
     pub(super) fn cycle_chain(
         &self,
         chain: ChainId,
-        child_rule: RuleId,
-        child_interface: &Interface,
-        child_inputs: &[Value],
+        child: PureComputationDigest,
         child_label: &str,
     ) -> Option<Vec<Box<str>>> {
-        let scope = self.scope(chain);
-        let repeats = |frame: &&EvalFrame| {
-            frame.rule == child_rule
-                && frame.request.interface == *child_interface
-                && *frame.request.inputs == *child_inputs
-        };
-        if !scope.iter().any(repeats) {
+        if !self.digest_is_live(chain, child) {
             return None;
         }
-        let mut labels: Vec<Box<str>> = scope
+        // Only once a cycle is found is the walk worth its cost: the labels of
+        // every frame in scope are what the diagnostic names.
+        let mut labels: Vec<Box<str>> = self
+            .scope(chain)
             .iter()
             .map(|frame| frame.request.label.clone())
             .collect();
         labels.push(child_label.into());
         Some(labels)
+    }
+
+    /// Whether `digest` names a frame already live anywhere in `chain`'s scope.
+    ///
+    /// One set lookup per chain in the lineage, where comparing frames took one
+    /// deep structural comparison per *frame* — and a chain's frames are where
+    /// the depth is, since `Need` pushes onto the requesting chain rather than
+    /// opening a new one (decision 0050).
+    fn digest_is_live(&self, chain: ChainId, digest: PureComputationDigest) -> bool {
+        let mut current = Some(chain);
+        while let Some(id) = current {
+            let Some(held) = self.chains.get(id).and_then(Option::as_ref) else {
+                return false;
+            };
+            if held.active.contains(&digest) {
+                return true;
+            }
+            current = self.parent_of(id);
+        }
+        false
     }
 
     /// Every frame in scope for `chain`, outermost first: the ancestor chains'
@@ -299,11 +360,4 @@ impl Scheduler {
     pub(super) fn into_roots(self) -> Vec<Option<Evaluation>> {
         self.roots
     }
-}
-
-/// The `Request<Pure>` fields [`Scheduler::cycle_chain`] compares. Kept as a
-/// helper so the two call sites (`Need` and `NeedAll`) cannot drift apart in
-/// what counts as the same request.
-pub(super) fn cycle_key(request: &Request<Pure>) -> (&Interface, &[Value], &str) {
-    (&request.interface, &request.inputs, &request.label)
 }
