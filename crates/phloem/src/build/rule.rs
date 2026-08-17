@@ -1,4 +1,4 @@
-use pith_core::{Interface, Pure, Request, Rule, Value};
+use pith_core::{BodyRevision, Interface, Pure, Request, Rule, Value};
 use pith_diag::{PithResult, Span};
 use pith_engine::{PureRule, PureRuleFrame, PureStep, Resumption};
 use pith_ids::ContentId;
@@ -158,6 +158,7 @@ impl PackageBuildRule {
         Rule::<Pure>::declared(
             crate::declarations::MODULE,
             "package-build",
+            BodyRevision(1),
             package_build_interface(),
             Span::none(),
         )
@@ -279,6 +280,7 @@ impl PackageLibraryRule {
         Rule::<Pure>::declared(
             crate::declarations::MODULE,
             "package-library",
+            BodyRevision(1),
             package_library_interface(),
             Span::none(),
         )

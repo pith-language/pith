@@ -1,8 +1,8 @@
 //! The test action and the pure entry that requests it.
 
 use pith_core::{
-    Action, ActionProgram, ActionSpec, ExitStatusContract, NetworkPolicy, PlatformRequirement,
-    Pure, Request, Rule, Value,
+    Action, ActionProgram, ActionSpec, BodyRevision, ExitStatusContract, NetworkPolicy,
+    PlatformRequirement, Pure, Request, Rule, Value,
 };
 use pith_diag::{PithResult, Span};
 use pith_engine::{ActionExecution, ActionExit, ActionRule, PureRule, PureRuleFrame};
@@ -35,7 +35,13 @@ impl TestAction {
 
     #[must_use]
     pub fn rule(&self) -> Rule<Action> {
-        Rule::<Action>::declared(types::MODULE, "test", types::test_interface(), Span::none())
+        Rule::<Action>::declared(
+            types::MODULE,
+            "test",
+            BodyRevision(1),
+            types::test_interface(),
+            Span::none(),
+        )
     }
 }
 
@@ -87,6 +93,7 @@ impl TestRule {
         Rule::<Pure>::declared(
             types::MODULE,
             "test-entry",
+            BodyRevision(1),
             types::test_interface(),
             Span::none(),
         )

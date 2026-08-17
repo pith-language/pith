@@ -4,7 +4,7 @@
 //! resolver rule decodes request values, runs the search, and returns the
 //! encoded resolution.
 
-use pith_core::{Pure, Rule, Value};
+use pith_core::{BodyRevision, Pure, Rule, Value};
 use pith_diag::{PithResult, Span};
 use pith_engine::{PureRule, PureRuleFrame, PureStep, Resumption};
 
@@ -107,6 +107,7 @@ impl ResolveSolver {
         Rule::<Pure>::declared(
             crate::declarations::MODULE,
             "resolve",
+            BodyRevision(1),
             resolve_interface(),
             Span::none(),
         )
@@ -126,6 +127,7 @@ pub fn resolver_revision_hex() -> Box<str> {
     Rule::<Pure>::declared(
         crate::declarations::MODULE,
         "resolve",
+        BodyRevision(1),
         resolve_interface(),
         Span::none(),
     )

@@ -1,8 +1,8 @@
 //! The compile action and the pure entry that discovers, then compiles.
 
 use pith_core::{
-    Action, ActionInput, ActionOutput, ActionProgram, ActionSpec, Content, ExitStatusContract,
-    NetworkPolicy, OutputKind, PlatformRequirement, Pure, Request, Rule, Value,
+    Action, ActionInput, ActionOutput, ActionProgram, ActionSpec, BodyRevision, Content,
+    ExitStatusContract, NetworkPolicy, OutputKind, PlatformRequirement, Pure, Request, Rule, Value,
 };
 use pith_diag::{PithResult, Span};
 use pith_engine::{
@@ -42,6 +42,7 @@ impl CompileAction {
         Rule::<Action>::declared(
             types::MODULE,
             "compile",
+            BodyRevision(1),
             types::compile_action_interface(),
             Span::none(),
         )
@@ -140,6 +141,7 @@ impl CompileRule {
         Rule::<Pure>::declared(
             types::MODULE,
             "compile-entry",
+            BodyRevision(1),
             types::compile_interface(),
             Span::none(),
         )

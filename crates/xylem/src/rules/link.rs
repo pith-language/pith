@@ -1,8 +1,9 @@
 //! The link action and the pure entry that requests it.
 
 use pith_core::{
-    Action, ActionInput, ActionOutput, ActionProgram, ActionSpec, Content, EnvironmentVariable,
-    ExitStatusContract, NetworkPolicy, OutputKind, PlatformRequirement, Pure, Request, Rule, Value,
+    Action, ActionInput, ActionOutput, ActionProgram, ActionSpec, BodyRevision, Content,
+    EnvironmentVariable, ExitStatusContract, NetworkPolicy, OutputKind, PlatformRequirement, Pure,
+    Request, Rule, Value,
 };
 use pith_diag::{PithResult, Span};
 use pith_engine::{ActionExecution, ActionRule, ProducedOutput, PureRule, PureRuleFrame};
@@ -27,7 +28,13 @@ impl LinkAction {
 
     #[must_use]
     pub fn rule(&self) -> Rule<Action> {
-        Rule::<Action>::declared(types::MODULE, "link", types::link_interface(), Span::none())
+        Rule::<Action>::declared(
+            types::MODULE,
+            "link",
+            BodyRevision(1),
+            types::link_interface(),
+            Span::none(),
+        )
     }
 }
 
@@ -109,6 +116,7 @@ impl LinkRule {
         Rule::<Pure>::declared(
             types::MODULE,
             "link-entry",
+            BodyRevision(1),
             types::link_interface(),
             Span::none(),
         )

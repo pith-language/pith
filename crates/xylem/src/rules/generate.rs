@@ -1,8 +1,8 @@
 //! The generate action and the pure entry that requests it.
 
 use pith_core::{
-    Action, ActionOutput, ActionProgram, ActionSpec, Content, ExitStatusContract, NetworkPolicy,
-    OutputKind, PlatformRequirement, Pure, Request, Rule, Value,
+    Action, ActionOutput, ActionProgram, ActionSpec, BodyRevision, Content, ExitStatusContract,
+    NetworkPolicy, OutputKind, PlatformRequirement, Pure, Request, Rule, Value,
 };
 use pith_diag::{PithResult, Span};
 use pith_engine::{ActionExecution, ActionRule, ProducedOutput, PureRule, PureRuleFrame};
@@ -32,6 +32,7 @@ impl GenerateAction {
         Rule::<Action>::declared(
             types::MODULE,
             "generate",
+            BodyRevision(1),
             types::generate_interface(),
             Span::none(),
         )
@@ -85,6 +86,7 @@ impl GenerateRule {
         Rule::<Pure>::declared(
             types::MODULE,
             "generate-entry",
+            BodyRevision(1),
             types::generate_interface(),
             Span::none(),
         )

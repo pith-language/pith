@@ -1,8 +1,8 @@
 //! The header universe and the discovery action that stages it.
 
 use pith_core::{
-    Action, ActionInput, ActionOutput, ActionProgram, ActionSpec, Content, ExitStatusContract,
-    NetworkPolicy, OutputKind, PlatformRequirement, Rule, Value,
+    Action, ActionInput, ActionOutput, ActionProgram, ActionSpec, BodyRevision, Content,
+    ExitStatusContract, NetworkPolicy, OutputKind, PlatformRequirement, Rule, Value,
 };
 use pith_diag::{PithResult, Span};
 use pith_engine::{ActionExecution, ActionRule, ProducedOutput};
@@ -87,6 +87,7 @@ impl HeaderDiscoveryAction {
         Rule::<Action>::declared(
             types::MODULE,
             "discover",
+            BodyRevision(1),
             types::discovery_interface(),
             Span::none(),
         )
