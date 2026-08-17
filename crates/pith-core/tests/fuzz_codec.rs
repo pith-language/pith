@@ -85,6 +85,17 @@ fn leaf_type_strategy() -> impl Strategy<Value = Type> {
         Just(Type::Bytes),
         Just(Type::Blob),
         bounded_string(16).prop_map(|name| declared_nominal(&name, Type::Blob)),
+        // The recursion cut, so the generated population reaches the tag rather
+        // than only the hand-written fixtures (decision 0047).
+        Just(Type::Cut),
+        // A nominal over something other than `Blob`, so the declared
+        // representation varies and the codec has to carry it rather than
+        // guessing.
+        bounded_string(16)
+            .prop_map(|name| declared_nominal(&name, Type::List(Box::new(Type::Text)))),
+        // A recursive nominal, whose body reaches its own cut.
+        bounded_string(16)
+            .prop_map(|name| declared_nominal(&name, Type::List(Box::new(Type::Cut)))),
     ]
 }
 

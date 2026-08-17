@@ -1116,3 +1116,128 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod declaration_codec {
+    use super::*;
+    use crate::declaration::DeclarationTable;
+    use pith_ids::ContentId;
+
+    fn round_trip_type(declared: &Type) {
+        assert_eq!(
+            Type::decode_canonical(&declared.encode_canonical()).as_ref(),
+            Ok(declared),
+            "{declared} did not survive the codec"
+        );
+    }
+
+    #[test]
+    fn a_nominal_carrying_a_declaration_round_trips_with_its_representation() {
+        // The encoding grew a body, so the decoder has to rebuild one — and a
+        // decoded type has to check as well as a constructed one, which is the
+        // whole reason decision 0047 puts the declaration in the type.
+        let mut table = DeclarationTable::new("m");
+        for (name, representation) in [
+            ("OverBlob", Type::Blob),
+            ("OverText", Type::Text),
+            ("OverList", Type::List(Box::new(Type::Int))),
+        ] {
+            round_trip_type(&table.nominal(name, representation).unwrap());
+        }
+    }
+
+    #[test]
+    fn a_decoded_declaration_still_refuses_a_wrong_representation() {
+        let mut table = DeclarationTable::new("m");
+        let over_blob = table.nominal("Thing", Type::Blob).unwrap();
+        let decoded = Type::decode_canonical(&over_blob.encode_canonical()).unwrap();
+
+        let genuine = Value::Nominal {
+            name: "m.Thing".into(),
+            representation: Box::new(Value::Blob(ContentId::of_blob(b"x"))),
+        };
+        let wrong = Value::Nominal {
+            name: "m.Thing".into(),
+            representation: Box::new(Value::Text("x".into())),
+        };
+        assert!(genuine.is_type(&decoded));
+        assert!(!wrong.is_type(&decoded));
+    }
+
+    #[test]
+    fn a_recursive_declaration_round_trips_through_the_cut() {
+        let mut table = DeclarationTable::new("m");
+        let tree = table
+            .nominal("Tree", Type::List(Box::new(Type::Cut)))
+            .unwrap();
+        round_trip_type(&tree);
+        // And the decoded form still checks a nested value, so the cut survived
+        // as a cut rather than as an expansion.
+        let decoded = Type::decode_canonical(&tree.encode_canonical()).unwrap();
+        let leaf = Value::Nominal {
+            name: "m.Tree".into(),
+            representation: Box::new(Value::List([].into())),
+        };
+        let nested = Value::Nominal {
+            name: "m.Tree".into(),
+            representation: Box::new(Value::List([leaf].into())),
+        };
+        assert!(nested.is_type(&decoded));
+    }
+
+    #[test]
+    fn a_declared_sum_round_trips_with_its_constructor_set() {
+        let mut table = DeclarationTable::new("m");
+        let source = table
+            .sum(
+                "Source",
+                [
+                    SumConstructor {
+                        name: "Archive".into(),
+                        payload: Some(Type::Blob),
+                    },
+                    SumConstructor {
+                        name: "Local".into(),
+                        payload: None,
+                    },
+                ],
+            )
+            .unwrap();
+        round_trip_type(&source);
+    }
+
+    #[test]
+    fn a_bare_cut_round_trips() {
+        round_trip_type(&Type::Cut);
+        round_trip_type(&Type::List(Box::new(Type::Cut)));
+    }
+
+    #[test]
+    fn a_value_stream_carrying_the_cut_tag_is_refused() {
+        // `Cut` is a type-only construct: a value carries its declaration's name,
+        // never a position inside a body. The value decoder must not accept the
+        // tag rather than silently producing something.
+        let encoded = vec![ENCODING_VERSION, TAG_CUT];
+        assert_eq!(
+            Value::decode_canonical(&encoded),
+            Err(CanonicalDecodeError::UnknownValueTag { tag: TAG_CUT })
+        );
+    }
+
+    #[test]
+    fn a_deeply_nested_nominal_declaration_is_refused_rather_than_overflowing() {
+        // The nominal decode path recurses now that it carries a representation,
+        // so it needs the same depth bound `List` and `Sum` already had.
+        let mut representation = Type::Unit;
+        for _ in 0..(MAX_NOMINAL_NESTING.saturating_add(2)) {
+            let mut table = DeclarationTable::new("m");
+            representation = table.nominal("N", representation).unwrap();
+        }
+        assert_eq!(
+            Type::decode_canonical(&representation.encode_canonical()),
+            Err(CanonicalDecodeError::NestingTooDeep {
+                limit: MAX_NOMINAL_NESTING
+            })
+        );
+    }
+}

@@ -61,6 +61,7 @@ impl Coordinate {
     /// module identity contains a dot; the prototype's population is
     /// single-segment module identities, and the grammar belongs to the
     /// module-system record.
+    ///
     /// Inverse of [`Self::parse`] on every input, including a dotless one: a
     /// coordinate with no module spells as the bare name, so the best-effort
     /// declaration `value_type` synthesizes from a dotless value name spells
@@ -393,6 +394,114 @@ mod tests {
         assert_ne!(one(None), one(Some(Type::Blob)));
         assert_ne!(one(Some(Type::Blob)), one(Some(Type::Text)));
         assert_eq!(one(Some(Type::Blob)), one(Some(Type::Blob)));
+    }
+
+    #[test]
+    fn the_kind_participates_in_the_digest() {
+        // A nominal over `Blob` and an alias for `Blob` have the same body and
+        // must not have the same digest: the kind is part of what the
+        // declaration says, and the two are not interchangeable at a use site.
+        let mut nominal = table();
+        nominal.nominal("Thing", Type::Blob).unwrap();
+        let mut alias = table();
+        alias.alias("Thing", Type::Blob).unwrap();
+        assert_ne!(
+            nominal.get("Thing").unwrap().digest(),
+            alias.get("Thing").unwrap().digest()
+        );
+
+        // And a sum whose single constructor carries `Blob` is a third thing.
+        let mut sum = table();
+        sum.sum(
+            "Thing",
+            [SumConstructor {
+                name: "Only".into(),
+                payload: Some(Type::Blob),
+            }],
+        )
+        .unwrap();
+        assert_ne!(
+            nominal.get("Thing").unwrap().digest(),
+            sum.get("Thing").unwrap().digest()
+        );
+    }
+
+    #[test]
+    fn a_constructor_payload_type_participates_and_a_reordering_does_not() {
+        let build = |payloads: [Option<Type>; 2], reversed: bool| {
+            let mut table = table();
+            let mut constructors = [
+                SumConstructor {
+                    name: "A".into(),
+                    payload: payloads[0].clone(),
+                },
+                SumConstructor {
+                    name: "B".into(),
+                    payload: payloads[1].clone(),
+                },
+            ];
+            if reversed {
+                constructors.reverse();
+            }
+            table.sum("S", constructors).unwrap();
+            table.get("S").unwrap().digest()
+        };
+        // Construction order is not content; the payload types are.
+        assert_eq!(
+            build([Some(Type::Blob), Some(Type::Text)], false),
+            build([Some(Type::Blob), Some(Type::Text)], true)
+        );
+        assert_ne!(
+            build([Some(Type::Blob), Some(Type::Text)], false),
+            build([Some(Type::Text), Some(Type::Blob)], false)
+        );
+        // Presence of a payload is content too.
+        assert_ne!(
+            build([Some(Type::Blob), None], false),
+            build([Some(Type::Blob), Some(Type::Blob)], false)
+        );
+    }
+
+    #[test]
+    fn a_recursive_nominals_digest_is_finite_and_distinguishes_its_shape() {
+        // The cut is what makes this terminate at all; that it also discriminates
+        // is what keeps a recursive declaration's revision honest.
+        let build = |body: Type| {
+            let mut table = table();
+            table.nominal("Tree", body).unwrap();
+            table.get("Tree").unwrap().digest()
+        };
+        let over_list = build(Type::List(Box::new(Type::Cut)));
+        assert_eq!(over_list, build(Type::List(Box::new(Type::Cut))));
+        assert_ne!(over_list, build(Type::List(Box::new(Type::Blob))));
+        assert_ne!(over_list, build(Type::Cut));
+    }
+
+    #[test]
+    fn a_coordinate_spelling_round_trips_through_parse() {
+        for (module, name) in [
+            ("xylem", "Object"),
+            ("", "bare"),
+            ("a", "b"),
+            ("phloem", "VersionScheme"),
+        ] {
+            let coordinate = Coordinate::new(module, name);
+            assert_eq!(
+                Coordinate::parse(&coordinate.spelling()),
+                coordinate,
+                "`{module}`.`{name}` did not survive the round trip"
+            );
+        }
+    }
+
+    #[test]
+    fn an_alias_target_may_reference_a_declaration_from_the_same_table() {
+        // The table admits a declaration whose body names an earlier one, which
+        // is how a domain builds a compound type. Only *itself* is refused.
+        let mut table = table();
+        let object = table.nominal("Object", Type::Blob).unwrap();
+        assert!(table.alias("Objects", Type::List(Box::new(object))).is_ok());
+        assert_eq!(table.len(), 2);
     }
 
     #[test]
