@@ -149,15 +149,12 @@ mutants-summary:
     @echo "Timeouts (possible hangs):"
     @jq -r '.mutations[] | select(.summary=="timeout") | "  " + .source + ":" + (.line|tostring) + ":" + (.col|tostring) + " " + .function' mutants.out/mutants.json 2>/dev/null || true
 
-# Run the codec round-trip / no-panic fuzzer.
-[group('fuzz')]
-fuzz-codec:
-    {{ cargo-nightly }} fuzz run fuzz_codec -- -max_total_time=120
-
-# Run the action-spec digest fuzzer.
-[group('fuzz')]
-fuzz-action-spec:
-    {{ cargo-nightly }} fuzz run fuzz_action_spec -- -max_total_time=120
+# The codec property tests. Named fuzz_* for the contracts they cover, but they
+# are proptest suites `just test` already runs, not cargo-fuzz targets: there is
+# no fuzz/ directory and no libfuzzer harness in the tree.
+[group('test')]
+test-codec-properties:
+    cargo nextest run -p pith-core --test fuzz_codec --test fuzz_action_spec
 
 # Run Miri on the safe crates. It cannot run the FFI in pith-executor-local
 # (landlock/seccomp); scope it to crates with no `unsafe`.
