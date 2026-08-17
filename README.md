@@ -6,7 +6,7 @@ summary: entry point for the design notebook
 kind: index
 status: active
 created: 2026-08-04
-updated: 2026-08-14
+updated: 2026-08-17
 tags:
   - project
   - design
@@ -34,7 +34,22 @@ the rough idea is a typed, incremental, capability-controlled computation kernel
 - [decisions](docs/decisions/index.md) contains the decisions made so far.
 - [open questions](docs/planning/open-questions.md) is where unresolved design work lives.
 
+## building and testing
+
+the repository builds inside a nix devshell, which pins the rust toolchain and the tools the checks use.
+
+```
+nix develop
+just
+```
+
+`just` with no recipe lists the rest. `just test` runs the suite, `just check` is format plus clippy, and `just ci` is everything the github workflow gates plus the checks it does not yet run.
+
+the linux-gated fixtures are the evidence base for most of what the milestones claim, and they compile to nothing off linux — on a darwin host those suites report zero tests rather than failing, so a green local run there is not a measured one.
+
 ## current position
+
+milestones M-1 through M-4 are complete at their own scopes, and [milestones](docs/planning/milestones.md) carries the evidence for each. M-5a, linux system composition, is next. the workspace is twelve crates: the kernel as `pith-core`, `pith-engine`, `pith-arena`, `pith-ids`, `pith-store`, `pith-state-sqlite`, `pith-diag`, `pith-output`, `pith-executor-local` and the `pith` cli, with two domain libraries beside them — `xylem` for builds and `phloem` for packages and environments.
 
 accepted so far:
 
@@ -42,14 +57,17 @@ accepted so far:
 - configuration denotes values, constraints, and acceptable states; it does not prescribe an operation sequence
 - first-party code uses the same extension surface as third-party code
 - build, package, system, and deployment functionality share one graph and provenance model without being forced into one domain hierarchy
+- a consumer of an action revalidates by re-planning it (0033), the written lock is a text projection whose write is a caller effect (0041), and the local executor confines an action with landlock and seccomp (0028)
 
-the proposed design also separates pure computation, bounded actions, observations, and mutations, with an `Opaque` category for unmodeled effectful work; makes authority explicit through capabilities; permits tracked dynamic dependencies; and distinguishes semantic, computation, content, external, and managed-object identity.
+the proposed design separates pure computation, bounded actions, observations, and mutations, with an `Opaque` category for unmodeled effectful work; makes authority explicit through capabilities; permits tracked dynamic dependencies; and distinguishes semantic, computation, content, external, and managed-object identity. rule selection matches typed interfaces and refuses ambiguity (0015); the kernel is rust with arena-and-index graph modeling and no unsafe for structure (0016); pure evaluation is total by construction, with the graph carrying recursion (0018); and the type calculus is one closed structural set with nominal identity by declaration (0026, superseding 0017), whose declaration site 0047 builds.
 
-further proposed decisions settle some of the open questions: rule selection matches typed interfaces and refuses ambiguity (0015); the kernel is implemented in rust with arena-and-index graph modeling and no unsafe for structure (0016); types are structural by default and nominal by declaration (0017); pure evaluation is total by construction, with the graph carrying recursion and cycle detection providing the real bound (0018); and the kernel has five type-level effect categories with nondeterminism tracked as a dependency (0019).
+what a build does today, end to end: the engine plans an action contract from a request, materializes only the declared executable and inputs, runs the child under a landlock ruleset and a 77-entry seccomp allowlist so it reports `AccessVerification::Prevented`, imports the captured outputs into its own content store, and keys the attempt by the request rather than the execution (0031). an unchanged compile is served from the reusable index within a run and across runs; a second build of unchanged sources reuses at the root, and a fresh engine over the same sqlite state hydrates it without allocating beneath the root. touching one source recompiles that object and re-links while the other object's compile is served. two toolchains share one graph, header dependencies are discovered by their own action rather than declared, and a test's exit status is a declared outcome so a failing test is a reusable verdict.
 
-the M-1 semantic prototype is complete. the rust prototype tests exact-interface selection over the current interface subset, the five effect-category types, arena-owned graph identity, exact in-memory reuse of completed pure applications, versioned pure-computation keys over separate stable rule identity and cache-invalidating rule revision, validated and stably digested action contracts, propagated action capability requirements, actual capability-use edges, the synchronous pure step machine, and an inspectable action-rule/policy/executor boundary. every scheduled run supplies an action policy; authorization happens before execution and is retained in provenance. before execution, the engine materializes only the executable and inputs declared by the validated action contract; after execution, the engine imports captured output bytes and trees into its own store before action completion sees content identities. action results are reusable. an action is identified by its request: the selected rule, its revision, the requested interface, the inputs, and the digest of the contract planned from them. a recorded attempt is admitted only if it was produced by the executor and platform this run would use, under confinement at least as strong as the engine demands, with its dependencies still valid and its output content still in the store (decision 0031). policy is reapplied on reuse.
+what is built and unproved, which the milestones state per item: the `Observation`, `Mutation`, and `Opaque` effect categories are marker types with no step variant, scheduler path, or durable record, so three of the five categories have no operational support. retention and garbage collection are framed (0027) and unbuilt — nothing in the tree deletes a byte. the durable half of invalidation explanation is built and held by the cross-adapter conformance suite; the live query surface has no caller, and its reason taxonomy names configuration rather than change, so it does not yet answer why something recomputed. there is no surface language: every declaration is a rust api call, and the frontend is gated on the 0026 calculus landing rather than on a milestone.
 
-engine state persists to sqlite as normalized relations, and a pure result computed by one process hydrates in another after the writer has exited. reopening the database marks attempts left pending by an interrupted owner as cancelled, since the owner was stopped rather than the computation failing. the exact constraint model and the rest of the persistent incremental engine are still open design work. invalidation explanations and concurrent, cancellable scheduling are built; path confinement is enforced by landlock and syscall confinement is not, so the executor reports `Observed`. a computation that consumes an action is reusable: its action edge is revalidated by re-selecting and re-planning the recorded request, which reapplies the current run's policy and re-derives the key rather than trusting one recorded when it ran (decision 0033). equality-based pruning now crosses that edge too, so an action re-executed under a revised rule whose outputs content-address to what the previous attempt produced leaves its consumers alone. operational support for the `Observation`, `Mutation`, and `Opaque` effect categories remains unproved. proposed decisions stay open until later milestones test their broader claims; completing a scoped prototype milestone does not accept those decisions in full.
+the live implementation item is [0047](docs/decisions/0047-the-declaration-table.md). `Type::Nominal` carries a bare name, so a value claiming a nominal name inhabits any interface declaring it whatever its representation holds; `crates/xylem/tests/declaration_hole.rs` asserts that hole is open, and it passes. under [0048](docs/decisions/0048-pre-release-version-pinning.md) no encoding version moves for the round — every version stays at 1 until the first release, and a pre-release database is discarded and rebuilt.
+
+proposed decisions stay open until later milestones test their broader claims. completing a scoped prototype milestone does not accept those decisions in full.
 
 ## document status
 
