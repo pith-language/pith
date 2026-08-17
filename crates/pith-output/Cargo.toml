@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+publish.workspace = true
 description = "Typed output records and the renderer trait for pith's Pretty/Plain/JSON shapes"
 
 [lints]
