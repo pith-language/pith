@@ -52,6 +52,7 @@
         pkgs.statix
         pkgs.git
         pkgs.clang
+        pkgs.jujutsu
       ];
 
       shellHook = ''
