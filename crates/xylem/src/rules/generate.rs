@@ -43,7 +43,7 @@ impl GenerateAction {
 impl ActionRule for GenerateAction {
     fn plan(&self, inputs: &[Value]) -> PithResult<ActionSpec> {
         let toolchain = requested_toolchain(&self.toolchains, inputs)?;
-        let generator = blob_of(input(inputs, 1)?, types::EXECUTABLE)?;
+        let generator = blob_of(input(inputs, 1)?, types::executable_name())?;
         Ok(ActionSpec {
             executable: ActionProgram::Content(generator),
             toolchain: toolchain.closure.clone(),

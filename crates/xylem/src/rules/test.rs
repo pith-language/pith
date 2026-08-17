@@ -47,7 +47,7 @@ impl TestAction {
 impl ActionRule for TestAction {
     fn plan(&self, inputs: &[Value]) -> PithResult<ActionSpec> {
         let toolchain = requested_toolchain(&self.toolchains, inputs)?;
-        let executable = blob_of(input(inputs, 1)?, types::EXECUTABLE)?;
+        let executable = blob_of(input(inputs, 1)?, types::executable_name())?;
         Ok(ActionSpec {
             executable: ActionProgram::Content(executable),
             toolchain: toolchain.closure.clone(),

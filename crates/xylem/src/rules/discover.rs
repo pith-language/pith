@@ -96,7 +96,7 @@ impl HeaderDiscoveryAction {
 impl ActionRule for HeaderDiscoveryAction {
     fn plan(&self, inputs: &[Value]) -> PithResult<ActionSpec> {
         let toolchain = requested_toolchain(&self.toolchains, inputs)?;
-        let source = blob_of(input(inputs, 1)?, types::C_SOURCE)?;
+        let source = blob_of(input(inputs, 1)?, types::c_source_name())?;
         let provided = provided_headers_of(input(inputs, 2)?)?;
         let headers = effective_headers(&self.universe, &provided)?;
         let mut action_inputs = vec![ActionInput {

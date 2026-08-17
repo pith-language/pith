@@ -51,7 +51,7 @@ impl CompileAction {
 impl ActionRule for CompileAction {
     fn plan(&self, inputs: &[Value]) -> PithResult<ActionSpec> {
         let toolchain = requested_toolchain(&self.toolchains, inputs)?;
-        let source = blob_of(input(inputs, 1)?, types::C_SOURCE)?;
+        let source = blob_of(input(inputs, 1)?, types::c_source_name())?;
         let Value::List(discovered) = input(inputs, 2)? else {
             return Err(diag(
                 "the compile request carried no discovered header list as its third input",
@@ -208,7 +208,7 @@ impl PureRuleFrame for CompileEntryFrame {
                     Some(value) => value,
                     None => return Err(diag("the discovery pass completed without a depfile")),
                 };
-                let depfile_id = blob_of(&depfile, types::DEPFILE)?;
+                let depfile_id = blob_of(&depfile, types::depfile_name())?;
                 self.phase = CompilePhase::Compile;
                 Ok(PureStep::NeedBlob(depfile_id))
             }

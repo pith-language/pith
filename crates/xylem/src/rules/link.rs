@@ -60,7 +60,7 @@ impl ActionRule for LinkAction {
         let mut action_inputs = Vec::with_capacity(objects.len());
         let mut arguments = Vec::with_capacity(objects.len().saturating_add(2));
         for (position, value) in objects.iter().enumerate() {
-            let id = blob_of(value, types::OBJECT)?;
+            let id = blob_of(value, types::object_name())?;
             let path = object_path(position);
             arguments.push(path.clone());
             action_inputs.push(ActionInput {

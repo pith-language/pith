@@ -178,12 +178,8 @@ impl PureRuleFrame for SourcesBuildFrame {
 /// build-library policy, so the rule lives in the test rather than in xylem.
 fn build_interface() -> pith_core::Interface {
     pith_core::Interface {
-        inputs: Box::new([pith_core::Type::List(Box::new(pith_core::Type::Nominal {
-            name: types::C_SOURCE.into(),
-        }))]),
-        output: pith_core::Type::Nominal {
-            name: types::EXECUTABLE.into(),
-        },
+        inputs: Box::new([pith_core::Type::List(Box::new(types::c_source_type()))]),
+        output: types::executable_type(),
     }
 }
 

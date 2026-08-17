@@ -1,49 +1,125 @@
-//! Nominal type names and value constructors for the xylem build graph.
+//! The declarations xylem owns, and the value constructors over them.
 //!
-//! Decision 0026 makes nominal identity a declaration attribute. The names
-//! in this module are the declarations xylem owns: a toolchain, and the
-//! content roles a C build moves through. They are nominal over their
-//! content identity so two rules producing content never collapse to the
-//! same `() -> Blob` interface and collide as `E-1102` ambiguity (the
-//! blocker Phase 0 lifted).
+//! Decision 0047 makes a declaration an entry in a per-module table: its
+//! identity is the coordinate `xylem.<name>`, and its revision is a digest over
+//! its representation. The table below is the single place each of xylem's six
+//! nominal types is named; the interfaces and the value constructors derive
+//! their spellings and their types from it, where they previously restated a
+//! string constant and built `Type::Nominal { name }` inline at eighteen sites.
+//!
+//! They are nominal over their content identity so two rules producing content
+//! never collapse to the same `() -> Blob` interface and collide as `E-1102`
+//! ambiguity (the blocker Phase 0 lifted).
 //!
 //! The discovered header set is the one input here that is not nominal: it is
 //! a `List<Text>` of include paths as the depfile spelled them, the landed
 //! slice of 0026's `List<T>` constructor. Its content identities are resolved
 //! by the compile action against the header universe it was registered with.
 
-use pith_core::{Interface, Pure, RecordField, Request, Type, Value};
+use std::sync::OnceLock;
+
+use pith_core::{DeclarationTable, Interface, Pure, RecordField, Request, Type, Value};
 use pith_diag::Span;
 use pith_ids::ContentId;
 
-/// A discovered C toolchain: the driver path is its identity for dispatch. Two
-/// compiles over different drivers are different requests because this value is
-/// a request input; the closure the executor confines is declared separately in
-/// the action spec.
-pub const TOOLCHAIN: &str = "xylem.Toolchain";
+/// The module identity every xylem declaration is registered under, matching
+/// the one its rule identities already carry (decision 0023).
+pub const MODULE: &str = "xylem";
 
-/// A C source file identified by its content.
-pub const C_SOURCE: &str = "xylem.CSource";
+/// One declared type: the use-site type and the coordinate spelling a value of
+/// it carries.
+struct Declared {
+    declared_type: Type,
+    spelling: Box<str>,
+}
 
-/// A compiled object file identified by its content.
-pub const OBJECT: &str = "xylem.Object";
+/// Xylem's declaration table and the six types declared in it.
+struct Declarations {
+    table: DeclarationTable,
+    toolchain: Declared,
+    c_source: Declared,
+    object: Declared,
+    executable: Declared,
+    depfile: Declared,
+    test_report: Declared,
+}
 
-/// A linked executable identified by its content.
-pub const EXECUTABLE: &str = "xylem.Executable";
+fn declarations() -> &'static Declarations {
+    static DECLARATIONS: OnceLock<Declarations> = OnceLock::new();
+    DECLARATIONS.get_or_init(|| {
+        let mut table = DeclarationTable::new(MODULE);
+        let mut declare = |name: &str, representation: Type| {
+            let declared_type = match table.nominal(name, representation) {
+                Ok(declared) => declared,
+                Err(error) => unreachable!("xylem declares each name once: {error}"),
+            };
+            Declared {
+                spelling: format!("{MODULE}.{name}").into(),
+                declared_type,
+            }
+        };
+        // A toolchain's driver path is its identity for dispatch. Two compiles
+        // over different drivers are different requests because this value is a
+        // request input; the closure the executor confines is declared
+        // separately in the action spec.
+        let toolchain = declare("Toolchain", Type::Text);
+        let c_source = declare("CSource", Type::Blob);
+        let object = declare("Object", Type::Blob);
+        let executable = declare("Executable", Type::Blob);
+        // The make-syntax depfile a discovery pass captured. The entry rule
+        // parses it; the paths it names are the source's header dependencies.
+        let depfile = declare("Depfile", Type::Blob);
+        // A verdict is nominal over `Bool`, which is the whole of what a build
+        // asks a test. A report carrying the exit status, the captured output,
+        // and a per-assertion breakdown wants a record, and the rule that
+        // produces this reads the status and decides, so the distinction
+        // between an exit code and a signal is made where the information is.
+        let test_report = declare("TestReport", Type::Bool);
+        Declarations {
+            table,
+            toolchain,
+            c_source,
+            object,
+            executable,
+            depfile,
+            test_report,
+        }
+    })
+}
 
-/// The make-syntax depfile a discovery pass captured, identified by its
-/// content. The entry rule parses it; the paths it names are the source's
-/// header dependencies.
-pub const DEPFILE: &str = "xylem.Depfile";
+/// Xylem's declaration table, for a rule revision derived from the declarations
+/// its interface names (decision 0047).
+#[must_use]
+pub fn table() -> &'static DeclarationTable {
+    &declarations().table
+}
 
-/// The verdict a test run produced.
-///
-/// Nominal over `Bool`, which is the whole of what a build asks a test. A report
-/// carrying the exit status, the captured output, and a per-assertion breakdown
-/// wants a record constructor, and 0026's calculus has none yet; the rule that
-/// produces this reads the status and decides, so the distinction between an
-/// exit code and a signal is made where the information is.
-pub const TEST_REPORT: &str = "xylem.TestReport";
+macro_rules! declared_accessors {
+    ($($field:ident => $type_fn:ident, $name_fn:ident, $doc:literal;)*) => {
+        $(
+            #[doc = concat!("The declared type of ", $doc, ".")]
+            #[must_use]
+            pub fn $type_fn() -> Type {
+                declarations().$field.declared_type.clone()
+            }
+
+            #[doc = concat!("The coordinate spelling a value of ", $doc, " carries.")]
+            #[must_use]
+            pub fn $name_fn() -> &'static str {
+                &declarations().$field.spelling
+            }
+        )*
+    };
+}
+
+declared_accessors! {
+    toolchain => toolchain_type, toolchain_name, "a discovered C toolchain";
+    c_source => c_source_type, c_source_name, "a C source file";
+    object => object_type, object_name, "a compiled object file";
+    executable => executable_type, executable_name, "a linked executable";
+    depfile => depfile_type, depfile_name, "a captured make-syntax depfile";
+    test_report => test_report_type, test_report_name, "a test verdict";
+}
 
 /// A toolchain value carrying `driver` as its identity. The full closure lives
 /// on the discovered [`crate::Toolchain`] struct the action rule holds; this
@@ -51,7 +127,7 @@ pub const TEST_REPORT: &str = "xylem.TestReport";
 #[must_use]
 pub fn toolchain(driver: &str) -> Value {
     Value::Nominal {
-        name: TOOLCHAIN.into(),
+        name: toolchain_name().into(),
         representation: Box::new(Value::Text(driver.into())),
     }
 }
@@ -59,7 +135,7 @@ pub fn toolchain(driver: &str) -> Value {
 #[must_use]
 pub fn c_source(id: ContentId) -> Value {
     Value::Nominal {
-        name: C_SOURCE.into(),
+        name: c_source_name().into(),
         representation: Box::new(Value::Blob(id)),
     }
 }
@@ -67,7 +143,7 @@ pub fn c_source(id: ContentId) -> Value {
 #[must_use]
 pub fn object(id: ContentId) -> Value {
     Value::Nominal {
-        name: OBJECT.into(),
+        name: object_name().into(),
         representation: Box::new(Value::Blob(id)),
     }
 }
@@ -75,7 +151,7 @@ pub fn object(id: ContentId) -> Value {
 #[must_use]
 pub fn executable(id: ContentId) -> Value {
     Value::Nominal {
-        name: EXECUTABLE.into(),
+        name: executable_name().into(),
         representation: Box::new(Value::Blob(id)),
     }
 }
@@ -84,7 +160,7 @@ pub fn executable(id: ContentId) -> Value {
 #[must_use]
 pub fn test_report(passed: bool) -> Value {
     Value::Nominal {
-        name: TEST_REPORT.into(),
+        name: test_report_name().into(),
         representation: Box::new(Value::Bool(passed)),
     }
 }
@@ -92,7 +168,7 @@ pub fn test_report(passed: bool) -> Value {
 #[must_use]
 pub fn depfile(id: ContentId) -> Value {
     Value::Nominal {
-        name: DEPFILE.into(),
+        name: depfile_name().into(),
         representation: Box::new(Value::Blob(id)),
     }
 }
@@ -182,18 +258,8 @@ where
 #[must_use]
 pub fn discovery_interface() -> Interface {
     Interface {
-        inputs: Box::new([
-            Type::Nominal {
-                name: TOOLCHAIN.into(),
-            },
-            Type::Nominal {
-                name: C_SOURCE.into(),
-            },
-            provided_headers_type(),
-        ]),
-        output: Type::Nominal {
-            name: DEPFILE.into(),
-        },
+        inputs: Box::new([toolchain_type(), c_source_type(), provided_headers_type()]),
+        output: depfile_type(),
     }
 }
 
@@ -206,18 +272,12 @@ pub fn discovery_interface() -> Interface {
 pub fn compile_action_interface() -> Interface {
     Interface {
         inputs: Box::new([
-            Type::Nominal {
-                name: TOOLCHAIN.into(),
-            },
-            Type::Nominal {
-                name: C_SOURCE.into(),
-            },
+            toolchain_type(),
+            c_source_type(),
             headers_type(),
             provided_headers_type(),
         ]),
-        output: Type::Nominal {
-            name: OBJECT.into(),
-        },
+        output: object_type(),
     }
 }
 
@@ -229,18 +289,8 @@ pub fn compile_action_interface() -> Interface {
 #[must_use]
 pub fn compile_interface() -> Interface {
     Interface {
-        inputs: Box::new([
-            Type::Nominal {
-                name: TOOLCHAIN.into(),
-            },
-            Type::Nominal {
-                name: C_SOURCE.into(),
-            },
-            provided_headers_type(),
-        ]),
-        output: Type::Nominal {
-            name: OBJECT.into(),
-        },
+        inputs: Box::new([toolchain_type(), c_source_type(), provided_headers_type()]),
+        output: object_type(),
     }
 }
 
@@ -252,17 +302,8 @@ pub fn compile_interface() -> Interface {
 #[must_use]
 pub fn link_interface() -> Interface {
     Interface {
-        inputs: Box::new([
-            Type::Nominal {
-                name: TOOLCHAIN.into(),
-            },
-            Type::List(Box::new(Type::Nominal {
-                name: OBJECT.into(),
-            })),
-        ]),
-        output: Type::Nominal {
-            name: EXECUTABLE.into(),
-        },
+        inputs: Box::new([toolchain_type(), Type::List(Box::new(object_type()))]),
+        output: executable_type(),
     }
 }
 
@@ -273,17 +314,8 @@ pub fn link_interface() -> Interface {
 #[must_use]
 pub fn test_interface() -> Interface {
     Interface {
-        inputs: Box::new([
-            Type::Nominal {
-                name: TOOLCHAIN.into(),
-            },
-            Type::Nominal {
-                name: EXECUTABLE.into(),
-            },
-        ]),
-        output: Type::Nominal {
-            name: TEST_REPORT.into(),
-        },
+        inputs: Box::new([toolchain_type(), executable_type()]),
+        output: test_report_type(),
     }
 }
 
@@ -295,17 +327,8 @@ pub fn test_interface() -> Interface {
 #[must_use]
 pub fn generate_interface() -> Interface {
     Interface {
-        inputs: Box::new([
-            Type::Nominal {
-                name: TOOLCHAIN.into(),
-            },
-            Type::Nominal {
-                name: EXECUTABLE.into(),
-            },
-        ]),
-        output: Type::Nominal {
-            name: C_SOURCE.into(),
-        },
+        inputs: Box::new([toolchain_type(), executable_type()]),
+        output: c_source_type(),
     }
 }
 

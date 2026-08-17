@@ -230,13 +230,13 @@ fn driver_of(value: &Value) -> PithResult<&str> {
         Value::Nominal {
             name,
             representation,
-        } if name.as_ref() == types::TOOLCHAIN => match representation.as_ref() {
+        } if name.as_ref() == types::toolchain_name() => match representation.as_ref() {
             Value::Text(driver) => Ok(driver),
             _ => Err(diag("a Toolchain value carried no driver path")),
         },
         _ => Err(diag(&format!(
             "expected a {} value, found {}",
-            types::TOOLCHAIN,
+            types::toolchain_name(),
             value.describe()
         ))),
     }
