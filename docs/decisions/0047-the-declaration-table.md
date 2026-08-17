@@ -156,6 +156,20 @@ the `b"xylem-v3"` constant and phloem's per-rule constants after it lose their r
 
 what a module identity is beyond a string accepted at registration, and how two repositories' modules relate, stays open with 0023 and 0038. the coordinate's dotted spelling means a module identity containing a dot could collide with a longer name in a dot-free module; the prototype's population (single-segment module identities) does not reach it, and the module grammar belongs to the module-system record.
 
+### measured
+
+the declaration table, the coordinate, the digest, `Type::Nominal` and `Type::Sum` carrying their declarations, `is_type` verifying the representation, and the recursion cut are built. xylem's six nominal types are declared in one table in `types.rs`, and the eighteen inline `Type::Nominal { name }` sites in its interfaces derive from it; phloem's five declared sums and its `VersionScheme` nominal go through `declarations.rs`, which registers lazily and derives each declared name from the coordinate spelling the crate's constants already held. 675 tests pass.
+
+the hole is closed from the other side. `crates/xylem/tests/declaration_hole.rs` asserted that a value naming `xylem.Object` while holding a `Text` inhabited the link interface; it now asserts the refusal, at `is_type` and at the request-input gate, with a companion asserting a genuine object still passes so the refusal is not the check rejecting everything.
+
+the table's own claims are tested against the real population rather than invented fixtures: registration order does not move a digest, two modules declaring one short name are two declarations with two digests, a changed representation and a changed module each move one, a changed constructor set moves a sum's, an alias yields its target expanded, a recursive alias is refused while a recursive nominal is not, and a cut reached only through another declaration does not make an alias recursive.
+
+recursion is measured on a value: `test.Tree` over `List<Cut>` type-checks a nested value, and a wrong representation at depth is still refused, so the cut carries the check down rather than waving it through.
+
+two things the round found that the record did not predict. `Coordinate::spelling` did not invert `Coordinate::parse` for a dotless name — it produced `.name` — which broke reflexivity for a nominal value whose name carries no module; the reflexivity test is what caught it, and spelling now omits the dot when the module is empty. and carrying the whole `PureComputationKey` on an evaluation frame, which an earlier round had done, grew two enums past `large_enum_variant`; the frame carries the digest alone.
+
+one consequence landed earlier than expected. phloem's `a_toolchain_whose_representation_is_not_the_driver_path_is_refused_on_read` asserted that the nominal type *could not* see the representation and that the reader had to. the declaration makes that false: the refusal now happens at the reader's type guard rather than at its driver-path branch, one layer earlier and for every consumer rather than only the readers that thought to check. the test is inverted and the driver-path diagnostic survives as defense in depth.
+
 ## unresolved
 
 forward references and mutual recursion between declared sums need either a two-phase table or a module-level elaboration pass; deferred until a shape that needs them is measured.
