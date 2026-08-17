@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -18,8 +18,24 @@ env:
 
 jobs:
   checks:
-    name: fmt + clippy + deny + test + repository checks
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Formatting and spelling
+            task: treefmt-check
+          - name: Clippy
+            task: clippy
+          - name: Tests
+            task: test-ci
+          - name: Dependency policy
+            task: deny
+          - name: Repository invariants
+            task: repo-check
+          - name: GitHub Actions security
+            task: zizmor
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -27,14 +43,7 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
         with:
           determinate: false
-      - name: checks
-        run: |
-          nix develop --command bash -c '
-            set -e
-            treefmt --ci
-            cargo clippy --workspace --all-targets -- -D warnings
-            cargo deny check
-            cargo test --workspace
-            cargo run -p xtask -- check
-            just zizmor
-          '
+      - name: Run ${{ matrix.name }}
+        env:
+          TASK: ${{ matrix.task }}
+        run: nix develop .#ci --command just "$TASK"

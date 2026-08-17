@@ -30,43 +30,60 @@
       inherit pkgs pkgsUnstable craneLib rustToolchain nightlyToolchain;
     };
 
-    devShells.default = pkgs.mkShell {
-      packages = [
-        rustToolchain
-        nightlyToolchain
-        config.treefmt.build.wrapper
-        pkgs.cargo-nextest
-        pkgs.cargo-llvm-cov
-        pkgs.cargo-mutants
-        pkgs.cargo-hack
-        pkgs.cargo-machete
-        pkgs.cargo-deny
-        pkgs.cargo-fuzz
-        pkgs.cargo-modules
-        pkgs.tokei
-        pkgs.typos
-        pkgs.lychee
-        pkgs.bacon
-        pkgs.just
-        pkgs.deadnix
-        pkgs.statix
-        pkgs.git
-        pkgs.clang
-        pkgs.jujutsu
-        pkgs.zizmor
-      ];
+    devShells = {
+      # Keep CI focused on the tools used by the required checks. In
+      # particular, avoid downloading the nightly and investigative tooling in
+      # every parallel GitHub Actions job.
+      ci = pkgs.mkShell {
+        packages = [
+          rustToolchain
+          config.treefmt.build.wrapper
+          pkgs.cargo-deny
+          pkgs.just
+          pkgs.git
+          pkgs.clang
+          pkgs.zizmor
+        ];
+      };
 
-      shellHook = ''
-        # Expose the nightly cargo so justfile recipes can invoke it without
-        # depending on rustup's `+nightly` proxy. Falls back to `cargo
-        # +nightly` outside the devshell (see the justfile `env(...)` defaults).
-        export CARGO_NIGHTLY="${nightlyToolchain}/bin/cargo"
-        if [ -n "$PS1" ]; then
-          echo "pith devshell"
-          echo "  rust   $(rustc --version)"
-          echo "  nightly $("${nightlyToolchain}/bin/rustc" --version)"
-        fi
-      '';
+      default = pkgs.mkShell {
+        packages = [
+          rustToolchain
+          nightlyToolchain
+          config.treefmt.build.wrapper
+          pkgs.cargo-nextest
+          pkgs.cargo-llvm-cov
+          pkgs.cargo-mutants
+          pkgs.cargo-hack
+          pkgs.cargo-machete
+          pkgs.cargo-deny
+          pkgs.cargo-fuzz
+          pkgs.cargo-modules
+          pkgs.tokei
+          pkgs.typos
+          pkgs.lychee
+          pkgs.bacon
+          pkgs.just
+          pkgs.deadnix
+          pkgs.statix
+          pkgs.git
+          pkgs.clang
+          pkgs.jujutsu
+          pkgs.zizmor
+        ];
+
+        shellHook = ''
+          # Expose the nightly cargo so justfile recipes can invoke it without
+          # depending on rustup's `+nightly` proxy. Falls back to `cargo
+          # +nightly` outside the devshell (see the justfile `env(...)` defaults).
+          export CARGO_NIGHTLY="${nightlyToolchain}/bin/cargo"
+          if [ -n "$PS1" ]; then
+            echo "pith devshell"
+            echo "  rust   $(rustc --version)"
+            echo "  nightly $("${nightlyToolchain}/bin/rustc" --version)"
+          fi
+        '';
+      };
     };
   };
 }
