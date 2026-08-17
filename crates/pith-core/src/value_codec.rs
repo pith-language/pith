@@ -2,8 +2,9 @@
 //! [`Value`] variants.
 
 use crate::{
-    Interface, RecordField, SumConstructor, Type, Value,
+    Interface, NominalType, RecordField, SumConstructor, SumType, Type, Value,
     codec::CanonicalReader,
+    declaration::Coordinate,
     manifest::{encode_bytes, encode_length, encode_str},
 };
 
@@ -32,6 +33,10 @@ pub(crate) const TAG_NOMINAL: u8 = 6;
 pub(crate) const TAG_LIST: u8 = 7;
 pub(crate) const TAG_RECORD: u8 = 8;
 pub(crate) const TAG_SUM: u8 = 9;
+/// The recursion cut (decision 0047). A type-only tag: a value never carries a
+/// cut, because a cut is a position inside a declaration's body and a value
+/// carries its declaration's name instead.
+pub(crate) const TAG_CUT: u8 = 10;
 
 pub(crate) fn encode_type_payload(encoded: &mut Vec<u8>, value_type: &Type) {
     match value_type {
@@ -41,10 +46,13 @@ pub(crate) fn encode_type_payload(encoded: &mut Vec<u8>, value_type: &Type) {
         Type::Text => encoded.push(TAG_TEXT),
         Type::Bytes => encoded.push(TAG_BYTES),
         Type::Blob => encoded.push(TAG_BLOB),
-        Type::Nominal { name } => {
+        Type::Nominal(declared) => {
             encoded.push(TAG_NOMINAL);
-            encode_str(encoded, name);
+            encode_str(encoded, &declared.coordinate.module);
+            encode_str(encoded, &declared.coordinate.name);
+            encode_type_payload(encoded, &declared.representation);
         }
+        Type::Cut => encoded.push(TAG_CUT),
         Type::List(element) => {
             encoded.push(TAG_LIST);
             encode_type_payload(encoded, element);
@@ -53,9 +61,11 @@ pub(crate) fn encode_type_payload(encoded: &mut Vec<u8>, value_type: &Type) {
             encoded.push(TAG_RECORD);
             encode_record_fields(encoded, fields, encode_type_payload);
         }
-        Type::Sum { name, constructors } => {
+        Type::Sum(declared) => {
+            let constructors = &declared.constructors;
             encoded.push(TAG_SUM);
-            encode_str(encoded, name);
+            encode_str(encoded, &declared.coordinate.module);
+            encode_str(encoded, &declared.coordinate.name);
             // Constructor order is canonical name order on the same terms a
             // record's fields are.
             let mut ordered: Vec<&SumConstructor> = constructors.iter().collect();
@@ -299,9 +309,20 @@ fn decode_type_at_depth(
         TAG_TEXT => Type::Text,
         TAG_BYTES => Type::Bytes,
         TAG_BLOB => Type::Blob,
-        TAG_NOMINAL => Type::Nominal {
-            name: decoder.read_text()?.into(),
-        },
+        TAG_NOMINAL => {
+            if depth >= MAX_NOMINAL_NESTING {
+                return Err(CanonicalDecodeError::NestingTooDeep {
+                    limit: MAX_NOMINAL_NESTING,
+                });
+            }
+            let module: Box<str> = decoder.read_text()?.into();
+            let name: Box<str> = decoder.read_text()?.into();
+            Type::Nominal(Box::new(NominalType {
+                coordinate: Coordinate::new(module, name),
+                representation: decode_type_at_depth(decoder, depth.saturating_add(1))?,
+            }))
+        }
+        TAG_CUT => Type::Cut,
         TAG_LIST => {
             if depth >= MAX_NOMINAL_NESTING {
                 return Err(CanonicalDecodeError::NestingTooDeep {
@@ -320,7 +341,8 @@ fn decode_type_at_depth(
                     limit: MAX_NOMINAL_NESTING,
                 });
             }
-            let name = decoder.read_text()?.into();
+            let module: Box<str> = decoder.read_text()?.into();
+            let name: Box<str> = decoder.read_text()?.into();
             let count = decoder.read_length()?;
             let mut constructors: Vec<SumConstructor> = Vec::with_capacity(count.min(64));
             for _ in 0..count {
@@ -342,10 +364,10 @@ fn decode_type_at_depth(
                     )?,
                 });
             }
-            Type::Sum {
-                name,
+            Type::Sum(Box::new(SumType {
+                coordinate: Coordinate::new(module, name),
                 constructors: constructors.into(),
-            }
+            }))
         }
         tag => return Err(CanonicalDecodeError::UnknownTypeTag { tag }),
     })
@@ -488,6 +510,7 @@ fn decode_value_payload(
 mod tests {
     use super::*;
     use crate::RecordField;
+    use crate::value::{declared_nominal, declared_sum};
     use pith_ids::{ContentDigest, ContentId};
     fn fixture_content_id() -> ContentId {
         ContentId::from_digest(ContentDigest::from_bytes([
@@ -506,12 +529,8 @@ mod tests {
             Type::Text,
             Type::Bytes,
             Type::Blob,
-            Type::Nominal {
-                name: "Machine".into(),
-            },
-            Type::List(Box::new(Type::Nominal {
-                name: "Machine".into(),
-            })),
+            declared_nominal("test", "Machine", Type::Blob),
+            Type::List(Box::new(declared_nominal("test", "Machine", Type::Blob))),
             Type::List(Box::new(Type::List(Box::new(Type::Int)))),
             Type::record([
                 RecordField {
@@ -524,7 +543,8 @@ mod tests {
                 },
             ])
             .unwrap(),
-            Type::sum(
+            declared_sum(
+                "test",
                 "Source",
                 [
                     SumConstructor {
@@ -536,8 +556,7 @@ mod tests {
                         payload: None,
                     },
                 ],
-            )
-            .unwrap(),
+            ),
         ] {
             let encoded = value_type.encode_canonical();
             assert_eq!(Type::decode_canonical(&encoded), Ok(value_type));
@@ -556,13 +575,13 @@ mod tests {
             Value::Bytes(vec![0x00, 0x80, 0xff].into_boxed_slice()),
             Value::Blob(fixture_content_id()),
             Value::Nominal {
-                name: "Machine".into(),
+                name: "test.Machine".into(),
                 representation: Box::new(Value::Text("id-7".into())),
             },
             Value::Nominal {
-                name: "Nested".into(),
+                name: "test.Nested".into(),
                 representation: Box::new(Value::Nominal {
-                    name: "Inner".into(),
+                    name: "test.Inner".into(),
                     representation: Box::new(Value::Int(1)),
                 }),
             },
@@ -583,12 +602,12 @@ mod tests {
             ])
             .unwrap(),
             Value::Sum {
-                type_name: "Source".into(),
+                type_name: "test.Source".into(),
                 constructor: "Git".into(),
                 payload: Some(Box::new(Value::Text("main".into()))),
             },
             Value::Sum {
-                type_name: "Source".into(),
+                type_name: "test.Source".into(),
                 constructor: "Path".into(),
                 payload: None,
             },
@@ -608,9 +627,15 @@ mod tests {
             (Type::Bytes, &[0x01, 0x04]),
             (Type::Blob, &[0x01, 0x05]),
             (
-                Type::Nominal { name: "N".into() },
+                // A nominal type now carries its declaration: the module, the
+                // declared name, then the representation's own payload
+                // (decision 0047). The trailing 0x05 is TAG_BLOB.
+                declared_nominal("test", "N", Type::Blob),
                 &[
-                    0x01, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'N',
+                    0x01, 0x06, //
+                    0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b't', b'e', b's', b't', //
+                    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'N', //
+                    0x05,
                 ],
             ),
             (Type::List(Box::new(Type::Int)), &[0x01, 0x07, 0x02]),
@@ -640,7 +665,8 @@ mod tests {
             // length-prefixed name, a presence byte, and the payload type
             // when present.
             (
-                Type::sum(
+                declared_sum(
+                    "test",
                     "S",
                     [
                         SumConstructor {
@@ -652,10 +678,11 @@ mod tests {
                             payload: Some(Type::Int),
                         },
                     ],
-                )
-                .unwrap(),
+                ),
                 &[
-                    0x01, 0x09, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'S', //
+                    0x01, 0x09, //
+                    0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b't', b'e', b's', b't', //
+                    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'S', //
                     0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //
                     0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'a', 0x01, 0x02, //
                     0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'b', 0x00,
@@ -700,11 +727,17 @@ mod tests {
             ),
             (
                 Value::Nominal {
-                    name: "N".into(),
+                    name: "test.N".into(),
                     representation: Box::new(Value::Unit),
                 },
+                // A nominal value carries a name, not a declaration: the value
+                // is data and the type is the side that can check
+                // (decision 0047). The name is the coordinate's spelling.
                 &[
-                    0x01, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'N', 0x00,
+                    0x01, 0x06, //
+                    0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //
+                    b't', b'e', b's', b't', b'.', b'N', //
+                    0x00,
                 ],
             ),
             // An empty list: the tag, the u64 element count, nothing else.
@@ -748,13 +781,17 @@ mod tests {
             // byte, then the payload when present.
             (
                 Value::Sum {
-                    type_name: "S".into(),
+                    type_name: "test.S".into(),
                     constructor: "a".into(),
                     payload: Some(Box::new(Value::Text("hi".into()))),
                 },
+                // A sum value names its declaration the way a nominal value
+                // does, with the coordinate's spelling; the constructor set is
+                // the type's business and is not repeated here.
                 &[
                     0x01, 0x09, //
-                    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'S', //
+                    0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //
+                    b't', b'e', b's', b't', b'.', b'S', //
                     0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'a', //
                     0x01, //
                     0x03, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'h', b'i',
@@ -800,7 +837,7 @@ mod tests {
             Err(CanonicalDecodeError::Truncated)
         );
 
-        let mut encoded_type = Type::Nominal { name: "N".into() }.encode_canonical();
+        let mut encoded_type = declared_nominal("test", "N", Type::Blob).encode_canonical();
         let _ = encoded_type.pop();
         assert_eq!(
             Type::decode_canonical(&encoded_type),
@@ -814,7 +851,7 @@ mod tests {
             Value::Bytes(vec![1].into_boxed_slice()),
             Value::Blob(fixture_content_id()),
             Value::Nominal {
-                name: "N".into(),
+                name: "test.N".into(),
                 representation: Box::new(Value::Unit),
             },
             Value::List(vec![Value::Int(1)].into_boxed_slice()),
@@ -969,7 +1006,7 @@ mod tests {
         let mut value = Value::Int(0);
         for _ in 0..(MAX_NOMINAL_NESTING.saturating_add(1)) {
             value = Value::Sum {
-                type_name: "S".into(),
+                type_name: "test.S".into(),
                 constructor: "a".into(),
                 payload: Some(Box::new(value)),
             };
@@ -983,14 +1020,14 @@ mod tests {
 
         let mut payload_type = Type::Int;
         for _ in 0..(MAX_NOMINAL_NESTING.saturating_add(1)) {
-            payload_type = Type::sum(
+            payload_type = declared_sum(
+                "test",
                 "S",
                 [SumConstructor {
                     name: "a".into(),
                     payload: Some(payload_type),
                 }],
-            )
-            .unwrap();
+            );
         }
         assert_eq!(
             Type::decode_canonical(&payload_type.encode_canonical()),
@@ -1005,6 +1042,7 @@ mod tests {
         // Descending constructor names, which is also what a duplicate name
         // produces; canonical order is the only one on the wire.
         let mut encoded = vec![ENCODING_VERSION, TAG_SUM];
+        encode_str(&mut encoded, "test");
         encode_str(&mut encoded, "S");
         encode_length(&mut encoded, 2);
         for name in ["b", "a"] {

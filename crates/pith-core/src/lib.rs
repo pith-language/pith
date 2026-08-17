@@ -7,6 +7,7 @@
 pub mod action;
 mod action_codec;
 pub mod codec;
+pub mod declaration;
 pub mod effect;
 mod manifest;
 pub mod rule;
@@ -18,14 +19,19 @@ pub use action::{
     CapabilityRequirement, Content, EnvironmentVariable, ExitStatusContract, NetworkPolicy,
     OutputKind, PlatformRequirement,
 };
+pub use declaration::{
+    Coordinate, Declaration, DeclarationBody, DeclarationError, DeclarationTable,
+};
 pub use effect::{Action, EffectCategory, Mutation, Observation, Opaque, Pure};
+pub use pith_ids::DeclarationDigest;
 pub use pith_ids::{RuleIdentity, RuleRevision};
 pub use rule::{
     ActionComputationKey, Interface, PureComputationKey, Request, Rule, RuleArena, RuleId,
     SelectOutcome, select_rule,
 };
 pub use value::{
-    DuplicateNameError, RecordField, SumConstructor, Type, Value, ValueArena, ValueId,
+    DuplicateNameError, NominalType, RecordField, SumConstructor, SumType, Type, Value, ValueArena,
+    ValueId,
 };
 pub use value_codec::{CanonicalDecodeError, MAX_NOMINAL_NESTING};
 

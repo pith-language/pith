@@ -13,8 +13,8 @@
 
 use pith_core::{
     ActionInput, ActionOutput, ActionProgram, ActionSpec, CanonicalDecodeError,
-    CapabilityRequirement, Content, EnvironmentVariable, ExitStatusContract, NetworkPolicy,
-    OutputKind, PlatformRequirement, RecordField, SumConstructor, Type, Value,
+    CapabilityRequirement, Content, DeclarationTable, EnvironmentVariable, ExitStatusContract,
+    NetworkPolicy, OutputKind, PlatformRequirement, RecordField, SumConstructor, Type, Value,
 };
 use pith_ids::ContentId;
 use proptest::prelude::*;
@@ -52,9 +52,7 @@ fn type_strategy() -> impl Strategy<Value = Type> {
         Just(Type::Text),
         Just(Type::Bytes),
         Just(Type::Blob),
-        bounded_string(16).prop_map(|name| Type::Nominal {
-            name: name.into_boxed_str(),
-        }),
+        bounded_string(16).prop_map(|name| declared_nominal(&name, Type::Blob)),
         leaf_type_strategy().prop_map(|element| Type::List(Box::new(element))),
         // Field names come from the fixed ascending alphabet above, so the
         // slice already satisfies the closed-record shape and goes straight
@@ -65,14 +63,13 @@ fn type_strategy() -> impl Strategy<Value = Type> {
             bounded_string(16),
             proptest::option::of(leaf_type_strategy())
         )
-            .prop_map(|(name, payload)| Type::Sum {
-                name: name.into_boxed_str(),
-                constructors: [SumConstructor {
+            .prop_map(|(name, payload)| declared_sum(
+                &name,
+                [SumConstructor {
                     name: "only".into(),
                     payload,
                 }]
-                .into(),
-            },),
+            ),),
     ]
 }
 
@@ -87,10 +84,28 @@ fn leaf_type_strategy() -> impl Strategy<Value = Type> {
         Just(Type::Text),
         Just(Type::Bytes),
         Just(Type::Blob),
-        bounded_string(16).prop_map(|name| Type::Nominal {
-            name: name.into_boxed_str(),
-        }),
+        bounded_string(16).prop_map(|name| declared_nominal(&name, Type::Blob)),
     ]
+}
+
+/// A nominal declared in a throwaway table. The property under test is the
+/// codec's round trip, so the declaration's module and representation are
+/// fixed and only the declared name varies.
+fn declared_nominal(name: &str, representation: Type) -> Type {
+    let mut table = DeclarationTable::new("fuzz");
+    match table.nominal(name, representation) {
+        Ok(declared) => declared,
+        Err(error) => unreachable!("a fresh table admits one name: {error}"),
+    }
+}
+
+/// A declared sum in a throwaway table. See [`declared_nominal`].
+fn declared_sum(name: &str, constructors: [SumConstructor; 1]) -> Type {
+    let mut table = DeclarationTable::new("fuzz");
+    match table.sum(name, constructors) {
+        Ok(declared) => declared,
+        Err(error) => unreachable!("a fresh table admits one name: {error}"),
+    }
 }
 
 /// Scalar-only generators used both directly and as the bounded

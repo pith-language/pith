@@ -329,6 +329,7 @@ impl SelectOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::{declared_nominal, declared_sum};
     use crate::value_codec::{
         TAG_BLOB, TAG_BOOL, TAG_BYTES, TAG_INT, TAG_LIST, TAG_NOMINAL, TAG_RECORD, TAG_SUM,
         TAG_TEXT, TAG_UNIT,
@@ -348,7 +349,7 @@ mod tests {
             (Type::Text, TAG_TEXT),
             (Type::Bytes, TAG_BYTES),
             (Type::Blob, TAG_BLOB),
-            (Type::Nominal { name: "n".into() }, TAG_NOMINAL),
+            (declared_nominal("test", "n", Type::Blob), TAG_NOMINAL),
             (Type::List(Box::new(Type::Unit)), TAG_LIST),
             (
                 Type::record([crate::RecordField {
@@ -359,14 +360,14 @@ mod tests {
                 TAG_RECORD,
             ),
             (
-                Type::sum(
+                declared_sum(
+                    "test",
                     "s",
                     [crate::SumConstructor {
                         name: "c".into(),
                         payload: None,
                     }],
-                )
-                .unwrap(),
+                ),
                 TAG_SUM,
             ),
         ];
@@ -398,7 +399,7 @@ mod tests {
             ),
             (
                 Value::Sum {
-                    type_name: "s".into(),
+                    type_name: "test.s".into(),
                     constructor: "c".into(),
                     payload: None,
                 },
@@ -609,8 +610,8 @@ mod tests {
 
     #[test]
     fn nominal_types_participate_in_pure_computation_identity() {
-        let first_interface = interface([], Type::Nominal { name: "A".into() });
-        let second_interface = interface([], Type::Nominal { name: "B".into() });
+        let first_interface = interface([], declared_nominal("test", "A", Type::Blob));
+        let second_interface = interface([], declared_nominal("test", "B", Type::Blob));
         let selected = rule("provider", first_interface.clone());
         let first = request("value", first_interface, []);
         let second = request("value", second_interface, []);

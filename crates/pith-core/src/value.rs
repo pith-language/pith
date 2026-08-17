@@ -6,6 +6,8 @@
 
 use pith_arena::define_arena;
 use pith_ids::ContentId;
+
+use crate::declaration::{Coordinate, Declaration, DeclarationBody};
 use pith_output::dto::{SumConstructorRepr, TypeRepr, ValueRepr};
 
 define_arena!(ValueId, ValueArena, ValueBrand);
@@ -118,7 +120,19 @@ impl Value {
             Self::Text(_) => Type::Text,
             Self::Bytes(_) => Type::Bytes,
             Self::Blob(_) => Type::Blob,
-            Self::Nominal { name, .. } => Type::Nominal { name: name.clone() },
+            // A value's name is a string, not a table lookup, so the best a
+            // value can do is synthesize the declaration its own content
+            // supports: the module split off the coordinate spelling, and the
+            // representation's best-effort type as the declared representation.
+            // For a fully determined representation the synthesis is the
+            // declared one (decision 0047).
+            Self::Nominal {
+                name,
+                representation,
+            } => Type::Nominal(Box::new(NominalType {
+                coordinate: Coordinate::parse(name),
+                representation: representation.value_type(),
+            })),
             Self::List(elements) => Type::List(Box::new(
                 elements.first().map_or(Type::Unit, Value::value_type),
             )),
@@ -140,14 +154,14 @@ impl Value {
                 type_name,
                 constructor,
                 payload,
-            } => Type::Sum {
-                name: type_name.clone(),
+            } => Type::Sum(Box::new(SumType {
+                coordinate: Coordinate::parse(type_name),
                 constructors: [SumConstructor {
                     name: constructor.clone(),
                     payload: payload.as_deref().map(|payload| payload.value_type()),
                 }]
                 .into(),
-            },
+            })),
         }
     }
 
@@ -165,6 +179,24 @@ impl Value {
     /// 0026).
     #[must_use]
     pub fn is_type(&self, expected: &Type) -> bool {
+        self.inhabits(expected, None)
+    }
+
+    /// [`Self::is_type`] with the enclosing declaration a [`Type::Cut`] resolves
+    /// to. `None` at the top level, where a cut has nothing to resolve against.
+    ///
+    /// Threading the enclosing reference rather than taking a table keeps the
+    /// public check a function of its two arguments (decision 0047). Recursion
+    /// terminates on the value: each step through a cut consumes one level of a
+    /// finite value, so checking costs time proportional to the value rather than
+    /// to the type.
+    fn inhabits(&self, expected: &Type, enclosing: Option<&Type>) -> bool {
+        if let Type::Cut = expected {
+            return match enclosing {
+                Some(declaration) => self.inhabits(declaration, enclosing),
+                None => false,
+            };
+        }
         match (self, expected) {
             (Self::Unit, Type::Unit)
             | (Self::Bool(_), Type::Bool)
@@ -172,22 +204,34 @@ impl Value {
             | (Self::Text(_), Type::Text)
             | (Self::Bytes(_), Type::Bytes)
             | (Self::Blob(_), Type::Blob) => true,
+            // Two checks in order, which is what closes the representation
+            // hole (decision 0047): the value names the declaration's
+            // coordinate, and its representation inhabits the declared
+            // representation type. A value naming `xylem.Object` while holding
+            // a `Text` is refused at the same gate that already checked the
+            // name. The declaration becomes the enclosing one, so a cut inside
+            // its representation resolves back to it.
             (
-                Self::Nominal { name, .. },
-                Type::Nominal {
-                    name: expected_name,
+                Self::Nominal {
+                    name,
+                    representation,
                 },
-            ) => name == expected_name,
-            (Self::List(elements), Type::List(element)) => {
-                elements.iter().all(|value| value.is_type(element))
+                Type::Nominal(declared),
+            ) => {
+                name.as_ref() == declared.coordinate.spelling()
+                    && representation.inhabits(&declared.representation, Some(expected))
             }
+            (Self::List(elements), Type::List(element)) => elements
+                .iter()
+                .all(|value| value.inhabits(element, enclosing)),
             (Self::Record(fields), Type::Record(declared)) => {
                 // Both sides carry their fields sorted by name, so one walk
                 // decides: a closed record matches its own field set exactly,
                 // with no width or depth subtyping (0026).
                 fields.len() == declared.len()
                     && fields.iter().zip(declared.iter()).all(|(field, expected)| {
-                        field.name == expected.name && field.payload.is_type(&expected.payload)
+                        field.name == expected.name
+                            && field.payload.inhabits(&expected.payload, enclosing)
                     })
             }
             (
@@ -196,17 +240,14 @@ impl Value {
                     constructor,
                     payload,
                 },
-                Type::Sum {
-                    name: expected_name,
-                    constructors,
-                },
+                Type::Sum(declared_sum),
             ) => {
-                type_name == expected_name
-                    && constructors.iter().any(|declared| {
+                type_name.as_ref() == declared_sum.coordinate.spelling()
+                    && declared_sum.constructors.iter().any(|declared| {
                         declared.name == *constructor
                             && match (&declared.payload, payload.as_deref()) {
                                 (Some(expected_payload), Some(payload)) => {
-                                    payload.is_type(expected_payload)
+                                    payload.inhabits(expected_payload, Some(expected))
                                 }
                                 (None, None) => true,
                                 _ => false,
@@ -312,6 +353,28 @@ impl From<&Value> for ValueRepr {
     }
 }
 
+/// A use-site reference to a declared nominal type, carrying the declaration
+/// (decision 0047).
+///
+/// The declaration travels in the type rather than being resolved through an
+/// ambient table, which is what keeps [`Value::is_type`] a total function of its
+/// two arguments and keeps a decoded type able to check as well as a constructed
+/// one. The cost is bytes; pre-release those are cheaper than the correctness
+/// risk of a checker whose answer depends on which table the reader happens to
+/// hold.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct NominalType {
+    pub coordinate: Coordinate,
+    pub representation: Type,
+}
+
+/// A use-site reference to a declared sum, carrying the declaration.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SumType {
+    pub coordinate: Coordinate,
+    pub constructors: Box<[SumConstructor]>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Type {
     Unit,
@@ -320,9 +383,11 @@ pub enum Type {
     Text,
     Bytes,
     Blob,
-    Nominal {
-        name: Box<str>,
-    },
+    /// A declared nominal type. Carries its declaration, so `is_type` verifies
+    /// that a value naming this coordinate also holds a representation the
+    /// declaration admits — the check decision 0026 promised "when the
+    /// declaration lands."
+    Nominal(Box<NominalType>),
     /// The type of a [`Value::List`] whose elements inhabit the element type.
     /// Type application is reified (0026): `List<Int>` and `List<Text>` are
     /// distinct types and distinct interface participants.
@@ -331,15 +396,26 @@ pub enum Type {
     /// sorted by name at construction, which is the canonical order the
     /// encoding writes and the only order the decoder accepts.
     Record(Box<[RecordField<Type>]>),
-    /// The declared sum constructor of the 0026 calculus: a nominal name over
+    /// The declared sum constructor of the 0026 calculus: a declared name over
     /// a fixed set of constructors, each optionally carrying a typed payload,
     /// sorted by constructor name at construction. Not a record with a tag
     /// field and not a polymorphic variant — 0026 rejects both and gives the
     /// reasons.
-    Sum {
-        name: Box<str>,
-        constructors: Box<[SumConstructor]>,
-    },
+    Sum(Box<SumType>),
+    /// The recursion cut: an occurrence of the declaration currently being
+    /// declared, inside its own body (decision 0047).
+    ///
+    /// `xylem.Tree = Node(List<Tree>) | Leaf(Int)` has a finite canonical form
+    /// because the inner `Tree` is this, rather than the whole declaration
+    /// expanded again. Only *direct* self-reference is spellable, so mutual
+    /// recursion between two declarations is unconstructible rather than
+    /// refused — the cut names its enclosing declaration and has no way to name
+    /// another.
+    ///
+    /// A cut outside a declaration body inhabits nothing: there is no enclosing
+    /// declaration to resolve it against, and `is_type` answers `false` rather
+    /// than guessing.
+    Cut,
 }
 
 impl Type {
@@ -354,22 +430,93 @@ impl Type {
         )?))
     }
 
-    /// Build a declared sum type, sorting the constructors into canonical
-    /// name order.
+    /// The use-site type of `declaration`.
     ///
-    /// # Errors
-    /// [`DuplicateNameError`] when two constructors share a name.
-    pub fn sum(
-        name: impl Into<Box<str>>,
-        constructors: impl Into<Box<[SumConstructor]>>,
-    ) -> Result<Self, DuplicateNameError> {
-        Ok(Self::Sum {
-            name: name.into(),
-            constructors: sorted_by_unique_name(constructors, |constructor: &SumConstructor| {
-                &constructor.name
-            })?,
-        })
+    /// A nominal or a sum yields a reference carrying its declaration; an alias
+    /// yields its target, expanded, because an alias has no spelling of its own
+    /// (decision 0047).
+    #[must_use]
+    pub fn of_declaration(declaration: &Declaration) -> Self {
+        match declaration.body() {
+            DeclarationBody::Nominal { representation } => Self::Nominal(Box::new(NominalType {
+                coordinate: declaration.coordinate().clone(),
+                representation: representation.clone(),
+            })),
+            DeclarationBody::Sum { constructors } => Self::Sum(Box::new(SumType {
+                coordinate: declaration.coordinate().clone(),
+                constructors: constructors.clone(),
+            })),
+            DeclarationBody::Alias { target } => target.clone(),
+        }
     }
+
+    /// Whether this type reaches a [`Type::Cut`], which is what makes an alias
+    /// recursive and therefore unexpandable (decision 0047).
+    ///
+    /// The walk stops at a nominal or a sum reference: a cut inside one of those
+    /// belongs to *that* declaration and is finite there, so it says nothing
+    /// about whether this type expands forever.
+    #[must_use]
+    pub fn reaches_cut(&self) -> bool {
+        match self {
+            Self::Cut => true,
+            Self::List(element) => element.reaches_cut(),
+            Self::Record(fields) => fields.iter().any(|field| field.payload.reaches_cut()),
+            Self::Unit
+            | Self::Bool
+            | Self::Int
+            | Self::Text
+            | Self::Bytes
+            | Self::Blob
+            | Self::Nominal(_)
+            | Self::Sum(_) => false,
+        }
+    }
+}
+
+/// A nominal type declared in a throwaway single-entry table, for tests and
+/// doctests that need a declaration and not a module.
+///
+/// There is deliberately no public shortcut past the table: a declaration
+/// reference exists only because a table admitted the name, which is what makes
+/// the duplicate and recursive-alias refusals real rather than advisory
+/// (decision 0047).
+#[cfg(test)]
+pub(crate) fn declared_nominal(module: &str, name: &str, representation: Type) -> Type {
+    let mut table = crate::declaration::DeclarationTable::new(module);
+    match table.nominal(name, representation) {
+        Ok(declared) => declared,
+        Err(error) => unreachable!("a fresh table admits one name: {error}"),
+    }
+}
+
+/// A declared sum in a throwaway single-entry table. See [`declared_nominal`].
+#[cfg(test)]
+pub(crate) fn declared_sum(
+    module: &str,
+    name: &str,
+    constructors: impl Into<Box<[SumConstructor]>>,
+) -> Type {
+    let mut table = crate::declaration::DeclarationTable::new(module);
+    match table.sum(name, constructors) {
+        Ok(declared) => declared,
+        Err(error) => unreachable!("a fresh table admits one name: {error}"),
+    }
+}
+
+/// Sort a constructor set into canonical name order, refusing a repeat.
+///
+/// Used by [`crate::declaration::DeclarationTable::sum`], which is where a sum's
+/// constructors are fixed now that a sum type carries its declaration.
+///
+/// # Errors
+/// [`DuplicateNameError`] when two constructors share a name.
+pub(crate) fn sorted_constructors(
+    constructors: impl Into<Box<[SumConstructor]>>,
+) -> Result<Box<[SumConstructor]>, DuplicateNameError> {
+    sorted_by_unique_name(constructors, |constructor: &SumConstructor| {
+        &constructor.name
+    })
 }
 
 impl Value {
@@ -396,7 +543,7 @@ impl std::fmt::Display for Type {
             Self::Text => f.write_str("Text"),
             Self::Bytes => f.write_str("Bytes"),
             Self::Blob => f.write_str("Blob"),
-            Self::Nominal { name } => f.write_str(name),
+            Self::Nominal(declared) => f.write_str(&declared.coordinate.spelling()),
             Self::List(element) => write!(f, "List<{element}>"),
             Self::Record(fields) => {
                 f.write_str("{ ")?;
@@ -408,8 +555,10 @@ impl std::fmt::Display for Type {
                 }
                 f.write_str(" }")
             }
-            Self::Sum { name, constructors } => {
-                write!(f, "{name}::{{")?;
+            Self::Cut => f.write_str("Self"),
+            Self::Sum(declared) => {
+                let (name, constructors) = (&declared.coordinate, &declared.constructors);
+                write!(f, "{}::{{", name.spelling())?;
                 let mut separator = "";
                 for constructor in &**constructors {
                     f.write_str(separator)?;
@@ -434,7 +583,15 @@ impl From<&Type> for TypeRepr {
             Type::Text => TypeRepr::Text,
             Type::Bytes => TypeRepr::Bytes,
             Type::Blob => TypeRepr::Blob,
-            Type::Nominal { name } => TypeRepr::Nominal { name: name.clone() },
+            // The projection carries the coordinate's spelling rather than the
+            // declaration. A rendered type is for a reader, and the declared
+            // representation is the checker's business — decision 0047 puts the
+            // body in the type so `is_type` needs no table, not so every
+            // diagnostic repeats it.
+            Type::Nominal(declared) => TypeRepr::Nominal {
+                name: declared.coordinate.spelling().into(),
+            },
+            Type::Cut => TypeRepr::Cut,
             Type::List(element) => TypeRepr::List {
                 element: Box::new(element.as_ref().into()),
             },
@@ -444,9 +601,10 @@ impl From<&Type> for TypeRepr {
                     .map(|field| (field.name.clone(), (&field.payload).into()))
                     .collect(),
             },
-            Type::Sum { name, constructors } => TypeRepr::Sum {
-                name: name.clone(),
-                constructors: constructors
+            Type::Sum(declared) => TypeRepr::Sum {
+                name: declared.coordinate.spelling().into(),
+                constructors: declared
+                    .constructors
                     .iter()
                     .map(|constructor| SumConstructorRepr {
                         name: constructor.name.clone(),
@@ -475,7 +633,7 @@ mod tests {
             Value::Bytes(vec![0, 1, 2].into_boxed_slice()),
             Value::Blob(ContentId::of_blob(b"y")),
             Value::Nominal {
-                name: "MachineId".into(),
+                name: "test.MachineId".into(),
                 representation: Box::new(Value::Text("m-1".into())),
             },
             Value::List(vec![].into_boxed_slice()),
@@ -492,7 +650,7 @@ mod tests {
             ])
             .unwrap(),
             Value::Sum {
-                type_name: "Source".into(),
+                type_name: "test.Source".into(),
                 constructor: "Git".into(),
                 payload: Some(Box::new(Value::Text("main".into()))),
             },
@@ -504,12 +662,12 @@ mod tests {
 
     #[test]
     fn nominal_type_projects_to_nominal_repr() {
-        let t = Type::Nominal {
-            name: "Machine".into(),
-        };
+        let t = declared_nominal("test", "Machine", Type::Blob);
         let repr: TypeRepr = (&t).into();
         match repr {
-            TypeRepr::Nominal { name } => assert_eq!(name.as_ref(), "Machine"),
+            // The projection carries the coordinate's spelling, so a reader of
+            // a rendered type sees which module declared it (decision 0047).
+            TypeRepr::Nominal { name } => assert_eq!(name.as_ref(), "test.Machine"),
             _ => unreachable!(),
         }
     }
@@ -549,12 +707,10 @@ mod tests {
             (Value::Blob(ContentId::of_blob(b"z")), Type::Blob),
             (
                 Value::Nominal {
-                    name: "MachineId".into(),
+                    name: "test.MachineId".into(),
                     representation: Box::new(Value::Text("m-1".into())),
                 },
-                Type::Nominal {
-                    name: "MachineId".into(),
-                },
+                declared_nominal("test", "MachineId", Type::Text),
             ),
             (
                 Value::List(
@@ -594,9 +750,7 @@ mod tests {
             Type::Text,
             Type::Bytes,
             Type::Blob,
-            Type::Nominal {
-                name: "MachineId".into(),
-            },
+            declared_nominal("test", "MachineId", Type::Text),
             Type::List(Box::new(Type::Text)),
             Type::List(Box::new(Type::Int)),
             Type::record([
@@ -638,7 +792,7 @@ mod tests {
         let texts = Value::List(vec![Value::Text("a".into())].into_boxed_slice());
         let objects = Value::List(
             vec![Value::Nominal {
-                name: "Object".into(),
+                name: "test.Object".into(),
                 representation: Box::new(Value::Blob(ContentId::of_blob(b"o"))),
             }]
             .into_boxed_slice(),
@@ -647,13 +801,17 @@ mod tests {
 
         assert!(texts.is_type(&Type::List(Box::new(Type::Text))));
         assert!(!texts.is_type(&Type::List(Box::new(Type::Int))));
-        assert!(objects.is_type(&Type::List(Box::new(Type::Nominal {
-            name: "Object".into()
-        }))));
+        assert!(objects.is_type(&Type::List(Box::new(declared_nominal(
+            "test",
+            "Object",
+            Type::Blob
+        )))));
         assert!(!objects.is_type(&Type::List(Box::new(Type::Blob))));
-        assert!(!blobs.is_type(&Type::List(Box::new(Type::Nominal {
-            name: "Object".into()
-        }))));
+        assert!(!blobs.is_type(&Type::List(Box::new(declared_nominal(
+            "test",
+            "Object",
+            Type::Blob
+        )))));
     }
 
     #[test]
@@ -674,16 +832,12 @@ mod tests {
         // match the representation's type, and a different nominal name is a
         // different type.
         let machine_id = Value::Nominal {
-            name: "MachineId".into(),
+            name: "test.MachineId".into(),
             representation: Box::new(Value::Text("m-1".into())),
         };
-        assert!(machine_id.is_type(&Type::Nominal {
-            name: "MachineId".into(),
-        }));
+        assert!(machine_id.is_type(&declared_nominal("test", "MachineId", Type::Text)));
         assert!(!machine_id.is_type(&Type::Text));
-        assert!(!machine_id.is_type(&Type::Nominal {
-            name: "OtherId".into(),
-        }));
+        assert!(!machine_id.is_type(&declared_nominal("test", "OtherId", Type::Text)));
     }
 
     #[test]
@@ -817,7 +971,8 @@ mod tests {
         // ambiguity breaks it, so the matrix's claim cannot include these
         // values. What holds everywhere is reflexivity: is_type accepts each
         // value against its own value_type.
-        let declared_sum = Type::sum(
+        let source_sum = declared_sum(
+            "test",
             "Source",
             [
                 SumConstructor {
@@ -829,8 +984,7 @@ mod tests {
                     payload: None,
                 },
             ],
-        )
-        .unwrap();
+        );
         let empty_list_field = Value::record([RecordField {
             name: "f".into(),
             payload: Value::List(vec![].into_boxed_slice()),
@@ -839,7 +993,7 @@ mod tests {
         let sum_field = Value::record([RecordField {
             name: "s".into(),
             payload: Value::Sum {
-                type_name: "Source".into(),
+                type_name: "test.Source".into(),
                 constructor: "Git".into(),
                 payload: Some(Box::new(Value::Text("main".into()))),
             },
@@ -881,7 +1035,7 @@ mod tests {
         let best_effort_sum = sum_field.value_type();
         let declared_field = Type::record([RecordField {
             name: "s".into(),
-            payload: declared_sum,
+            payload: source_sum,
         }])
         .unwrap();
         assert_ne!(best_effort_sum, declared_field);
@@ -895,41 +1049,37 @@ mod tests {
         // the value inhabits every declared sum carrying the constructor with
         // a `List<Text>` or `List<Int>` payload.
         let empty_list_payload = Value::Sum {
-            type_name: "Source".into(),
+            type_name: "test.Source".into(),
             constructor: "Archive".into(),
             payload: Some(Box::new(Value::List(vec![].into_boxed_slice()))),
         };
         let best_effort_payload = empty_list_payload.value_type();
         assert_eq!(
             best_effort_payload,
-            Type::sum(
+            declared_sum(
+                "test",
                 "Source",
                 [SumConstructor {
                     name: "Archive".into(),
                     payload: Some(Type::List(Box::new(Type::Unit))),
                 }],
             )
-            .unwrap()
         );
         for element in [Type::Text, Type::Int] {
-            assert!(
-                empty_list_payload.is_type(
-                    &Type::sum(
-                        "Source",
-                        [
-                            SumConstructor {
-                                name: "Archive".into(),
-                                payload: Some(Type::List(Box::new(element.clone()))),
-                            },
-                            SumConstructor {
-                                name: "Git".into(),
-                                payload: Some(Type::Text),
-                            },
-                        ],
-                    )
-                    .unwrap()
-                )
-            );
+            assert!(empty_list_payload.is_type(&declared_sum(
+                "test",
+                "Source",
+                [
+                    SumConstructor {
+                        name: "Archive".into(),
+                        payload: Some(Type::List(Box::new(element.clone()))),
+                    },
+                    SumConstructor {
+                        name: "Git".into(),
+                        payload: Some(Type::Text),
+                    },
+                ],
+            )));
         }
         assert!(empty_list_payload.is_type(&best_effort_payload));
     }
@@ -941,7 +1091,8 @@ mod tests {
         // match, the constructor must be in the declared set, and the payload
         // must be present exactly when the declaration carries one and inhabit
         // the declared payload type.
-        let source = Type::sum(
+        let source = declared_sum(
+            "test",
             "Source",
             [
                 SumConstructor {
@@ -953,19 +1104,19 @@ mod tests {
                     payload: None,
                 },
             ],
-        )
-        .unwrap();
+        );
         let git = Value::Sum {
-            type_name: "Source".into(),
+            type_name: "test.Source".into(),
             constructor: "Git".into(),
             payload: Some(Box::new(Value::Text("main".into()))),
         };
         let path = Value::Sum {
-            type_name: "Source".into(),
+            type_name: "test.Source".into(),
             constructor: "Path".into(),
             payload: None,
         };
-        let renamed = Type::sum(
+        let renamed = declared_sum(
+            "test",
             "Origin",
             [
                 SumConstructor {
@@ -977,17 +1128,17 @@ mod tests {
                     payload: None,
                 },
             ],
-        )
-        .unwrap();
-        let without_git = Type::sum(
+        );
+        let without_git = declared_sum(
+            "test",
             "Source",
             [SumConstructor {
                 name: "Path".into(),
                 payload: None,
             }],
-        )
-        .unwrap();
-        let mistyped = Type::sum(
+        );
+        let mistyped = declared_sum(
+            "test",
             "Source",
             [
                 SumConstructor {
@@ -999,9 +1150,9 @@ mod tests {
                     payload: None,
                 },
             ],
-        )
-        .unwrap();
-        let bare_git = Type::sum(
+        );
+        let bare_git = declared_sum(
+            "test",
             "Source",
             [
                 SumConstructor {
@@ -1013,8 +1164,7 @@ mod tests {
                     payload: None,
                 },
             ],
-        )
-        .unwrap();
+        );
 
         assert!(git.is_type(&source));
         assert!(path.is_type(&source));
@@ -1027,7 +1177,8 @@ mod tests {
 
     #[test]
     fn sum_construction_orders_constructors_and_rejects_duplicates() {
-        let first = Type::sum(
+        let first = declared_sum(
+            "test",
             "Source",
             [
                 SumConstructor {
@@ -1039,9 +1190,9 @@ mod tests {
                     payload: Some(Type::Blob),
                 },
             ],
-        )
-        .unwrap();
-        let second = Type::sum(
+        );
+        let second = declared_sum(
+            "test",
             "Source",
             [
                 SumConstructor {
@@ -1053,11 +1204,12 @@ mod tests {
                     payload: Some(Type::Text),
                 },
             ],
-        )
-        .unwrap();
+        );
         assert_eq!(first, second);
 
-        let duplicate = Type::sum(
+        // A repeated constructor is refused where a sum is now declared: the
+        // table, not a free constructor (decision 0047).
+        let duplicate = crate::declaration::DeclarationTable::new("test").sum(
             "Source",
             [
                 SumConstructor {
@@ -1071,8 +1223,11 @@ mod tests {
             ],
         );
         assert_eq!(
-            duplicate.unwrap_err(),
-            DuplicateNameError { name: "Git".into() }
+            duplicate,
+            Err(crate::declaration::DeclarationError::DuplicateName {
+                module: "test".into(),
+                name: "Git".into(),
+            })
         );
     }
 
@@ -1085,7 +1240,8 @@ mod tests {
         // `is_type` accepts the declared type as well. Request-input checking
         // compares with `is_type`, so the singleton is a diagnostic, never a
         // gate.
-        let declared = Type::sum(
+        let declared = declared_sum(
+            "test",
             "Source",
             [
                 SumConstructor {
@@ -1097,10 +1253,9 @@ mod tests {
                     payload: None,
                 },
             ],
-        )
-        .unwrap();
+        );
         let git = Value::Sum {
-            type_name: "Source".into(),
+            type_name: "test.Source".into(),
             constructor: "Git".into(),
             payload: Some(Box::new(Value::Text("main".into()))),
         };
@@ -1108,17 +1263,139 @@ mod tests {
         let best_effort = git.value_type();
         assert_eq!(
             best_effort,
-            Type::Sum {
-                name: "Source".into(),
-                constructors: [SumConstructor {
+            declared_sum(
+                "test",
+                "Source",
+                [SumConstructor {
                     name: "Git".into(),
                     payload: Some(Type::Text),
                 }]
-                .into(),
-            }
+            )
         );
         assert_ne!(best_effort, declared);
         assert!(git.is_type(&best_effort));
         assert!(git.is_type(&declared));
+    }
+}
+
+#[cfg(test)]
+mod declaration_checks {
+    use super::*;
+    use crate::declaration::DeclarationTable;
+
+    #[test]
+    fn a_wrong_representation_no_longer_inhabits_a_nominal_type() {
+        // The hole decision 0047 exists to close. Before the declaration
+        // landed, `Type::Nominal` carried a bare name and matched any value
+        // carrying the same string, so a `Text` masquerading as content
+        // identity passed every check the kernel ran.
+        let mut table = DeclarationTable::new("xylem");
+        let object = table.nominal("Object", Type::Blob).unwrap();
+
+        let genuine = Value::Nominal {
+            name: "xylem.Object".into(),
+            representation: Box::new(Value::Blob(ContentId::of_blob(b"real"))),
+        };
+        let fabricated = Value::Nominal {
+            name: "xylem.Object".into(),
+            representation: Box::new(Value::Text("not a content identity".into())),
+        };
+
+        assert!(genuine.is_type(&object));
+        assert!(
+            !fabricated.is_type(&object),
+            "a value naming the coordinate with a wrong representation must be refused"
+        );
+        // And inside a list, which is where a link interface takes its objects.
+        let inside = Type::List(Box::new(object));
+        assert!(Value::List([genuine].into()).is_type(&inside));
+        assert!(!Value::List([fabricated].into()).is_type(&inside));
+    }
+
+    #[test]
+    fn a_recursive_declaration_checks_a_value_in_time_proportional_to_the_value() {
+        // `test.Tree` over `List<Tree>`: the inner occurrence is the cut, so
+        // the type is finite and a value of it terminates (0047).
+        let mut table = DeclarationTable::new("test");
+        let tree = table
+            .nominal("Tree", Type::List(Box::new(Type::Cut)))
+            .unwrap();
+
+        let leaf = || Value::Nominal {
+            name: "test.Tree".into(),
+            representation: Box::new(Value::List([].into())),
+        };
+        let nested = Value::Nominal {
+            name: "test.Tree".into(),
+            representation: Box::new(Value::List(
+                [
+                    leaf(),
+                    Value::Nominal {
+                        name: "test.Tree".into(),
+                        representation: Box::new(Value::List([leaf()].into())),
+                    },
+                ]
+                .into(),
+            )),
+        };
+        assert!(nested.is_type(&tree));
+
+        // A wrong representation at depth is still refused, so the cut carries
+        // the check down rather than waving it through.
+        let corrupt = Value::Nominal {
+            name: "test.Tree".into(),
+            representation: Box::new(Value::List([Value::Text("not a tree".into())].into())),
+        };
+        assert!(!corrupt.is_type(&tree));
+    }
+
+    #[test]
+    fn a_cut_outside_a_declaration_inhabits_nothing() {
+        // There is no enclosing declaration to resolve against, so the check
+        // answers false rather than guessing.
+        assert!(!Value::Unit.is_type(&Type::Cut));
+        assert!(!Value::List([Value::Unit].into()).is_type(&Type::List(Box::new(Type::Cut))));
+        // An *empty* list still inhabits every `List<T>`, cut included, which is
+        // the documented empty-list asymmetry rather than a cut resolving.
+        assert!(Value::List([].into()).is_type(&Type::List(Box::new(Type::Cut))));
+    }
+
+    #[test]
+    fn a_value_naming_another_modules_declaration_is_refused() {
+        let mut xylem = DeclarationTable::new("xylem");
+        let object = xylem.nominal("Object", Type::Blob).unwrap();
+        let from_elsewhere = Value::Nominal {
+            name: "phloem.Object".into(),
+            representation: Box::new(Value::Blob(ContentId::of_blob(b"real"))),
+        };
+        assert!(!from_elsewhere.is_type(&object));
+    }
+
+    #[test]
+    fn every_value_still_inhabits_its_own_value_type() {
+        // Reflexivity, which the synthesized best-effort declaration has to
+        // preserve for a nominal (0047).
+        for value in [
+            Value::Unit,
+            Value::Nominal {
+                name: "test.Id".into(),
+                representation: Box::new(Value::Text("x".into())),
+            },
+            Value::Nominal {
+                name: "bare".into(),
+                representation: Box::new(Value::Blob(ContentId::of_blob(b"b"))),
+            },
+            Value::Sum {
+                type_name: "test.Source".into(),
+                constructor: "Git".into(),
+                payload: Some(Box::new(Value::Text("main".into()))),
+            },
+        ] {
+            let synthesized = value.value_type();
+            assert!(
+                value.is_type(&synthesized),
+                "{value:?} did not inhabit its own value_type {synthesized:?}"
+            );
+        }
     }
 }

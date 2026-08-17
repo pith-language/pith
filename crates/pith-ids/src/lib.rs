@@ -255,6 +255,41 @@ impl std::fmt::Debug for PureComputationDigest {
     }
 }
 
+/// Stable digest of one declaration: its coordinate, its kind, and the canonical
+/// encoding of its body (decision 0047).
+///
+/// What it covers is chosen so that it moves for a change a reader can observe
+/// and not otherwise. A doc-comment edit, the declaration's position in its
+/// module's table, and formatting are all outside it; the representation type of
+/// a nominal, the constructor set of a sum, and a constructor payload's type are
+/// all inside it. That asymmetry is the Dhall 1.17.0 lesson: a digest whose basis
+/// includes what no reader can see breaks compatibility for nothing.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct DeclarationDigest(ContentDigest);
+
+impl DeclarationDigest {
+    pub fn of_manifest(manifest: &[u8]) -> Self {
+        Self(ContentId::with_domain(domain::DECLARATION, manifest))
+    }
+
+    /// Restore a digest read back from a persistence adapter. See
+    /// [`ActionSpecDigest::from_digest`] for why restoration is distinct from
+    /// derivation.
+    pub const fn from_digest(digest: ContentDigest) -> Self {
+        Self(digest)
+    }
+
+    pub fn digest(self) -> ContentDigest {
+        self.0
+    }
+}
+
+impl std::fmt::Debug for DeclarationDigest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "DeclarationDigest({:?})", self.0)
+    }
+}
+
 /// Stable digest of a canonical action rule application: the request that was
 /// asked for and the contract the rule planned from it (decision 0031).
 ///
@@ -305,6 +340,7 @@ mod domain {
     pub const RULE_REVISION: &[u8] = b"pith:rule-revision:v1\0";
     pub const PURE_COMPUTATION: &[u8] = b"pith:pure-computation:v1\0";
     pub const ACTION_COMPUTATION: &[u8] = b"pith:action-computation:v1\0";
+    pub const DECLARATION: &[u8] = b"pith:declaration:v1\0";
 
     /// Every prefix in this module. Distinctness and a shared version
     /// segment are checked over this one slice, so a new digest kind is
@@ -318,6 +354,7 @@ mod domain {
         RULE_REVISION,
         PURE_COMPUTATION,
         ACTION_COMPUTATION,
+        DECLARATION,
     ];
 }
 

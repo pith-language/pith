@@ -59,6 +59,10 @@ pub enum TypeRepr {
         name: Box<str>,
         constructors: Box<[SumConstructorRepr]>,
     },
+    /// The recursion cut inside a declaration's body (decision 0047). Rendered
+    /// as a distinct kind rather than as the enclosing declaration repeated, so
+    /// a reader sees a finite type.
+    Cut,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
