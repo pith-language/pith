@@ -121,7 +121,7 @@ the field evidence says this floor is real and expensive. Salsa states it as a r
 
 the benchmark gains a fourth shape, `reused-chain`, which is the walk's worst case: a reuse at every depth of a chain, so the walks would sum to the chain's triangle. at one, two, and four thousand it runs 3.2, 6.5, and 13.8 ms, against 3.3, 6.5, and 13.7 ms for the same shape before this record — the walk is not observable there. without the live-frontier bound the same three sizes are 65.8, 264.3, and 1049.3 ms, quadrupling per doubling, so the bound is what the numbers are measuring and the shape exists to hold it. `deep-chain`, `wide-sequence`, and `wide-fanout` are unmoved, which is the control: none of them reuses anything.
 
-the workspace suite is 713 tests, 0 failures. `xtask check-determinism` passes over the `IndexSet` the walk introduced, which it would also have passed over a `HashSet` — the same gap 0050 recorded, unchanged and still worth naming.
+the workspace suite is 710 tests, 0 failures. `xtask check-determinism` passes over the `IndexSet` the walk introduced, which it would also have passed over a `HashSet` — the same gap 0050 recorded, unchanged and still worth naming.
 
 ## unresolved
 
