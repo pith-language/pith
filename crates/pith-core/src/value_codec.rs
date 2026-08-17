@@ -7,6 +7,14 @@ use crate::{
     manifest::{encode_bytes, encode_length, encode_str},
 };
 
+/// Version of the stored `Type`/`Value` encoding.
+///
+/// Pinned at 1 until the first release (decision 0048), on the same terms as the
+/// contract encoding and the record encoding: no released reader exists, so a
+/// grammar change is answered by discarding and rebuilding rather than by a
+/// migration. Four constructors have landed under that rule — `Nominal`, `List`,
+/// `Record`, `Sum` — each taking a reserved tag, so no existing byte sequence
+/// changed meaning and a foreign stream is still refused by the version byte.
 const ENCODING_VERSION: u8 = 1;
 
 /// Discriminant tags for `Type`/`Value` variants. `Type` and `Value`

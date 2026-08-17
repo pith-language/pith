@@ -20,13 +20,17 @@ use crate::{
 /// `semantic_encoding` half of an adapter's [`EngineStateVersions`]. Adapters
 /// choose their own table layout and report it as `schema` (decision 0025).
 ///
-/// Pinned at 1 while nothing is released, on the same terms the sqlite
-/// adapter pins its schema: no database outside a working tree needs to
+/// Pinned at 1 until the first release (decision 0048), on the same terms the
+/// sqlite adapter pins its schema: no database outside a working tree needs to
 /// survive a change, so a pre-release database is moved aside and rebuilt
-/// rather than versioned around, and a stale one is deleted. Once there is a
-/// release to be compatible with, this starts moving for any change a prior
-/// build would misread — a new constructor in the value grammar as much as a
-/// changed meaning of existing bytes.
+/// rather than versioned around, and a stale one is deleted. It reached 5 and
+/// was returned to 1 before 0048 made the rule general, which is why 0026's
+/// account of four bumps describes history rather than the tree.
+///
+/// The first tag is the trigger. After it, this starts moving for any change a
+/// prior build would misread — a new constructor in the value grammar as much
+/// as a changed meaning of existing bytes — and engine state stays in 0048's
+/// derived-cache class, where discard-and-rebuild remains a legal answer.
 pub const RECORD_ENCODING_VERSION: SemanticEncodingVersion = SemanticEncodingVersion::new(1);
 
 pub const CURRENT_ENGINE_STATE_VERSIONS: EngineStateVersions = EngineStateVersions {

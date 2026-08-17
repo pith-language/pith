@@ -17,11 +17,16 @@ use crate::codec::{
     encode_str, output_kind_tag, read_capabilities, read_content, read_output_kind,
 };
 
-/// Version 2 carries the program as a tagged sum so a contract can name content
-/// the graph produced as well as a host path (decision 0036), and the exit-status
-/// contract a rule reads a verdict from (decision 0037). The storage format is
-/// versioned independently of the digest manifest for this reason (0024).
-const ENCODING_VERSION: u8 = 2;
+/// Version of the stored contract encoding, versioned independently of the
+/// digest manifest (0024).
+///
+/// Pinned at 1 until the first release (decision 0048). Nothing is released, so
+/// no reader exists that a grammar change could break, and a pre-release
+/// database carrying an older encoding is moved aside and rebuilt rather than
+/// migrated. The grammar this version gates has already grown twice under that
+/// rule — the program as a tagged sum (0036) and the exit-status contract a rule
+/// reads a verdict from (0037) — without the number moving.
+const ENCODING_VERSION: u8 = 1;
 
 const TAG_PROGRAM_HOST_PATH: u8 = 0;
 const TAG_PROGRAM_CONTENT: u8 = 1;
