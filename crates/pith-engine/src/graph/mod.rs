@@ -30,7 +30,9 @@ pub use reuse::ReuseContext;
 use std::num::NonZeroUsize;
 
 use indexmap::IndexMap;
-use pith_core::{Action, Pure, PureComputationKey, Request, Rule, RuleArena, RuleId};
+use pith_core::{
+    Action, Pure, PureComputationKey, Request, Rule, RuleArena, RuleId, RuleIdentity, RuleRevision,
+};
 use pith_diag::PithResult;
 use pith_ids::{ComputationArena, ComputationId, ContentId};
 use pith_store::{ContentStore, MemoryContentStore};
@@ -47,6 +49,12 @@ use reuse::{ActionComputationIndex, PureComputationIndex};
 pub struct Engine {
     pub(crate) rules: RuleArena<Rule<Pure>>,
     pub(crate) bodies: IndexMap<RuleId, Box<dyn PureRule>>,
+    /// The revision each pure rule identity is registered at, indexed off
+    /// `rules` so revalidating a recorded pure edge does not scan the arena
+    /// (decision 0049). `None` marks an identity two rules registered at
+    /// different revisions: the map cannot answer for it, and revalidation
+    /// treats that as invalid rather than picking one.
+    pub(crate) pure_rule_revisions: IndexMap<RuleIdentity, Option<RuleRevision>>,
     pub(crate) action_rules: RuleArena<Rule<Action>>,
     pub(crate) action_bodies: IndexMap<RuleId, Box<dyn ActionRule>>,
     pub(crate) computations: ComputationArena<ComputationNode>,
@@ -94,6 +102,7 @@ impl Engine {
         Self {
             rules: RuleArena::new(),
             bodies: IndexMap::new(),
+            pure_rule_revisions: IndexMap::new(),
             action_rules: RuleArena::new(),
             action_bodies: IndexMap::new(),
             computations: ComputationArena::new(),
@@ -181,9 +190,33 @@ impl Engine {
     where
         B: PureRule + 'static,
     {
+        let (identity, revision) = (rule.identity, rule.revision);
         let id = self.rules.push(rule);
         self.bodies.insert(id, Box::new(body));
+        self.pure_rule_revisions
+            .entry(identity)
+            .and_modify(|known| {
+                if *known != Some(revision) {
+                    *known = None;
+                }
+            })
+            .or_insert(Some(revision));
         id
+    }
+
+    /// Whether a pure rule identity is registered here at `revision`.
+    ///
+    /// A recorded pure edge names the revision its dependency was computed
+    /// under. If this engine's rule set disagrees, the recorded key is not the
+    /// key the consumer's body would request, so the edge is stale even though
+    /// the old key's attempt is still the latest reusable one under it
+    /// (decision 0049).
+    pub(crate) fn pure_rule_is_registered_at(
+        &self,
+        identity: RuleIdentity,
+        revision: RuleRevision,
+    ) -> bool {
+        self.pure_rule_revisions.get(&identity) == Some(&Some(revision))
     }
 
     /// Register an action rule together with its deterministic planner.

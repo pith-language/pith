@@ -145,6 +145,16 @@ impl Engine {
         computation: PureComputationKey,
         recorded: DurableAttemptId,
     ) -> PithResult<bool> {
+        // The recorded key names the revision the dependency was computed
+        // under. Asking only whether that key's latest reusable attempt is
+        // still the recorded one cannot see a revision that moved: a revised
+        // rule mints a *new* key, which leaves the old key's attempt
+        // undisturbed and still latest under it, so the edge would revalidate
+        // and the consumer would hydrate a result derived from a rule body
+        // this engine no longer has (decision 0049).
+        if !self.pure_rule_is_registered_at(computation.rule_identity, computation.rule_revision) {
+            return Ok(false);
+        }
         let Some(latest) = self.latest_reusable_attempt(computation)? else {
             return Ok(false);
         };
