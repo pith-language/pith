@@ -134,12 +134,7 @@ pub fn substitution_type() -> Type {
         (BUILT_FROM, Type::Blob),
         (FIELD_OPERATING_SYSTEM, Type::Text),
         (FIELD_ARCHITECTURE, Type::Text),
-        (
-            FIELD_TOOLCHAIN,
-            Type::Nominal {
-                name: xylem::types::TOOLCHAIN.into(),
-            },
-        ),
+        (FIELD_TOOLCHAIN, xylem::types::toolchain_type()),
         (BINARY, Type::Blob),
         (AUTHORIZED_BY, crate::lock::origin_type()),
     ])

@@ -9,6 +9,7 @@ pub(crate) mod archive;
 pub mod build;
 pub(crate) mod codec;
 pub mod constraint;
+pub mod declarations;
 pub mod description;
 pub mod document;
 pub mod environment;

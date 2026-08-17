@@ -59,12 +59,7 @@ pub fn environment_type() -> Type {
         (CONSTRAINTS, Type::List(Box::new(constraint_type()))),
         (FIELD_OPERATING_SYSTEM, Type::Text),
         (FIELD_ARCHITECTURE, Type::Text),
-        (
-            FIELD_TOOLCHAIN,
-            Type::Nominal {
-                name: xylem::types::TOOLCHAIN.into(),
-            },
-        ),
+        (FIELD_TOOLCHAIN, xylem::types::toolchain_type()),
         (ORIGINS, Type::List(Box::new(origin_type()))),
     ])
 }
@@ -170,12 +165,7 @@ pub fn environment_document_type() -> Type {
         (LOCK, lock_type()),
         (FIELD_OPERATING_SYSTEM, Type::Text),
         (FIELD_ARCHITECTURE, Type::Text),
-        (
-            FIELD_TOOLCHAIN,
-            Type::Nominal {
-                name: xylem::types::TOOLCHAIN.into(),
-            },
-        ),
+        (FIELD_TOOLCHAIN, xylem::types::toolchain_type()),
         (SUBSTITUTIONS, Type::List(Box::new(substitution_type()))),
     ])
 }
@@ -326,20 +316,34 @@ mod tests {
     }
 
     #[test]
-    fn a_toolchain_whose_representation_is_not_the_driver_path_is_refused_on_read() {
+    fn a_toolchain_whose_representation_is_not_the_driver_path_is_refused_by_the_type() {
+        // Before decision 0047 the nominal type could not see the
+        // representation, so this refusal was the reader's alone and the
+        // document still inhabited its own type. The declaration xylem now
+        // registers says `Toolchain` is over `Text`, so an `Int` inside one is
+        // refused at the type — one layer earlier and for every consumer rather
+        // than only for the readers that thought to check.
         let wrong = Value::Nominal {
-            name: xylem::types::TOOLCHAIN.into(),
+            name: xylem::types::toolchain_name().into(),
             representation: Box::new(Value::Int(7)),
         };
-        let value = document(wrong.clone()).to_value();
+        let value = document(wrong).to_value();
         assert!(
-            value.is_type(&environment_document_type()),
-            "the nominal type cannot see the representation; the reader must"
+            !value.is_type(&environment_document_type()),
+            "an Int inside a Toolchain must not inhabit the document type"
         );
+        // The reader refuses it too, and now at its own type guard rather than
+        // at the driver-path branch further in: the type it checks against
+        // carries the declaration, so the wrong representation never reaches the
+        // field read. The driver-path diagnostic survives as defense in depth
+        // for a caller that skips the guard, and is no longer the only thing
+        // standing between an `Int` and a toolchain.
         let error = EnvironmentDocument::from_value(&value).unwrap_err();
         assert!(
-            error.iter().any(|d| d.message.0.contains("driver path")),
-            "the diagnostic names what the toolchain had to carry: {error:?}"
+            error
+                .iter()
+                .any(|d| d.message.0.contains("environment document type")),
+            "the refusal names the type the value failed to inhabit: {error:?}"
         );
     }
 

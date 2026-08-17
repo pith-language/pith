@@ -164,12 +164,7 @@ pub struct Library {
 #[must_use]
 pub fn library_type() -> Type {
     record_type([
-        (
-            OBJECTS,
-            Type::List(Box::new(Type::Nominal {
-                name: xylem::types::OBJECT.into(),
-            })),
-        ),
+        (OBJECTS, Type::List(Box::new(xylem::types::object_type()))),
         (HEADERS, xylem::types::provided_headers_type()),
     ])
 }
@@ -242,7 +237,7 @@ fn object_of(entry: &Value) -> PithResult<ContentId> {
         Value::Nominal {
             name,
             representation,
-        } if name.as_ref() == xylem::types::OBJECT => match representation.as_ref() {
+        } if name.as_ref() == xylem::types::object_name() => match representation.as_ref() {
             Value::Blob(id) => Ok(*id),
             other => Err(diag(format!(
                 "an object value carried {other:?} rather than a blob"
@@ -250,7 +245,7 @@ fn object_of(entry: &Value) -> PithResult<ContentId> {
         },
         other => Err(diag(format!(
             "expected a {} value in the objects list, found {}",
-            xylem::types::OBJECT,
+            xylem::types::object_name(),
             other.describe()
         ))),
     }

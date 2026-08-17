@@ -116,9 +116,17 @@ impl<T: VersionScheme + ?Sized> VersionScheme for Box<T> {
     }
 }
 
-/// The nominal type a request carries to name the declared ordering it runs
-/// under: `phloem.VersionScheme` over the scheme's declared name.
-pub const VERSION_SCHEME: &str = "phloem.VersionScheme";
+/// The declared name of the nominal type a request carries to name the ordering
+/// it runs under. Declared in phloem's table over `Text`, the scheme's own
+/// declared name (decision 0047).
+const VERSION_SCHEME_NAME: &str = "VersionScheme";
+
+/// The coordinate spelling a version-scheme value carries, derived from the
+/// declaration rather than restated.
+#[must_use]
+pub fn version_scheme_spelling() -> String {
+    crate::declarations::spelling(VERSION_SCHEME_NAME)
+}
 
 /// The declared name of [`NumericSegments`].
 pub const NUMERIC_SEGMENTS: &str = "numeric-segments";
@@ -129,16 +137,14 @@ pub const DEBIAN: &str = "debian";
 /// The version-scheme type: nominal over the scheme's declared name.
 #[must_use]
 pub fn version_scheme_type() -> Type {
-    Type::Nominal {
-        name: VERSION_SCHEME.into(),
-    }
+    crate::declarations::nominal(&version_scheme_spelling(), Type::Text)
 }
 
 /// Creates a version-scheme value naming `scheme`.
 #[must_use]
 pub fn version_scheme_value(scheme: &str) -> Value {
     Value::Nominal {
-        name: VERSION_SCHEME.into(),
+        name: version_scheme_spelling().into(),
         representation: Box::new(Value::Text(scheme.into())),
     }
 }
@@ -153,14 +159,16 @@ pub fn version_scheme_name(value: &Value) -> PithResult<&str> {
         Value::Nominal {
             name,
             representation,
-        } if name.as_ref() == VERSION_SCHEME => match representation.as_ref() {
+        } if name.as_ref() == version_scheme_spelling() => match representation.as_ref() {
             Value::Text(text) => Ok(text),
             other => Err(diag(format!(
-                "a {VERSION_SCHEME} value carried {other:?} rather than a text"
+                "a {} value carried {other:?} rather than a text",
+                version_scheme_spelling()
             ))),
         },
         other => Err(diag(format!(
-            "expected a {VERSION_SCHEME} value, found {}",
+            "expected a {} value, found {}",
+            version_scheme_spelling(),
             other.describe()
         ))),
     }

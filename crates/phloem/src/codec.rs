@@ -28,8 +28,13 @@ pub(crate) fn record_type<const N: usize>(fields: [(&str, Type); N]) -> Type {
     record.unwrap_or_else(|error| unreachable!("{error}"))
 }
 
+/// The use-site type of one of phloem's declared sums.
+///
+/// Declared in phloem's own table rather than constructed inline, so the sum
+/// carries its declaration and a rule revision can derive from it
+/// (decision 0047).
 pub(crate) fn sum_type<const N: usize>(name: &str, constructors: [SumConstructor; N]) -> Type {
-    Type::sum(name, constructors).unwrap_or_else(|error| unreachable!("{error}"))
+    crate::declarations::sum(name, constructors)
 }
 
 /// Build a record value from `(name, payload)` pairs, on the same terms as

@@ -1,4 +1,4 @@
-use pith_core::{Interface, Pure, Request, Rule, RuleIdentity, RuleRevision, Type, Value};
+use pith_core::{Interface, Pure, Request, Rule, RuleIdentity, RuleRevision, Value};
 use pith_diag::{PithResult, Span};
 use pith_engine::{PureRule, PureRuleFrame, PureStep, Resumption};
 use pith_ids::ContentId;
@@ -21,16 +21,12 @@ const PACKAGE_LIBRARY_MANIFEST: &[u8] = b"phloem-package-library-v1";
 pub fn package_build_interface() -> Interface {
     Interface {
         inputs: Box::new([
-            Type::Nominal {
-                name: xylem::types::TOOLCHAIN.into(),
-            },
+            xylem::types::toolchain_type(),
             tree_type(),
             build_type(),
             dependency_list_type(),
         ]),
-        output: Type::Nominal {
-            name: xylem::types::EXECUTABLE.into(),
-        },
+        output: xylem::types::executable_type(),
     }
 }
 
@@ -40,13 +36,7 @@ pub fn package_build_interface() -> Interface {
 #[must_use]
 pub fn package_library_interface() -> Interface {
     Interface {
-        inputs: Box::new([
-            Type::Nominal {
-                name: xylem::types::TOOLCHAIN.into(),
-            },
-            tree_type(),
-            build_type(),
-        ]),
+        inputs: Box::new([xylem::types::toolchain_type(), tree_type(), build_type()]),
         output: library_type(),
     }
 }
@@ -263,7 +253,7 @@ impl PureRuleFrame for PackageBuildFrame {
                 let own = match input {
                     Some(Resumption::Many(values)) if !values.is_empty() => values
                         .iter()
-                        .map(|object| blob_of(object, xylem::types::OBJECT))
+                        .map(|object| blob_of(object, xylem::types::object_name()))
                         .collect::<Result<Vec<_>, _>>()?,
                     _ => return Err(diag("the compiles did not return one object per source")),
                 };
@@ -349,7 +339,7 @@ impl PureRuleFrame for PackageLibraryFrame {
                 let objects = match input {
                     Some(Resumption::Many(values)) if !values.is_empty() => values
                         .iter()
-                        .map(|object| blob_of(object, xylem::types::OBJECT))
+                        .map(|object| blob_of(object, xylem::types::object_name()))
                         .collect::<Result<Vec<_>, _>>()?,
                     _ => return Err(diag("the compiles did not return one object per source")),
                 };
