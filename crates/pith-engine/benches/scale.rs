@@ -1,7 +1,8 @@
 //! Wall-clock cost of pure evaluation at graph sizes the test suite does not
-//! reach. Three shapes, because they stress different parts of the scheduler:
+//! reach. Four shapes, because they stress different parts of the engine:
 //! a deep chain puts N frames on one stack, a wide sequence puts N requests
-//! through a stack two deep, and a fan-out opens N chains.
+//! through a stack two deep, a fan-out opens N chains, and a reused chain
+//! revalidates a recorded subtree N times.
 //!
 //! `harness = false`, so this is a plain binary and needs no benchmark
 //! framework. The numbers are coarse by design — what they exist for is
@@ -41,6 +42,13 @@ fn main() {
     for size in SIZES.iter().take(3) {
         report("wide-fanout", *size, wide_fanout(*size));
     }
+    // Revalidation walks the recorded subtree beneath a reused result (decision
+    // 0051), and this shape is the worst case for it: a reuse at every depth of
+    // a chain, so the walks sum to the chain's triangle. Measured over the same
+    // smaller range as fan-out.
+    for size in SIZES.iter().take(3) {
+        report("reused-chain", *size, reused_chain(*size));
+    }
 }
 
 fn report(shape: &str, size: u64, elapsed: Duration) {
@@ -76,7 +84,8 @@ fn wide_sequence(width: u64) -> Duration {
     engine.register_rule(
         rule("sequence", root.clone()),
         SequenceRule {
-            leaf: signature.clone(),
+            child: "leaf",
+            signature: signature.clone(),
         },
     );
     let request = request(
@@ -88,6 +97,35 @@ fn wide_sequence(width: u64) -> Duration {
     engine
         .evaluate_pure(&request)
         .expect("the sequential root evaluates");
+    start.elapsed()
+}
+
+/// The first request builds a chain `n` deep; each of the `n - 1` that follow
+/// finds its result already in the arena and revalidates it, which walks that
+/// result's whole recorded subtree. So the walk runs at every depth and this is
+/// where a per-pass memo would show up as the wrong bound if the walks were not
+/// each other's prefixes.
+fn reused_chain(depth: u64) -> Duration {
+    let mut engine = Engine::new();
+    let signature = interface();
+    engine.register_rule(rule("descend", signature.clone()), DescendRule);
+    let root = root_interface();
+    engine.register_rule(
+        rule("revisit", root.clone()),
+        SequenceRule {
+            child: "descend",
+            signature,
+        },
+    );
+    let request = request(
+        "revisit",
+        root,
+        [Value::Int(as_int(depth)), Value::Bool(true)],
+    );
+    let start = Instant::now();
+    engine
+        .evaluate_pure(&request)
+        .expect("the revisited chain evaluates");
     start.elapsed()
 }
 
@@ -166,21 +204,27 @@ impl PureRuleFrame for LeafFrame {
     }
 }
 
+/// Requests `child(n - 1)` down to `child(0)`, one at a time. What the child
+/// is decides what the shape measures: a leaf makes every request fresh work,
+/// and the descending chain makes every request but the first a reuse.
 struct SequenceRule {
-    leaf: Interface,
+    child: &'static str,
+    signature: Interface,
 }
 
 impl PureRule for SequenceRule {
     fn start(&self, inputs: &[Value]) -> Box<dyn PureRuleFrame> {
         Box::new(SequenceFrame {
-            leaf: self.leaf.clone(),
+            child: self.child,
+            signature: self.signature.clone(),
             remaining: first_int(inputs),
         })
     }
 }
 
 struct SequenceFrame {
-    leaf: Interface,
+    child: &'static str,
+    signature: Interface,
     remaining: i64,
 }
 
@@ -191,8 +235,8 @@ impl PureRuleFrame for SequenceFrame {
         }
         self.remaining = self.remaining.saturating_sub(1);
         Ok(PureStep::Need(request(
-            "leaf",
-            self.leaf.clone(),
+            self.child,
+            self.signature.clone(),
             [Value::Int(self.remaining)],
         )))
     }

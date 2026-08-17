@@ -236,6 +236,171 @@ fn hydration_is_refused_when_a_dependency_rule_was_revised() {
 }
 
 #[test]
+fn hydration_is_refused_when_a_rule_two_levels_down_was_revised() {
+    // Decision 0051. The root's edge to the middle computation revalidates on
+    // its own terms and stops: the middle rule is unrevised, so its key is
+    // unmoved and its recorded attempt is still the latest reusable one under
+    // it. Everything 0049 checks passes, and the leaf underneath it has been
+    // revised. Only a walk into the middle attempt's own record sees it.
+    let state = SharedEngineStateStore::default();
+    let leaf = interface(&[], Type::Int);
+    let middle = interface(&[Type::Bool], Type::Int);
+    let root = interface(&[Type::Bool, Type::Bool], Type::Int);
+
+    let mut first = engine_with_state(state.clone());
+    register_chain(
+        &mut first,
+        &leaf,
+        &middle,
+        &root,
+        ConstantRule(Value::Int(1)),
+    );
+    let first_root = first.evaluate_pure(&chain_root_request(&root)).unwrap();
+    assert_eq!(first_root.value, Value::Int(1));
+
+    // Only the leaf's revision moved. The middle and root rules are registered
+    // exactly as they were, so both of their keys and both of their recorded
+    // attempts are untouched.
+    let mut second = engine_with_state(state.clone());
+    second.register_rule(
+        revised_pure_rule("leaf", leaf.clone(), b"leaf-v2"),
+        ConstantRule(Value::Int(2)),
+    );
+    second.register_rule(
+        pure_rule("middle", middle.clone()),
+        ForwardRule {
+            dependency: pure_request("leaf", leaf, []),
+        },
+    );
+    second.register_rule(
+        pure_rule("root", root.clone()),
+        ForwardRule {
+            dependency: pure_request("middle", middle, [Value::Bool(false)]),
+        },
+    );
+    let second_root = second.evaluate_pure(&chain_root_request(&root)).unwrap();
+
+    assert_eq!(
+        second_root.source,
+        EvaluationSource::Computed,
+        "a revision two levels down must reach the root, not stop at the edge above it"
+    );
+    assert_eq!(
+        second_root.value,
+        Value::Int(2),
+        "the recomputed root must observe the revised leaf through the middle computation"
+    );
+}
+
+#[test]
+fn a_revised_leaf_recomputed_to_an_equal_result_still_hydrates_its_root() {
+    // The walk descends through the attempt the edge check accepted, not the
+    // superseded one the edge recorded. Here they differ and disagree: the
+    // recorded middle attempt names the leaf at its old revision, and the
+    // attempt that superseded it names the leaf at the new one. Descending into
+    // the recorded attempt would refuse a root that is genuinely current, which
+    // is the early cutoff decision 0033 exists to preserve.
+    let state = SharedEngineStateStore::default();
+    let leaf = interface(&[], Type::Int);
+    let middle = interface(&[Type::Bool], Type::Int);
+    let root = interface(&[Type::Bool, Type::Bool], Type::Int);
+
+    let mut first = engine_with_state(state.clone());
+    register_chain(
+        &mut first,
+        &leaf,
+        &middle,
+        &root,
+        ConstantRule(Value::Int(1)),
+    );
+    let first_root = first.evaluate_pure(&chain_root_request(&root)).unwrap();
+    let root_attempt = durable_id(&first, first_root.computation);
+
+    // The leaf is revised and answers the same value, so the middle computation
+    // recomputes to a canonically equal result under its own unmoved key. The
+    // root is never requested here and its record is left as it was.
+    let mut second = engine_with_state(state.clone());
+    second.register_rule(
+        revised_pure_rule("leaf", leaf.clone(), b"leaf-v2"),
+        ConstantRule(Value::Int(1)),
+    );
+    second.register_rule(
+        pure_rule("middle", middle.clone()),
+        ForwardRule {
+            dependency: pure_request("leaf", leaf.clone(), []),
+        },
+    );
+    let recomputed_middle = second
+        .evaluate_pure(&pure_request(
+            "middle",
+            middle.clone(),
+            [Value::Bool(false)],
+        ))
+        .unwrap();
+    assert_eq!(recomputed_middle.source, EvaluationSource::Computed);
+
+    let mut third = engine_with_state(state.clone());
+    third.register_rule(
+        revised_pure_rule("leaf", leaf.clone(), b"leaf-v2"),
+        FailingRule,
+    );
+    third.register_rule(
+        pure_rule("middle", middle.clone()),
+        ForwardRule {
+            dependency: pure_request("leaf", leaf, []),
+        },
+    );
+    third.register_rule(
+        pure_rule("root", root.clone()),
+        ForwardRule {
+            dependency: pure_request("middle", middle, [Value::Bool(false)]),
+        },
+    );
+    let third_root = third.evaluate_pure(&chain_root_request(&root)).unwrap();
+
+    assert_eq!(
+        third_root.source,
+        EvaluationSource::Hydrated,
+        "the root's whole recorded subtree is current, so nothing under it should force a recompute"
+    );
+    assert_eq!(third_root.value, Value::Int(1));
+    assert_eq!(durable_id(&third, third_root.computation), root_attempt);
+}
+
+/// A root over a middle computation over a leaf, the shape the transitive
+/// checks need and the shallowest one they can be told apart on: an edge that
+/// stops at its target cannot see past the middle computation.
+fn register_chain(
+    engine: &mut Engine,
+    leaf: &Interface,
+    middle: &Interface,
+    root: &Interface,
+    leaf_body: ConstantRule,
+) {
+    engine.register_rule(pure_rule("leaf", leaf.clone()), leaf_body);
+    engine.register_rule(
+        pure_rule("middle", middle.clone()),
+        ForwardRule {
+            dependency: pure_request("leaf", leaf.clone(), []),
+        },
+    );
+    engine.register_rule(
+        pure_rule("root", root.clone()),
+        ForwardRule {
+            dependency: pure_request("middle", middle.clone(), [Value::Bool(false)]),
+        },
+    );
+}
+
+fn chain_root_request(root: &Interface) -> Request<Pure> {
+    pure_request(
+        "root",
+        root.clone(),
+        [Value::Bool(false), Value::Bool(true)],
+    )
+}
+
+#[test]
 fn hydration_is_refused_when_a_dependency_rule_is_not_registered() {
     // The other half of 0049's check, and the case that decides what an absent
     // rule means for a recorded edge: refusing is not a lost optimization,
