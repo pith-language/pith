@@ -41,12 +41,15 @@ each lineage starts with the pressure that created a system. it records the mech
 - [declarations and their identity](declarations.md)
 - [tooling and inspectability](tooling.md)
 - [source ledger](sources.md)
+- [composing a system from declared parts](system-composition.md)
 
 the development-environments note draws mkShell from its nixpkgs source, `nix develop` and `nix print-dev-env` from the Nix manual, direnv's caching from its wiki, Guix's shells and containers, Spack's `spack.yaml`/`spack.lock` split, conda's environment files and their lockfile history, rustup's toolchain overrides, mise and asdf's pin files, the devcontainers specification, and PEP 405 from primary sources. it grounds decision 0043 and records the disagreement those systems never settled about whether an environment is a lock consumer, a lock producer, or a lock of its own.
 
 the incremental-revalidation note draws Salsa's LRU RFC and rust-analyzer's account of lazy revalidation, the rustc dev guide on `try_mark_green` and the previous dependency graph, Bazel's Skyframe reference and its memory page including Skyfocus, the Nix manual's garbage-collection chapter, and the *Build Systems à la Carte* rebuilder taxonomy from primary sources. it grounds decision 0051 and records the disagreement those systems never settled about where the transitive cost of a validity check is paid — at check time as a walk and a retained closure, or at record time as a summary and a lost early cutoff.
 
 the package-builds note draws stdenv's phases from nixpkgs's setup.sh, Spack's package.py and builder from its documentation and source, Guix's build systems and g-expressions from its manual, Debian's source-package format and `debian/rules` from policy and the debhelper and dpkg manuals, cargo's `.crate` and `build.rs` from its reference, portage's ebuild phases from the gentoo development guide, and Homebrew's formula DSL from its cookbook and API docs. it grounds decision 0045 and records the disagreement those systems never settled about whether a package's build is data the system can inspect or code it can only run.
+
+the system-composition note draws NixOS's module merge and priorities from the manual and `lib/modules.nix`, the toplevel and activation from `top-level.nix` and the switch chapters, the JFP and HotOS papers, Guix's service extensions and fold from the manual and `gnu/services.scm`, OSTree's object, deployment, and delta model from its documentation, BuildStream's staging and overlap rule from its docs, and the OCI image-spec's manifest and layer chapters from primary sources. it grounds decision 0052 and records the disagreement those systems never settled about what a composed system is — a tree, a layered sequence, or assertions over a target — finding that four of the five collapse to a tree somewhere, that the artifact's shape and the composition's conflict rule are independent choices, and that assertion-shaped behavior appears only at the activation boundary every one of them keeps.
 
 ## research depth
 
