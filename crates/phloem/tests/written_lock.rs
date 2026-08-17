@@ -444,8 +444,8 @@ fn a_malformed_lock_read_back_carries_its_file_and_renders_its_position() {
     lock::write(&lock, &path).unwrap();
     let good = std::fs::read_to_string(&path).unwrap();
     let bad = good.replace(
-        &format!("sha256:{}", ContentId::of_blob(b"zlib-1.3").digest()),
-        "sha256:not-hex",
+        &format!("blake3:{}", ContentId::of_blob(b"zlib-1.3").digest()),
+        "blake3:not-hex",
     );
     std::fs::write(&path, &bad).unwrap();
 
@@ -463,7 +463,7 @@ fn a_malformed_lock_read_back_carries_its_file_and_renders_its_position() {
     assert_eq!(
         file.source_text()
             .get(diagnostic.span.start.0 as usize..diagnostic.span.end.0 as usize),
-        Some("sha256:not-hex"),
+        Some("blake3:not-hex"),
         "the span selects the offending digest field, prefix included"
     );
 
@@ -471,11 +471,11 @@ fn a_malformed_lock_read_back_carries_its_file_and_renders_its_position() {
         let (number, line) = bad
             .lines()
             .enumerate()
-            .find(|(_, line)| line.contains("sha256:not-hex"))
+            .find(|(_, line)| line.contains("blake3:not-hex"))
             .map(|(index, line)| (index.saturating_add(1), line))
             .unwrap();
         let column = line
-            .find("sha256:not-hex")
+            .find("blake3:not-hex")
             .map(|at| line.get(..at).unwrap().chars().count().saturating_add(1))
             .unwrap();
         (number, column)
@@ -491,7 +491,7 @@ fn a_malformed_lock_read_back_carries_its_file_and_renders_its_position() {
         "the rendered header names the file, the line, and the column: {rendered}"
     );
     assert!(
-        rendered.contains("sha256:not-hex"),
+        rendered.contains("blake3:not-hex"),
         "the rendered snippet quotes the offending field: {rendered}"
     );
 }

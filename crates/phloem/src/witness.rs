@@ -281,7 +281,7 @@ mod tests {
 
     fn records() -> Vec<Vec<u8>> {
         (0..13)
-            .map(|n| format!("bind pithpkgs lib{n} 1.0 [] sha256:{n:064x}").into_bytes())
+            .map(|n| format!("bind pithpkgs lib{n} 1.0 [] blake3:{n:064x}").into_bytes())
             .collect()
     }
 
@@ -392,7 +392,7 @@ mod tests {
     fn the_root_moves_when_any_record_moves_and_a_log_never_starts_empty() {
         let base = MerkleTree::new(records().iter().map(Vec::as_slice)).unwrap();
         let mut moved = records();
-        let sixth = format!("bind pithpkgs lib6 1.0 [] sha256:{:064x}", 0xdead).into_bytes();
+        let sixth = format!("bind pithpkgs lib6 1.0 [] blake3:{:064x}", 0xdead).into_bytes();
         if let Some(slot) = moved.get_mut(6) {
             *slot = sixth;
         }

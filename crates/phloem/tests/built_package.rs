@@ -96,7 +96,7 @@ fn publish(root: &Path, published: &Published) -> pith_diag::PithResult<Checkpoi
     append_index_line(
         &mut index,
         "hello",
-        &format!("1.0 [] sha256:{}", digest.digest()),
+        &format!("1.0 [] blake3:{}", digest.digest()),
     );
     for (name, lines) in index {
         write_file(root.join("index/pithpkgs").join(name), lines.as_bytes())?;

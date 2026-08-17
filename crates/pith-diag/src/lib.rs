@@ -487,7 +487,7 @@ mod tests {
 
     #[test]
     fn span_of_names_a_slice_of_the_file() {
-        let text = "lock-version 1\nresolver sha256:00\n";
+        let text = "lock-version 1\nresolver blake3:00\n";
         let file = SourceFile::new(SourceId::from_raw(0), "pith.lock", text);
         let word = file.source_text().get(16..23).unwrap();
         let span = file.span_of(word);

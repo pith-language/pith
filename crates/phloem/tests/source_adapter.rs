@@ -69,7 +69,7 @@ fn published() -> Vec<Published> {
 }
 
 fn index_line(version: &str, digest: &ContentId) -> String {
-    format!("{version} [] sha256:{}", digest.digest())
+    format!("{version} [] blake3:{}", digest.digest())
 }
 
 fn package_path(root: &Path, name: &str, version: &str) -> std::path::PathBuf {

@@ -41,6 +41,12 @@ define_arena!(
 /// the store's manifest reader, and tests.
 pub const DIGEST_LEN: usize = 32;
 
+/// The name of the hash function behind every digest in the kernel, as the
+/// written forms' digest prefix spells it. One source for both: the prefix
+/// is bound to this name by test, so the written spelling and the hasher
+/// cannot drift apart silently.
+pub const DIGEST_ALGORITHM: &str = "blake3";
+
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ContentDigest([u8; DIGEST_LEN]);
 

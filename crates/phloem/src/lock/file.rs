@@ -19,7 +19,7 @@ use pith_ids::ContentId;
 
 use super::document::Lock;
 use super::text::{
-    SHA256, Token, features_token, parse_digest, parse_features, token as text_token, tokenize,
+    BLAKE3, Token, features_token, parse_digest, parse_features, token as text_token, tokenize,
 };
 use crate::identity::{DomainIdentity, PackageIdentity, PackageVersion};
 use crate::lock::{Binding, LockEntry, Origin};
@@ -43,9 +43,9 @@ const BIND: &str = "bind";
 pub fn render(lock: &Lock) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "{LOCK_VERSION} {LOCK_FILE_VERSION}");
-    let _ = writeln!(out, "{RESOLVER} {SHA256}{}", lock.resolver);
+    let _ = writeln!(out, "{RESOLVER} {BLAKE3}{}", lock.resolver);
     let _ = writeln!(out, "{VERSION_SCHEME} {}", text_token(&lock.scheme));
-    let _ = writeln!(out, "{UNIVERSE} {SHA256}{}", lock.universe.digest());
+    let _ = writeln!(out, "{UNIVERSE} {BLAKE3}{}", lock.universe.digest());
     for preference in lock.preferences.0.iter() {
         let _ = writeln!(out, "{PREFERENCE} {}", preference.name());
     }
@@ -341,7 +341,7 @@ fn singleton<'a>(
 #[must_use]
 pub fn binding_line(entry: &LockEntry) -> String {
     format!(
-        "{BIND} {} {} {} {} {SHA256}{}",
+        "{BIND} {} {} {} {} {BLAKE3}{}",
         text_token(entry.package.identity().domain().as_str()),
         text_token(entry.package.identity().name()),
         text_token(entry.package.version()),
@@ -688,7 +688,7 @@ mod tests {
 
     #[test]
     fn an_unknown_directive_is_refused_naming_it() {
-        let text = format!("lock-version 1\nfog sha256:00\n{}", render(&lock()));
+        let text = format!("lock-version 1\nfog blake3:00\n{}", render(&lock()));
         let error = parse("pith.lock", &text).unwrap_err();
         assert!(
             error.iter().any(
@@ -719,8 +719,8 @@ mod tests {
     #[test]
     fn a_bad_digest_is_refused_with_the_field_and_its_span() {
         let text = render(&lock()).replace(
-            &format!("universe sha256:{}", lock().universe.digest()),
-            "universe sha256:not-hex",
+            &format!("universe blake3:{}", lock().universe.digest()),
+            "universe blake3:not-hex",
         );
         let error = parse("pith.lock", &text).unwrap_err();
         let diagnostic = error.iter().next().unwrap();
@@ -731,7 +731,7 @@ mod tests {
         );
         assert_eq!(
             select(&text, diagnostic.span),
-            Some("sha256:not-hex"),
+            Some("blake3:not-hex"),
             "the span selects the digest field, prefix included"
         );
     }
@@ -739,8 +739,8 @@ mod tests {
     #[test]
     fn a_bind_line_with_the_wrong_token_count_is_refused() {
         let truncated = format!(
-            "lock-version 1\nresolver sha256:{}\nversion-scheme numeric-segments\nuniverse \
-             sha256:{}\npreference newest\n\nbind pithpkgs zlib 1.3",
+            "lock-version 1\nresolver blake3:{}\nversion-scheme numeric-segments\nuniverse \
+             blake3:{}\npreference newest\n\nbind pithpkgs zlib 1.3",
             lock().resolver,
             lock().universe.digest(),
         );

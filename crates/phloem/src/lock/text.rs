@@ -1,7 +1,7 @@
 //! Tokens, quoting, feature lists, and digest spelling for lock text.
 //!
 //! Fields use bare tokens when possible and quoted tokens with backslash
-//! escapes otherwise. Digests render as `sha256:` followed by lowercase
+//! escapes otherwise. Digests render as `blake3:` followed by lowercase
 //! hexadecimal digits; parsing also accepts uppercase digits.
 //!
 //! Every parse here refuses with a span selecting the offending field in the
@@ -352,16 +352,16 @@ fn unquote(field: &Token) -> Result<String, String> {
     Ok(piece.into())
 }
 
-/// Parses `sha256:` followed by 64 hexadecimal digits.
+/// Parses `blake3:` followed by 64 hexadecimal digits.
 ///
 /// # Errors
 /// A [`Refusal`] whose span selects the field when the text is not a digest
 /// of this shape.
 pub(crate) fn parse_digest(field: &Token, name: &str) -> Result<ContentId, Refusal> {
-    let Some(hex) = field.text.strip_prefix(SHA256) else {
+    let Some(hex) = field.text.strip_prefix(BLAKE3) else {
         return Err(Refusal {
             message: format!(
-                "the {name} carried `{}`, rather than a `sha256:`-prefixed digest",
+                "the {name} carried `{}`, rather than a `blake3:`-prefixed digest",
                 field.text
             ),
             span: field.span,
@@ -385,7 +385,7 @@ pub(crate) fn parse_digest(field: &Token, name: &str) -> Result<ContentId, Refus
 
 /// The digest prefix the written form spells, shared by every directive and
 /// binding line that names content.
-pub(crate) const SHA256: &str = "sha256:";
+pub(crate) const BLAKE3: &str = "blake3:";
 
 /// A version range in its written spelling: `*`, `=1.0`, `>=1.0`, `>1.0`,
 /// `<=2.0`, `<2.0`, or a comma-joined pair of a lower and an upper edge such

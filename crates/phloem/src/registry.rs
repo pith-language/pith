@@ -74,7 +74,7 @@ pub fn index_line(
         "{} {} {}{}",
         version,
         features_token(features),
-        crate::lock::text::SHA256,
+        crate::lock::text::BLAKE3,
         archive.digest(),
     );
     for requirement in requires {
@@ -91,7 +91,7 @@ pub fn index_line(
     line
 }
 
-/// One index line as one candidate: `<version> <features> sha256:<digest>`
+/// One index line as one candidate: `<version> <features> blake3:<digest>`
 /// followed by zero or more `requires <domain>/<name> <range> [<features>]`
 /// clauses, where the digest is the registry's claim about the archive and
 /// each clause a version's claim about another package. The fetch verifies
@@ -479,7 +479,7 @@ mod tests {
 
     #[test]
     fn a_malformed_requirement_clause_is_refused_at_its_own_field() {
-        let text = "1.3 [] sha256:0000000000000000000000000000000000000000000000000000000000000000 requires pithpkgs/util 1.0";
+        let text = "1.3 [] blake3:0000000000000000000000000000000000000000000000000000000000000000 requires pithpkgs/util 1.0";
         let file = index_file(Path::new("/registry"), "pithpkgs", "zlib", text);
         let source = Arc::new(file);
         let error = index_candidate(
@@ -511,7 +511,7 @@ mod tests {
     #[test]
     fn a_well_formed_index_line_parses_with_its_requirements() {
         let digest = "0000000000000000000000000000000000000000000000000000000000000000";
-        let text = format!("1.3 [shared] sha256:{digest} requires pithpkgs/util >=1.0 [fast]");
+        let text = format!("1.3 [shared] blake3:{digest} requires pithpkgs/util >=1.0 [fast]");
         let file = index_file(Path::new("/registry"), "pithpkgs", "zlib", &text);
         let source = Arc::new(file);
         let candidate = index_candidate(

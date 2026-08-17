@@ -6,7 +6,7 @@ use pith_diag::PithResult;
 
 use crate::codec::FIELD_TOOLCHAIN;
 use crate::diag;
-use crate::lock::text::{SHA256, token};
+use crate::lock::text::{BLAKE3, token};
 
 use super::{DEFAULT_ENVIRONMENT, EnvironmentDocument};
 
@@ -37,7 +37,7 @@ pub fn render(document: &EnvironmentDocument) -> String {
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "{ENV} {} {PLATFORM} {}/{} {FIELD_TOOLCHAIN} {} {LOCK} {SHA256}{}",
+        "{ENV} {} {PLATFORM} {}/{} {FIELD_TOOLCHAIN} {} {LOCK} {BLAKE3}{}",
         token(&document.name),
         document.platform.operating_system,
         document.platform.architecture,
@@ -49,7 +49,7 @@ pub fn render(document: &EnvironmentDocument) -> String {
         .iter()
         .map(|substitution| {
             format!(
-                "{SUBSTITUTE} {} {} {} [{}] {SHA256}{} {}",
+                "{SUBSTITUTE} {} {} {} [{}] {BLAKE3}{} {}",
                 token(substitution.package.identity().domain().as_str()),
                 token(substitution.package.identity().name()),
                 token(substitution.package.version()),
