@@ -10,7 +10,7 @@ use pith_ids::ContentId;
 
 use super::{
     DEPFILE_PATH, SOURCE_PATH, blob_of, compiler_environment, diag, effective_headers, input,
-    provided_headers_of, requested_toolchain, rule_revision,
+    provided_headers_of, requested_toolchain,
 };
 use crate::toolchain::Toolchains;
 use crate::types;
@@ -84,8 +84,8 @@ impl HeaderDiscoveryAction {
     /// The action rule, ready to register against the discovery interface.
     #[must_use]
     pub fn rule(&self) -> Rule<Action> {
-        Rule::<Action>::new(
-            rule_revision("discover"),
+        Rule::<Action>::declared(
+            types::MODULE,
             "discover",
             types::discovery_interface(),
             Span::none(),

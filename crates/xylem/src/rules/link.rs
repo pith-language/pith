@@ -7,9 +7,7 @@ use pith_core::{
 use pith_diag::{PithResult, Span};
 use pith_engine::{ActionExecution, ActionRule, ProducedOutput, PureRule, PureRuleFrame};
 
-use super::{
-    ActionRequestFrame, EXECUTABLE_PATH, blob_of, diag, input, requested_toolchain, rule_revision,
-};
+use super::{ActionRequestFrame, EXECUTABLE_PATH, blob_of, diag, input, requested_toolchain};
 use crate::toolchain::Toolchains;
 use crate::types;
 
@@ -29,12 +27,7 @@ impl LinkAction {
 
     #[must_use]
     pub fn rule(&self) -> Rule<Action> {
-        Rule::<Action>::new(
-            rule_revision("link"),
-            "link",
-            types::link_interface(),
-            Span::none(),
-        )
+        Rule::<Action>::declared(types::MODULE, "link", types::link_interface(), Span::none())
     }
 }
 
@@ -113,8 +106,8 @@ pub struct LinkRule;
 impl LinkRule {
     #[must_use]
     pub fn rule() -> Rule<Pure> {
-        Rule::<Pure>::new(
-            rule_revision("link-entry"),
+        Rule::<Pure>::declared(
+            types::MODULE,
             "link-entry",
             types::link_interface(),
             Span::none(),

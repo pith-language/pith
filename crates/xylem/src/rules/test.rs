@@ -7,7 +7,7 @@ use pith_core::{
 use pith_diag::{PithResult, Span};
 use pith_engine::{ActionExecution, ActionExit, ActionRule, PureRule, PureRuleFrame};
 
-use super::{ActionRequestFrame, blob_of, diag, input, requested_toolchain, rule_revision};
+use super::{ActionRequestFrame, blob_of, diag, input, requested_toolchain};
 use crate::toolchain::Toolchains;
 use crate::types;
 
@@ -35,12 +35,7 @@ impl TestAction {
 
     #[must_use]
     pub fn rule(&self) -> Rule<Action> {
-        Rule::<Action>::new(
-            rule_revision("test"),
-            "test",
-            types::test_interface(),
-            Span::none(),
-        )
+        Rule::<Action>::declared(types::MODULE, "test", types::test_interface(), Span::none())
     }
 }
 
@@ -89,8 +84,8 @@ pub struct TestRule;
 impl TestRule {
     #[must_use]
     pub fn rule() -> Rule<Pure> {
-        Rule::<Pure>::new(
-            rule_revision("test-entry"),
+        Rule::<Pure>::declared(
+            types::MODULE,
             "test-entry",
             types::test_interface(),
             Span::none(),

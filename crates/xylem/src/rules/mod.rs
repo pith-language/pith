@@ -31,7 +31,7 @@ pub use generate::{GenerateAction, GenerateRule};
 pub use link::{LinkAction, LinkRule};
 pub use test::{TestAction, TestRule};
 
-use pith_core::{Action, EnvironmentVariable, Request, RuleIdentity, RuleRevision, Value};
+use pith_core::{Action, EnvironmentVariable, Request, Value};
 use pith_diag::{Diag, DiagnosticSink, PithResult, Severity, Span, StableCode};
 use pith_engine::{PureRuleFrame, PureStep, Resumption};
 use pith_ids::ContentId;
@@ -53,26 +53,6 @@ pub(crate) const EXECUTABLE_PATH: &str = "out";
 
 /// The staged path of the source a generator writes.
 pub(crate) const GENERATED_PATH: &str = "generated.c";
-
-/// The revision every xylem rule derives its identity from.
-///
-/// Bumping this invalidates every cached xylem result, and — since decision
-/// 0049 — every result in another library that depends on one, because a
-/// recorded pure edge naming a superseded revision no longer revalidates. That
-/// was the claim this comment made before 0049 and did not hold: phloem derives
-/// its own revisions from its own manifests, so a xylem bump left phloem's
-/// package-build attempts reusable and hydrating xylem results derived from the
-/// superseded bodies.
-///
-/// The granularity is still one revision for the whole library, which is 0023's
-/// rejected "manual semantic version only" alternative. An edit to one rule body
-/// moves all of them, and an edit that changes a nominal type's representation
-/// moves none — decision 0047 derives these from the declarations an interface
-/// names and retires the constant.
-pub(crate) fn rule_revision(label: &str) -> RuleRevision {
-    let identity = RuleIdentity::of_module_declaration("xylem", label);
-    RuleRevision::of_manifest(identity, b"xylem-v3")
-}
 
 pub(crate) fn diag(message: &str) -> DiagnosticSink {
     let mut sink = DiagnosticSink::new();

@@ -11,7 +11,7 @@ use pith_engine::{
 
 use super::{
     OBJECT_PATH, SOURCE_PATH, blob_of, compiler_environment, diag, effective_headers, input,
-    provided_headers_of, requested_toolchain, rule_revision,
+    provided_headers_of, requested_toolchain,
 };
 use crate::HeaderUniverse;
 use crate::depfile;
@@ -39,8 +39,8 @@ impl CompileAction {
     /// The action rule, ready to register against the compile interface.
     #[must_use]
     pub fn rule(&self) -> Rule<Action> {
-        Rule::<Action>::new(
-            rule_revision("compile"),
+        Rule::<Action>::declared(
+            types::MODULE,
             "compile",
             types::compile_action_interface(),
             Span::none(),
@@ -137,8 +137,8 @@ pub struct CompileRule;
 impl CompileRule {
     #[must_use]
     pub fn rule() -> Rule<Pure> {
-        Rule::<Pure>::new(
-            rule_revision("compile-entry"),
+        Rule::<Pure>::declared(
+            types::MODULE,
             "compile-entry",
             types::compile_interface(),
             Span::none(),
