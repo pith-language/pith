@@ -11,7 +11,7 @@ env:
 
 jobs:
   checks:
-    name: fmt + clippy + deny + test + determinism
+    name: fmt + clippy + deny + test + repository checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -26,5 +26,5 @@ jobs:
             cargo clippy --workspace --all-targets -- -D warnings
             cargo deny check
             cargo test --workspace
-            cargo run -p xtask -- check-determinism
+            cargo run -p xtask -- check
           '

@@ -2,7 +2,8 @@
 schema: design-doc/v1
 id: decision-0046-an-index-line-carries-the-requirement
 title: an index line carries the requirement, and a dependency's artifact is a library the graph builds
-summary: the index line grows requirement clauses so a candidate says what it depends on and one resolve request walks the edge with no fetches — the cargo and alpine position against PyPI's sidecar, with the disagreement rule stated before the surface exists; a dependency's artifact is a library, objects plus offered headers, produced by a second package-build interface and consumed in-graph by the dependent's build naming its dependencies as (tree, build); the dependent's compiles see the dependency's headers as request data through a declared third input on xylem's compile entry — the first xylem interface change in six records, argued against engine-wide universe composition and the archive side — and the edge reuses selectively: republishing the dependency moves the dependent while republishing an unused package moves nothing
+summary: >-
+  the index line grows requirement clauses so a candidate says what it depends on and one resolve request walks the edge with no fetches — the cargo and alpine position against PyPI's sidecar, with the disagreement rule stated before the surface exists; a dependency's artifact is a library, objects plus offered headers, produced by a second package-build interface and consumed in-graph by the dependent's build naming its dependencies as (tree, build); the dependent's compiles see the dependency's headers as request data through a declared third input on xylem's compile entry — the first xylem interface change in six records, argued against engine-wide universe composition and the archive side — and the edge reuses selectively: republishing the dependency moves the dependent while republishing an unused package moves nothing
 kind: decision
 status: proposed
 created: 2026-07-20

@@ -2,7 +2,8 @@
 schema: design-doc/v1
 id: research-package-builds
 title: package builds
-summary: how Nix's stdenv, Spack's package.py, Guix's build systems, Debian's debian/rules, Cargo's .crate and build.rs, portage's ebuild phases, and Homebrew's formula each get from a fetched source to a built artifact, and where each sits on the axis the disagreement actually runs: whether a package's build is data the system can inspect or code it can only run, and how much the packager writes versus inherits
+summary: >-
+  how Nix's stdenv, Spack's package.py, Guix's build systems, Debian's debian/rules, Cargo's .crate and build.rs, portage's ebuild phases, and Homebrew's formula each get from a fetched source to a built artifact, and where each sits on the axis the disagreement actually runs: whether a package's build is data the system can inspect or code it can only run, and how much the packager writes versus inherits
 kind: research
 status: researching
 evidence: preliminary

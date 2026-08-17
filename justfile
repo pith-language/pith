@@ -65,12 +65,22 @@ watch-clippy:
 
 # Everything CI checks, in one target. Use before pushing.
 [group('ci')]
-ci: fmt-check clippy test test-doc docs-check deny typos determinism just-fmt-check
+ci: fmt-check clippy test test-doc docs-check deny typos repo-check just-fmt-check
+
+# Run every repository-specific check maintained by xtask.
+[group('ci')]
+repo-check:
+    cargo run -p xtask -- check
 
 # The xtask determinism guard (no HashMap in source, decision 0021).
 [group('ci')]
 determinism:
     cargo run -p xtask -- check-determinism
+
+# Validate documentation frontmatter, IDs, and relations.
+[group('ci')]
+docs-frontmatter:
+    cargo run -p xtask -- check-docs
 
 # Build the workspace documentation and fail on rustdoc warnings/lints.
 [group('ci')]
