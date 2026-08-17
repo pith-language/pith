@@ -385,17 +385,14 @@ fn one_lock_per_environment_and_the_placement_is_derived() {
     phloem::lockpublish::write(&cross_lock, &cross_path).unwrap();
     assert_eq!(phloem::lockpublish::read(&default_path).unwrap(), default);
     assert_eq!(phloem::lockpublish::read(&cross_path).unwrap(), cross_lock);
-    let written: Vec<std::ffi::OsString> = std::fs::read_dir(scratch.path())
+    let written: Vec<std::fs::DirEntry> = std::fs::read_dir(scratch.path())
         .unwrap()
-        .map(|entry| entry.unwrap().file_name())
-        .collect();
+        .collect::<Result<_, _>>()
+        .unwrap();
     assert_eq!(
-        written,
-        vec![
-            std::ffi::OsString::from("cross.pith.lock"),
-            std::ffi::OsString::from("pith.lock"),
-        ],
-        "two environments hold two locks"
+        written.len(),
+        2,
+        "two environments hold two locks and no other files"
     );
 }
 

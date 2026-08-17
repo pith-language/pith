@@ -344,7 +344,13 @@ fn sorted_children(path: &Path) -> PithResult<Vec<String>> {
                 path.display()
             ))
         })?;
-        names.push(entry.file_name().to_string_lossy().into());
+        let name = entry.file_name().into_string().map_err(|_| {
+            diag(format!(
+                "an entry name in {} is not valid UTF-8",
+                path.display()
+            ))
+        })?;
+        names.push(name);
     }
     names.sort();
     Ok(names)
@@ -354,6 +360,35 @@ fn sorted_children(path: &Path) -> PithResult<Vec<String>> {
 mod tests {
     use super::*;
     use crate::identity::PackageVersion;
+
+    #[test]
+    fn directory_children_are_utf8_and_sorted() {
+        let directory = tempfile::TempDir::new().unwrap();
+        std::fs::write(directory.path().join("z-last"), b"").unwrap();
+        std::fs::write(directory.path().join("a-first"), b"").unwrap();
+
+        assert_eq!(
+            sorted_children(directory.path()).unwrap(),
+            ["a-first".to_string(), "z-last".to_string()]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_non_utf8_directory_child_is_refused() {
+        use std::os::unix::ffi::OsStringExt as _;
+
+        let directory = tempfile::TempDir::new().unwrap();
+        let name = std::ffi::OsString::from_vec(vec![0xff]);
+        std::fs::write(directory.path().join(name), b"").unwrap();
+
+        let error = sorted_children(directory.path()).unwrap_err();
+        assert!(
+            error
+                .iter()
+                .any(|diagnostic| diagnostic.message.0.contains("not valid UTF-8"))
+        );
+    }
 
     #[test]
     fn a_name_that_is_not_one_path_component_is_refused_at_the_fetch() {

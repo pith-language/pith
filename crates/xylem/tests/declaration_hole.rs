@@ -34,7 +34,10 @@ fn a_value_naming_object_with_a_text_representation_inhabits_the_link_interface(
     // with the same check, so the fabricated object reaches the rule.
     let toolchain = xylem::types::toolchain("/bin/cc");
     let request = xylem::types::link_request(toolchain, [ContentId::of_blob(b"real")]);
-    let fabricated_inputs = [request.inputs[0].clone(), list];
+    let [toolchain, _objects] = request.inputs.as_ref() else {
+        unreachable!("a link request always has toolchain and object-list inputs");
+    };
+    let fabricated_inputs = [toolchain.clone(), list];
     let fabricated_request = pith_core::Request::<pith_core::Pure>::new(
         "link-entry",
         xylem::types::link_interface(),

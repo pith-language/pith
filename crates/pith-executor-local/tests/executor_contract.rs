@@ -344,6 +344,12 @@ async fn nested_tree_outputs_preserve_files_and_executable_bits() {
     let CapturedOutputContent::Tree(tree) = &output.content else {
         return;
     };
+    let names: Vec<&str> = tree.entries.iter().map(TreeEntry::name).collect();
+    assert_eq!(
+        names,
+        ["nested", "plain"],
+        "captured trees have one canonical entry order"
+    );
 
     let plain = tree.entries.iter().find(|entry| entry.name() == "plain");
     assert!(plain.is_some_and(|entry| matches!(entry.content(), CapturedTreeEntryContent::File(file) if file.bytes.as_ref() == b"plain" && !file.executable)));

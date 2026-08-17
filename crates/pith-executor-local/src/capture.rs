@@ -52,21 +52,9 @@ async fn capture_output(path: &Path, kind: OutputKind) -> CaptureResult<Captured
 }
 
 async fn capture_tree(path: &Path) -> CaptureResult<CapturedTree> {
-    let mut entries = Vec::new();
-    let mut reader = fs::read_dir(path)
-        .await
-        .map_err(|error| io_diag("tree output directory", error))?;
-    while let Some(entry) = reader
-        .next_entry()
-        .await
-        .map_err(|error| io_diag("tree output entry", error))?
-    {
-        let name = entry.file_name();
-        let name = name
-            .to_str()
-            .ok_or_else(|| executor_diag("a tree output entry name is not valid utf-8"))?
-            .to_string()
-            .into_boxed_str();
+    let directory_entries = sorted_directory_entries(path).await?;
+    let mut entries = Vec::with_capacity(directory_entries.len());
+    for (name, entry) in directory_entries {
         let file_type = entry
             .file_type()
             .await
@@ -114,6 +102,31 @@ async fn capture_tree(path: &Path) -> CaptureResult<CapturedTree> {
     Ok(CapturedTree {
         entries: entries.into_boxed_slice(),
     })
+}
+
+/// Reads one directory into the UTF-8 name order used by captured trees.
+/// Filesystems do not promise an iteration order, so normalization happens at
+/// the adapter boundary before the entries become an executor result.
+async fn sorted_directory_entries(path: &Path) -> CaptureResult<Vec<(Box<str>, fs::DirEntry)>> {
+    let mut entries = Vec::new();
+    let mut reader = fs::read_dir(path)
+        .await
+        .map_err(|error| io_diag("tree output directory", error))?;
+    while let Some(entry) = reader
+        .next_entry()
+        .await
+        .map_err(|error| io_diag("tree output entry", error))?
+    {
+        let name = entry.file_name();
+        let name = name
+            .to_str()
+            .ok_or_else(|| executor_diag("a tree output entry name is not valid utf-8"))?
+            .to_string()
+            .into_boxed_str();
+        entries.push((name, entry));
+    }
+    entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+    Ok(entries)
 }
 
 fn io_diag(what: &str, error: std::io::Error) -> pith_diag::DiagnosticSink {
