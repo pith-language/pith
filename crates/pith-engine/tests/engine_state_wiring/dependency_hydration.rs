@@ -181,3 +181,99 @@ fn hydration_reports_an_engine_state_read_failure() {
             .any(|diag| diag.code == pith_diag::EngineCode::InternalInvariant.into())
     );
 }
+
+#[test]
+fn hydration_is_refused_when_a_dependency_rule_was_revised() {
+    // Decision 0049. A revised rule mints a *new* computation key, which leaves
+    // the old key's attempt undisturbed and still the latest reusable one under
+    // it. Asking only "is this key's latest attempt still the recorded one"
+    // therefore answers yes, and the consumer hydrates a result derived from a
+    // rule body this engine no longer has.
+    let state = SharedEngineStateStore::default();
+    let leaf = interface(&[], Type::Int);
+    let root = interface(&[Type::Bool], Type::Int);
+
+    let mut first = engine_with_state(state.clone());
+    first.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::Int(1)));
+    first.register_rule(
+        pure_rule("root", root.clone()),
+        ForwardRule {
+            dependency: pure_request("leaf", leaf.clone(), []),
+        },
+    );
+    let first_root = first
+        .evaluate_pure(&pure_request("root", root.clone(), [Value::Bool(false)]))
+        .unwrap();
+    assert_eq!(first_root.value, Value::Int(1));
+
+    // The root's own rule is unchanged, so its key and its recorded attempt are
+    // untouched. Only the leaf's revision moved, and its body now answers 2.
+    let mut second = engine_with_state(state.clone());
+    second.register_rule(
+        revised_pure_rule("leaf", leaf.clone(), b"leaf-v2"),
+        ConstantRule(Value::Int(2)),
+    );
+    second.register_rule(
+        pure_rule("root", root.clone()),
+        ForwardRule {
+            dependency: pure_request("leaf", leaf, []),
+        },
+    );
+    let second_root = second
+        .evaluate_pure(&pure_request("root", root, [Value::Bool(false)]))
+        .unwrap();
+
+    assert_eq!(
+        second_root.source,
+        EvaluationSource::Computed,
+        "a revised dependency rule must make its consumer recompute, not hydrate"
+    );
+    assert_eq!(
+        second_root.value,
+        Value::Int(2),
+        "the recomputed root must observe the revised leaf rather than the superseded one"
+    );
+}
+
+#[test]
+fn hydration_is_refused_when_a_dependency_rule_is_not_registered() {
+    // The other half of 0049's check, and the case that decides what an absent
+    // rule means for a recorded edge: refusing is not a lost optimization,
+    // because a consumer whose dependency has no rule cannot be evaluated at
+    // all. Serving it from the index would hand back a value this rule set
+    // cannot derive.
+    let state = SharedEngineStateStore::default();
+    let leaf = interface(&[], Type::Int);
+    let root = interface(&[Type::Bool], Type::Int);
+
+    let mut first = engine_with_state(state.clone());
+    first.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::Int(1)));
+    first.register_rule(
+        pure_rule("root", root.clone()),
+        ForwardRule {
+            dependency: pure_request("leaf", leaf.clone(), []),
+        },
+    );
+    first
+        .evaluate_pure(&pure_request("root", root.clone(), [Value::Bool(false)]))
+        .unwrap();
+
+    // The second engine has the root's rule and not the leaf's.
+    let mut second = engine_with_state(state.clone());
+    second.register_rule(
+        pure_rule("root", root.clone()),
+        ForwardRule {
+            dependency: pure_request("leaf", leaf, []),
+        },
+    );
+    let diagnostics = second
+        .evaluate_pure(&pure_request("root", root, [Value::Bool(false)]))
+        .expect_err("the root must not be served from a rule set that cannot derive it");
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diag| diag.code == pith_diag::EngineCode::NoRuleForInterface.into()),
+        "the refusal names the missing rule rather than reporting a cache miss: {diagnostics:?}"
+    );
+}
