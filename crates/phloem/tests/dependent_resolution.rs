@@ -18,9 +18,9 @@ mod registry_support;
 use std::path::Path;
 
 use phloem::constraint::{Bound, Constraint, Range, constraint_set_value};
-use phloem::document::{Lock, LockChange, diff as diff_locks};
 use phloem::identity::{DomainIdentity, NUMERIC_SEGMENTS, PackageIdentity, version_scheme_value};
 use phloem::lock::Origin;
+use phloem::lock::{Lock, LockChange, diff as diff_locks};
 use phloem::preference::{Preference, PreferenceList, preference_list_value};
 use phloem::registry;
 use phloem::resolution::{Resolution, resolve_request};
@@ -106,7 +106,7 @@ fn publish(root: &Path, packages: &[Published]) -> pith_diag::PithResult<Checkpo
     let leaves: Vec<String> = packages
         .iter()
         .map(|package| {
-            phloem::lockfile::binding_line(&phloem::lock::LockEntry::new(
+            phloem::lock::binding_line(&phloem::lock::LockEntry::new(
                 phloem::identity::PackageVersion::new(identity(package.name), package.version),
                 [] as [&str; 0],
                 ContentId::of_blob(package.bytes),

@@ -37,8 +37,8 @@ use phloem::build::{
     self, Dependency, PackageBuild, PackageBuildRule, PackageLibraryRule, SourceTree,
 };
 use phloem::constraint::{Bound, Constraint, Range};
-use phloem::document::Lock;
 use phloem::identity::{DomainIdentity, NUMERIC_SEGMENTS, PackageIdentity, version_scheme_value};
+use phloem::lock::Lock;
 use phloem::lock::Origin;
 use phloem::preference::{Preference, PreferenceList, preference_list_value};
 use phloem::registry;
@@ -169,14 +169,12 @@ fn publish(root: &Path, packages: &[Published]) -> pith_diag::PithResult<Checkpo
                 .join(format!("{}-{}.tar", package.name, package.version)),
             &archive,
         )?;
-        leaves.push(phloem::lockfile::binding_line(
-            &phloem::lock::LockEntry::new(
-                phloem::identity::PackageVersion::new(identity(package.name), package.version),
-                [] as [&str; 0],
-                digest,
-                Origin::Registry(REGISTRY.into()),
-            ),
-        ));
+        leaves.push(phloem::lock::binding_line(&phloem::lock::LockEntry::new(
+            phloem::identity::PackageVersion::new(identity(package.name), package.version),
+            [] as [&str; 0],
+            digest,
+            Origin::Registry(REGISTRY.into()),
+        )));
     }
     for (name, lines) in index {
         write_file(root.join("index/pithpkgs").join(&name), lines.as_bytes())?;

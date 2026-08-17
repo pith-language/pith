@@ -3,8 +3,8 @@ use pith_diag::PithResult;
 use pith_engine::Engine;
 
 use crate::constraint::Constraint;
-use crate::document::Lock;
 use crate::identity::{PackageVersion, version_scheme_value};
+use crate::lock::Lock;
 use crate::preference::{PreferenceList, preference_list_value};
 use crate::resolution::{Resolution, resolve_request};
 use crate::substitution::{Admission, Admitted, BinaryOffer, Refusal, Serving, serve};

@@ -18,10 +18,6 @@ use crate::resolution::Resolution;
 use crate::source::SourceBinding;
 use crate::universe::Candidate;
 
-mod diff;
-
-pub use self::diff::{LockChange, LockDiff, diff};
-
 /// Digest domain for lock document values.
 const LOCK_DOMAIN: &[u8] = b"phloem.lock-v1\0";
 
@@ -250,7 +246,7 @@ fn entry_of(candidate: &Candidate) -> PithResult<LockEntry> {
 mod tests {
     use super::*;
     use crate::identity::{DomainIdentity, NUMERIC_SEGMENTS, PackageIdentity};
-    use crate::lock::Origin;
+    use crate::lock::{LockChange, Origin, diff};
     use crate::preference::Preference;
     use crate::resolution::TrailEntry;
     use pith_ids::ContentId;

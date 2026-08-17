@@ -11,13 +11,12 @@ mod engine_state_support;
 
 use engine_state_support::SharedState;
 use phloem::constraint::{Bound, Constraint, Range, constraint_set_value};
-use phloem::document::{Lock, LockChange, diff};
 use phloem::identity::{
     DEBIAN, DomainIdentity, NUMERIC_SEGMENTS, PackageIdentity, version_scheme_value,
 };
+use phloem::lock;
 use phloem::lock::Origin;
-use phloem::lockfile;
-use phloem::lockpublish;
+use phloem::lock::{Lock, LockChange, diff};
 use phloem::preference::{Preference, PreferenceList, preference_list_value};
 use phloem::resolution::{Resolution, resolve_request};
 use phloem::resolve::{ResolveSolver, Schemes};
@@ -130,7 +129,7 @@ fn resolving_through_the_engine_writes_no_file() {
     assert!(!path.exists(), "resolving wrote no file");
     let resolution = Resolution::from_value(&answer.value).unwrap();
     let lock = Lock::from_resolution(NUMERIC_SEGMENTS, &newest(), &resolution).unwrap();
-    lockpublish::write(&lock, &path).unwrap();
+    lock::write(&lock, &path).unwrap();
     assert!(path.exists(), "the caller's write created the file");
 }
 
@@ -151,8 +150,8 @@ fn the_written_form_round_trips_through_a_real_file() {
     let resolution = Resolution::from_value(&answer.value).unwrap();
     let written = Lock::from_resolution(NUMERIC_SEGMENTS, &newest(), &resolution).unwrap();
 
-    lockpublish::write(&written, &path).unwrap();
-    let read_back = lockpublish::read(&path).unwrap();
+    lock::write(&written, &path).unwrap();
+    let read_back = lock::read(&path).unwrap();
     assert_eq!(read_back, written);
     assert_eq!(read_back.content_id(), written.content_id());
     for (back, wrote) in read_back.entries.iter().zip(written.entries.iter()) {
@@ -202,10 +201,7 @@ fn two_resolutions_under_the_same_universe_write_identical_bytes() {
         &Resolution::from_value(&two.value).unwrap(),
     )
     .unwrap();
-    assert_eq!(
-        lockfile::render(&first_lock),
-        lockfile::render(&second_lock)
-    );
+    assert_eq!(lock::render(&first_lock), lock::render(&second_lock));
     assert_eq!(first_lock.content_id(), second_lock.content_id());
 
     // The same engine serving the same request from the reusable index
@@ -226,10 +222,7 @@ fn two_resolutions_under_the_same_universe_write_identical_bytes() {
         &Resolution::from_value(&reused.value).unwrap(),
     )
     .unwrap();
-    assert_eq!(
-        lockfile::render(&reused_lock),
-        lockfile::render(&first_lock)
-    );
+    assert_eq!(lock::render(&reused_lock), lock::render(&first_lock));
 }
 
 #[test]
@@ -269,7 +262,7 @@ fn a_changed_input_moves_the_file_and_the_diff_names_it() {
         &preference_list_value(&newest()),
         NUMERIC_SEGMENTS,
     );
-    assert_ne!(lockfile::render(&base), lockfile::render(&moved_universe));
+    assert_ne!(lock::render(&base), lock::render(&moved_universe));
     assert_eq!(
         diff(&base, &moved_universe)
             .changes
@@ -448,7 +441,7 @@ fn a_malformed_lock_read_back_carries_its_file_and_renders_its_position() {
         &Resolution::from_value(&answer.value).unwrap(),
     )
     .unwrap();
-    lockpublish::write(&lock, &path).unwrap();
+    lock::write(&lock, &path).unwrap();
     let good = std::fs::read_to_string(&path).unwrap();
     let bad = good.replace(
         &format!("sha256:{}", ContentId::of_blob(b"zlib-1.3").digest()),
@@ -456,7 +449,7 @@ fn a_malformed_lock_read_back_carries_its_file_and_renders_its_position() {
     );
     std::fs::write(&path, &bad).unwrap();
 
-    let error = lockpublish::read(&path).unwrap_err();
+    let error = lock::read(&path).unwrap_err();
     let diagnostic = error.iter().next().unwrap();
     let file = diagnostic
         .source

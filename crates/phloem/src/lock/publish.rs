@@ -10,9 +10,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use pith_diag::PithResult;
 
+use super::file::{parse, render};
 use crate::diag;
-use crate::document::Lock;
-use crate::lockfile;
+use crate::lock::Lock;
 
 /// Atomically writes a lock through an exclusive temporary file.
 ///
@@ -20,7 +20,7 @@ use crate::lockfile;
 /// Returns a diagnostic when writing, flushing, renaming, or directory
 /// synchronization fails.
 pub fn write(lock: &Lock, path: &Path) -> PithResult<()> {
-    let text = lockfile::render(lock);
+    let text = render(lock);
     let directory = destination_directory(path);
     let (temporary, mut file) =
         temporary_file(&directory).map_err(|error| io_diag("writing the lock", path, &error))?;
@@ -87,7 +87,7 @@ fn remove_temporary_file(path: &Path) {
 pub fn read(path: &Path) -> PithResult<Lock> {
     let text =
         std::fs::read_to_string(path).map_err(|error| io_diag("reading the lock", path, &error))?;
-    lockfile::parse(&path.display().to_string(), &text)
+    parse(&path.display().to_string(), &text)
 }
 
 fn io_diag(what: &str, path: &Path, error: &std::io::Error) -> pith_diag::DiagnosticSink {
@@ -98,8 +98,8 @@ fn io_diag(what: &str, path: &Path, error: &std::io::Error) -> pith_diag::Diagno
 mod tests {
     use super::*;
     use crate::identity::{DomainIdentity, PackageIdentity, PackageVersion};
+    use crate::lock::LOCK_FILE_VERSION;
     use crate::lock::{LockEntry, Origin};
-    use crate::lockfile::LOCK_FILE_VERSION;
     use crate::preference::{Preference, PreferenceList};
     use pith_ids::ContentId;
     use tempfile::TempDir;

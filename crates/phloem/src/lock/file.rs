@@ -4,8 +4,8 @@
 //! equivalent non-canonical spellings. Every parse refusal carries a span
 //! into the parsed text and the source file itself, so a reader renders the
 //! line and the field rather than a number baked into prose. Character-level
-//! token handling lives in `locktext`; filesystem publication lives in
-//! `lockpublish`.
+//! token handling lives in `text`; filesystem publication lives in
+//! `publish`.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -17,12 +17,12 @@ use pith_diag::{
 };
 use pith_ids::ContentId;
 
-use crate::document::Lock;
-use crate::identity::{DomainIdentity, PackageIdentity, PackageVersion};
-use crate::lock::{Binding, LockEntry, Origin};
-use crate::locktext::{
+use super::document::Lock;
+use super::text::{
     SHA256, Token, features_token, parse_digest, parse_features, token as text_token, tokenize,
 };
+use crate::identity::{DomainIdentity, PackageIdentity, PackageVersion};
+use crate::lock::{Binding, LockEntry, Origin};
 use crate::preference::{Preference, PreferenceList};
 use crate::text_diag;
 
@@ -449,7 +449,7 @@ fn bind_entry(source: &Arc<SourceFile>, tokens: &[Token], line: FileLine) -> Pit
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::diff;
+    use crate::lock::diff;
 
     fn select(source: &str, span: Span) -> Option<&str> {
         source.get(span.start.0 as usize..span.end.0 as usize)

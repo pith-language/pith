@@ -13,11 +13,10 @@ use pith_diag::{PithResult, SourceFile, SourceId};
 use pith_ids::ContentId;
 
 use crate::identity::{DomainIdentity, PackageIdentity};
-use crate::lock::{LockEntry, Origin};
-use crate::lockfile;
-use crate::locktext::{
+use crate::lock::text::{
     Token, features_token, parse_digest, parse_features, parse_range, range_token, tokenize,
 };
+use crate::lock::{LockEntry, Origin, parse_binding_line};
 use crate::text_diag;
 use crate::universe::{Candidate, CandidateUniverse, Requirement};
 use crate::witness::{self, Checkpoint, Inclusion};
@@ -75,7 +74,7 @@ pub fn index_line(
         "{} {} {}{}",
         version,
         features_token(features),
-        crate::locktext::SHA256,
+        crate::lock::text::SHA256,
         archive.digest(),
     );
     for requirement in requires {
@@ -274,7 +273,7 @@ pub fn read_witness(log: &Path, entry: &LockEntry) -> PithResult<Witnessed> {
         if line.text.is_empty() {
             continue;
         }
-        let binding = lockfile::parse_binding_line(&file, &line)?;
+        let binding = parse_binding_line(&file, &line)?;
         if found.is_none() && same_coordinates(&binding, entry) {
             found = Some((records.len(), binding.source, line.text.into()));
         }
@@ -390,7 +389,7 @@ fn sorted_children(path: &Path) -> PithResult<Vec<String>> {
 mod tests {
     use super::*;
     use crate::identity::PackageVersion;
-    use crate::lockfile::binding_line;
+    use crate::lock::binding_line;
 
     #[test]
     fn directory_children_are_utf8_and_sorted() {
@@ -544,7 +543,7 @@ mod tests {
         let text = format!("{good}\nbind broken\n");
         let file = SourceFile::new(SourceId::from_raw(0), "log/leaves", text.as_str());
         let source = Arc::new(file);
-        let error = lockfile::parse_binding_line(&source, &source.lines().nth(1).unwrap());
+        let error = parse_binding_line(&source, &source.lines().nth(1).unwrap());
         assert!(error.is_err(), "a broken leaf line is refused: {error:?}");
         let error = error.unwrap_err();
         let diagnostic = error.iter().next().unwrap();

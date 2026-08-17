@@ -6,7 +6,7 @@ use pith_diag::PithResult;
 
 use crate::codec::FIELD_TOOLCHAIN;
 use crate::diag;
-use crate::locktext::{SHA256, token};
+use crate::lock::text::{SHA256, token};
 
 use super::{DEFAULT_ENVIRONMENT, EnvironmentDocument};
 

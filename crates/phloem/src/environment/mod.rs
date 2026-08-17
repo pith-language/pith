@@ -16,7 +16,7 @@ use crate::codec::{
 };
 use crate::constraint::{Constraint, constraint_type};
 use crate::diag;
-use crate::document::{Lock, lock_type};
+use crate::lock::{Lock, lock_type};
 use crate::lock::{Origin, origin_type};
 use crate::substitution::{Admitted, AdmittedOrigins, substitution_type};
 

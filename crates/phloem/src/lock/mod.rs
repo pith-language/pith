@@ -2,6 +2,26 @@
 //!
 //! A lock entry binds package coordinates to source content and records the
 //! origin as provenance. Origin does not participate in binding identity.
+//!
+//! The lock concern lives in this module tree: the entry, binding, and
+//! origin values here; the document over entries and its structural diff
+//! (`document`, `diff`); the shared field grammar of every written line
+//! (`text`, also the index and environment files' grammar); the lock
+//! document's written form (`file`); and atomic publication (`publish`).
+
+pub(crate) mod text;
+
+mod diff;
+mod document;
+mod file;
+mod publish;
+
+pub use diff::{LockChange, LockDiff, diff};
+pub use document::{Lock, lock_type};
+pub use file::{LOCK_FILE_VERSION, binding_line, parse, render};
+pub use publish::{read, write};
+
+pub(crate) use file::parse_binding_line;
 
 use pith_core::{SumConstructor, Type, Value};
 use pith_diag::PithResult;

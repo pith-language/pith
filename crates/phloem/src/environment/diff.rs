@@ -1,7 +1,7 @@
 use pith_core::Value;
 use pith_engine::ExecutionPlatform;
 
-use crate::document::{LockChange, diff as diff_locks};
+use crate::lock::{LockChange, diff as diff_locks};
 
 use super::EnvironmentDocument;
 

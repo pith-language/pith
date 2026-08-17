@@ -37,10 +37,10 @@ use diagnostic_support::fixture_error;
 use phloem::build::{self, PackageBuild, PackageBuildRule, SourceTree};
 use phloem::constraint::{Bound, Constraint, Range};
 use phloem::description::Description;
-use phloem::document::{Lock, LockChange, diff as diff_locks};
 use phloem::environment::{self, Environment, EnvironmentDocument, Offer};
 use phloem::identity::{DomainIdentity, NUMERIC_SEGMENTS, PackageIdentity, version_scheme_value};
 use phloem::lock::Origin;
+use phloem::lock::{Lock, LockChange, diff as diff_locks};
 use phloem::preference::{Preference, PreferenceList, preference_list_value};
 use phloem::registry;
 use phloem::resolution::{Resolution, resolve_request};
@@ -102,7 +102,7 @@ fn publish(root: &Path, published: &Published) -> pith_diag::PithResult<Checkpoi
         write_file(root.join("index/pithpkgs").join(name), lines.as_bytes())?;
     }
     write_file(root.join("pkg/pithpkgs/hello-1.0.tar"), &published.archive)?;
-    let binding = phloem::lockfile::binding_line(&phloem::lock::LockEntry::new(
+    let binding = phloem::lock::binding_line(&phloem::lock::LockEntry::new(
         phloem::identity::PackageVersion::new(identity(), "1.0"),
         [] as [&str; 0],
         digest,

@@ -18,11 +18,11 @@ use std::path::Path;
 use std::process::Command;
 
 use phloem::constraint::{Bound, Constraint, Range, constraint_set_value};
-use phloem::document::{Lock, diff as diff_locks};
 use phloem::forge;
 use phloem::identity::{DomainIdentity, NUMERIC_SEGMENTS, PackageIdentity, version_scheme_value};
+use phloem::lock;
+use phloem::lock::{Lock, diff as diff_locks};
 use phloem::lock::{LockEntry, Origin};
-use phloem::lockfile;
 use phloem::preference::{Preference, PreferenceList, preference_list_value};
 use phloem::registry;
 use phloem::resolution::{Resolution, resolve_request};
@@ -107,7 +107,7 @@ fn publish(root: &Path, packages: &[Published]) -> pith_diag::PithResult<Checkpo
     }
     let leaves: Vec<String> = packages
         .iter()
-        .map(|p| lockfile::binding_line(&binding_of(p)))
+        .map(|p| lock::binding_line(&binding_of(p)))
         .collect();
     write_transparency_log(root, LOG, &leaves)
 }
@@ -351,10 +351,10 @@ fn a_registry_answer_that_moved_between_runs_moves_the_universe_and_the_diff_nam
     assert!(
         changes
             .iter()
-            .any(|change| matches!(change, phloem::document::LockChange::Universe(..)))
+            .any(|change| matches!(change, phloem::lock::LockChange::Universe(..)))
             && changes
                 .iter()
-                .any(|change| matches!(change, phloem::document::LockChange::Upgraded { .. })),
+                .any(|change| matches!(change, phloem::lock::LockChange::Upgraded { .. })),
         "the diff names the moved universe and the moved selection: {changes:?}"
     );
 }
@@ -372,7 +372,7 @@ fn resolving_and_verifying_touch_no_path_beyond_the_adapter_reads() {
     let evidence = registry::read_witness(&scratch.path().join("log"), &entry).unwrap();
 
     let project = TempDir::new().unwrap();
-    let _ = phloem::lockfile::render(&resolve_lock(&universe).unwrap());
+    let _ = phloem::lock::render(&resolve_lock(&universe).unwrap());
     entry.verify_resolution(fetched.measured).unwrap();
     registry::verify(&entry, &evidence, &pinned).unwrap();
     assert!(

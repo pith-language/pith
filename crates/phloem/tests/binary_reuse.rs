@@ -14,8 +14,8 @@ use engine_state_support::SharedState;
 use phloem::build::{PackageBuild, PackageBuildRule, SourceFile, SourceTree};
 use phloem::constraint::{Bound, Constraint, Range, constraint_set_value};
 use phloem::description::Description;
-use phloem::document::Lock;
 use phloem::identity::{DomainIdentity, NUMERIC_SEGMENTS, PackageIdentity, version_scheme_value};
+use phloem::lock::Lock;
 use phloem::lock::Origin;
 use phloem::preference::{Preference, PreferenceList, preference_list_value};
 use phloem::resolution::{Resolution, resolve_request};
@@ -239,7 +239,7 @@ fn an_admitted_binary_substitutes_for_the_build_of_a_locked_binding() {
     let mut engine = engine_with(&SharedState::default());
     let lock = locked_zlib(&mut engine).unwrap();
     let entry = lock.entries.first().unwrap();
-    let before = phloem::lockfile::render(&lock);
+    let before = phloem::lock::render(&lock);
     let (toolchain, platform) = (toolchain(), platform());
     let origins = origins();
 
@@ -269,7 +269,7 @@ fn an_admitted_binary_substitutes_for_the_build_of_a_locked_binding() {
         "the build the binary stands in for is not requested"
     );
     assert_eq!(
-        phloem::lockfile::render(&lock),
+        phloem::lock::render(&lock),
         before,
         "a served substitution moves nothing in the written lock"
     );

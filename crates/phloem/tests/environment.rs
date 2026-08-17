@@ -9,9 +9,9 @@
 //! rendered lock stays byte-identical.
 
 use phloem::constraint::{Bound, Constraint, Range};
-use phloem::document::LockChange;
 use phloem::environment::{self, Environment, EnvironmentChange, EnvironmentDocument, Offer};
 use phloem::identity::{DomainIdentity, NUMERIC_SEGMENTS, PackageIdentity};
+use phloem::lock::LockChange;
 use phloem::lock::Origin;
 use phloem::preference::{Preference, PreferenceList};
 use phloem::resolve::{ResolveSolver, Schemes};
@@ -93,7 +93,7 @@ fn engine() -> Engine {
 fn resolve(
     declaration: &Environment,
     universe: &CandidateUniverse,
-) -> pith_diag::PithResult<phloem::document::Lock> {
+) -> pith_diag::PithResult<phloem::lock::Lock> {
     let realized = EnvironmentDocument::resolve(
         declaration,
         &mut engine(),
@@ -381,10 +381,10 @@ fn one_lock_per_environment_and_the_placement_is_derived() {
     );
     assert_eq!(cross_path, scratch.path().join("cross.pith.lock"));
 
-    phloem::lockpublish::write(&default, &default_path).unwrap();
-    phloem::lockpublish::write(&cross_lock, &cross_path).unwrap();
-    assert_eq!(phloem::lockpublish::read(&default_path).unwrap(), default);
-    assert_eq!(phloem::lockpublish::read(&cross_path).unwrap(), cross_lock);
+    phloem::lock::write(&default, &default_path).unwrap();
+    phloem::lock::write(&cross_lock, &cross_path).unwrap();
+    assert_eq!(phloem::lock::read(&default_path).unwrap(), default);
+    assert_eq!(phloem::lock::read(&cross_path).unwrap(), cross_lock);
     let written: Vec<std::fs::DirEntry> = std::fs::read_dir(scratch.path())
         .unwrap()
         .collect::<Result<_, _>>()
@@ -419,7 +419,7 @@ fn resolving_an_environment_touches_no_path_until_the_caller_writes() {
     let lock = environment::lock_path(scratch.path(), environment::DEFAULT_ENVIRONMENT).unwrap();
     let record =
         environment::record_path(scratch.path(), environment::DEFAULT_ENVIRONMENT).unwrap();
-    phloem::lockpublish::write(&document.lock, &lock).unwrap();
+    phloem::lock::write(&document.lock, &lock).unwrap();
     std::fs::write(&record, rendered).unwrap();
     assert!(
         lock.exists() && record.exists(),
@@ -472,8 +472,8 @@ fn a_served_substitution_persists_in_the_record_and_not_in_the_lock() {
         "the record names the served substitution: {rendered}"
     );
     assert_eq!(
-        phloem::lockfile::render(&substituted.lock),
-        phloem::lockfile::render(&built.lock),
+        phloem::lock::render(&substituted.lock),
+        phloem::lock::render(&built.lock),
         "the lock records source only and does not move"
     );
 
