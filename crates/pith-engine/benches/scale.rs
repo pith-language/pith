@@ -64,7 +64,7 @@ fn deep_chain(depth: u64) -> Duration {
     let mut engine = Engine::new();
     let signature = interface();
     engine.register_rule(rule("descend", signature.clone()), DescendRule);
-    let request = request("descend", signature, [Value::Int(as_int(depth))]);
+    let request = request("descend", signature, [Value::int(as_int(depth))]);
     let start = Instant::now();
     engine
         .evaluate_pure(&request)
@@ -91,7 +91,7 @@ fn wide_sequence(width: u64) -> Duration {
     let request = request(
         "sequence",
         root,
-        [Value::Int(as_int(width)), Value::Bool(true)],
+        [Value::int(as_int(width)), Value::Bool(true)],
     );
     let start = Instant::now();
     engine
@@ -120,7 +120,7 @@ fn reused_chain(depth: u64) -> Duration {
     let request = request(
         "revisit",
         root,
-        [Value::Int(as_int(depth)), Value::Bool(true)],
+        [Value::int(as_int(depth)), Value::Bool(true)],
     );
     let start = Instant::now();
     engine
@@ -145,7 +145,7 @@ fn wide_fanout(width: u64) -> Duration {
     let request = request(
         "fanout",
         root,
-        [Value::Int(as_int(width)), Value::Bool(true)],
+        [Value::int(as_int(width)), Value::Bool(true)],
     );
     let start = Instant::now();
     engine
@@ -173,13 +173,13 @@ struct DescendFrame {
 impl PureRuleFrame for DescendFrame {
     fn step(&mut self, _input: Option<Resumption>) -> PithResult<PureStep> {
         if self.depth <= 0 || self.requested {
-            return Ok(PureStep::Complete(Value::Int(self.depth)));
+            return Ok(PureStep::Complete(Value::int(self.depth)));
         }
         self.requested = true;
         Ok(PureStep::Need(request(
             "descend",
             interface(),
-            [Value::Int(self.depth.saturating_sub(1))],
+            [Value::int(self.depth.saturating_sub(1))],
         )))
     }
 }
@@ -200,7 +200,7 @@ struct LeafFrame {
 
 impl PureRuleFrame for LeafFrame {
     fn step(&mut self, _input: Option<Resumption>) -> PithResult<PureStep> {
-        Ok(PureStep::Complete(Value::Int(self.value)))
+        Ok(PureStep::Complete(Value::int(self.value)))
     }
 }
 
@@ -231,13 +231,13 @@ struct SequenceFrame {
 impl PureRuleFrame for SequenceFrame {
     fn step(&mut self, _input: Option<Resumption>) -> PithResult<PureStep> {
         if self.remaining <= 0 {
-            return Ok(PureStep::Complete(Value::Int(0)));
+            return Ok(PureStep::Complete(Value::int(0)));
         }
         self.remaining = self.remaining.saturating_sub(1);
         Ok(PureStep::Need(request(
             self.child,
             self.signature.clone(),
-            [Value::Int(self.remaining)],
+            [Value::int(self.remaining)],
         )))
     }
 }
@@ -265,11 +265,11 @@ struct FanOutFrame {
 impl PureRuleFrame for FanOutFrame {
     fn step(&mut self, _input: Option<Resumption>) -> PithResult<PureStep> {
         if self.requested {
-            return Ok(PureStep::Complete(Value::Int(self.width)));
+            return Ok(PureStep::Complete(Value::int(self.width)));
         }
         self.requested = true;
         let requests: Box<[Request<Pure>]> = (0..self.width)
-            .map(|index| request("leaf", self.leaf.clone(), [Value::Int(index)]))
+            .map(|index| request("leaf", self.leaf.clone(), [Value::int(index)]))
             .collect();
         Ok(PureStep::NeedAll(requests))
     }
@@ -304,7 +304,7 @@ fn request(label: &str, signature: Interface, inputs: impl Into<Box<[Value]>>) -
 
 fn first_int(inputs: &[Value]) -> i64 {
     match inputs.first() {
-        Some(Value::Int(value)) => *value,
+        Some(Value::Int(value)) => value.to_i64().unwrap_or(0),
         _ => 0,
     }
 }

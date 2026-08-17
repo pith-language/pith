@@ -325,7 +325,7 @@ mod tests {
         // than only for the readers that thought to check.
         let wrong = Value::Nominal {
             name: xylem::types::toolchain_name().into(),
-            representation: Box::new(Value::Int(7)),
+            representation: Box::new(Value::int(7)),
         };
         let value = document(wrong).to_value();
         assert!(

@@ -6,8 +6,8 @@
 
 use pith_core::{
     Action, ActionComputationKey, ActionInput, ActionOutput, ActionSpec, CapabilityRequirement,
-    Content, Interface, OutputKind, PlatformRequirement, Pure, PureComputationKey, Request, Rule,
-    RuleIdentity, RuleRevision, Type, Value,
+    Content, Int, Interface, OutputKind, PlatformRequirement, Pure, PureComputationKey, Request,
+    Rule, RuleIdentity, RuleRevision, Type, Value,
 };
 use pith_diag::{PithResult, Span};
 use pith_engine::state::{
@@ -116,7 +116,7 @@ impl PureRuleFrame for IncrementFrame {
             return Ok(PureStep::Need(self.dependency.clone()));
         }
         match input.and_then(Resumption::one) {
-            Some(Value::Int(n)) => Ok(PureStep::Complete(Value::Int(n.saturating_add(1)))),
+            Some(Value::Int(n)) => Ok(PureStep::Complete(Value::Int(n.added(&Int::from(1))))),
             Some(value) => Ok(PureStep::Complete(value)),
             None => Ok(PureStep::Complete(Value::Unit)),
         }

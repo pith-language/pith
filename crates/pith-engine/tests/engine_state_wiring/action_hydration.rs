@@ -6,7 +6,7 @@ fn hydrates_a_completed_pure_result_into_a_fresh_engine() {
     let leaf = interface(&[], Type::Int);
 
     let mut first = engine_with_state(state.clone());
-    first.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::Int(7)));
+    first.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::int(7)));
     let computed = first
         .evaluate_pure(&pure_request("leaf", leaf.clone(), []))
         .unwrap();
@@ -25,7 +25,7 @@ fn hydrates_a_completed_pure_result_into_a_fresh_engine() {
         .unwrap();
 
     assert_eq!(hydrated.source, EvaluationSource::Hydrated);
-    assert_eq!(hydrated.value, Value::Int(7));
+    assert_eq!(hydrated.value, Value::int(7));
     // Hydration maps the fresh arena node onto the attempt it loaded, and
     // records no new attempt: loading a result is not an evaluation of it.
     assert_eq!(durable_id(&second, hydrated.computation), original_attempt);

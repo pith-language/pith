@@ -124,7 +124,7 @@ impl PureRuleFrame for ReadBlobLengthFrame {
             return Ok(PureStep::NeedBlob(self.identity));
         }
         match input.and_then(Resumption::one) {
-            Some(Value::Bytes(bytes)) => Ok(PureStep::Complete(Value::Int(
+            Some(Value::Bytes(bytes)) => Ok(PureStep::Complete(Value::int(
                 i64::try_from(bytes.len()).unwrap_or(i64::MAX),
             ))),
             _ => Err(fixture_error("blob dependency resumed without bytes")),
@@ -257,6 +257,6 @@ fn engine_executes_imports_and_rematerializes_a_real_local_action() {
             .ok()
             .and_then(Result::ok)
             .map(|result| result.value),
-        Some(Value::Int(15))
+        Some(Value::int(15))
     );
 }

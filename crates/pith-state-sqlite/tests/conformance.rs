@@ -49,7 +49,7 @@ fn the_latest_reusable_action_attempt_is_the_latest_published() {
             conformance::Step::Complete {
                 attempt: 1,
                 dependencies: Box::new([]),
-                result: Value::Int(0),
+                result: Value::int(0),
                 corrupt_reuse: false,
             },
             // Completes the first-created attempt last: this is the one the
@@ -57,7 +57,7 @@ fn the_latest_reusable_action_attempt_is_the_latest_published() {
             conformance::Step::Complete {
                 attempt: 0,
                 dependencies: Box::new([]),
-                result: Value::Int(0),
+                result: Value::int(0),
                 corrupt_reuse: false,
             },
         ]),

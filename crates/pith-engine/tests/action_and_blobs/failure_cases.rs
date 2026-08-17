@@ -12,7 +12,7 @@ fn output_import_failure_retains_the_executor_report() {
     engine.register_rule(
         pure_rule("entry", root_interface.clone()),
         ActionDepRule {
-            dependency: action_request("double", action_interface, [Value::Int(21)]),
+            dependency: action_request("double", action_interface, [Value::int(21)]),
         },
     );
 
@@ -99,7 +99,7 @@ fn completion_failure_retains_executor_and_imported_reports() {
     engine.register_rule(
         pure_rule("entry", root_interface.clone()),
         ActionDepRule {
-            dependency: action_request("failing completion", action_interface, [Value::Int(21)]),
+            dependency: action_request("failing completion", action_interface, [Value::int(21)]),
         },
     );
 
@@ -142,7 +142,7 @@ fn undeclared_capability_use_is_rejected() {
     engine.register_rule(
         pure_rule("entry", pure_iface.clone()),
         ActionDepRule {
-            dependency: action_request("double", action_iface, [Value::Int(21)]),
+            dependency: action_request("double", action_iface, [Value::int(21)]),
         },
     );
 
@@ -205,7 +205,7 @@ fn policy_denial_is_recorded_before_execution() {
     engine.register_rule(
         pure_rule("entry", root_interface.clone()),
         ActionDepRule {
-            dependency: action_request("double", action_interface, [Value::Int(21)]),
+            dependency: action_request("double", action_interface, [Value::int(21)]),
         },
     );
     let executions = Arc::new(AtomicUsize::new(0));
@@ -278,7 +278,7 @@ fn executor_must_report_the_planned_platform() {
     engine.register_rule(
         pure_rule("entry", root_interface.clone()),
         ActionDepRule {
-            dependency: action_request("double", action_interface, [Value::Int(21)]),
+            dependency: action_request("double", action_interface, [Value::int(21)]),
         },
     );
 

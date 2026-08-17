@@ -9,6 +9,7 @@ mod action_codec;
 pub mod codec;
 pub mod declaration;
 pub mod effect;
+pub mod int;
 mod manifest;
 pub mod rule;
 pub mod value;
@@ -23,6 +24,7 @@ pub use declaration::{
     Coordinate, Declaration, DeclarationBody, DeclarationError, DeclarationTable,
 };
 pub use effect::{Action, EffectCategory, Mutation, Observation, Opaque, Pure};
+pub use int::{Int, OutOfRangeError};
 pub use pith_ids::DeclarationDigest;
 pub use pith_ids::{RuleIdentity, RuleRevision};
 pub use rule::{

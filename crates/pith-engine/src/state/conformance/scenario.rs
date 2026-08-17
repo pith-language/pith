@@ -20,10 +20,10 @@ const RESULT_FIELD_NAMES: [&str; 2] = ["name", "value"];
 /// fixtures happened to use first.
 fn result_value() -> impl Strategy<Value = Value> {
     prop_oneof![
-        2 => any::<i64>().prop_map(Value::Int),
+        2 => any::<i64>().prop_map(Value::int),
         1 => any::<bool>().prop_map(Value::Bool),
         1 => proptest::collection::vec(any::<i64>(), 0..3)
-            .prop_map(|elements| Value::List(elements.into_iter().map(Value::Int).collect())),
+            .prop_map(|elements| Value::List(elements.into_iter().map(Value::int).collect())),
         1 => proptest::collection::vec(any::<bool>(), 0..2).prop_map(|payloads| {
             Value::Record(
                 RESULT_FIELD_NAMES
@@ -40,7 +40,7 @@ fn result_value() -> impl Strategy<Value = Value> {
             |(present, payload)| Value::Sum {
                 type_name: "Outcome".into(),
                 constructor: if present { "Built" } else { "Failed" }.into(),
-                payload: payload.map(|n| Box::new(Value::Int(n))),
+                payload: payload.map(|n| Box::new(Value::int(n))),
             },
         ),
     ]

@@ -8,8 +8,11 @@ pub enum ValueRepr {
     Bool {
         b: bool,
     },
+    /// The decimal spelling of an arbitrary-precision integer. A JSON number is
+    /// a double to most readers, so a value beyond 2^53 would be rendered back
+    /// rounded (decision 0055).
     Int {
-        n: i64,
+        decimal: Box<str>,
     },
     Text {
         s: Box<str>,

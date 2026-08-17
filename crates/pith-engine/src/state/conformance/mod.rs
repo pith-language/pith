@@ -67,7 +67,7 @@ mod tests {
                 Step::Complete {
                     attempt: 0,
                     dependencies: Box::new([]),
-                    result: Value::Int(1),
+                    result: Value::int(1),
                     corrupt_reuse: false,
                 },
                 Step::CreatePure { rule: 1, input: 0 },
@@ -77,7 +77,7 @@ mod tests {
                     result: Value::Record(
                         [RecordField {
                             name: "result".into(),
-                            payload: Value::Int(2),
+                            payload: Value::int(2),
                         }]
                         .into(),
                     ),
@@ -92,7 +92,7 @@ mod tests {
                 Step::Complete {
                     attempt: 0,
                     dependencies: Box::new([GeneratedDependency::Blob(3)]),
-                    result: Value::Int(3),
+                    result: Value::int(3),
                     corrupt_reuse: false,
                 },
             ]),

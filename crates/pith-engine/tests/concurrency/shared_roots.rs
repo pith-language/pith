@@ -28,7 +28,7 @@ fn roots_that_share_a_dependency_still_evaluate() {
     let mut engine = fixture_engine();
     engine.register_rule(
         pure_rule("shared", int_interface(0)),
-        ConstantRule(Value::Int(7)),
+        ConstantRule(Value::int(7)),
     );
     for arity in [1_usize, 2] {
         engine.register_rule(
@@ -53,7 +53,7 @@ fn roots_that_share_a_dependency_still_evaluate() {
         .expect("the runtime drives the run")
         .expect("both roots evaluate");
 
-    assert_eq!(values(&evaluations), [Value::Int(7), Value::Int(7)]);
+    assert_eq!(values(&evaluations), [Value::int(7), Value::int(7)]);
     assert_no_pending_attempts(&engine);
 }
 
@@ -62,7 +62,7 @@ fn the_same_root_requested_twice_evaluates_twice() {
     let mut engine = fixture_engine();
     engine.register_rule(
         pure_rule("leaf", int_interface(0)),
-        ConstantRule(Value::Int(5)),
+        ConstantRule(Value::int(5)),
     );
     let request = pure_request("leaf", int_interface(0), int_inputs(0));
 
@@ -76,6 +76,6 @@ fn the_same_root_requested_twice_evaluates_twice() {
         .expect("the runtime drives the run")
         .expect("both roots evaluate");
 
-    assert_eq!(values(&evaluations), [Value::Int(5), Value::Int(5)]);
+    assert_eq!(values(&evaluations), [Value::int(5), Value::int(5)]);
     assert_no_pending_attempts(&engine);
 }

@@ -453,7 +453,7 @@ mod tests {
         let values = [
             (Value::Unit, TAG_UNIT),
             (Value::Bool(false), TAG_BOOL),
-            (Value::Int(0), TAG_INT),
+            (Value::int(0), TAG_INT),
             (Value::Text("".into()), TAG_TEXT),
             (Value::Bytes(Box::new([])), TAG_BYTES),
             (
@@ -529,8 +529,8 @@ mod tests {
             signature.clone(),
             Span::none(),
         );
-        let first = request("first request", signature.clone(), [Value::Int(7)]);
-        let second = request("second request", signature, [Value::Int(7)]);
+        let first = request("first request", signature.clone(), [Value::int(7)]);
+        let second = request("second request", signature, [Value::int(7)]);
 
         assert_eq!(
             pure_key(&first_rule, &first),
@@ -542,8 +542,8 @@ mod tests {
     fn pure_computation_key_distinguishes_input_values() {
         let signature = interface([Type::Int], Type::Int);
         let selected = rule("identity", signature.clone());
-        let seven = request("value", signature.clone(), [Value::Int(7)]);
-        let eight = request("value", signature, [Value::Int(8)]);
+        let seven = request("value", signature.clone(), [Value::int(7)]);
+        let eight = request("value", signature, [Value::int(8)]);
 
         assert_ne!(pure_key(&selected, &seven), pure_key(&selected, &eight));
     }
@@ -621,8 +621,8 @@ mod tests {
             signature.clone(),
             Span::none(),
         );
-        let first = action_request("first request", signature.clone(), [Value::Int(7)]);
-        let second = action_request("second request", signature, [Value::Int(7)]);
+        let first = action_request("first request", signature.clone(), [Value::int(7)]);
+        let second = action_request("second request", signature, [Value::int(7)]);
 
         assert_eq!(
             ActionComputationKey::new(&first_rule, &first, planned(b"contract")),
@@ -636,7 +636,7 @@ mod tests {
         // contracts are different computations.
         let signature = interface([Type::Int], Type::Blob);
         let selected = action_rule("compile", signature.clone());
-        let requested = action_request("object", signature, [Value::Int(7)]);
+        let requested = action_request("object", signature, [Value::int(7)]);
 
         assert_ne!(
             ActionComputationKey::new(&selected, &requested, planned(b"gcc contract")),
@@ -651,8 +651,8 @@ mod tests {
         // well as from the execution.
         let signature = interface([Type::Int], Type::Blob);
         let selected = action_rule("compile", signature.clone());
-        let seven = action_request("object", signature.clone(), [Value::Int(7)]);
-        let eight = action_request("object", signature, [Value::Int(8)]);
+        let seven = action_request("object", signature.clone(), [Value::int(7)]);
+        let eight = action_request("object", signature, [Value::int(8)]);
 
         assert_ne!(
             ActionComputationKey::new(&selected, &seven, planned(b"contract")),
@@ -672,8 +672,8 @@ mod tests {
             Rule::new(revision, "provider", signature.clone(), Span::none());
         let action_rule: Rule<Action> =
             Rule::new(revision, "provider", signature.clone(), Span::none());
-        let pure_request = request("value", signature.clone(), [Value::Int(7)]);
-        let action_request = action_request("value", signature, [Value::Int(7)]);
+        let pure_request = request("value", signature.clone(), [Value::int(7)]);
+        let action_request = action_request("value", signature, [Value::int(7)]);
 
         let pure = PureComputationKey::new(&pure_rule, &pure_request);
         let action = ActionComputationKey::new(&action_rule, &action_request, planned(b"contract"));

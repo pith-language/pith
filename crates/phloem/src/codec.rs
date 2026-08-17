@@ -172,12 +172,19 @@ pub(crate) fn blob_field(fields: &[RecordField<Value>], name: &str) -> PithResul
 /// Reads a record's integer field as a `u64`.
 ///
 /// # Errors
-/// Returns a diagnostic when the field is missing, not an integer, or
-/// negative.
+/// Returns a diagnostic when the field is missing, not an integer, or outside
+/// the range of a `u64` — which a value of the kernel's arbitrary-precision
+/// integer type can be from either end (decision 0055).
 pub(crate) fn int_field(fields: &[RecordField<Value>], name: &str) -> PithResult<u64> {
     match field_of(fields, name) {
-        Some(Value::Int(n)) => u64::try_from(*n)
-            .map_err(|_| crate::diag(format!("the {name} field carried a negative integer"))),
+        Some(Value::Int(n)) => n
+            .to_i64()
+            .and_then(|value| u64::try_from(value).ok())
+            .ok_or_else(|| {
+                crate::diag(format!(
+                    "the {name} field carried the integer {n}, which is not a count"
+                ))
+            }),
         Some(found) => Err(diag(format!(
             "the {name} field carried {} rather than an integer",
             found.describe()

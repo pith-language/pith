@@ -59,7 +59,7 @@ impl PureRuleFrame for BlobLenFrame {
             Some(Value::Bytes(b)) => b.len() as i64,
             _ => 0,
         };
-        Ok(PureStep::Complete(Value::Int(len)))
+        Ok(PureStep::Complete(Value::int(len)))
     }
 }
 
@@ -68,7 +68,7 @@ struct DoubleAction;
 impl ActionRule for DoubleAction {
     fn plan(&self, inputs: &[Value]) -> PithResult<ActionSpec> {
         let n = match inputs.first() {
-            Some(Value::Int(n)) => *n,
+            Some(Value::Int(n)) => n.to_i64().unwrap_or(0),
             _ => 0,
         };
         let mut spec = ActionSpec::isolated(double_executable());
@@ -111,7 +111,7 @@ struct HeldStateAction {
 
 impl ActionRule for HeldStateAction {
     fn plan(&self, _inputs: &[Value]) -> PithResult<ActionSpec> {
-        DoubleAction.plan(&[Value::Int(self.argument.load(Ordering::Relaxed))])
+        DoubleAction.plan(&[Value::int(self.argument.load(Ordering::Relaxed))])
     }
 
     fn complete(&self, inputs: &[Value], execution: &ActionExecution) -> PithResult<Value> {
@@ -133,7 +133,7 @@ impl ActionRule for WrongTypeAction {
     }
 
     fn complete(&self, _inputs: &[Value], _execution: &ActionExecution) -> PithResult<Value> {
-        Ok(Value::Int(0))
+        Ok(Value::int(0))
     }
 }
 

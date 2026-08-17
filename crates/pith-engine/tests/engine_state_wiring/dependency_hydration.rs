@@ -10,7 +10,7 @@ fn a_hydrated_computation_serves_as_a_dependency_of_a_new_computation() {
     let root = interface(&[Type::Bool], Type::Int);
 
     let mut first = engine_with_state(state.clone());
-    first.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::Int(1)));
+    first.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::int(1)));
     let leaf_evaluation = first
         .evaluate_pure(&pure_request("leaf", leaf.clone(), []))
         .unwrap();
@@ -32,7 +32,7 @@ fn a_hydrated_computation_serves_as_a_dependency_of_a_new_computation() {
         .unwrap();
 
     assert_eq!(root_evaluation.source, EvaluationSource::Computed);
-    assert_eq!(root_evaluation.value, Value::Int(2));
+    assert_eq!(root_evaluation.value, Value::int(2));
 
     // The root's published edge names the leaf's original durable attempt, and
     // the root is itself reusable because that dependency is.
@@ -56,7 +56,7 @@ fn hydration_is_refused_when_a_recorded_dependency_changed() {
     let root = interface(&[Type::Bool], Type::Int);
 
     let mut first = engine_with_state(state.clone());
-    first.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::Int(1)));
+    first.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::int(1)));
     first.register_rule(
         pure_rule("root", root.clone()),
         ForwardRule {
@@ -70,10 +70,10 @@ fn hydration_is_refused_when_a_recorded_dependency_changed() {
 
     // Another engine recomputed the leaf to a different result, so the root's
     // recorded dependency set no longer describes the current graph.
-    publish_reusable_attempt(&state, leaf_key, &Value::Int(99));
+    publish_reusable_attempt(&state, leaf_key, &Value::int(99));
 
     let mut second = engine_with_state(state.clone());
-    second.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::Int(1)));
+    second.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::int(1)));
     second.register_rule(
         pure_rule("root", root.clone()),
         ForwardRule {
@@ -87,7 +87,7 @@ fn hydration_is_refused_when_a_recorded_dependency_changed() {
     // The root was dirty, so it re-evaluated. Its leaf dependency hydrated from
     // the newer attempt, so the recomputed root observes the changed value.
     assert_eq!(second_root.source, EvaluationSource::Computed);
-    assert_eq!(second_root.value, Value::Int(99));
+    assert_eq!(second_root.value, Value::int(99));
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn hydration_survives_a_dependency_recomputed_to_an_equal_result() {
     let root = interface(&[Type::Bool], Type::Int);
 
     let mut first = engine_with_state(state.clone());
-    first.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::Int(1)));
+    first.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::int(1)));
     first.register_rule(
         pure_rule("root", root.clone()),
         ForwardRule {
@@ -112,7 +112,7 @@ fn hydration_survives_a_dependency_recomputed_to_an_equal_result() {
 
     // A new leaf attempt with a canonically equal result. Decision 0024: the
     // consumer is not dirty, so downstream propagation stops here.
-    let equal_leaf = publish_reusable_attempt(&state, leaf_key, &Value::Int(1));
+    let equal_leaf = publish_reusable_attempt(&state, leaf_key, &Value::int(1));
 
     let mut second = engine_with_state(state.clone());
     second.register_rule(pure_rule("leaf", leaf.clone()), FailingRule);
@@ -127,7 +127,7 @@ fn hydration_survives_a_dependency_recomputed_to_an_equal_result() {
         .unwrap();
 
     assert_eq!(second_root.source, EvaluationSource::Hydrated);
-    assert_eq!(second_root.value, Value::Int(1));
+    assert_eq!(second_root.value, Value::int(1));
     assert_eq!(durable_id(&second, second_root.computation), root_attempt);
 
     // A hydrated node has no arena subgraph; its recorded dependency set stays
@@ -168,7 +168,7 @@ fn hydration_reports_an_engine_state_read_failure() {
     // corruption an adapter error, never a cache miss.
     let mut engine = engine_with_state(ReadFailingStore::default());
     let leaf = interface(&[], Type::Int);
-    engine.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::Int(7)));
+    engine.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::int(7)));
 
     let diagnostics = engine
         .evaluate_pure(&pure_request("leaf", leaf, []))
@@ -194,7 +194,7 @@ fn hydration_is_refused_when_a_dependency_rule_was_revised() {
     let root = interface(&[Type::Bool], Type::Int);
 
     let mut first = engine_with_state(state.clone());
-    first.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::Int(1)));
+    first.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::int(1)));
     first.register_rule(
         pure_rule("root", root.clone()),
         ForwardRule {
@@ -204,14 +204,14 @@ fn hydration_is_refused_when_a_dependency_rule_was_revised() {
     let first_root = first
         .evaluate_pure(&pure_request("root", root.clone(), [Value::Bool(false)]))
         .unwrap();
-    assert_eq!(first_root.value, Value::Int(1));
+    assert_eq!(first_root.value, Value::int(1));
 
     // The root's own rule is unchanged, so its key and its recorded attempt are
     // untouched. Only the leaf's revision moved, and its body now answers 2.
     let mut second = engine_with_state(state.clone());
     second.register_rule(
         revised_pure_rule("leaf", leaf.clone(), b"leaf-v2"),
-        ConstantRule(Value::Int(2)),
+        ConstantRule(Value::int(2)),
     );
     second.register_rule(
         pure_rule("root", root.clone()),
@@ -230,7 +230,7 @@ fn hydration_is_refused_when_a_dependency_rule_was_revised() {
     );
     assert_eq!(
         second_root.value,
-        Value::Int(2),
+        Value::int(2),
         "the recomputed root must observe the revised leaf rather than the superseded one"
     );
 }
@@ -253,10 +253,10 @@ fn hydration_is_refused_when_a_rule_two_levels_down_was_revised() {
         &leaf,
         &middle,
         &root,
-        ConstantRule(Value::Int(1)),
+        ConstantRule(Value::int(1)),
     );
     let first_root = first.evaluate_pure(&chain_root_request(&root)).unwrap();
-    assert_eq!(first_root.value, Value::Int(1));
+    assert_eq!(first_root.value, Value::int(1));
 
     // Only the leaf's revision moved. The middle and root rules are registered
     // exactly as they were, so both of their keys and both of their recorded
@@ -264,7 +264,7 @@ fn hydration_is_refused_when_a_rule_two_levels_down_was_revised() {
     let mut second = engine_with_state(state.clone());
     second.register_rule(
         revised_pure_rule("leaf", leaf.clone(), b"leaf-v2"),
-        ConstantRule(Value::Int(2)),
+        ConstantRule(Value::int(2)),
     );
     second.register_rule(
         pure_rule("middle", middle.clone()),
@@ -287,7 +287,7 @@ fn hydration_is_refused_when_a_rule_two_levels_down_was_revised() {
     );
     assert_eq!(
         second_root.value,
-        Value::Int(2),
+        Value::int(2),
         "the recomputed root must observe the revised leaf through the middle computation"
     );
 }
@@ -311,7 +311,7 @@ fn a_revised_leaf_recomputed_to_an_equal_result_still_hydrates_its_root() {
         &leaf,
         &middle,
         &root,
-        ConstantRule(Value::Int(1)),
+        ConstantRule(Value::int(1)),
     );
     let first_root = first.evaluate_pure(&chain_root_request(&root)).unwrap();
     let root_attempt = durable_id(&first, first_root.computation);
@@ -322,7 +322,7 @@ fn a_revised_leaf_recomputed_to_an_equal_result_still_hydrates_its_root() {
     let mut second = engine_with_state(state.clone());
     second.register_rule(
         revised_pure_rule("leaf", leaf.clone(), b"leaf-v2"),
-        ConstantRule(Value::Int(1)),
+        ConstantRule(Value::int(1)),
     );
     second.register_rule(
         pure_rule("middle", middle.clone()),
@@ -363,7 +363,7 @@ fn a_revised_leaf_recomputed_to_an_equal_result_still_hydrates_its_root() {
         EvaluationSource::Hydrated,
         "the root's whole recorded subtree is current, so nothing under it should force a recompute"
     );
-    assert_eq!(third_root.value, Value::Int(1));
+    assert_eq!(third_root.value, Value::int(1));
     assert_eq!(durable_id(&third, third_root.computation), root_attempt);
 }
 
@@ -412,7 +412,7 @@ fn hydration_is_refused_when_a_dependency_rule_is_not_registered() {
     let root = interface(&[Type::Bool], Type::Int);
 
     let mut first = engine_with_state(state.clone());
-    first.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::Int(1)));
+    first.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::int(1)));
     first.register_rule(
         pure_rule("root", root.clone()),
         ForwardRule {

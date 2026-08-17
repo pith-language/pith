@@ -184,8 +184,10 @@ fn solve_from_values(schemes: &Schemes, inputs: &[Value]) -> PithResult<Value> {
             "the fifth resolve input is not a budget integer",
         ));
     };
-    let budget = u64::try_from(*budget)
-        .map_err(|_| crate::diag("the resolve budget must not be negative"))?;
+    let budget = budget
+        .to_i64()
+        .and_then(|budget| u64::try_from(budget).ok())
+        .ok_or_else(|| crate::diag("the resolve budget is not a count"))?;
     let request = SolveRequest {
         constraints: parsed.into(),
         universe: CandidateUniverse::from_value(universe)?,
@@ -215,7 +217,7 @@ mod tests {
                 Value::List(Box::new([])),
                 Value::List(Box::new([])),
                 Value::List(Box::new([])),
-                Value::Int(10),
+                Value::int(10),
             ],
         );
         let error = result.unwrap_err();

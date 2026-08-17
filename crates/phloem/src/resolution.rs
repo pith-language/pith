@@ -173,7 +173,7 @@ pub fn resolve_request(
             constraints.clone(),
             universe.clone(),
             preferences.clone(),
-            Value::Int(budget as i64),
+            Value::int(budget as i64),
         ],
         Span::none(),
     )
@@ -323,7 +323,7 @@ fn trail_entry_value(entry: &TrailEntry) -> Value {
     record_value([
         domain,
         package,
-        (CONSIDERED, Value::Int(entry.considered as i64)),
+        (CONSIDERED, Value::int(entry.considered as i64)),
         (DECIDED_BY, text_value(&entry.decided_by)),
     ])
 }
@@ -444,8 +444,8 @@ fn budget_exhausted_value(budget: u64, decisions: u64) -> Value {
         RESOLUTION,
         BUDGET_EXHAUSTED,
         Some(record_value([
-            (BUDGET, Value::Int(budget as i64)),
-            (DECISIONS, Value::Int(decisions as i64)),
+            (BUDGET, Value::int(budget as i64)),
+            (DECISIONS, Value::int(decisions as i64)),
         ])),
     )
 }

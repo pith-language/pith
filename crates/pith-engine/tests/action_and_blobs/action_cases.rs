@@ -9,7 +9,7 @@ fn action_dependency_driven_through_run() {
     engine.register_rule(
         pure_rule("entry", pure_iface.clone()),
         ActionDepRule {
-            dependency: action_request("double", action_iface, [Value::Int(21)]),
+            dependency: action_request("double", action_iface, [Value::int(21)]),
         },
     );
 
@@ -18,7 +18,7 @@ fn action_dependency_driven_through_run() {
         .plan_action(&action_request(
             "double",
             interface(&[Type::Int], Type::Blob),
-            [Value::Int(21)],
+            [Value::int(21)],
         ))
         .unwrap();
     assert_eq!(plan.spec.executable.host_path(), Some(double_executable()));
@@ -96,7 +96,7 @@ fn actual_capability_uses_are_dependency_edges() {
     engine.register_rule(
         pure_rule("entry", pure_iface.clone()),
         ActionDepRule {
-            dependency: action_request("double", action_iface, [Value::Int(21)]),
+            dependency: action_request("double", action_iface, [Value::int(21)]),
         },
     );
 
@@ -144,7 +144,7 @@ fn action_output_bytes_are_imported_by_the_engine() {
     engine.register_rule(
         pure_rule("entry", pure_iface.clone()),
         ActionDepRule {
-            dependency: action_request("double", action_iface, [Value::Int(21)]),
+            dependency: action_request("double", action_iface, [Value::int(21)]),
         },
     );
 
@@ -176,7 +176,7 @@ fn action_output_bytes_are_imported_by_the_engine() {
         .unwrap();
 
     assert_eq!(output, double_result(21));
-    assert_eq!(bytes_evaluation.value, Value::Int(2));
+    assert_eq!(bytes_evaluation.value, Value::int(2));
 }
 
 #[test]
@@ -194,7 +194,7 @@ fn missing_action_input_is_rejected_before_executor_call() {
     engine.register_rule(
         pure_rule("entry", root_interface.clone()),
         ActionDepRule {
-            dependency: action_request("double", action_interface, [Value::Int(21)]),
+            dependency: action_request("double", action_interface, [Value::int(21)]),
         },
     );
     let executions = Arc::new(AtomicUsize::new(0));
@@ -298,7 +298,7 @@ fn executor_failure_finalizes_action_and_parent_without_a_report() {
     engine.register_rule(
         pure_rule("entry", root_interface.clone()),
         ActionDepRule {
-            dependency: action_request("double", action_interface, [Value::Int(21)]),
+            dependency: action_request("double", action_interface, [Value::int(21)]),
         },
     );
 

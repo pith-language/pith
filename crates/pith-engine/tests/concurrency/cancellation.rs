@@ -139,7 +139,7 @@ fn an_uncancelled_signal_lets_the_run_finish() {
         .expect("the runtime drives the run")
         .expect("an uncancelled run produces results");
 
-    assert_eq!(values(&evaluations), [Value::Int(0), Value::Int(2)]);
+    assert_eq!(values(&evaluations), [Value::int(0), Value::int(2)]);
 }
 
 // ---------------------------------------------------------------------------

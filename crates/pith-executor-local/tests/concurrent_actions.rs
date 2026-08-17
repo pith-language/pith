@@ -177,7 +177,7 @@ impl PureRuleFrame for BothAtOnceFrame {
         let Some(Resumption::Many(values)) = input else {
             return Err(fixture_error("a NeedAll batch must resume with Many"));
         };
-        Ok(PureStep::Complete(Value::Int(
+        Ok(PureStep::Complete(Value::int(
             i64::try_from(values.len()).unwrap_or(i64::MAX),
         )))
     }
@@ -262,7 +262,7 @@ fn interface(arity: usize, output: Type) -> Interface {
 }
 
 fn inputs(arity: usize) -> Box<[Value]> {
-    vec![Value::Int(0); arity].into_boxed_slice()
+    vec![Value::int(0); arity].into_boxed_slice()
 }
 
 fn rule<K: pith_core::EffectCategory>(label: &str, interface: Interface) -> Rule<K> {
@@ -404,7 +404,7 @@ fn a_fan_out_overlaps_real_child_processes() {
         .expect("the runtime drives the run")
         .expect("the fan-out's actions meet at the rendezvous");
 
-    assert_eq!(evaluation.value, Value::Int(2));
+    assert_eq!(evaluation.value, Value::int(2));
     assert_eq!(
         rendezvous.released(),
         2,

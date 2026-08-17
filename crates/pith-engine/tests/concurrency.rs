@@ -15,7 +15,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use pith_core::{
-    Action, ActionSpec, Interface, Pure, Request, Rule, RuleIdentity, RuleRevision, Type, Value,
+    Action, ActionSpec, Int, Interface, Pure, Request, Rule, RuleIdentity, RuleRevision, Type,
+    Value,
 };
 use pith_diag::{EngineCode, PithResult, Span};
 use pith_engine::state::DurableAttemptState;
@@ -83,10 +84,10 @@ impl PureRuleFrame for SumAllFrame {
         let Some(Resumption::Many(values)) = input else {
             return Err(fixture_error("a NeedAll batch must resume with Many"));
         };
-        let mut total = 0_i64;
+        let mut total = Int::zero();
         for value in values {
             match value {
-                Value::Int(number) => total = total.saturating_add(number),
+                Value::Int(number) => total = total.added(&number),
                 other => return Err(fixture_error(&format!("expected an int, got {other:?}"))),
             }
         }
@@ -156,7 +157,7 @@ impl ActionRule for ArityAction {
     }
 
     fn complete(&self, inputs: &[Value], _execution: &ActionExecution) -> PithResult<Value> {
-        Ok(Value::Int(arity(inputs).saturating_mul(2)))
+        Ok(Value::int(arity(inputs).saturating_mul(2)))
     }
 }
 
@@ -328,7 +329,7 @@ fn int_interface(arity: usize) -> Interface {
 }
 
 fn int_inputs(arity: usize) -> Box<[Value]> {
-    vec![Value::Int(0); arity].into_boxed_slice()
+    vec![Value::int(0); arity].into_boxed_slice()
 }
 
 /// Register `count` action-backed pure rules, each running one action, and

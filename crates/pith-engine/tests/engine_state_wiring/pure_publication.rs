@@ -6,7 +6,7 @@ fn pure_leaf_evaluation_publishes_a_reusable_complete_attempt() {
     let leaf = interface(&[], Type::Int);
     engine.register_rule(
         pure_rule("leaf", leaf.clone()),
-        ConstantRule(Value::Int(41)),
+        ConstantRule(Value::int(41)),
     );
 
     let evaluation = engine
@@ -19,7 +19,7 @@ fn pure_leaf_evaluation_publishes_a_reusable_complete_attempt() {
         pith_engine::state::CURRENT_ENGINE_STATE_VERSIONS
     );
     let completion = completed_record(store, durable_id(&engine, evaluation.computation));
-    assert_eq!(completion.result.decode(), Ok(Value::Int(41)));
+    assert_eq!(completion.result.decode(), Ok(Value::int(41)));
     assert_eq!(completion.reuse, DurableReuseDecision::Reusable);
     assert!(completion.dependencies.is_empty());
     assert_eq!(completion.provenance, DurableProvenance::Pure);
@@ -33,7 +33,7 @@ fn pure_parent_with_child_dependency_publishes_both_with_the_pure_edge() {
     let parent = interface(&[Type::Bool], Type::Int);
     engine.register_rule(
         pure_rule("leaf", leaf.clone()),
-        ConstantRule(Value::Int(41)),
+        ConstantRule(Value::int(41)),
     );
     engine.register_rule(
         pure_rule("increment", parent.clone()),
@@ -52,9 +52,9 @@ fn pure_parent_with_child_dependency_publishes_both_with_the_pure_edge() {
     let parent_record = completed_record(store, durable_id(&engine, evaluation.computation));
     let leaf_record = completed_record(store, durable_id(&engine, leaf_computation));
 
-    assert_eq!(parent_record.result.decode(), Ok(Value::Int(42)));
+    assert_eq!(parent_record.result.decode(), Ok(Value::int(42)));
     assert_eq!(parent_record.reuse, DurableReuseDecision::Reusable);
-    assert_eq!(leaf_record.result.decode(), Ok(Value::Int(41)));
+    assert_eq!(leaf_record.result.decode(), Ok(Value::int(41)));
     assert_eq!(leaf_record.reuse, DurableReuseDecision::Reusable);
     assert_eq!(
         parent_record.dependencies.as_ref(),
@@ -106,7 +106,7 @@ fn pure_create_failure_reconciles_the_orphaned_arena_node() {
     let signature = interface(&[], Type::Int);
     engine.register_rule(
         pure_rule("constant", signature.clone()),
-        ConstantRule(Value::Int(7)),
+        ConstantRule(Value::int(7)),
     );
 
     let diagnostics = engine

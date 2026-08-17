@@ -35,7 +35,7 @@ fn main() -> ExitCode {
     };
 
     let mut engine = Engine::with_state_store(pith_store::MemoryContentStore::default(), state);
-    engine.register_rule(leaf_rule(), ConstantRule(Value::Int(value)));
+    engine.register_rule(leaf_rule(), ConstantRule(Value::int(value)));
 
     match engine.evaluate_pure(&leaf_request()) {
         Ok(evaluation) => {

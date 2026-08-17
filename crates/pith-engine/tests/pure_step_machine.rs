@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use pith_core::{Interface, Request, Rule, RuleIdentity, RuleRevision, Type, Value};
+use pith_core::{Int, Interface, Request, Rule, RuleIdentity, RuleRevision, Type, Value};
 use pith_diag::{Diag, DiagnosticSink, EngineCode, PithResult, Severity, Span, StableCode};
 use pith_engine::{
     AttemptState, DependencyEdge, Engine, EvaluationSource, PureRule, PureRuleFrame, PureStep,
@@ -84,7 +84,7 @@ impl PureRuleFrame for IncrementFrame {
         }
 
         let value = match input.and_then(Resumption::one) {
-            Some(Value::Int(value)) => Value::Int(value.saturating_add(1)),
+            Some(Value::Int(value)) => Value::Int(value.added(&Int::from(1))),
             Some(value) => value,
             None => Value::Unit,
         };
@@ -129,7 +129,7 @@ struct CountdownRule {
 impl PureRule for CountdownRule {
     fn start(&self, inputs: &[Value]) -> Box<dyn PureRuleFrame> {
         let remaining = match inputs.first() {
-            Some(Value::Int(value)) => *value,
+            Some(Value::Int(value)) => value.to_i64().unwrap_or(0),
             _ => 0,
         };
         Box::new(CountdownFrame {
@@ -153,13 +153,13 @@ impl PureRuleFrame for CountdownFrame {
             return Ok(PureStep::Need(request(
                 "countdown",
                 self.interface.clone(),
-                [Value::Int(self.remaining.saturating_sub(1))],
+                [Value::int(self.remaining.saturating_sub(1))],
             )));
         }
         Ok(PureStep::Complete(
             input
                 .and_then(Resumption::one)
-                .unwrap_or(Value::Int(self.remaining)),
+                .unwrap_or(Value::int(self.remaining)),
         ))
     }
 }
@@ -229,22 +229,19 @@ fn leaf_rule_returns_its_value() {
     let leaf = interface(&[], Type::Int);
     engine.register_rule(
         rule("leaf provider", leaf.clone()),
-        ConstantRule(Value::Int(41)),
+        ConstantRule(Value::int(41)),
     );
 
     let evaluation = engine
         .evaluate_pure(&request("diagnostic leaf label", leaf, []))
         .unwrap();
 
-    assert!(matches!(evaluation.value, Value::Int(41)));
+    assert_eq!(evaluation.value, Value::int(41));
     let node = engine.query().computation(evaluation.computation).unwrap();
-    assert!(matches!(
-        node.state,
-        AttemptState::Complete {
-            result: Value::Int(41),
-            ..
-        }
-    ));
+    let AttemptState::Complete { result, .. } = &node.state else {
+        unreachable!("the attempt completed")
+    };
+    assert_eq!(*result, Value::int(41));
 }
 
 #[test]
@@ -253,7 +250,7 @@ fn selection_query_does_not_evaluate_the_rule() {
     let signature = interface(&[], Type::Int);
     let rule = engine.register_rule(
         rule("provider", signature.clone()),
-        ConstantRule(Value::Int(41)),
+        ConstantRule(Value::int(41)),
     );
     let request = request("answer", signature.clone(), []);
 
@@ -277,10 +274,10 @@ fn rule_body_receives_request_inputs() {
     engine.register_rule(rule("identity", signature.clone()), FirstInputRule);
 
     let evaluation = engine
-        .evaluate_pure(&request("seven", signature, [Value::Int(7)]))
+        .evaluate_pure(&request("seven", signature, [Value::int(7)]))
         .unwrap();
 
-    assert_eq!(evaluation.value, Value::Int(7));
+    assert_eq!(evaluation.value, Value::int(7));
 }
 
 #[test]
@@ -290,7 +287,7 @@ fn parent_resumes_with_child_value_and_records_the_edge() {
     let parent = interface(&[Type::Int], Type::Int);
     engine.register_rule(
         rule("leaf provider", leaf.clone()),
-        ConstantRule(Value::Int(41)),
+        ConstantRule(Value::int(41)),
     );
     engine.register_rule(
         rule("increment provider", parent.clone()),
@@ -300,10 +297,10 @@ fn parent_resumes_with_child_value_and_records_the_edge() {
     );
 
     let evaluation = engine
-        .evaluate_pure(&request("requested answer", parent, [Value::Int(0)]))
+        .evaluate_pure(&request("requested answer", parent, [Value::int(0)]))
         .unwrap();
 
-    assert!(matches!(evaluation.value, Value::Int(42)));
+    assert_eq!(evaluation.value, Value::int(42));
     let query = engine.query();
     let dependencies = query.dependencies_of(evaluation.computation).unwrap();
     assert_eq!(dependencies.len(), 1);
@@ -315,13 +312,10 @@ fn parent_resumes_with_child_value_and_records_the_edge() {
             assert_eq!(request.label.as_ref(), "base value");
             assert_eq!(request.interface, leaf);
             let child = query.computation(*computation).unwrap();
-            assert!(matches!(
-                child.state,
-                AttemptState::Complete {
-                    result: Value::Int(41),
-                    ..
-                }
-            ));
+            let AttemptState::Complete { result, .. } = &child.state else {
+                unreachable!("the dependency completed")
+            };
+            assert_eq!(*result, Value::int(41));
             let dependents: Vec<_> = query.dependents_of(*computation).collect();
             assert_eq!(dependents.len(), 1);
             assert_eq!(dependents.first().unwrap().0, evaluation.computation);
@@ -342,7 +336,7 @@ fn dependency_cycle_reports_the_request_chain() {
     engine.register_rule(
         rule("a provider", a.clone()),
         ForwardRule {
-            dependency: request("need b", b.clone(), [Value::Int(0)]),
+            dependency: request("need b", b.clone(), [Value::int(0)]),
         },
     );
     engine.register_rule(
@@ -444,10 +438,10 @@ fn repeated_rule_with_different_inputs_is_not_a_cycle() {
     );
 
     let evaluation = engine
-        .evaluate_pure(&request("countdown", signature, [Value::Int(3)]))
+        .evaluate_pure(&request("countdown", signature, [Value::int(3)]))
         .unwrap();
 
-    assert_eq!(evaluation.value, Value::Int(0));
+    assert_eq!(evaluation.value, Value::int(0));
     assert_eq!(
         engine
             .query()
@@ -466,7 +460,7 @@ fn repeated_evaluations_reuse_the_completed_computation() {
     engine.register_rule(
         rule("leaf provider", leaf.clone()),
         CountingRule {
-            value: Value::Int(41),
+            value: Value::int(41),
             starts: starts.clone(),
         },
     );
@@ -493,15 +487,15 @@ fn different_inputs_create_different_computations() {
     engine.register_rule(rule("identity", signature.clone()), FirstInputRule);
 
     let seven = engine
-        .evaluate_pure(&request("seven", signature.clone(), [Value::Int(7)]))
+        .evaluate_pure(&request("seven", signature.clone(), [Value::int(7)]))
         .unwrap();
     let eight = engine
-        .evaluate_pure(&request("eight", signature, [Value::Int(8)]))
+        .evaluate_pure(&request("eight", signature, [Value::int(8)]))
         .unwrap();
 
     assert_ne!(seven.computation, eight.computation);
-    assert_eq!(seven.value, Value::Int(7));
-    assert_eq!(eight.value, Value::Int(8));
+    assert_eq!(seven.value, Value::int(7));
+    assert_eq!(eight.value, Value::int(8));
 }
 
 #[test]
@@ -514,7 +508,7 @@ fn distinct_parents_share_a_completed_dependency() {
     engine.register_rule(
         rule("leaf provider", leaf.clone()),
         CountingRule {
-            value: Value::Int(41),
+            value: Value::int(41),
             starts: leaf_starts.clone(),
         },
     );
@@ -546,8 +540,8 @@ fn distinct_parents_share_a_completed_dependency() {
         ))
         .unwrap();
 
-    assert_eq!(boolean_result.value, Value::Int(41));
-    assert_eq!(text_result.value, Value::Int(41));
+    assert_eq!(boolean_result.value, Value::int(41));
+    assert_eq!(text_result.value, Value::int(41));
     assert_eq!(leaf_starts.load(Ordering::Relaxed), 1);
     assert_eq!(engine.query().computations().count(), 3);
 }
@@ -558,7 +552,7 @@ fn computation_ids_do_not_cross_engine_instances() {
     let mut first = Engine::new();
     first.register_rule(
         rule("first provider", signature.clone()),
-        ConstantRule(Value::Int(1)),
+        ConstantRule(Value::int(1)),
     );
     let first_evaluation = first
         .evaluate_pure(&request("first request", signature.clone(), []))
@@ -567,7 +561,7 @@ fn computation_ids_do_not_cross_engine_instances() {
     let mut second = Engine::new();
     second.register_rule(
         rule("second provider", signature.clone()),
-        ConstantRule(Value::Int(2)),
+        ConstantRule(Value::int(2)),
     );
     let second_evaluation = second
         .evaluate_pure(&request("second request", signature, []))
@@ -602,7 +596,7 @@ fn the_same_request_twice_in_sequence_is_reuse_and_not_a_cycle() {
     engine.register_rule(
         rule("root", root.clone()),
         TwiceRule {
-            dependency: request("leaf", leaf, [Value::Int(7)]),
+            dependency: request("leaf", leaf, [Value::int(7)]),
         },
     );
 
@@ -610,7 +604,7 @@ fn the_same_request_twice_in_sequence_is_reuse_and_not_a_cycle() {
         .evaluate_pure(&request("root", root, [Value::Bool(false)]))
         .unwrap();
 
-    assert_eq!(evaluation.value, Value::Int(7));
+    assert_eq!(evaluation.value, Value::int(7));
     // Both requests recorded an edge, and both name the one computation the
     // first request allocated.
     let dependencies = engine

@@ -5,7 +5,7 @@ fn durable_reuse_is_valid_until_a_dependency_result_identity_changes() {
     let mut engine = engine_with_fixtures();
     let leaf = interface(&[], Type::Int);
     let root = interface(&[Type::Bool], Type::Int);
-    engine.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::Int(1)));
+    engine.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::int(1)));
     engine.register_rule(
         pure_rule("root", root.clone()),
         ForwardRule {
@@ -41,7 +41,7 @@ fn durable_reuse_is_valid_until_a_dependency_result_identity_changes() {
             changed_leaf,
             CompletedAttempt {
                 dependencies: Box::new([]),
-                result: EncodedValue::from_value(&Value::Int(99)),
+                result: EncodedValue::from_value(&Value::int(99)),
                 provenance: DurableProvenance::Pure,
                 reuse: DurableReuseDecision::Reusable,
                 capabilities: Box::new([]),
@@ -64,7 +64,7 @@ fn durable_reuse_remains_valid_when_a_dependency_result_is_canonically_equal() {
     let mut engine = engine_with_fixtures();
     let leaf = interface(&[], Type::Int);
     let root = interface(&[Type::Bool], Type::Int);
-    engine.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::Int(1)));
+    engine.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::int(1)));
     engine.register_rule(
         pure_rule("root", root.clone()),
         ForwardRule {
@@ -96,7 +96,7 @@ fn durable_reuse_remains_valid_when_a_dependency_result_is_canonically_equal() {
             equal_leaf,
             CompletedAttempt {
                 dependencies: Box::new([]),
-                result: EncodedValue::from_value(&Value::Int(1)),
+                result: EncodedValue::from_value(&Value::int(1)),
                 provenance: DurableProvenance::Pure,
                 reuse: DurableReuseDecision::Reusable,
                 capabilities: Box::new([]),
@@ -119,7 +119,7 @@ fn durable_reuse_observed_through_engine_reuses_unchanged_computations() {
     let mut engine = engine_with_fixtures();
     let leaf = interface(&[], Type::Int);
     let root = interface(&[Type::Bool], Type::Int);
-    engine.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::Int(1)));
+    engine.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::int(1)));
     engine.register_rule(
         pure_rule("root", root.clone()),
         ForwardRule {

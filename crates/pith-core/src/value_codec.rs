@@ -2,7 +2,7 @@
 //! [`Value`] variants.
 
 use crate::{
-    Interface, NominalType, RecordField, SumConstructor, SumType, Type, Value,
+    Int, Interface, NominalType, RecordField, SumConstructor, SumType, Type, Value,
     codec::CanonicalReader,
     declaration::Coordinate,
     manifest::{encode_bytes, encode_length, encode_str},
@@ -77,6 +77,30 @@ pub(crate) fn encode_type_payload(encoded: &mut Vec<u8>, value_type: &Type) {
             }
         }
     }
+}
+
+/// A sign byte, then the magnitude big-endian with no leading zero, behind the
+/// length prefix every variable-width payload in this encoding carries
+/// (decision 0055).
+///
+/// Big-endian magnitudes are CBOR's choice for its bignums and Java's for
+/// `BigInteger.toByteArray`, and the byte order is the only part of this a
+/// reader has to agree on; the length prefix is what makes the payload
+/// self-delimiting the way `Text` and `Bytes` already are.
+fn encode_integer(encoded: &mut Vec<u8>, value: &Int) {
+    encoded.push(u8::from(value.is_negative()));
+    encode_bytes(encoded, &value.magnitude_bytes());
+}
+
+/// Refuses every spelling of a value except the one [`encode_integer`] writes:
+/// a leading zero byte and a negative zero both name a value that already has an
+/// encoding, and admitting them would put two byte strings under one integer and
+/// two computation keys under one value.
+fn decode_integer(decoder: &mut CanonicalReader) -> Result<Int, CanonicalDecodeError> {
+    let negative = decoder.read_bool()?;
+    let magnitude = decoder.read_bytes()?;
+    Int::from_sign_and_magnitude(negative, magnitude)
+        .ok_or(CanonicalDecodeError::NonCanonicalInteger)
 }
 
 /// A presence byte then the payload when present, for the optionally-typed
@@ -166,7 +190,7 @@ pub(crate) fn encode_value_payload(encoded: &mut Vec<u8>, value: &Value) {
         }
         Value::Int(value) => {
             encoded.push(TAG_INT);
-            encoded.extend_from_slice(&value.to_le_bytes());
+            encode_integer(encoded, value);
         }
         Value::Text(value) => {
             encoded.push(TAG_TEXT);
@@ -225,6 +249,7 @@ pub enum CanonicalDecodeError {
     LengthOutOfRange { length: u64 },
     NestingTooDeep { limit: u32 },
     NamesOutOfOrder { earlier: Box<str>, later: Box<str> },
+    NonCanonicalInteger,
 }
 
 impl std::fmt::Display for CanonicalDecodeError {
@@ -259,6 +284,9 @@ impl std::fmt::Display for CanonicalDecodeError {
             Self::NamesOutOfOrder { earlier, later } => write!(
                 formatter,
                 "canonical names are not in strictly ascending order: `{earlier}` then `{later}`"
+            ),
+            Self::NonCanonicalInteger => formatter.write_str(
+                "canonical integer magnitude has a leading zero byte, or is a negative zero",
             ),
         }
     }
@@ -455,7 +483,7 @@ fn decode_value_payload(
     match decoder.read_byte()? {
         TAG_UNIT => Ok(Value::Unit),
         TAG_BOOL => Ok(Value::Bool(decoder.read_bool()?)),
-        TAG_INT => Ok(Value::Int(decoder.read_int()?)),
+        TAG_INT => Ok(Value::Int(decode_integer(decoder)?)),
         TAG_TEXT => Ok(Value::Text(decoder.read_text()?.into())),
         TAG_BYTES => Ok(Value::Bytes(decoder.read_bytes()?.into())),
         TAG_BLOB => Ok(Value::Blob(decoder.read_content_id()?)),
@@ -569,8 +597,11 @@ mod tests {
             Value::Unit,
             Value::Bool(false),
             Value::Bool(true),
-            Value::Int(i64::MIN),
-            Value::Int(i64::MAX),
+            Value::int(i64::MIN),
+            Value::int(i64::MAX),
+            // Past the range the type used to stop at, from both ends.
+            Value::Int(Int::from(i64::MIN).multiplied(&Int::from(i64::MIN))),
+            Value::Int(Int::from(i64::MIN).multiplied(&Int::from(i64::MAX))),
             Value::Text("Pith \u{03bb}".into()),
             Value::Bytes(vec![0x00, 0x80, 0xff].into_boxed_slice()),
             Value::Blob(fixture_content_id()),
@@ -582,13 +613,13 @@ mod tests {
                 name: "test.Nested".into(),
                 representation: Box::new(Value::Nominal {
                     name: "test.Inner".into(),
-                    representation: Box::new(Value::Int(1)),
+                    representation: Box::new(Value::int(1)),
                 }),
             },
             Value::List(vec![].into_boxed_slice()),
             Value::List(vec![Value::Text("a".into()), Value::Text("b".into())].into_boxed_slice()),
             Value::List(
-                vec![Value::List(vec![Value::Int(1)].into_boxed_slice())].into_boxed_slice(),
+                vec![Value::List(vec![Value::int(1)].into_boxed_slice())].into_boxed_slice(),
             ),
             Value::record([
                 RecordField {
@@ -597,7 +628,7 @@ mod tests {
                 },
                 RecordField {
                     name: "nested".into(),
-                    payload: Value::List(vec![Value::Int(1)].into_boxed_slice()),
+                    payload: Value::List(vec![Value::int(1)].into_boxed_slice()),
                 },
             ])
             .unwrap(),
@@ -697,13 +728,41 @@ mod tests {
 
     #[test]
     fn version_one_value_bytes_are_stable() {
-        let fixtures: [(Value, &[u8]); 12] = [
+        let fixtures: [(Value, &[u8]); 15] = [
             (Value::Unit, &[0x01, 0x00]),
             (Value::Bool(false), &[0x01, 0x01, 0x00]),
             (Value::Bool(true), &[0x01, 0x01, 0x01]),
+            // An integer carries a sign byte then its magnitude, big-endian
+            // behind the same u64 length prefix `Text` and `Bytes` use, with no
+            // leading zero byte (decision 0055). Zero is the empty magnitude,
+            // which is the one place the sign byte and the length agree that
+            // there is nothing to read.
             (
-                Value::Int(-2),
-                &[0x01, 0x02, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
+                Value::int(0),
+                &[
+                    0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                ],
+            ),
+            (
+                Value::int(-2),
+                &[
+                    0x01, 0x02, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02,
+                ],
+            ),
+            (
+                Value::int(258),
+                &[
+                    0x01, 0x02, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02,
+                ],
+            ),
+            (
+                // Beyond the range the type used to hold: 2^64, whose magnitude
+                // is nine bytes and which no `i64` fixture could have written.
+                Value::Int(Int::from(4_294_967_296u64).multiplied(&Int::from(4_294_967_296u64))),
+                &[
+                    0x01, 0x02, 0x00, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //
+                    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                ],
             ),
             (
                 Value::Text("hi".into()),
@@ -761,7 +820,7 @@ mod tests {
                 Value::record([
                     RecordField {
                         name: "a".into(),
-                        payload: Value::Int(7),
+                        payload: Value::int(7),
                     },
                     RecordField {
                         name: "b".into(),
@@ -772,7 +831,7 @@ mod tests {
                 &[
                     0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //
                     0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'a', //
-                    0x02, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //
+                    0x02, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07, //
                     0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'b', //
                     0x03, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, b'h', b'i',
                 ],
@@ -846,7 +905,7 @@ mod tests {
 
         for value in [
             Value::Bool(true),
-            Value::Int(1),
+            Value::int(1),
             Value::Text("x".into()),
             Value::Bytes(vec![1].into_boxed_slice()),
             Value::Blob(fixture_content_id()),
@@ -854,7 +913,7 @@ mod tests {
                 name: "test.N".into(),
                 representation: Box::new(Value::Unit),
             },
-            Value::List(vec![Value::Int(1)].into_boxed_slice()),
+            Value::List(vec![Value::int(1)].into_boxed_slice()),
         ] {
             let mut encoded = value.encode_canonical();
             let _ = encoded.pop();
@@ -902,11 +961,11 @@ mod tests {
         let sorted = Value::record([
             RecordField {
                 name: "a".into(),
-                payload: Value::Int(1),
+                payload: Value::int(1),
             },
             RecordField {
                 name: "b".into(),
-                payload: Value::Int(2),
+                payload: Value::int(2),
             },
         ])
         .unwrap();
@@ -914,11 +973,11 @@ mod tests {
             vec![
                 RecordField {
                     name: "b".into(),
-                    payload: Value::Int(2),
+                    payload: Value::int(2),
                 },
                 RecordField {
                     name: "a".into(),
-                    payload: Value::Int(1),
+                    payload: Value::int(1),
                 },
             ]
             .into_boxed_slice(),
@@ -968,7 +1027,7 @@ mod tests {
     fn deeply_nested_records_fail_rather_than_overflowing() {
         // A record's field payload recurses in both grammars, so a run of
         // record tags has the same unbounded-recursion shape a list chain has.
-        let mut value = Value::Int(0);
+        let mut value = Value::int(0);
         for _ in 0..(MAX_NOMINAL_NESTING.saturating_add(1)) {
             value = Value::record([RecordField {
                 name: "f".into(),
@@ -1003,7 +1062,7 @@ mod tests {
     fn deeply_nested_sums_fail_rather_than_overflowing() {
         // A sum's payload recurses in both grammars, so a run of sum tags has
         // the same unbounded-recursion shape a list chain has.
-        let mut value = Value::Int(0);
+        let mut value = Value::int(0);
         for _ in 0..(MAX_NOMINAL_NESTING.saturating_add(1)) {
             value = Value::Sum {
                 type_name: "test.S".into(),
@@ -1105,6 +1164,34 @@ mod tests {
         assert_eq!(
             Value::decode_canonical(&encoded_value),
             Err(CanonicalDecodeError::InvalidUtf8)
+        );
+    }
+
+    #[test]
+    fn non_canonical_integer_bytes_are_rejected() {
+        // Two byte strings under one integer would be two computation keys
+        // under one value, so the decoder refuses every spelling the encoder
+        // does not write: a leading zero byte, and a negative zero.
+        let integer = |negative: u8, magnitude: &[u8]| {
+            let mut encoded = vec![ENCODING_VERSION, TAG_INT, negative];
+            encode_bytes(&mut encoded, magnitude);
+            encoded
+        };
+        for encoded in [
+            integer(0, &[0x00]),
+            integer(0, &[0x00, 0x01]),
+            integer(1, &[0x00, 0x01]),
+            integer(1, &[]),
+        ] {
+            assert_eq!(
+                Value::decode_canonical(&encoded),
+                Err(CanonicalDecodeError::NonCanonicalInteger)
+            );
+        }
+        assert_eq!(Value::decode_canonical(&integer(0, &[])), Ok(Value::int(0)));
+        assert_eq!(
+            Value::decode_canonical(&integer(2, &[0x01])),
+            Err(CanonicalDecodeError::InvalidBoolean { byte: 2 })
         );
     }
 

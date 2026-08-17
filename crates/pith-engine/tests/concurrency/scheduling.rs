@@ -11,7 +11,7 @@ fn independent_roots_run_their_actions_concurrently() {
         .expect("the runtime drives the run")
         .expect("both roots evaluate");
 
-    assert_eq!(values(&evaluations), [Value::Int(0), Value::Int(2)]);
+    assert_eq!(values(&evaluations), [Value::int(0), Value::int(2)]);
     assert_eq!(
         executor.peak(),
         2,
@@ -45,7 +45,7 @@ fn a_fan_out_runs_its_actions_concurrently() {
         .expect("the root evaluates");
 
     // 2*0 + 2*1 + 2*2
-    assert_eq!(evaluation.value, Value::Int(6));
+    assert_eq!(evaluation.value, Value::int(6));
     assert_eq!(
         executor.peak(),
         3,
@@ -97,7 +97,7 @@ fn a_fan_out_wider_than_the_bound_runs_its_actions_in_batches() {
         .expect("the root evaluates");
 
     // 2 * (0 + 1 + 2 + 3 + 4 + 5)
-    assert_eq!(evaluation.value, Value::Int(30));
+    assert_eq!(evaluation.value, Value::int(30));
     assert_eq!(
         executor.peak(),
         ACTION_BOUND,
@@ -139,7 +139,7 @@ fn a_fan_out_resumes_in_request_order() {
     for (arity, value) in [(1_usize, 20_i64), (0, 10)] {
         engine.register_rule(
             pure_rule(&format!("leaf-{arity}"), int_interface(arity)),
-            ConstantRule(Value::Int(value)),
+            ConstantRule(Value::int(value)),
         );
     }
     let root_interface = interface(&[], Type::Text);
@@ -176,5 +176,5 @@ fn an_empty_fan_out_resumes_with_no_values() {
         .evaluate_pure(&pure_request("root", root_interface, []))
         .expect("the root evaluates");
 
-    assert_eq!(evaluation.value, Value::Int(0));
+    assert_eq!(evaluation.value, Value::int(0));
 }

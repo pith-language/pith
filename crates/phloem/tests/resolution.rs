@@ -282,7 +282,7 @@ fn the_resolution_interface_selects_exactly_one_rule() {
             inputs: Box::new([Type::Int]),
             output: Type::Int,
         },
-        [Value::Int(1)],
+        [Value::int(1)],
         pith_diag::Span::none(),
     );
     assert!(mismatched.validate_inputs().is_ok());

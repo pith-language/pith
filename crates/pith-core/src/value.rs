@@ -8,6 +8,7 @@ use pith_arena::define_arena;
 use pith_ids::ContentId;
 
 use crate::declaration::{Coordinate, Declaration, DeclarationBody};
+use crate::int::Int;
 use pith_output::dto::{SumConstructorRepr, TypeRepr, ValueRepr};
 
 define_arena!(ValueId, ValueArena, ValueBrand);
@@ -16,7 +17,11 @@ define_arena!(ValueId, ValueArena, ValueBrand);
 pub enum Value {
     Unit,
     Bool(bool),
-    Int(i64),
+    /// An integer of arbitrary precision (decision 0055). Addition,
+    /// subtraction, and multiplication are closed over it, which is what makes
+    /// arithmetic total and lets 0018's termination construction cover it
+    /// without an overflow case.
+    Int(Int),
     Text(Box<str>),
     /// Raw bytes computed or materialized by a rule. Distinct from [`Value::Blob`],
     /// which names stored content by identity.
@@ -316,7 +321,12 @@ impl From<&Value> for ValueRepr {
         match v {
             Value::Unit => ValueRepr::Unit,
             Value::Bool(b) => ValueRepr::Bool { b: *b },
-            Value::Int(n) => ValueRepr::Int { n: *n },
+            // A JSON number cannot carry an arbitrary-precision integer without
+            // a reader's float parser rounding it, so the projection renders the
+            // decimal (decision 0055).
+            Value::Int(n) => ValueRepr::Int {
+                decimal: n.to_string().into_boxed_str(),
+            },
             Value::Text(s) => ValueRepr::Text { s: s.clone() },
             Value::Bytes(b) => ValueRepr::Bytes {
                 len: b.len() as u64,
@@ -520,6 +530,12 @@ pub(crate) fn sorted_constructors(
 }
 
 impl Value {
+    /// An integer value from any machine integer that converts into an [`Int`].
+    #[must_use]
+    pub fn int(value: impl Into<Int>) -> Self {
+        Self::Int(value.into())
+    }
+
     /// Build a record value, sorting the fields into canonical name order.
     ///
     /// # Errors
@@ -628,7 +644,7 @@ mod tests {
         for v in [
             Value::Unit,
             Value::Bool(true),
-            Value::Int(-5),
+            Value::int(-5),
             Value::Text("x".into()),
             Value::Bytes(vec![0, 1, 2].into_boxed_slice()),
             Value::Blob(ContentId::of_blob(b"y")),
@@ -645,7 +661,7 @@ mod tests {
                 },
                 RecordField {
                     name: "version".into(),
-                    payload: Value::Int(1),
+                    payload: Value::int(1),
                 },
             ])
             .unwrap(),
@@ -670,6 +686,17 @@ mod tests {
             TypeRepr::Nominal { name } => assert_eq!(name.as_ref(), "test.Machine"),
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn an_arbitrary_precision_integer_does_not_widen_the_value_it_lives_in() {
+        // The magnitude is inline for the range the type used to hold, and the
+        // sum variant's three fields are wider than that, so no value in the
+        // engine grew when the integer stopped being an `i64` (decision 0055).
+        assert!(
+            size_of::<Int>() <= size_of::<(Box<str>, Box<str>, Option<Box<Value>>)>(),
+            "an integer is now the variant that decides how big every value is"
+        );
     }
 
     #[test]
@@ -701,7 +728,7 @@ mod tests {
         let values = [
             (Value::Unit, Type::Unit),
             (Value::Bool(true), Type::Bool),
-            (Value::Int(7), Type::Int),
+            (Value::int(7), Type::Int),
             (Value::Text("x".into()), Type::Text),
             (Value::Bytes(b"y".to_vec().into_boxed_slice()), Type::Bytes),
             (Value::Blob(ContentId::of_blob(b"z")), Type::Blob),
@@ -726,7 +753,7 @@ mod tests {
                     },
                     RecordField {
                         name: "version".into(),
-                        payload: Value::Int(1),
+                        payload: Value::int(1),
                     },
                 ])
                 .unwrap(),
@@ -848,7 +875,7 @@ mod tests {
         let first = Value::record([
             RecordField {
                 name: "b".into(),
-                payload: Value::Int(1),
+                payload: Value::int(1),
             },
             RecordField {
                 name: "a".into(),
@@ -863,7 +890,7 @@ mod tests {
             },
             RecordField {
                 name: "b".into(),
-                payload: Value::Int(1),
+                payload: Value::int(1),
             },
         ])
         .unwrap();
@@ -872,11 +899,11 @@ mod tests {
         let duplicate = Value::record([
             RecordField {
                 name: "a".into(),
-                payload: Value::Int(1),
+                payload: Value::int(1),
             },
             RecordField {
                 name: "a".into(),
-                payload: Value::Int(2),
+                payload: Value::int(2),
             },
         ]);
         assert_eq!(
@@ -911,7 +938,7 @@ mod tests {
             },
             RecordField {
                 name: "version".into(),
-                payload: Value::Int(1),
+                payload: Value::int(1),
             },
         ])
         .unwrap();

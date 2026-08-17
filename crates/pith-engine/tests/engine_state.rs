@@ -34,7 +34,7 @@ fn pure_computation(declaration: &str, input: i64) -> PureComputationKey {
     let request = Request::new(
         declaration,
         rule.interface.clone(),
-        [Value::Int(input)],
+        [Value::int(input)],
         Span::none(),
     );
     PureComputationKey::new(&rule, &request)
@@ -164,7 +164,7 @@ fn conformance_suite(store: &mut dyn EngineStateStore) -> Result<(), Box<dyn std
         store.create_pending_attempt(DurableComputation::Pure(dependency_key))?;
     store.publish_complete(
         dependency_attempt,
-        pure_completion(Value::Int(1), Box::new([]), DurableReuseDecision::Reusable),
+        pure_completion(Value::int(1), Box::new([]), DurableReuseDecision::Reusable),
     )?;
 
     let root_key = pure_computation("root", 2);
@@ -177,7 +177,7 @@ fn conformance_suite(store: &mut dyn EngineStateStore) -> Result<(), Box<dyn std
     store.publish_complete(
         first_root,
         pure_completion(
-            Value::Int(3),
+            Value::int(3),
             Box::new([
                 DurableDependency::Blob { content },
                 DurableDependency::Pure {
@@ -196,7 +196,7 @@ fn conformance_suite(store: &mut dyn EngineStateStore) -> Result<(), Box<dyn std
     store.publish_complete(
         second_root,
         pure_completion(
-            Value::Int(3),
+            Value::int(3),
             Box::new([DurableDependency::Pure {
                 computation: dependency_key,
                 attempt: dependency_attempt,
@@ -248,7 +248,7 @@ fn conformance_suite(store: &mut dyn EngineStateStore) -> Result<(), Box<dyn std
             DurableDependency::CapabilityUse { capability },
         ]
     );
-    assert_eq!(first_completion.result.decode(), Ok(Value::Int(3)));
+    assert_eq!(first_completion.result.decode(), Ok(Value::int(3)));
     assert_eq!(
         store
             .latest_completed_reusable_attempt(root_key)?
@@ -455,7 +455,7 @@ fn mismatched_provenance_does_not_partially_publish() -> Result<(), Box<dyn std:
         attempt,
         CompletedAttempt {
             dependencies: Box::new([]),
-            result: EncodedValue::from_value(&Value::Int(1)),
+            result: EncodedValue::from_value(&Value::int(1)),
             provenance: DurableProvenance::Action(DurableActionProvenance::NotExecuted),
             reuse: DurableReuseDecision::Reusable,
             capabilities: Box::new([]),
@@ -482,7 +482,7 @@ fn invalid_dependency_edges_do_not_publish() -> Result<(), Box<dyn std::error::E
         store.create_pending_attempt(DurableComputation::Pure(dependency_key))?;
     store.publish_complete(
         dependency_attempt,
-        pure_completion(Value::Int(1), Box::new([]), DurableReuseDecision::Reusable),
+        pure_completion(Value::int(1), Box::new([]), DurableReuseDecision::Reusable),
     )?;
 
     let pending_dependency_key = pure_computation("pending-dependency", 1);
@@ -556,7 +556,7 @@ fn invalid_dependency_edges_do_not_publish() -> Result<(), Box<dyn std::error::E
         let result = store.publish_complete(
             root,
             pure_completion(
-                Value::Int(1),
+                Value::int(1),
                 Box::new([dependency]),
                 DurableReuseDecision::Reusable,
             ),
@@ -621,7 +621,7 @@ fn pure_reuse_is_derived_from_ordered_dependencies() -> Result<(), Box<dyn std::
         let result = store.publish_complete(
             pure_attempt,
             pure_completion_requiring(
-                Value::Int(1),
+                Value::int(1),
                 Box::new([DurableDependency::Action {
                     attempt: action_attempt,
                 }]),
@@ -643,7 +643,7 @@ fn pure_reuse_is_derived_from_ordered_dependencies() -> Result<(), Box<dyn std::
     store.publish_complete(
         pure_attempt,
         pure_completion_requiring(
-            Value::Int(1),
+            Value::int(1),
             Box::new([DurableDependency::Action {
                 attempt: action_attempt,
             }]),
@@ -843,7 +843,7 @@ fn capability_requirements_a_dependency_does_not_carry_are_rejected()
     let dependency = store.create_pending_attempt(DurableComputation::Pure(dependency_key))?;
     store.publish_complete(
         dependency,
-        pure_completion(Value::Int(1), Box::new([]), DurableReuseDecision::Reusable),
+        pure_completion(Value::int(1), Box::new([]), DurableReuseDecision::Reusable),
     )?;
 
     let parent_key = pure_computation("capability-claiming", 1);
@@ -851,7 +851,7 @@ fn capability_requirements_a_dependency_does_not_carry_are_rejected()
     let result = store.publish_complete(
         parent,
         pure_completion_requiring(
-            Value::Int(2),
+            Value::int(2),
             Box::new([DurableDependency::Pure {
                 computation: dependency_key,
                 attempt: dependency,

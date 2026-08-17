@@ -13,7 +13,7 @@
 
 use pith_core::{
     ActionInput, ActionOutput, ActionProgram, ActionSpec, CanonicalDecodeError,
-    CapabilityRequirement, Content, DeclarationTable, EnvironmentVariable, ExitStatusContract,
+    CapabilityRequirement, Content, DeclarationTable, EnvironmentVariable, ExitStatusContract, Int,
     NetworkPolicy, OutputKind, PlatformRequirement, RecordField, SumConstructor, Type, Value,
 };
 use pith_ids::ContentId;
@@ -119,13 +119,31 @@ fn declared_sum(name: &str, constructors: [SumConstructor; 1]) -> Type {
     }
 }
 
+/// Integers on both sides of the boundary the type used to stop at: a machine
+/// integer, and a product of several of them, whose magnitude runs to hundreds
+/// of bits. The generated population is what holds the codec's minimal-magnitude
+/// rule against lengths no `i64` can produce (decision 0055).
+fn int_strategy() -> impl Strategy<Value = Int> {
+    prop_oneof![
+        any::<i64>().prop_map(Int::from),
+        (any::<bool>(), proptest::collection::vec(any::<i64>(), 1..6)).prop_map(
+            |(negative, factors)| {
+                let product = factors.into_iter().fold(Int::from(1), |product, factor| {
+                    product.multiplied(&Int::from(factor))
+                });
+                if negative { product.negated() } else { product }
+            }
+        ),
+    ]
+}
+
 /// Scalar-only generators used both directly and as the bounded
 /// representation inside a nominal value, so `value_strategy` stays finite.
 fn scalar_value_strategy() -> impl Strategy<Value = Value> {
     prop_oneof![
         Just(Value::Unit),
         any::<bool>().prop_map(Value::Bool),
-        any::<i64>().prop_map(Value::Int),
+        int_strategy().prop_map(Value::Int),
         bounded_string(24).prop_map(|s| Value::Text(s.into_boxed_str())),
         bounded_bytes(32).prop_map(|b| Value::Bytes(b.into_boxed_slice())),
         bounded_bytes(32).prop_map(|b| Value::Blob(ContentId::of_blob(&b))),
@@ -136,7 +154,7 @@ fn value_strategy() -> impl Strategy<Value = Value> {
     prop_oneof![
         Just(Value::Unit),
         any::<bool>().prop_map(Value::Bool),
-        any::<i64>().prop_map(Value::Int),
+        int_strategy().prop_map(Value::Int),
         bounded_string(24).prop_map(|s| Value::Text(s.into_boxed_str())),
         bounded_bytes(32).prop_map(|b| Value::Bytes(b.into_boxed_slice())),
         bounded_bytes(32).prop_map(|b| Value::Blob(ContentId::of_blob(&b))),

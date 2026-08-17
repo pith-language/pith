@@ -65,7 +65,7 @@ pub(super) fn action_computation(
         inputs: Box::new([Type::Int]),
         output: Type::Blob,
     };
-    let inputs = [Value::Int(i64::from(executable))];
+    let inputs = [Value::int(i64::from(executable))];
     let computation_digest = ActionComputationKey::from_parts(
         identity,
         revision,

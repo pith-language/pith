@@ -12,7 +12,7 @@ fn an_identical_action_is_served_from_the_reusable_index() {
     engine.register_rule(
         pure_rule("entry", root_interface.clone()),
         ActionDepRule {
-            dependency: action_request("double", action_interface, [Value::Int(21)]),
+            dependency: action_request("double", action_interface, [Value::int(21)]),
         },
     );
     let executions = Arc::new(AtomicUsize::new(0));
@@ -84,7 +84,7 @@ fn a_consumer_reruns_when_its_action_replans_a_different_contract() {
     engine.register_rule(
         pure_rule("entry", root_interface.clone()),
         ActionDepRule {
-            dependency: action_request("double", action_interface, [Value::Int(21)]),
+            dependency: action_request("double", action_interface, [Value::int(21)]),
         },
     );
     let executions = Arc::new(AtomicUsize::new(0));
@@ -132,7 +132,7 @@ fn a_pure_only_evaluation_will_not_serve_a_consumer_of_an_action() {
     engine.register_rule(
         pure_rule("entry", root_interface.clone()),
         ActionDepRule {
-            dependency: action_request("double", action_interface, [Value::Int(21)]),
+            dependency: action_request("double", action_interface, [Value::int(21)]),
         },
     );
     let executions = Arc::new(AtomicUsize::new(0));
@@ -171,7 +171,7 @@ fn an_engine_with_caching_off_executes_every_action() {
     engine.register_rule(
         pure_rule("entry", root_interface.clone()),
         ActionDepRule {
-            dependency: action_request("double", action_interface, [Value::Int(21)]),
+            dependency: action_request("double", action_interface, [Value::int(21)]),
         },
     );
     let executions = Arc::new(AtomicUsize::new(0));
@@ -223,7 +223,7 @@ fn distinct_parents_share_one_action_result() {
     let action_interface = interface(&[Type::Int], Type::Blob);
     let boolean_parent_interface = interface(&[Type::Bool], Type::Blob);
     let text_parent_interface = interface(&[Type::Text], Type::Blob);
-    let dependency = action_request("double", action_interface.clone(), [Value::Int(21)]);
+    let dependency = action_request("double", action_interface.clone(), [Value::int(21)]);
     engine.register_action_rule(action_rule("double", action_interface), DoubleAction);
     engine.register_rule(
         pure_rule("boolean parent", boolean_parent_interface.clone()),
@@ -304,7 +304,7 @@ fn an_action_below_the_confinement_floor_is_not_reused() {
     engine.register_rule(
         pure_rule("entry", root_interface.clone()),
         ActionDepRule {
-            dependency: action_request("double", action_interface, [Value::Int(21)]),
+            dependency: action_request("double", action_interface, [Value::int(21)]),
         },
     );
     let executions = Arc::new(AtomicUsize::new(0));

@@ -167,7 +167,7 @@ fn a_result_computed_by_another_process_hydrates_here() {
     };
 
     assert_eq!(evaluation.source, EvaluationSource::Hydrated);
-    assert_eq!(evaluation.value, Value::Int(7));
+    assert_eq!(evaluation.value, Value::int(7));
     // The writer's attempt was adopted, not duplicated.
     let history = match engine.state_store().attempt_history(leaf_key()) {
         Ok(history) => history,
@@ -197,7 +197,7 @@ fn a_dependency_changed_by_another_process_makes_the_consumer_dirty() {
         };
         let completion = CompletedAttempt {
             dependencies: Box::new([]),
-            result: EncodedValue::from_value(&Value::Int(42)),
+            result: EncodedValue::from_value(&Value::int(42)),
             provenance: DurableProvenance::Pure,
             reuse: DurableReuseDecision::Reusable,
             capabilities: Box::new([]),
@@ -218,7 +218,7 @@ fn a_dependency_changed_by_another_process_makes_the_consumer_dirty() {
         Err(error) => unreachable!("the leaf did not hydrate: {error:?}"),
     };
     assert_eq!(evaluation.source, EvaluationSource::Hydrated);
-    assert_eq!(evaluation.value, Value::Int(42));
+    assert_eq!(evaluation.value, Value::int(42));
 }
 
 // ---------------------------------------------------------------------------
@@ -239,7 +239,7 @@ fn records_survive_closing_and_reopening_the_database() {
         };
         let completion = CompletedAttempt {
             dependencies: Box::new([]),
-            result: EncodedValue::from_value(&Value::Int(5)),
+            result: EncodedValue::from_value(&Value::int(5)),
             provenance: DurableProvenance::Pure,
             reuse: DurableReuseDecision::Reusable,
             capabilities: Box::new([]),
@@ -261,7 +261,7 @@ fn records_survive_closing_and_reopening_the_database() {
     let DurableAttemptState::Complete(completion) = &reopened.state else {
         unreachable!("the reopened attempt is not complete");
     };
-    assert_eq!(completion.result.decode().ok(), Some(Value::Int(5)));
+    assert_eq!(completion.result.decode().ok(), Some(Value::int(5)));
 }
 
 #[test]
@@ -487,7 +487,7 @@ fn an_incompatible_database_is_moved_aside_and_rebuilt() {
         };
         let completion = CompletedAttempt {
             dependencies: Box::new([]),
-            result: EncodedValue::from_value(&Value::Int(3)),
+            result: EncodedValue::from_value(&Value::int(3)),
             provenance: DurableProvenance::Pure,
             reuse: DurableReuseDecision::Reusable,
             capabilities: Box::new([]),

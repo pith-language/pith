@@ -19,7 +19,7 @@ fn blob_dependency_resumes_with_bytes_and_records_edge() {
         .unwrap()
         .unwrap();
 
-    assert_eq!(evaluation.value, Value::Int(5));
+    assert_eq!(evaluation.value, Value::int(5));
     let deps = engine
         .query()
         .dependencies_of(evaluation.computation)
