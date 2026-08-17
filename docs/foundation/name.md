@@ -46,13 +46,15 @@ source files use `.pi`. generated files use a distinct name so they are visibly 
 
 ## store paths
 
-storage is defined in [identity and storage](../design/identity-and-storage.md). the on-disk layout uses `pith` as the root.
+this section is the intended layout, not the built one. nothing below exists yet, and the distinction matters because this document is `active` — the names are fixed, the paths are a plan.
 
 - `/pith/store/<digest>-<name>` is a content-addressed store path, the same shape as `/nix/store` in nix.
 - `/pith/blob/<digest>` is a raw immutable blob.
 - `/pith/tree/<digest>` is a serialized tree value.
 - `/etc/pithos` holds system configuration for pithos.
 - `/pith/var/cache` holds the local cache.
+
+what `pith-store` builds today is a caller-supplied root holding `blobs/<digest>` and `trees/<digest>`, with no absolute prefix, no `<digest>-<name>` shape, and no system location — a build fixture points it at a temporary directory. an absolute root is a system-installation concern that arrives with the first installable artifact, and the `<digest>-<name>` shape is a legibility choice the digest-only path does not need yet. storage is otherwise described in [identity and storage](../design/identity-and-storage.md), which specifies no layout, so this list is the only written one.
 
 materialization is separate from identity. a graph can refer to remote content without copying it to the local filesystem.
 
@@ -78,6 +80,10 @@ first-party libraries take names from the parts of a plant stem. each name lines
 - `lenticel` is the adapter ports, the pores that let things cross the bark.
 
 the intent is that the names are self-explaining once the mapping is known.
+
+the scheme holds for the domain libraries and not yet for the kernel. `xylem` and `phloem` exist under these names and in these roles. the kernel ships as ten `pith-*` crates rather than one `pith`, split along the boundaries the implementation found — `pith-core` for the typed ir, `pith-engine` and `pith-arena` for the rule and graph engine that `cambium` names, then `pith-ids`, `pith-store`, `pith-state-sqlite`, `pith-diag`, `pith-output`, `pith-executor-local`, and `pith-cli`. `bark`, `periderm`, and `lenticel` name roles no crate fills.
+
+whether the kernel's split is permanent or collapses toward `pith` and `cambium` is a question the release record owns, since crate boundaries become a published surface at that point and not before. until then the `pith-*` prefix says what a crate is part of, which is the property a twelve-crate workspace needs and a seven-name scheme does not supply.
 
 ### community packages
 
@@ -121,6 +127,6 @@ one root domain is used, with subdomains for each surface.
 
 ## namespaces
 
-- the crates are `pith`, `cambium`, `xylem`, `phloem`, `bark`, `periderm`, and `lenticel`.
+- the reserved crate names are `pith`, `cambium`, `xylem`, `phloem`, `bark`, `periderm`, and `lenticel`. the workspace today publishes none of them: `xylem` and `phloem` exist, the kernel is ten `pith-*` crates, and `publish = false` holds across all of them under 0048.
 - the github organization is `pith-language` and the codeberg organization is `pith`.
 - the package registry namespace is `pithpkgs`.
