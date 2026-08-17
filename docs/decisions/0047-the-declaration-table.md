@@ -60,7 +60,7 @@ so declarations follow rules, not values: identity by coordinate, revision by di
 
 a declaration's digest is a domain-separated hash over its coordinate, its kind, and the canonical encoding of its body — the representation type for a nominal, the sorted constructor set for a sum, the target for an alias. self-reference inside the body (see recursion below) encodes as a dedicated cut tag, not as a nested digest.
 
-three things must not move it, on Dhall's ground that a digest must not move for what no reader can observe: a doc-comment change, declaration order in the table, and formatting. the table's registration order is not content and does not participate; two tables holding the same declarations in different orders derive the same digest per declaration. one thing must move it: a change to what the declaration says — the representation type, the constructor set, a payload's type. these claims are tested against the real population, not invented fixtures: xylem's six nominal declarations and phloem's `Source` sum and nominal set are built from tables in this round.
+three things must not move it, on Dhall's ground that a digest must not move for what no reader can observe: a doc-comment change, declaration order in the table, and formatting. the table's registration order is not content and does not participate; two tables holding the same declarations in different orders derive the same digest per declaration. one thing must move it: a change to what the declaration says — the representation type, the constructor set, a payload's type. these claims are tested against the real population, not invented fixtures: xylem's six nominal declarations and phloem's five declared sums and nominal set are built from tables in this round. the sums are `phloem.Source`, `phloem.Origin`, `phloem.Range`, `phloem.Preference`, and `phloem.Resolution`, all constructed through the one `sum_type` helper in `codec.rs`, which is the seam the migration goes through.
 
 ### the type carries its declaration; the value keeps its name
 
@@ -80,13 +80,15 @@ structural aliases may not be recursive. an alias has no coordinate spelling —
 
 one consequence is accepted and recorded: mutual recursion between declared sums is unconstructible under ordered registration, since each sum's body would need the other's digest. direct self-recursion covers the build-domain shapes (trees, linked structures); forward references belong to the module-system work if a measured need appears.
 
-### Int is arbitrary precision
+### Int is arbitrary precision, in the round that computes with it
 
-0026 says `Int` is arbitrary precision; `Value::Int(i64)` implemented 64-bit. the record picks arbitrary precision, and the codec matches: a sign and a length-prefixed magnitude.
+> the argument below stands and its landing moved. arbitrary precision is deferred to the record that lands arithmetic, on the grounds given under serialization: it has no consumer here, and its incidental surface is larger than the declaration table's. `Value::Int(i64)` stands until then.
+
+0026 says `Int` is arbitrary precision; `Value::Int(i64)` implemented 64-bit. the record picks arbitrary precision, and the codec matches when it lands: a sign and a length-prefixed magnitude.
 
 the argument that decides it is totality, 0018's ground. `Int` closed under addition and multiplication makes arithmetic total, and 0018's claim that the pure fragment terminates by construction then covers arithmetic wholesale — the empty-cache equivalence holds because no input can leave the finitary operations, not because someone inspected them. a fixed width makes arithmetic partial — overflow is a run-time failure 0018 would have to admit as a backstop on pure code, which its own text refuses ("a limit ... is never the primary defense against non-termination in pure code"). bounds on integers remain what 0026 says they are: a library concern via validation, not a scalar proliferation.
 
-no arithmetic lands in this round — the kernel computes nothing over `Int` yet — so the totality argument is prospective and the record says so. what lands is the representation, the round-trip beyond the 64-bit range, and the stable digest.
+no arithmetic lands in this round — the kernel computes nothing over `Int` yet — so the totality argument is prospective, and that is the reason the representation waits for it. the round that lands arithmetic lands the representation, the round-trip beyond the 64-bit range, and the stable digest together, where the totality claim can be measured rather than stated.
 
 ### a rule's revision derives from the declarations its interface names
 
@@ -104,11 +106,15 @@ leaves the set: the five effect categories as value-type constructors. this is t
 
 stays in the set, unbuilt: the five uncertainty constructors, `Unknown`, `Unchecked<T>`, `Stale<T>`, `Conflicted<T>`, `Unreachable`. they pass 0026's test as designed but not as measured — the subsystems that would read them structurally (the cache's staleness surface, the merge operator's conflict promotion, the observation tier's unreachability, the surface's gradual consistency) are themselves unbuilt, and 0033's revalidation already shows staleness living as a graph fact on durable records. each stays gated on the subsystem that reads it: `Stale` and `Conflicted` on the merge operator and invalidation surfaces, `Unchecked` on the first validation boundary, `Unknown` on the surface's gradual typing, `Unreachable` on the observation tier. landing one without its reader would repeat the `Type::Nominal` history — a declared, encoded, digested constructor nothing inhabits.
 
-built now: the declaration table itself with its three kinds, the recursive cut, and `Int` completed to arbitrary precision. nothing else. 0026's amendment is a net shrink of the primitive set with one completion, which is what an honest application of its own test yields.
+built now: the declaration table itself with its three kinds, and the recursive cut. nothing else — `Int` moves to the arithmetic round for the reason given above. 0026's amendment is a net shrink of the primitive set, which is what an honest application of its own test yields.
 
-### serialization moves once
+### serialization does not move
 
-`ENCODING_VERSION` moves from 1 to 2, once, for everything this round changes: the `Int` shape (sign and length-prefixed magnitude), `Nominal` and `Sum` carrying module, name, kind, and body, and the recursion cut's tag. `RECORD_ENCODING_VERSION` moves from 1 to 2 on its own stated terms — it "starts moving for any change a prior build would misread," and the retained-value grammar grew. a pre-release database is moved aside and rebuilt, which the existing test asserts.
+> amended by [0048](0048-pre-release-version-pinning.md), which pins every version in the tree at 1 until the first tag. the paragraph below planned two bumps; neither happens. what the round still does is discard the pre-release database, which was always the mechanism — 0048 makes it the only one.
+
+`ENCODING_VERSION` stays at 1 while the grammar it gates changes: `Nominal` and `Sum` grow to carry module, name, kind, and body, and the recursion cut takes a tag. `RECORD_ENCODING_VERSION` stays at 1 for the same reason, because the retained-value grammar grew with no released reader to misread it. the pre-release database is moved aside and rebuilt, which the existing test asserts, and that discard is what a version mismatch would otherwise have announced.
+
+the `Int` shape is no longer part of this round. arbitrary precision has no consumer — this record says so itself, "no arithmetic lands in this round" — and it carries the largest incidental surface of anything here: an arbitrary-precision dependency in a kernel with few, or a hand-rolled magnitude under `arithmetic_side_effects = "deny"`, a variable-width canonical encoding, and digest stability for every `Int`-bearing value. it belongs to the record that lands arithmetic, and `Value::Int(i64)` stands until then. the totality argument this record makes for arbitrary precision is unaffected by the delay and moves there with it.
 
 the digest domains stay at `v1`. nothing released has ever persisted a digest over the old manifest shapes, so there is no state to protect and nothing to migrate; bumping the domains would be ceremony over an empty warehouse. the Dhall 1.17.0 lesson is carried as the rule for when there is a release: from then on, a change to what participates in any digest is a domain bump or an explicit migration, never a silent basis change — which is 0023's rule, restated with the precedent attached.
 
@@ -142,7 +148,7 @@ the GHC shape — types carry names, the environment resolves. rejected for this
 
 the representation hole closes at the type side: a value naming `xylem.Object` with a non-`Blob` representation no longer inhabits any interface declaring it, at request validation and result checking alike, and the first test of that is the one that demonstrates the hole in the committed tree before the change.
 
-every nominal and sum construction site migrates from string literals and inline constructor sets to table references: xylem's six nominal types and six interfaces, phloem's `Source` sum and nominal set. the value constructors stay unchanged — values carry names, and the names are the coordinates the declarations now own. computation keys move, because canonical encodings changed shape; pre-release, that is the moved-aside-and-rebuilt path the record above states.
+every nominal and sum construction site migrates from string literals and inline constructor sets to table references: xylem's six nominal types and six interfaces, phloem's five declared sums and nominal set. the migration is smaller than the raw construction-site count suggests: of roughly 102 `Type`/`Value` `Nominal`/`Sum` sites in non-test source, 48 are inside `pith-core`'s own `value.rs` and `value_codec.rs` — the definition and the codec, which this round rewrites rather than migrates. the domain surface is about 26 in xylem, 24 of them in the single `types.rs` that becomes xylem's declaration table, and about 22 in phloem, at most four per file after `8ef5dc4` centralized its sum construction. the value constructors stay unchanged — values carry names, and the names are the coordinates the declarations now own. computation keys move, because canonical encodings changed shape; pre-release, that is the moved-aside-and-rebuilt path the record above states.
 
 the `b"xylem-v3"` constant and phloem's per-rule constants after it lose their reason to exist as granularity; phloem's constants survive this round unchanged (its rules are host-tier like xylem's, and its migration to derived revisions follows the same path xylem's takes here). host-tier body changes remain covered by discipline until 0038's tier lands.
 
