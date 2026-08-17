@@ -8,21 +8,10 @@ use pith_engine::{
     Resumption,
 };
 
-struct ConstantRule(Value);
+#[path = "support/constant_rule.rs"]
+mod constant_rule_support;
 
-impl PureRule for ConstantRule {
-    fn start(&self, _inputs: &[Value]) -> Box<dyn PureRuleFrame> {
-        Box::new(ConstantFrame(self.0.clone()))
-    }
-}
-
-struct ConstantFrame(Value);
-
-impl PureRuleFrame for ConstantFrame {
-    fn step(&mut self, _input: Option<Resumption>) -> PithResult<PureStep> {
-        Ok(PureStep::Complete(self.0.clone()))
-    }
-}
+use constant_rule_support::{ConstantFrame, ConstantRule};
 
 struct FailingRule;
 
