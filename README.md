@@ -134,5 +134,8 @@ analysis, `just ci` runs the full local suite. The Linux executor and system
 fixtures compile to zero tests elsewhere, so a green run on another platform has
 not exercised those paths.
 
+Contributions are guided by [CONTRIBUTING](CONTRIBUTING.md), including the
+project's authorship and AI-tool terms.
+
 Pith is licensed under [Apache 2.0](./LICENSE). Third-party notices are
 collected in [NOTICE](./NOTICE).

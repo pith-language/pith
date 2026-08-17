@@ -6,7 +6,7 @@ summary: map of the project foundation, current design, requirements, research, 
 kind: index
 status: active
 created: 2026-02-24
-updated: 2026-08-18
+updated: 2026-08-20
 tags:
   - documentation
 relations:
@@ -36,6 +36,11 @@ the repository separates current design from the evidence and decisions that pro
 - [effects and capabilities](design/effects-and-capabilities.md)
 - [identity and storage](design/identity-and-storage.md)
 - [first-party domains](design/first-party-domains.md)
+
+## brand
+
+- [identity process](brand/process.md)
+- [identity system](brand/system.md)
 
 ## requirements
 

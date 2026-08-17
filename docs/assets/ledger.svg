@@ -2,40 +2,44 @@
 <title id="ledger-t">Action computations planned</title>
 <desc id="ledger-d">A cold build plans five action computations. Editing one of the two sources plans three. When nothing changed, none: the root is reused. In a new process over the same store, none: the recorded attempt is hydrated.</desc>
 <style>
-  :root { --ink: #191e1b; --muted: #6a716c; --line: #d4d6d1; }
-  @media (prefers-color-scheme: dark) { :root { --ink: #e9ebe7; --muted: #8d948e; --line: #2f3531; } }
-  text { font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  :root { --bg: #F0EAD8; --ink: #23201A; --muted: #4E4936; --line: #938E82; --good: #2E5A3C; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1A1C17; --ink: #F0EAD8; --muted: #8A927B; --line: #494B41; --good: #5E8A6E; } }
+  text { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
   .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
   .head { font-size: 12px; letter-spacing: 1.4px; fill: var(--muted); }
   .label { font-size: 18px; fill: var(--ink); }
   .num { font-size: 64px; font-weight: 600; fill: var(--ink); }
+  .num.good { fill: var(--good); }
   .note { font-size: 12px; letter-spacing: 1.2px; fill: var(--muted); }
+  .note.good { fill: var(--good); }
   .rule { stroke: var(--line); stroke-width: 1; }
   .lead { stroke: var(--line); stroke-width: 1; stroke-dasharray: 1 6; }
 </style>
 
-<text class="mono head" x="30" y="26" fill="#6a716c">ACTION COMPUTATIONS PLANNED</text>
-<line class="rule" x1="30" y1="44" x2="870" y2="44" stroke="#d4d6d1"/>
+<rect width="900" height="348" fill="var(--bg)"/>
 
-<text class="label" x="30" y="112" fill="#191e1b">cold build</text>
-<line class="lead" x1="250" y1="106" x2="690" y2="106" stroke="#d4d6d1"/>
-<text class="num" x="750" y="112" text-anchor="end" fill="#191e1b">5</text>
-<line class="rule" x1="30" y1="130" x2="870" y2="130" stroke="#d4d6d1"/>
+<text class="mono head" x="30" y="26">ACTION COMPUTATIONS PLANNED</text>
+<line class="rule" x1="30" y1="44" x2="870" y2="44"/>
 
-<text class="label" x="30" y="178" fill="#191e1b">one source edited</text>
-<line class="lead" x1="250" y1="172" x2="690" y2="172" stroke="#d4d6d1"/>
-<text class="num" x="750" y="178" text-anchor="end" fill="#191e1b">3</text>
-<line class="rule" x1="30" y1="196" x2="870" y2="196" stroke="#d4d6d1"/>
+<text class="label" x="30" y="94">cold build</text>
+<line class="lead" x1="250" y1="87" x2="690" y2="87"/>
+<text class="mono num" x="750" y="109" text-anchor="end">5</text>
+<line class="rule" x1="30" y1="130" x2="870" y2="130"/>
 
-<text class="label" x="30" y="244" fill="#191e1b">nothing changed</text>
-<line class="lead" x1="250" y1="238" x2="690" y2="238" stroke="#d4d6d1"/>
-<text class="num" x="750" y="244" text-anchor="end" fill="#191e1b">0</text>
-<text class="mono note" x="870" y="244" text-anchor="end" fill="#6a716c">REUSED</text>
-<line class="rule" x1="30" y1="262" x2="870" y2="262" stroke="#d4d6d1"/>
+<text class="label" x="30" y="170">one source edited</text>
+<line class="lead" x1="250" y1="163" x2="690" y2="163"/>
+<text class="mono num" x="750" y="185" text-anchor="end">3</text>
+<line class="rule" x1="30" y1="196" x2="870" y2="196"/>
 
-<text class="label" x="30" y="310" fill="#191e1b">new process, same store</text>
-<line class="lead" x1="250" y1="304" x2="690" y2="304" stroke="#d4d6d1"/>
-<text class="num" x="750" y="310" text-anchor="end" fill="#191e1b">0</text>
-<text class="mono note" x="870" y="310" text-anchor="end" fill="#6a716c">HYDRATED</text>
-<line class="rule" x1="30" y1="328" x2="870" y2="328" stroke="#d4d6d1"/>
+<text class="label" x="30" y="236">nothing changed</text>
+<line class="lead" x1="250" y1="229" x2="690" y2="229"/>
+<text class="mono num good" x="750" y="251" text-anchor="end">0</text>
+<text class="mono note good" x="870" y="251" text-anchor="end">REUSED</text>
+<line class="rule" x1="30" y1="262" x2="870" y2="262"/>
+
+<text class="label" x="30" y="302">new process, same store</text>
+<line class="lead" x1="250" y1="295" x2="690" y2="295"/>
+<text class="mono num good" x="750" y="317" text-anchor="end">0</text>
+<text class="mono note good" x="870" y="317" text-anchor="end">HYDRATED</text>
+<line class="rule" x1="30" y1="328" x2="870" y2="328"/>
 </svg>
