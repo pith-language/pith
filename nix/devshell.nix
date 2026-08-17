@@ -42,6 +42,8 @@
         pkgs.cargo-machete
         pkgs.cargo-deny
         pkgs.cargo-fuzz
+        pkgs.cargo-modules
+        pkgs.tokei
         pkgs.typos
         pkgs.lychee
         pkgs.bacon
