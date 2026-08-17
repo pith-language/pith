@@ -254,15 +254,27 @@ impl<K: EffectCategory> Rule<K> {
     /// revision of every rule whose interface names it, with no author edit;
     /// changing an unrelated declaration moves nothing.
     ///
-    /// What it does not cover is a host-tier rule *body* that changes while its
-    /// interface and every declaration in it stay fixed. That is 0023's recorded
-    /// conservatism for the host tier, narrowed from "one edit moves every rule
-    /// in the library" to "an interface-level change is automatic, a body-level
-    /// change is not." The body half arrives with 0038's represented tier, whose
-    /// revisions derive from canonical ir.
-    pub fn declared(module: &str, label: &str, interface: Interface, span: Span) -> Self {
+    /// The interface cannot see a host-tier rule *body* that changes while it and
+    /// every declaration in it stay fixed, which is why `body` is the second
+    /// input and not a convenience: decision 0023 asks for both halves, and says
+    /// an implementation-local version "can be one revision-manifest input, but
+    /// it is not the only input for rust-hosted code."
+    ///
+    /// So the two halves cover the two ways a rule's meaning moves. An interface
+    /// or declaration change is automatic. A body change is an explicit bump of
+    /// `body`, per rule — which is what the retired per-library constants got
+    /// wrong in the other direction: one edit moved every rule in the library.
+    /// The bump stops being the author's job when 0038's represented tier lands
+    /// and a body's revision derives from canonical ir.
+    pub fn declared(
+        module: &str,
+        label: &str,
+        body: BodyRevision,
+        interface: Interface,
+        span: Span,
+    ) -> Self {
         let identity = RuleIdentity::of_module_declaration(module, label);
-        let revision = RuleRevision::of_manifest(identity, &revision_manifest(&interface));
+        let revision = RuleRevision::of_manifest(identity, &revision_manifest(body, &interface));
         Self {
             identity,
             revision,
@@ -274,9 +286,19 @@ impl<K: EffectCategory> Rule<K> {
     }
 }
 
-/// The revision manifest for a rule declared over `interface`.
+/// The author-maintained half of a rule's revision: a number the author bumps
+/// when the rule's body changes in a way that could change a result
+/// (decision 0023).
 ///
-/// The canonical interface encoding, and nothing else.
+/// Per rule rather than per library. The declaration half of the revision is
+/// derived and needs no bump, so this moves only for what the derivation cannot
+/// see, and moving it invalidates one rule instead of every rule beside it.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct BodyRevision(pub u32);
+
+/// The revision manifest for a rule declared over `interface` at `body`.
+///
+/// Two inputs: the author's body revision, and the canonical interface encoding.
 ///
 /// Decision 0047 specifies this as the interface encoding *plus* the sorted
 /// digests of every declaration that encoding reaches. The second half is
@@ -291,8 +313,8 @@ impl<K: EffectCategory> Rule<K> {
 /// considered and rejected, where a type carries a bare coordinate — the digest
 /// half becomes load-bearing and this manifest has to grow it. Under 0048 that is
 /// a digest-domain bump rather than a silent basis change.
-fn revision_manifest(interface: &Interface) -> Vec<u8> {
-    let mut manifest = Vec::new();
+fn revision_manifest(body: BodyRevision, interface: &Interface) -> Vec<u8> {
+    let mut manifest = body.0.to_le_bytes().to_vec();
     encode_interface(&mut manifest, interface);
     manifest
 }
@@ -799,7 +821,7 @@ mod derived_revisions {
     }
 
     fn revision_of(interface: Interface) -> RuleRevision {
-        Rule::<Pure>::declared("m", "r", interface, Span::none()).revision
+        Rule::<Pure>::declared("m", "r", BodyRevision(1), interface, Span::none()).revision
     }
 
     #[test]
@@ -862,12 +884,14 @@ mod derived_revisions {
         let over_blob = Rule::<Pure>::declared(
             "m",
             "compile",
+            BodyRevision(1),
             interface_over(declared_nominal("m", "CSource", Type::Blob), Type::Unit),
             Span::none(),
         );
         let over_text = Rule::<Pure>::declared(
             "m",
             "compile",
+            BodyRevision(1),
             interface_over(declared_nominal("m", "CSource", Type::Text), Type::Unit),
             Span::none(),
         );
@@ -880,11 +904,79 @@ mod derived_revisions {
     }
 
     #[test]
+    fn a_body_revision_moves_the_revision_and_nothing_else() {
+        // The half the interface cannot see (decision 0023). Without it a host
+        // rule whose body changes while its interface holds still has no way to
+        // invalidate, which is what deleting the per-library constants would have
+        // cost if the derivation had been the only input.
+        let interface = interface_over(declared_nominal("m", "CSource", Type::Blob), Type::Unit);
+        let at = |body: u32| {
+            Rule::<Pure>::declared(
+                "m",
+                "r",
+                BodyRevision(body),
+                interface.clone(),
+                Span::none(),
+            )
+        };
+        assert_ne!(at(1).revision, at(2).revision);
+        assert_eq!(at(1).revision, at(1).revision);
+        // The coordinate is not the revision: bumping a body leaves identity put.
+        assert_eq!(at(1).identity, at(2).identity);
+    }
+
+    #[test]
+    fn the_two_revision_halves_are_independent() {
+        // Neither half can mask the other: a body bump is visible at every
+        // interface, and an interface change is visible at every body revision.
+        let blob = interface_over(declared_nominal("m", "CSource", Type::Blob), Type::Unit);
+        let text = interface_over(declared_nominal("m", "CSource", Type::Text), Type::Unit);
+        let at = |body: u32, interface: Interface| {
+            Rule::<Pure>::declared("m", "r", BodyRevision(body), interface, Span::none()).revision
+        };
+        let (a, b, c, d) = (
+            at(1, blob.clone()),
+            at(2, blob),
+            at(1, text.clone()),
+            at(2, text),
+        );
+        for (left, right) in [(&a, &b), (&a, &c), (&a, &d), (&b, &c), (&b, &d), (&c, &d)] {
+            assert_ne!(left, right, "two of the four combinations collided");
+        }
+    }
+
+    #[test]
+    fn a_body_revision_does_not_leak_across_rules() {
+        // Per rule, not per library: the defect the retired constants had in the
+        // other direction, where one edit moved every rule beside it.
+        let interface = interface_over(Type::Unit, Type::Unit);
+        let bumped = Rule::<Pure>::declared(
+            "m",
+            "compile",
+            BodyRevision(2),
+            interface.clone(),
+            Span::none(),
+        );
+        let untouched = Rule::<Pure>::declared(
+            "m",
+            "link",
+            BodyRevision(1),
+            interface.clone(),
+            Span::none(),
+        );
+        let untouched_again =
+            Rule::<Pure>::declared("m", "link", BodyRevision(1), interface, Span::none());
+        assert_eq!(untouched.revision, untouched_again.revision);
+        assert_ne!(bumped.revision, untouched.revision);
+    }
+
+    #[test]
     fn two_modules_declaring_one_rule_label_are_two_rules() {
         assert_ne!(
             Rule::<Pure>::declared(
                 "xylem",
                 "compile",
+                BodyRevision(1),
                 interface_over(Type::Unit, Type::Unit),
                 Span::none()
             )
@@ -892,6 +984,7 @@ mod derived_revisions {
             Rule::<Pure>::declared(
                 "phloem",
                 "compile",
+                BodyRevision(1),
                 interface_over(Type::Unit, Type::Unit),
                 Span::none()
             )
