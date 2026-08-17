@@ -30,9 +30,9 @@ fn source_id_round_trips_through_its_raw_form() {
 
 #[test]
 fn source_file_exposes_its_text() {
-    let file = SourceFile::new(SourceId::from_raw(3), "src/main.pith", "let x = 1\n");
+    let file = SourceFile::new(SourceId::from_raw(3), "src/main.pi", "let x = 1\n");
     assert_eq!(file.id, SourceId::from_raw(3));
-    assert_eq!(file.label.as_ref(), "src/main.pith");
+    assert_eq!(file.label.as_ref(), "src/main.pi");
     assert_eq!(file.source_text(), "let x = 1\n");
 }
 
