@@ -10,6 +10,11 @@
 //! publishes a registry and resolves against it. The build half of the edge
 //! is `two_package_build.rs`, which is linux-gated.
 
+#[path = "support/diagnostic.rs"]
+mod diagnostic_support;
+#[path = "support/registry.rs"]
+mod registry_support;
+
 use std::path::Path;
 
 use phloem::constraint::{Bound, Constraint, Range, constraint_set_value};
@@ -21,12 +26,14 @@ use phloem::registry;
 use phloem::resolution::{Resolution, resolve_request};
 use phloem::resolve::{ResolveSolver, Schemes};
 use phloem::universe::Requirement;
-use phloem::witness::{Checkpoint, MerkleTree};
+use phloem::witness::Checkpoint;
 use pith_engine::Engine;
 use pith_engine::state::MemoryEngineStateStore;
 use pith_ids::ContentId;
 use pith_store::MemoryContentStore;
 use tempfile::TempDir;
+
+use registry_support::{append_index_line, write_file, write_transparency_log};
 
 const REGISTRY: &str = "registries.pith-lang.org";
 const LOG: &str = "logs.pith-lang.org";
@@ -74,30 +81,10 @@ fn requires_util() -> Box<[Requirement]> {
     }])
 }
 
-fn fixture_error(message: String) -> pith_diag::DiagnosticSink {
-    let mut sink = pith_diag::DiagnosticSink::new();
-    sink.push(pith_diag::Diag::new(
-        pith_diag::Severity::Error,
-        pith_diag::StableCode(0),
-        pith_diag::Span::none(),
-        message,
-    ));
-    sink
-}
-
 /// Publish a registry and its witnessing log, authoring each index line
 /// through the adapter's own spelling so the format has one writer and one
 /// reader rather than a fixture's private guess at the line.
 fn publish(root: &Path, packages: &[Published]) -> pith_diag::PithResult<Checkpoint> {
-    let write = |path: std::path::PathBuf, bytes: &[u8]| -> pith_diag::PithResult<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| {
-                fixture_error(format!("creating {} failed: {error}", parent.display()))
-            })?;
-        }
-        std::fs::write(&path, bytes)
-            .map_err(|error| fixture_error(format!("writing {} failed: {error}", path.display())))
-    };
     let mut index: Vec<(String, String)> = Vec::new();
     for package in packages {
         let line = registry::index_line(
@@ -106,18 +93,15 @@ fn publish(root: &Path, packages: &[Published]) -> pith_diag::PithResult<Checkpo
             ContentId::of_blob(package.bytes),
             &package.requires,
         );
-        match index.iter_mut().find(|(name, _)| name == package.name) {
-            Some((_, lines)) => lines.push_str(&format!("{line}\n")),
-            None => index.push((package.name.into(), format!("{line}\n"))),
-        }
-        write(
+        append_index_line(&mut index, package.name, &line);
+        write_file(
             root.join("pkg/pithpkgs")
                 .join(format!("{}-{}.tar", package.name, package.version)),
             package.bytes,
         )?;
     }
     for (name, lines) in index {
-        write(root.join("index/pithpkgs").join(&name), lines.as_bytes())?;
+        write_file(root.join("index/pithpkgs").join(&name), lines.as_bytes())?;
     }
     let leaves: Vec<String> = packages
         .iter()
@@ -130,19 +114,7 @@ fn publish(root: &Path, packages: &[Published]) -> pith_diag::PithResult<Checkpo
             ))
         })
         .collect();
-    let log = root.join("log");
-    write(
-        log.join("leaves"),
-        format!("{}\n", leaves.join("\n")).as_bytes(),
-    )?;
-    let tree = MerkleTree::new(leaves.iter().map(String::as_str).map(str::as_bytes))?;
-    let checkpoint = Checkpoint {
-        origin: LOG.into(),
-        size: tree.size(),
-        root: tree.root(),
-    };
-    write(log.join("checkpoint"), checkpoint.render().as_bytes())?;
-    Ok(checkpoint)
+    write_transparency_log(root, LOG, &leaves)
 }
 
 fn resolving_engine() -> Engine {

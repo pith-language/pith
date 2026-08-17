@@ -9,6 +9,11 @@
 //! reference, the one source whose witness is intrinsic, locks only after
 //! a fetch materializes and measures the tree.
 
+#[path = "support/diagnostic.rs"]
+mod diagnostic_support;
+#[path = "support/registry.rs"]
+mod registry_support;
+
 use std::path::Path;
 use std::process::Command;
 
@@ -23,12 +28,14 @@ use phloem::registry;
 use phloem::resolution::{Resolution, resolve_request};
 use phloem::resolve::{ResolveSolver, Schemes};
 use phloem::universe::CandidateUniverse;
-use phloem::witness::{Checkpoint, MerkleTree};
+use phloem::witness::Checkpoint;
 use pith_engine::Engine;
 use pith_engine::state::MemoryEngineStateStore;
 use pith_ids::ContentId;
 use pith_store::MemoryContentStore;
 use tempfile::TempDir;
+
+use registry_support::{append_index_line, write_file, write_transparency_log};
 
 const REGISTRY: &str = "registries.pith-lang.org";
 const LOG: &str = "logs.pith-lang.org";
@@ -85,62 +92,24 @@ fn binding_of(published: &Published) -> LockEntry {
 /// filesystem work is carried as a result so the tests unwrap at their
 /// call sites, where unwrapping is allowed.
 fn publish(root: &Path, packages: &[Published]) -> pith_diag::PithResult<Checkpoint> {
-    let write = |path: std::path::PathBuf, bytes: &[u8]| -> pith_diag::PithResult<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| {
-                fixture_error(format!("creating {} failed: {error}", parent.display()))
-            })?;
-        }
-        std::fs::write(&path, bytes)
-            .map_err(|error| fixture_error(format!("writing {} failed: {error}", path.display())))
-    };
     let mut index: Vec<(String, String)> = Vec::new();
     for package in packages {
         let digest = ContentId::of_blob(package.bytes);
         let line = index_line(package.version, &digest);
-        match index.iter_mut().find(|(name, _)| name == package.name) {
-            Some((_, lines)) => lines.push_str(&format!("{line}\n")),
-            None => index.push((package.name.into(), format!("{line}\n"))),
-        }
-        write(
+        append_index_line(&mut index, package.name, &line);
+        write_file(
             package_path(root, package.name, package.version),
             package.bytes,
         )?;
     }
     for (name, lines) in index {
-        write(root.join("index/pithpkgs").join(&name), lines.as_bytes())?;
+        write_file(root.join("index/pithpkgs").join(&name), lines.as_bytes())?;
     }
     let leaves: Vec<String> = packages
         .iter()
         .map(|p| lockfile::binding_line(&binding_of(p)))
         .collect();
-    let log = root.join("log");
-    write(
-        log.join("leaves"),
-        format!("{}\n", leaves.join("\n")).as_bytes(),
-    )?;
-    let tree = MerkleTree::new(leaves.iter().map(String::as_str).map(str::as_bytes))?;
-    let checkpoint = Checkpoint {
-        origin: LOG.into(),
-        size: tree.size(),
-        root: tree.root(),
-    };
-    write(log.join("checkpoint"), checkpoint.render().as_bytes())?;
-    Ok(checkpoint)
-}
-
-/// The fixture's own failure spelling: a diagnostic sink carrying the
-/// message, because a helper outside a `#[test]` function cannot unwrap or
-/// panic under the crate's lint posture.
-fn fixture_error(message: String) -> pith_diag::DiagnosticSink {
-    let mut sink = pith_diag::DiagnosticSink::new();
-    sink.push(pith_diag::Diag::new(
-        pith_diag::Severity::Error,
-        pith_diag::StableCode(0),
-        pith_diag::Span::none(),
-        message,
-    ));
-    sink
+    write_transparency_log(root, LOG, &leaves)
 }
 
 fn engine() -> Engine {

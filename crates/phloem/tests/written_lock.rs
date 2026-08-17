@@ -6,8 +6,10 @@
 //! moved input, and a lock read back pins the same selection and reports
 //! drift rather than absorbing it.
 
-use std::sync::{Arc, Mutex};
+#[path = "support/engine_state.rs"]
+mod engine_state_support;
 
+use engine_state_support::SharedState;
 use phloem::constraint::{Bound, Constraint, Range, constraint_set_value};
 use phloem::document::{Lock, LockChange, diff};
 use phloem::identity::{
@@ -21,12 +23,7 @@ use phloem::resolution::{Resolution, resolve_request};
 use phloem::resolve::{ResolveSolver, Schemes};
 use phloem::source::SourceBinding;
 use phloem::universe::{Candidate, CandidateUniverse};
-use pith_core::{ActionComputationKey, Pure, PureComputationKey, Request, Value};
-use pith_engine::state::{
-    CompletedAttempt, DurableAttempt, DurableAttemptId, DurableComputation, EngineStateError,
-    EngineStateStore, EngineStateVersions, InvalidationExplanation, MemoryEngineStateStore,
-    StoppedAttempt,
-};
+use pith_core::{Pure, Request, Value};
 use pith_engine::{Engine, EvaluationSource};
 use pith_ids::ContentId;
 use pith_store::MemoryContentStore;
@@ -84,119 +81,6 @@ fn engine_with(state: &SharedState) -> Engine {
     let solver = ResolveSolver::new(Schemes::standard());
     engine.register_rule(solver.rule(), solver);
     engine
-}
-
-/// One durable substrate behind several engines, the arrangement 0024
-/// describes; two resolutions over two such substrates is what the
-/// byte-identity claim needs, so no engine or state is shared there.
-#[derive(Clone, Default)]
-struct SharedState(Arc<Mutex<MemoryEngineStateStore>>);
-
-impl SharedState {
-    fn read<T>(
-        &self,
-        read: impl FnOnce(&MemoryEngineStateStore) -> Result<T, EngineStateError>,
-    ) -> Result<T, EngineStateError> {
-        match self.0.lock() {
-            Ok(store) => read(&store),
-            Err(_) => Err(lock_poisoned()),
-        }
-    }
-
-    fn write<T>(
-        &self,
-        write: impl FnOnce(&mut MemoryEngineStateStore) -> Result<T, EngineStateError>,
-    ) -> Result<T, EngineStateError> {
-        match self.0.lock() {
-            Ok(mut store) => write(&mut store),
-            Err(_) => Err(lock_poisoned()),
-        }
-    }
-}
-
-fn lock_poisoned() -> EngineStateError {
-    EngineStateError::Adapter {
-        message: "fixture: shared engine state lock was poisoned".into(),
-    }
-}
-
-impl EngineStateStore for SharedState {
-    fn versions(&self) -> EngineStateVersions {
-        match self.0.lock() {
-            Ok(store) => store.versions(),
-            Err(_) => unreachable!("the shared engine state lock was poisoned"),
-        }
-    }
-
-    fn create_pending_attempt(
-        &self,
-        computation: DurableComputation,
-    ) -> Result<DurableAttemptId, EngineStateError> {
-        self.write(|store| store.create_pending_attempt(computation))
-    }
-
-    fn publish_complete(
-        &self,
-        attempt: DurableAttemptId,
-        completion: CompletedAttempt,
-    ) -> Result<(), EngineStateError> {
-        self.write(|store| store.publish_complete(attempt, completion))
-    }
-
-    fn publish_failed(
-        &self,
-        attempt: DurableAttemptId,
-        failure: StoppedAttempt,
-    ) -> Result<(), EngineStateError> {
-        self.write(|store| store.publish_failed(attempt, failure))
-    }
-
-    fn publish_cancelled(
-        &self,
-        attempt: DurableAttemptId,
-        cancellation: StoppedAttempt,
-    ) -> Result<(), EngineStateError> {
-        self.write(|store| store.publish_cancelled(attempt, cancellation))
-    }
-
-    fn attempt(
-        &self,
-        attempt: DurableAttemptId,
-    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
-        self.read(|store| store.attempt(attempt))
-    }
-
-    fn attempt_history(
-        &self,
-        computation: PureComputationKey,
-    ) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
-        self.read(|store| store.attempt_history(computation))
-    }
-
-    fn latest_completed_reusable_attempt(
-        &self,
-        computation: PureComputationKey,
-    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
-        self.read(|store| store.latest_completed_reusable_attempt(computation))
-    }
-
-    fn latest_completed_reusable_action_attempt(
-        &self,
-        computation: ActionComputationKey,
-    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
-        self.read(|store| store.latest_completed_reusable_action_attempt(computation))
-    }
-
-    fn explain_invalidation(
-        &self,
-        computation: PureComputationKey,
-    ) -> Result<Option<InvalidationExplanation>, EngineStateError> {
-        self.read(|store| store.explain_invalidation(computation))
-    }
-
-    fn pending_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
-        self.read(|store| store.pending_attempts())
-    }
 }
 
 #[test]

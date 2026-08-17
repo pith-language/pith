@@ -23,9 +23,17 @@
 
 #![cfg(target_os = "linux")]
 
+#[path = "support/diagnostic.rs"]
+mod diagnostic_support;
+#[path = "support/registry.rs"]
+mod registry_support;
+#[path = "support/toolchain.rs"]
+mod toolchain_support;
+
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
+use diagnostic_support::fixture_error;
 use phloem::build::{self, PackageBuild, PackageBuildRule, SourceTree};
 use phloem::constraint::{Bound, Constraint, Range};
 use phloem::description::Description;
@@ -39,7 +47,7 @@ use phloem::resolution::{Resolution, resolve_request};
 use phloem::resolve::{ResolveSolver, Schemes};
 use phloem::source::SourceBinding;
 use phloem::substitution::{Admission, AdmittedOrigins, BinaryOffer, Serving, serve};
-use phloem::witness::{Checkpoint, MerkleTree};
+use phloem::witness::Checkpoint;
 use pith_core::{Pure, Request, Value};
 use pith_engine::state::MemoryEngineStateStore;
 use pith_engine::{
@@ -50,8 +58,10 @@ use pith_executor_local::LocalExecutor;
 use pith_ids::ContentId;
 use pith_state_sqlite::SqliteEngineStateStore;
 use pith_store::{ContentStore, FilesystemContentStore, MemoryContentStore};
+use registry_support::{append_index_line, write_file, write_transparency_log};
 use tempfile::TempDir;
-use xylem::{BuildEngine, DiscoveryError, HeaderUniverse, Toolchain, Toolchains};
+use toolchain_support::{assert_c_toolchain_available, toolchain_or_skip};
+use xylem::{BuildEngine, HeaderUniverse, Toolchain, Toolchains};
 
 const REGISTRY: &str = "registries.pith-lang.org";
 const LOG: &str = "logs.pith-lang.org";
@@ -80,51 +90,25 @@ struct Published {
     archive: Vec<u8>,
 }
 
-/// The fixture's own failure spelling: a diagnostic sink carrying the
-/// message, because a helper outside a `#[test]` function cannot unwrap or
-/// panic under the crate's lint posture.
-fn fixture_error(message: String) -> pith_diag::DiagnosticSink {
-    let mut sink = pith_diag::DiagnosticSink::new();
-    sink.push(pith_diag::Diag::new(
-        pith_diag::Severity::Error,
-        pith_diag::StableCode(0),
-        pith_diag::Span::none(),
-        message,
-    ));
-    sink
-}
-
 fn publish(root: &Path, published: &Published) -> pith_diag::PithResult<Checkpoint> {
-    let write = |path: std::path::PathBuf, bytes: &[u8]| -> pith_diag::PithResult<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| {
-                fixture_error(format!("creating {} failed: {error}", parent.display()))
-            })?;
-        }
-        std::fs::write(&path, bytes)
-            .map_err(|error| fixture_error(format!("writing {} failed: {error}", path.display())))
-    };
     let digest = ContentId::of_blob(&published.archive);
-    write(
-        root.join("index/pithpkgs/hello"),
-        format!("1.0 [] sha256:{}\n", digest.digest()).as_bytes(),
-    )?;
-    write(root.join("pkg/pithpkgs/hello-1.0.tar"), &published.archive)?;
+    let mut index = Vec::new();
+    append_index_line(
+        &mut index,
+        "hello",
+        &format!("1.0 [] sha256:{}", digest.digest()),
+    );
+    for (name, lines) in index {
+        write_file(root.join("index/pithpkgs").join(name), lines.as_bytes())?;
+    }
+    write_file(root.join("pkg/pithpkgs/hello-1.0.tar"), &published.archive)?;
     let binding = phloem::lockfile::binding_line(&phloem::lock::LockEntry::new(
         phloem::identity::PackageVersion::new(identity(), "1.0"),
         [] as [&str; 0],
         digest,
         Origin::Registry(REGISTRY.into()),
     ));
-    let tree = MerkleTree::new([binding.as_bytes()])?;
-    let checkpoint = Checkpoint {
-        origin: LOG.into(),
-        size: tree.size(),
-        root: tree.root(),
-    };
-    write(root.join("log/leaves"), format!("{binding}\n").as_bytes())?;
-    write(root.join("log/checkpoint"), checkpoint.render().as_bytes())?;
-    Ok(checkpoint)
+    write_transparency_log(root, LOG, &[binding])
 }
 
 /// A ustar archive holding the two sources, authored by the fixture the
@@ -272,42 +256,11 @@ fn blob_of(value: &Value) -> pith_diag::PithResult<ContentId> {
     }
 }
 
-fn toolchain_or_skip(driver: &str) -> Result<Option<Toolchain>, String> {
-    match Toolchain::discover(driver) {
-        Ok(toolchain) => Ok(Some(toolchain)),
-        Err(DiscoveryError::NotFound) => {
-            eprintln!("skipping: no {driver} driver on this host");
-            Ok(None)
-        }
-        // Reachable by design: the driver is on the host but could not be
-        // resolved into a closure, which is a failure to report rather than
-        // an absence to skip on. The failure surfaces where the test body
-        // unwraps it, a helper's `panic!` being outside the lint posture.
-        Err(error) => Err(format!("{driver} is present but discovery failed: {error}")),
-    }
-}
-
 /// A host with no C compiler at all cannot run this file's other tests, and
 /// a green run over skips would read as a verified round. Fail instead.
 #[test]
 fn a_c_toolchain_is_available() {
-    let outcomes: Vec<(&str, Result<Toolchain, DiscoveryError>)> = ["cc", "gcc", "clang"]
-        .into_iter()
-        .map(|driver| (driver, Toolchain::discover(driver)))
-        .collect();
-    for (driver, outcome) in &outcomes {
-        if let Err(error) = outcome {
-            assert!(
-                matches!(error, DiscoveryError::NotFound),
-                "{driver} is present but discovery failed: {error}"
-            );
-        }
-    }
-    assert!(
-        outcomes.iter().any(|(_, outcome)| outcome.is_ok()),
-        "no C compiler (cc, gcc, or clang) on this host: the round cannot run, and its other \
-         tests would all skip green: {outcomes:?}"
-    );
+    assert_c_toolchain_available("the round cannot run, and its other tests would all skip green");
 }
 
 /// The round's whole claim: an index line becomes a running executable

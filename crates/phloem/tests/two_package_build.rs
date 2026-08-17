@@ -22,9 +22,17 @@
 
 #![cfg(target_os = "linux")]
 
+#[path = "support/diagnostic.rs"]
+mod diagnostic_support;
+#[path = "support/registry.rs"]
+mod registry_support;
+#[path = "support/toolchain.rs"]
+mod toolchain_support;
+
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
+use diagnostic_support::fixture_error;
 use phloem::build::{
     self, Dependency, PackageBuild, PackageBuildRule, PackageLibraryRule, SourceTree,
 };
@@ -37,7 +45,7 @@ use phloem::registry;
 use phloem::resolution::{Resolution, resolve_request};
 use phloem::resolve::{ResolveSolver, Schemes};
 use phloem::universe::Requirement;
-use phloem::witness::{Checkpoint, MerkleTree};
+use phloem::witness::Checkpoint;
 use pith_core::{Pure, Request, Value};
 use pith_engine::state::MemoryEngineStateStore;
 use pith_engine::{
@@ -47,8 +55,10 @@ use pith_executor_local::LocalExecutor;
 use pith_ids::ContentId;
 use pith_state_sqlite::SqliteEngineStateStore;
 use pith_store::{ContentStore, FilesystemContentStore, MemoryContentStore};
+use registry_support::{append_index_line, write_file, write_transparency_log};
 use tempfile::TempDir;
-use xylem::{BuildEngine, DiscoveryError, HeaderUniverse, Toolchain, Toolchains};
+use toolchain_support::{assert_c_toolchain_available, toolchain_or_skip};
+use xylem::{BuildEngine, HeaderUniverse, Toolchain, Toolchains};
 
 const REGISTRY: &str = "registries.pith-lang.org";
 const LOG: &str = "logs.pith-lang.org";
@@ -70,17 +80,6 @@ const HELLO_C: (&str, &[u8]) = (
 
 fn identity(name: &str) -> PackageIdentity {
     PackageIdentity::declare(DomainIdentity::new("pithpkgs"), name)
-}
-
-fn fixture_error(message: String) -> pith_diag::DiagnosticSink {
-    let mut sink = pith_diag::DiagnosticSink::new();
-    sink.push(pith_diag::Diag::new(
-        pith_diag::Severity::Error,
-        pith_diag::StableCode(0),
-        pith_diag::Span::none(),
-        message,
-    ));
-    sink
 }
 
 /// One published revision of one package: the files its archive holds and
@@ -158,26 +157,14 @@ fn archive_of_published(published: &Published) -> Vec<u8> {
 /// through the adapter's own spelling so the requirement format has one
 /// writer and one reader.
 fn publish(root: &Path, packages: &[Published]) -> pith_diag::PithResult<Checkpoint> {
-    let write = |path: std::path::PathBuf, bytes: &[u8]| -> pith_diag::PithResult<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| {
-                fixture_error(format!("creating {} failed: {error}", parent.display()))
-            })?;
-        }
-        std::fs::write(&path, bytes)
-            .map_err(|error| fixture_error(format!("writing {} failed: {error}", path.display())))
-    };
     let mut index: Vec<(String, String)> = Vec::new();
     let mut leaves = Vec::new();
     for package in packages {
         let archive = archive_of_published(package);
         let digest = ContentId::of_blob(&archive);
         let line = registry::index_line(package.version, &[], digest, &package.requires);
-        match index.iter_mut().find(|(name, _)| name == package.name) {
-            Some((_, lines)) => lines.push_str(&format!("{line}\n")),
-            None => index.push((package.name.into(), format!("{line}\n"))),
-        }
-        write(
+        append_index_line(&mut index, package.name, &line);
+        write_file(
             root.join("pkg/pithpkgs")
                 .join(format!("{}-{}.tar", package.name, package.version)),
             &archive,
@@ -192,21 +179,9 @@ fn publish(root: &Path, packages: &[Published]) -> pith_diag::PithResult<Checkpo
         ));
     }
     for (name, lines) in index {
-        write(root.join("index/pithpkgs").join(&name), lines.as_bytes())?;
+        write_file(root.join("index/pithpkgs").join(&name), lines.as_bytes())?;
     }
-    let log = root.join("log");
-    write(
-        log.join("leaves"),
-        format!("{}\n", leaves.join("\n")).as_bytes(),
-    )?;
-    let tree = MerkleTree::new(leaves.iter().map(String::as_str).map(str::as_bytes))?;
-    let checkpoint = Checkpoint {
-        origin: LOG.into(),
-        size: tree.size(),
-        root: tree.root(),
-    };
-    write(log.join("checkpoint"), checkpoint.render().as_bytes())?;
-    Ok(checkpoint)
+    write_transparency_log(root, LOG, &leaves)
 }
 
 /// The packages' declarations, authored beside the registry the way a
@@ -399,38 +374,11 @@ fn resolve_fetch_unpack(
     })
 }
 
-fn toolchain_or_skip(driver: &str) -> Result<Option<Toolchain>, String> {
-    match Toolchain::discover(driver) {
-        Ok(toolchain) => Ok(Some(toolchain)),
-        Err(DiscoveryError::NotFound) => {
-            eprintln!("skipping: no {driver} driver on this host");
-            Ok(None)
-        }
-        Err(error) => Err(format!("{driver} is present but discovery failed: {error}")),
-    }
-}
-
 /// A host with no C compiler at all cannot run this file's other tests, and
 /// a green run over skips would read as a verified round. Fail instead.
 #[test]
 fn a_c_toolchain_is_available() {
-    let outcomes: Vec<(&str, Result<Toolchain, DiscoveryError>)> = ["cc", "gcc", "clang"]
-        .into_iter()
-        .map(|driver| (driver, Toolchain::discover(driver)))
-        .collect();
-    for (driver, outcome) in &outcomes {
-        if let Err(error) = outcome {
-            assert!(
-                matches!(error, DiscoveryError::NotFound),
-                "{driver} is present but discovery failed: {error}"
-            );
-        }
-    }
-    assert!(
-        outcomes.iter().any(|(_, outcome)| outcome.is_ok()),
-        "no C compiler (cc, gcc, or clang) on this host: the round cannot run, and its other \
-         tests would all skip green: {outcomes:?}"
-    );
+    assert_c_toolchain_available("the round cannot run, and its other tests would all skip green");
 }
 
 /// The round's whole claim, build half: two index lines become one running
