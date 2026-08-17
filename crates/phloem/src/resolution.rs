@@ -10,7 +10,7 @@ use pith_ids::ContentId;
 
 use crate::codec::{
     FIELD_DOMAIN, FIELD_PACKAGE, blob_field, field_of, int_field, record_type, record_value,
-    sum_value, text_field,
+    sum_type, sum_value, text_field,
 };
 use crate::constraint::{Constraint, constraint_set_type, constraint_set_value};
 use crate::identity::{DomainIdentity, PackageIdentity, version_scheme_type};
@@ -117,7 +117,7 @@ pub fn resolution_type() -> Type {
         (ORDERINGS, preference_list_type()),
     ]);
     let budget_exhausted = record_type([(BUDGET, Type::Int), (DECISIONS, Type::Int)]);
-    let sum = Type::sum(
+    sum_type(
         RESOLUTION,
         [
             SumConstructor {
@@ -137,8 +137,7 @@ pub fn resolution_type() -> Type {
                 payload: Some(budget_exhausted),
             },
         ],
-    );
-    sum.unwrap_or_else(|error| unreachable!("{error}"))
+    )
 }
 
 /// Returns the resolution interface over its five declared inputs.

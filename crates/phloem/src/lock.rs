@@ -9,7 +9,7 @@ use pith_ids::ContentId;
 
 use crate::codec::{
     FIELD_DOMAIN, FIELD_FEATURES, FIELD_VERSION, blob_field, field_of, record_type, record_value,
-    sum_value, text_field, text_list, value_content_id,
+    sum_type, sum_value, text_field, text_list, value_content_id,
 };
 use crate::diag;
 use crate::identity::PackageVersion;
@@ -143,7 +143,7 @@ impl std::fmt::Display for Origin {
 /// location as text.
 #[must_use]
 pub fn origin_type() -> Type {
-    let sum = Type::sum(
+    sum_type(
         ORIGIN,
         [
             SumConstructor {
@@ -159,12 +159,7 @@ pub fn origin_type() -> Type {
                 payload: Some(Type::Text),
             },
         ],
-    );
-    match sum {
-        Ok(sum) => sum,
-        // Constructor names are distinct literals.
-        Err(error) => unreachable!("{error}"),
-    }
+    )
 }
 
 /// Returns the declared lock-entry record type.

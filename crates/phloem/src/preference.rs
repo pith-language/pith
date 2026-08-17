@@ -8,7 +8,7 @@ use std::cmp::Ordering;
 use pith_core::{SumConstructor, Type, Value};
 use pith_diag::PithResult;
 
-use crate::codec::sum_value;
+use crate::codec::{sum_type, sum_value};
 use crate::diag;
 use crate::identity::VersionScheme;
 
@@ -34,7 +34,7 @@ pub enum Preference {
 /// The declared preference sum type: `Newest`, `Oldest`.
 #[must_use]
 pub fn preference_type() -> Type {
-    let sum = Type::sum(
+    sum_type(
         PREFERENCE,
         [
             SumConstructor {
@@ -46,8 +46,7 @@ pub fn preference_type() -> Type {
                 payload: None,
             },
         ],
-    );
-    sum.unwrap_or_else(|error| unreachable!("{error}"))
+    )
 }
 
 /// The preference-list type: a lexicographic list of declared orderings.

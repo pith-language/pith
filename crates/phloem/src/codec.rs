@@ -3,7 +3,7 @@
 //! Record and sum codecs use the field-name constants defined here so their
 //! encoders and decoders share one spelling.
 
-use pith_core::{RecordField, Type, Value};
+use pith_core::{RecordField, SumConstructor, Type, Value};
 use pith_diag::PithResult;
 use pith_ids::{ContentDigest, ContentId, DIGEST_LEN};
 
@@ -26,6 +26,10 @@ pub(crate) fn record_type<const N: usize>(fields: [(&str, Type); N]) -> Type {
         payload,
     }));
     record.unwrap_or_else(|error| unreachable!("{error}"))
+}
+
+pub(crate) fn sum_type<const N: usize>(name: &str, constructors: [SumConstructor; N]) -> Type {
+    Type::sum(name, constructors).unwrap_or_else(|error| unreachable!("{error}"))
 }
 
 /// Build a record value from `(name, payload)` pairs, on the same terms as

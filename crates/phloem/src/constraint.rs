@@ -11,7 +11,7 @@ use pith_diag::PithResult;
 
 use crate::codec::{
     FIELD_DOMAIN, FIELD_FEATURES, FIELD_PACKAGE, FIELD_VERSION, canonical_list, field_of,
-    record_type, record_value, sum_value, text_list, text_of,
+    record_type, record_value, sum_type, sum_value, text_list, text_of,
 };
 use crate::diag;
 use crate::identity::{DomainIdentity, PackageIdentity, VersionScheme};
@@ -108,7 +108,7 @@ pub enum Range {
 /// `Between({lower, upper})`.
 #[must_use]
 pub fn range_type() -> Type {
-    let sum = Type::sum(
+    sum_type(
         RANGE,
         [
             SumConstructor {
@@ -132,8 +132,7 @@ pub fn range_type() -> Type {
                 payload: Some(record_type([(LOWER, bound_type()), (UPPER, bound_type())])),
             },
         ],
-    );
-    sum.unwrap_or_else(|error| unreachable!("{error}"))
+    )
 }
 
 impl Range {

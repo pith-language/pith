@@ -7,7 +7,7 @@ use pith_core::{SumConstructor, Type, Value};
 use pith_diag::PithResult;
 use pith_ids::ContentId;
 
-use crate::codec::{field_of, record_type, record_value, sum_value};
+use crate::codec::{field_of, record_type, record_value, sum_type, sum_value};
 use crate::diag;
 
 /// The declared sum's name.
@@ -48,7 +48,7 @@ pub fn source_type() -> Type {
     ]);
     let path = record_type([(PATH_PATH, Type::Text), (PATH_CONTENT, Type::Blob)]);
     // Field and constructor names are distinct literals.
-    let sum = Type::sum(
+    sum_type(
         SOURCE,
         [
             SumConstructor {
@@ -68,8 +68,7 @@ pub fn source_type() -> Type {
                 payload: Some(path),
             },
         ],
-    );
-    sum.unwrap_or_else(|error| unreachable!("{error}"))
+    )
 }
 
 /// One source binding, as declared.
