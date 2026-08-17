@@ -243,6 +243,58 @@ impl<K: EffectCategory> Rule<K> {
             effect: PhantomData,
         }
     }
+
+    /// A rule declared at `module`.`label`, with its revision derived from the
+    /// declarations `interface` names (decision 0047).
+    ///
+    /// This is the constructor a library should use. It replaces a hand-bumped
+    /// revision manifest — the "manual semantic version only" alternative 0023
+    /// rejected and every domain library nonetheless shipped — with a derivation
+    /// over the interface. Changing a nominal type's representation moves the
+    /// revision of every rule whose interface names it, with no author edit;
+    /// changing an unrelated declaration moves nothing.
+    ///
+    /// What it does not cover is a host-tier rule *body* that changes while its
+    /// interface and every declaration in it stay fixed. That is 0023's recorded
+    /// conservatism for the host tier, narrowed from "one edit moves every rule
+    /// in the library" to "an interface-level change is automatic, a body-level
+    /// change is not." The body half arrives with 0038's represented tier, whose
+    /// revisions derive from canonical ir.
+    pub fn declared(module: &str, label: &str, interface: Interface, span: Span) -> Self {
+        let identity = RuleIdentity::of_module_declaration(module, label);
+        let revision = RuleRevision::of_manifest(identity, &revision_manifest(&interface));
+        Self {
+            identity,
+            revision,
+            label: label.into(),
+            interface,
+            span,
+            effect: PhantomData,
+        }
+    }
+}
+
+/// The revision manifest for a rule declared over `interface`.
+///
+/// The canonical interface encoding, and nothing else.
+///
+/// Decision 0047 specifies this as the interface encoding *plus* the sorted
+/// digests of every declaration that encoding reaches. The second half is
+/// redundant under the first half of the same record: because a nominal or sum
+/// type carries its declaration rather than a bare coordinate, the encoding
+/// already contains every declaration body the interface reaches, so no
+/// declaration change can move a digest without moving the encoding, and no
+/// encoding is reachable from two different declaration sets. Adding the digests
+/// would be a second mechanism for one concern, which the principles forbid.
+///
+/// If a later record moves to ambient table resolution — the alternative 0047
+/// considered and rejected, where a type carries a bare coordinate — the digest
+/// half becomes load-bearing and this manifest has to grow it. Under 0048 that is
+/// a digest-domain bump rather than a silent basis change.
+fn revision_manifest(interface: &Interface) -> Vec<u8> {
+    let mut manifest = Vec::new();
+    encode_interface(&mut manifest, interface);
+    manifest
 }
 
 fn encode_interface(manifest: &mut Vec<u8>, interface: &Interface) {
@@ -730,5 +782,120 @@ mod tests {
 
         assert_eq!(err.code, EngineCode::RequestInputsMismatch.into());
         assert!(err.message.0.contains("has type Bool, expected Int"));
+    }
+}
+
+#[cfg(test)]
+mod derived_revisions {
+    use super::*;
+    use crate::declaration::DeclarationTable;
+    use crate::value::declared_nominal;
+
+    fn interface_over(input: Type, output: Type) -> Interface {
+        Interface {
+            inputs: [input].into(),
+            output,
+        }
+    }
+
+    fn revision_of(interface: Interface) -> RuleRevision {
+        Rule::<Pure>::declared("m", "r", interface, Span::none()).revision
+    }
+
+    #[test]
+    fn a_changed_representation_moves_the_revision_with_no_author_edit() {
+        // The reason decision 0047's last section exists. Before it, a rule's
+        // revision was a hand-written constant, so editing a nominal type's
+        // representation moved nothing and a cached result computed under the old
+        // one was still served.
+        let over_blob = revision_of(interface_over(
+            declared_nominal("m", "CSource", Type::Blob),
+            Type::Unit,
+        ));
+        let over_text = revision_of(interface_over(
+            declared_nominal("m", "CSource", Type::Text),
+            Type::Unit,
+        ));
+        assert_ne!(over_blob, over_text);
+    }
+
+    #[test]
+    fn an_unrelated_declaration_does_not_move_a_revision() {
+        // The other half of the granularity claim: the old constant moved every
+        // rule in a library at once, and a derived revision moves only the rules
+        // whose interface reaches what changed.
+        let mut table = DeclarationTable::new("m");
+        let source = table.nominal("CSource", Type::Blob).unwrap();
+        let before = revision_of(interface_over(source.clone(), Type::Unit));
+
+        // Declaring something else, and changing what it is, is invisible here.
+        let mut other = DeclarationTable::new("m");
+        other.nominal("CSource", Type::Blob).unwrap();
+        other.nominal("Unrelated", Type::Text).unwrap();
+        let after = revision_of(interface_over(
+            Type::of_declaration(other.get("CSource").unwrap()),
+            Type::Unit,
+        ));
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn a_changed_interface_shape_moves_the_revision() {
+        let source = declared_nominal("m", "CSource", Type::Blob);
+        assert_ne!(
+            revision_of(interface_over(source.clone(), Type::Unit)),
+            revision_of(interface_over(source.clone(), Type::Bool)),
+        );
+        assert_ne!(
+            revision_of(interface_over(source.clone(), Type::Unit)),
+            revision_of(Interface {
+                inputs: [source, Type::Bool].into(),
+                output: Type::Unit,
+            }),
+        );
+    }
+
+    #[test]
+    fn a_declared_rules_identity_is_its_coordinate_and_survives_a_revision_move() {
+        // 0023's two halves, at the rule layer: the coordinate is stable across a
+        // representation change, the revision is not.
+        let over_blob = Rule::<Pure>::declared(
+            "m",
+            "compile",
+            interface_over(declared_nominal("m", "CSource", Type::Blob), Type::Unit),
+            Span::none(),
+        );
+        let over_text = Rule::<Pure>::declared(
+            "m",
+            "compile",
+            interface_over(declared_nominal("m", "CSource", Type::Text), Type::Unit),
+            Span::none(),
+        );
+        assert_eq!(over_blob.identity, over_text.identity);
+        assert_ne!(over_blob.revision, over_text.revision);
+        assert_eq!(
+            over_blob.identity,
+            RuleIdentity::of_module_declaration("m", "compile")
+        );
+    }
+
+    #[test]
+    fn two_modules_declaring_one_rule_label_are_two_rules() {
+        assert_ne!(
+            Rule::<Pure>::declared(
+                "xylem",
+                "compile",
+                interface_over(Type::Unit, Type::Unit),
+                Span::none()
+            )
+            .identity,
+            Rule::<Pure>::declared(
+                "phloem",
+                "compile",
+                interface_over(Type::Unit, Type::Unit),
+                Span::none()
+            )
+            .identity,
+        );
     }
 }

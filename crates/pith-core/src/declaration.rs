@@ -221,9 +221,10 @@ impl DeclarationTable {
     ///
     /// # Errors
     /// [`DeclarationError::DuplicateName`] when the module already declares the
-    /// name, and [`crate::DuplicateNameError`] surfaces as a duplicate
-    /// constructor through [`Type::sum`], so constructors are sorted here and
-    /// a repeated constructor name is refused.
+    /// name, and — reported under the same variant, with the constructor as the
+    /// name — when two constructors share one. There is no free sum constructor
+    /// to refuse a repeat any more, so this is where constructors are sorted and
+    /// a repeat is caught.
     pub fn sum(
         &mut self,
         name: &str,
