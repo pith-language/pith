@@ -65,7 +65,7 @@ watch-clippy:
 
 # Everything CI checks, in one target. Use before pushing.
 [group('ci')]
-ci: fmt-check clippy test test-doc docs-check deny typos repo-check just-fmt-check
+ci: fmt-check clippy test test-doc docs-check deny typos repo-check zizmor just-fmt-check
 
 # Run every repository-specific check maintained by xtask.
 [group('ci')]
@@ -101,6 +101,11 @@ deny:
 [group('ci')]
 typos:
     typos
+
+# Audit GitHub Actions workflows and local actions.
+[group('ci')]
+zizmor:
+    zizmor --pedantic --strict-collection .github
 
 # Check that this justfile is canonically formatted.
 [group('ci')]

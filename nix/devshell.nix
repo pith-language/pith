@@ -53,6 +53,7 @@
         pkgs.git
         pkgs.clang
         pkgs.jujutsu
+        pkgs.zizmor
       ];
 
       shellHook = ''
