@@ -21,6 +21,7 @@
 //! [`EngineStateStore`]: pith_engine::state::EngineStateStore
 
 mod columns;
+mod database;
 mod rows;
 mod schema;
 mod store;

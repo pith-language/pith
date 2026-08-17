@@ -2,17 +2,14 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use diesel::connection::SimpleConnection;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 use pith_core::{ActionComputationKey, PureComputationKey};
-use pith_diag::{Diag, EngineCode, Span};
 use pith_engine::state::validate::{AttemptLookup, TerminalAttemptState, validate_publication};
 use pith_engine::state::{
-    CompletedAttempt, DurableActionProvenance, DurableAttempt, DurableAttemptId,
-    DurableAttemptStatus, DurableComputation, DurableDiagnostic, DurableProvenance,
+    CompletedAttempt, DurableAttempt, DurableAttemptId, DurableAttemptStatus, DurableComputation,
     EngineStateError, EngineStateStore, EngineStateVersions, InvalidationExplanation,
-    SchemaVersion, SemanticEncodingVersion, StoppedAttempt,
+    StoppedAttempt,
 };
 
 use crate::rows::{
@@ -20,7 +17,7 @@ use crate::rows::{
     insert_pending_attempt, intern_computation, load_attempt, load_attempts, pending_attempt_rows,
     publish_reusable, reusable_action_attempt_row, reusable_attempt_row, write_terminal_state,
 };
-use crate::schema::{CREATE_SCHEMA, CURRENT_VERSIONS, engine_state_versions};
+use crate::schema::CURRENT_VERSIONS;
 
 /// Failure to open an engine-state database.
 ///
@@ -144,17 +141,7 @@ impl SqliteEngineStateStore {
     /// Returns [`SqliteStateError`] when the database cannot be opened,
     /// initialized, or moved aside.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, SqliteStateError> {
-        let path = path.as_ref();
-        let mut connection = establish(path)?;
-        // The version gate is read before any schema is applied, so a database
-        // this build cannot interpret is not written to at all.
-        if compatibility(&mut connection)? == Compatibility::Incompatible {
-            drop(connection);
-            quarantine(path)?;
-            connection = establish(path)?;
-        }
-        initialize(&mut connection)?;
-        recover_pending(&mut connection)?;
+        let connection = crate::database::open(path.as_ref())?;
         Ok(Self {
             connection: Mutex::new(connection),
         })
@@ -166,10 +153,7 @@ impl SqliteEngineStateStore {
     /// # Errors
     /// Returns [`SqliteStateError`] when the database cannot be initialized.
     pub fn open_in_memory() -> Result<Self, SqliteStateError> {
-        let mut connection = SqliteConnection::establish(":memory:")?;
-        configure(&mut connection)?;
-        initialize(&mut connection)?;
-        recover_pending(&mut connection)?;
+        let connection = crate::database::open_in_memory()?;
         Ok(Self {
             connection: Mutex::new(connection),
         })
@@ -206,7 +190,7 @@ impl SqliteEngineStateStore {
                     return Err(EngineStateError::AttemptNotPending { attempt, status }.into());
                 }
                 {
-                    let lookup = ConnectionLookup(RefCell::new(connection));
+                    let lookup = ConnectionLookup::publishing(connection);
                     validate_publication(&lookup, attempt, &computation, &terminal_state)?;
                 }
                 let reusable = terminal_state.is_reusable();
@@ -228,270 +212,41 @@ impl SqliteEngineStateStore {
     }
 }
 
-fn establish(path: &Path) -> Result<SqliteConnection, SqliteStateError> {
-    let url = path
-        .to_str()
-        .ok_or_else(|| SqliteStateError::UnusablePath {
-            path: path.to_path_buf(),
-        })?;
-    let mut connection = SqliteConnection::establish(url)?;
-    configure(&mut connection)?;
-    Ok(connection)
-}
-
-/// WAL gives concurrent readers alongside the single writer decision 0024
-/// describes; FULL synchronous keeps a committed transaction durable across
-/// power loss, which is what makes a published attempt a promise rather than a
-/// hint.
-///
-/// `auto_vacuum` comes first and the order is load-bearing. Sqlite honors a
-/// change out of `none` only while the database file has not been written yet,
-/// and setting `journal_mode = wal` writes the header, so the two pragmas in
-/// the other order leave auto-vacuum at `none` with no error to notice.
-/// Recovering it afterwards costs a full `VACUUM`. Decision 0027 asks for
-/// incremental auto-vacuum at creation time because a collector deletes whole
-/// attempts and their edge and diagnostic cascades at once, and incremental
-/// vacuum reclaims those without rewriting the file. On an existing database
-/// the pragma is ignored, and there is no error to notice either way, which is
-/// why the durable-state tests assert the mode on a fresh database rather than
-/// trusting it. The checkpoint and `incremental_vacuum` cadence 0027 also names
-/// belongs with the collector, which does not exist.
-fn configure(connection: &mut SqliteConnection) -> Result<(), SqliteStateError> {
-    connection.batch_execute(
-        "pragma auto_vacuum = incremental; \
-         pragma journal_mode = wal; \
-         pragma synchronous = full; \
-         pragma foreign_keys = on;",
-    )?;
-    Ok(())
-}
-
-fn initialize(connection: &mut SqliteConnection) -> Result<(), SqliteStateError> {
-    connection.batch_execute(CREATE_SCHEMA)?;
-    diesel::replace_into(engine_state_versions::table)
-        .values((
-            engine_state_versions::id.eq(0),
-            engine_state_versions::schema_version.eq(version(CURRENT_VERSIONS.schema.get())?),
-            engine_state_versions::semantic_encoding_version
-                .eq(version(CURRENT_VERSIONS.semantic_encoding.get())?),
-        ))
-        .execute(connection)?;
-    Ok(())
-}
-
-fn version(value: u32) -> Result<i32, SqliteStateError> {
-    i32::try_from(value).map_err(|_| SqliteStateError::UnrepresentableVersion { version: value })
-}
-
-#[derive(PartialEq, Eq)]
-enum Compatibility {
-    /// No prior database, or one that never recorded its versions and holds no
-    /// attempts.
-    Fresh,
-    Current,
-    Incompatible,
-}
-
-fn compatibility(connection: &mut SqliteConnection) -> Result<Compatibility, SqliteStateError> {
-    if !table_exists(connection, "engine_state_versions")? {
-        return Ok(Compatibility::Fresh);
-    }
-    let recorded: Option<(i32, i32)> = engine_state_versions::table
-        .find(0)
-        .select((
-            engine_state_versions::schema_version,
-            engine_state_versions::semantic_encoding_version,
-        ))
-        .first(connection)
-        .optional()?;
-    let Some((schema, semantic_encoding)) = recorded else {
-        return Ok(Compatibility::Fresh);
-    };
-    // A negative version was never written by this adapter, so it is a database
-    // this build cannot interpret rather than one to coerce into range.
-    let (Ok(schema), Ok(semantic_encoding)) =
-        (u32::try_from(schema), u32::try_from(semantic_encoding))
-    else {
-        return Ok(Compatibility::Incompatible);
-    };
-    let recorded = EngineStateVersions {
-        schema: SchemaVersion::new(schema),
-        semantic_encoding: SemanticEncodingVersion::new(semantic_encoding),
-    };
-    if recorded == CURRENT_VERSIONS {
-        Ok(Compatibility::Current)
-    } else {
-        Ok(Compatibility::Incompatible)
-    }
-}
-
-fn table_exists(connection: &mut SqliteConnection, name: &str) -> Result<bool, SqliteStateError> {
-    use diesel::dsl::sql;
-    use diesel::sql_types::{Bool, Text};
-
-    // `sqlite_master` is sqlite's own catalogue, not part of this schema, so it
-    // is the one place a statement is not built from a table definition.
-    let exists: bool = diesel::select(
-        sql::<Bool>("exists (select 1 from sqlite_master where type = 'table' and name = ")
-            .bind::<Text, _>(name)
-            .sql(")"),
-    )
-    .get_result(connection)?;
-    Ok(exists)
-}
-
-/// Move an incompatible database aside without overwriting a previous one.
-///
-/// The suffix is a counter rather than a timestamp so the choice is
-/// deterministic and does not read a clock.
-fn quarantine(path: &Path) -> Result<(), SqliteStateError> {
-    for candidate in 0u32..1024 {
-        let mut quarantined = path.as_os_str().to_os_string();
-        quarantined.push(format!(".incompatible.{candidate}"));
-        let quarantined = PathBuf::from(quarantined);
-        if quarantined.exists() {
-            continue;
-        }
-        // Sidecar journals belong to the database they were written for; a
-        // rebuilt database must not adopt them.
-        for suffix in ["", "-wal", "-shm"] {
-            let mut source = path.as_os_str().to_os_string();
-            source.push(suffix);
-            let source = PathBuf::from(source);
-            if !source.exists() {
-                continue;
-            }
-            let mut destination = quarantined.as_os_str().to_os_string();
-            destination.push(suffix);
-            std::fs::rename(&source, PathBuf::from(destination)).map_err(|error| {
-                SqliteStateError::Filesystem {
-                    path: source.clone(),
-                    error,
-                }
-            })?;
-        }
-        return Ok(());
-    }
-    Err(SqliteStateError::NoFreeQuarantinePath {
-        path: path.to_path_buf(),
-    })
-}
-
-/// Mark every attempt still `Pending` as cancelled (decision 0024, as amended
-/// by the `Cancelled` state 0022 added later). An interrupted owner never
-/// resumed them, so reopening the database does: each is written through the
-/// same validated transaction a caller-driven stop uses, with an `E-1214`
-/// diagnostic naming it as interrupted work.
-///
-/// Cancelled rather than failed because the two answer different questions for
-/// a later reader. A failure says the computation cannot work and re-running it
-/// is not worth the time; a cancellation says nothing about the computation at
-/// all, because it never got to run. An attempt whose owner was killed is the
-/// second, and recording it as the first would tell a reader to give up on work
-/// that was only interrupted.
-fn recover_pending(connection: &mut SqliteConnection) -> Result<(), SqliteStateError> {
-    let pending = match pending_attempt_rows(connection) {
-        Ok(rows) => rows,
-        Err(Failure::Database(error)) => return Err(SqliteStateError::Database(error)),
-        Err(Failure::Engine(error)) => {
-            return Err(SqliteStateError::Recovery {
-                attempt: None,
-                reason: error,
-            });
-        }
-    };
-    if pending.is_empty() {
-        return Ok(());
-    }
-    for row in pending {
-        let attempt = row.id.0;
-        let result = connection.transaction::<(), Failure, _>(|connection| {
-            let Some((_computation_id, computation, status)) =
-                attempt_computation(connection, attempt)?
-            else {
-                return Err(EngineStateError::AttemptNotFound { attempt }.into());
-            };
-            if status != DurableAttemptStatus::Pending {
-                return Ok(());
-            }
-            let terminal_state = TerminalAttemptState::Cancelled(interrupted_attempt(&computation));
-            {
-                let lookup = ConnectionLookup(RefCell::new(connection));
-                validate_publication(&lookup, attempt, &computation, &terminal_state)?;
-            }
-            write_terminal_state(connection, attempt, &terminal_state)?;
-            Ok(())
-        });
-        match result {
-            Ok(()) => Ok(()),
-            Err(Failure::Database(error)) => Err(SqliteStateError::Database(error)),
-            Err(Failure::Engine(reason)) => Err(SqliteStateError::Recovery {
-                attempt: Some(attempt),
-                reason,
-            }),
-        }?;
-    }
-    Ok(())
-}
-
-fn interrupted_attempt(computation: &DurableComputation) -> StoppedAttempt {
-    let provenance = match computation {
-        DurableComputation::Pure(_) => DurableProvenance::Pure,
-        DurableComputation::Action { .. } => {
-            DurableProvenance::Action(DurableActionProvenance::NotExecuted)
-        }
-    };
-    let diagnostic = DurableDiagnostic::from(&Diag::engine(
-        EngineCode::InterruptedAttempt,
-        Span::none(),
-        "the attempt was left pending when its owner stopped",
-    ));
-    StoppedAttempt {
-        dependencies: Box::new([]),
-        diagnostics: [diagnostic].into(),
-        provenance,
-    }
-}
-
 /// Resolves dependency edges during validation from inside the publishing
 /// transaction, so an edge is checked against the same snapshot it is written
 /// into.
-struct ConnectionLookup<'transaction>(RefCell<&'transaction mut SqliteConnection>);
+struct ConnectionLookup<'connection> {
+    connection: RefCell<&'connection mut SqliteConnection>,
+    borrowed_message: &'static str,
+}
+
+impl<'connection> ConnectionLookup<'connection> {
+    fn publishing(connection: &'connection mut SqliteConnection) -> Self {
+        Self {
+            connection: RefCell::new(connection),
+            borrowed_message: "the engine-state connection was already in use during validation",
+        }
+    }
+
+    fn reading(connection: &'connection mut SqliteConnection) -> Self {
+        Self {
+            connection: RefCell::new(connection),
+            borrowed_message: "the engine-state connection was already in use",
+        }
+    }
+}
 
 impl AttemptLookup for ConnectionLookup<'_> {
     fn lookup(
         &self,
         attempt: DurableAttemptId,
     ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
-        let mut connection = self
-            .0
-            .try_borrow_mut()
-            .map_err(|_| EngineStateError::Adapter {
-                message: "the engine-state connection was already in use during validation".into(),
-            })?;
-        let record = load_attempt(&mut connection, attempt).map_err(EngineStateError::from)?;
-        Ok(record.map(Arc::new))
-    }
-}
-
-/// Read-only dependency-edge resolver used by the invalidation chain walk.
-/// Unlike [`ConnectionLookup`] this is not inside a publishing transaction; it
-/// is the same `load_attempt` query run against the snapshot the read holds.
-/// `RefCell` reborrows the connection the way `ConnectionLookup` does, because
-/// [`AttemptLookup::lookup`] takes `&self` while `load_attempt` needs `&mut`.
-struct LoadLookup<'connection>(RefCell<&'connection mut SqliteConnection>);
-
-impl AttemptLookup for LoadLookup<'_> {
-    fn lookup(
-        &self,
-        attempt: DurableAttemptId,
-    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
-        let mut connection = self
-            .0
-            .try_borrow_mut()
-            .map_err(|_| EngineStateError::Adapter {
-                message: "the engine-state connection was already in use".into(),
-            })?;
+        let mut connection =
+            self.connection
+                .try_borrow_mut()
+                .map_err(|_| EngineStateError::Adapter {
+                    message: self.borrowed_message.into(),
+                })?;
         let record = load_attempt(&mut connection, attempt).map_err(EngineStateError::from)?;
         Ok(record.map(Arc::new))
     }
@@ -610,7 +365,7 @@ impl EngineStateStore for SqliteEngineStateStore {
                 },
                 None => None,
             };
-            let lookup = LoadLookup(RefCell::new(connection));
+            let lookup = ConnectionLookup::reading(connection);
             Ok(pith_engine::state::explain::explain_latest(&lookup, latest)?)
         })
     }
