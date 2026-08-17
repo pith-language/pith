@@ -42,6 +42,7 @@ each lineage starts with the pressure that created a system. it records the mech
 - [tooling and inspectability](tooling.md)
 - [source ledger](sources.md)
 - [composing a system from declared parts](system-composition.md)
+- [diagnostic spans](diagnostic-spans.md)
 
 the development-environments note draws mkShell from its nixpkgs source, `nix develop` and `nix print-dev-env` from the Nix manual, direnv's caching from its wiki, Guix's shells and containers, Spack's `spack.yaml`/`spack.lock` split, conda's environment files and their lockfile history, rustup's toolchain overrides, mise and asdf's pin files, the devcontainers specification, and PEP 405 from primary sources. it grounds decision 0043 and records the disagreement those systems never settled about whether an environment is a lock consumer, a lock producer, or a lock of its own.
 
@@ -79,3 +80,5 @@ the current order is based on architectural leverage:
 6. signed package repositories, TUF, in-toto, SLSA, Sigstore, and workload identity
 
 the arrows in these lineages mean influence or reaction unless a source establishes direct ancestry.
+
+the diagnostic-spans note draws rustc's span and diagnostics chapters from the rustc dev guide, cpplib's line numbering from the GCC internals manual, miette's `Diagnostic` trait and `SourceCode` from its api documentation, and the Diagnostic structure and position-encoding negotiation from the LSP 3.17 specification. it grounds decision 0053 and records the disagreement those systems never settled about where the text a diagnostic points into lives — a session table the producer owns, an attachment the renderer adds, or a document the client already holds — and when position becomes line and column: eagerly in negotiated units, or lazily from offsets at render.
