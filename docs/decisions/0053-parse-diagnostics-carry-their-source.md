@@ -83,13 +83,13 @@ the rule leaves engine evaluation exactly where it was: an evaluation has no tex
 
 `a_malformed_lock_read_back_carries_its_file_and_renders_its_position` (`crates/phloem/tests/written_lock.rs`) is the round's headline: a lock published through `lockpublish::write`, its bind line's digest corrupted to `sha256:not-hex`, read back through `lockpublish::read`, refuses with a diagnostic whose source label is the path it was read from, whose span selects exactly `sha256:not-hex`, and whose miette graphical render prints `pith.lock:7:27` with the field quoted in the snippet — producer to render, one chain, identity untouched by any of it.
 
-`a_union_merge_binding_one_package_twice_is_refused_naming_both_lines` (`crates/phloem/src/lockfile.rs`) now asserts the structure the sentence used to spell: the primary span selects the second `bind` line and the note's span selects the first, both by comparing the selected bytes against the fixture.
+`a_union_merge_binding_one_package_twice_is_refused_naming_both_lines` (`crates/phloem/src/lock/file.rs`) now asserts the structure the sentence used to spell: the primary span selects the second `bind` line and the note's span selects the first, both by comparing the selected bytes against the fixture.
 
 `a_malformed_requirement_is_refused_at_its_field_in_the_package_file` (`crates/phloem/tests/dependent_resolution.rs`) is the registry half: a corrupted requirement clause refuses with the attached source labeled by the package's index file path and the span selecting `1.0` — the two facts `reattribute` used to bake into prose, now structure.
 
-`an_attached_source_renders_its_label_line_and_column` and `a_note_becomes_a_second_label_in_the_rendered_report` (`crates/pith-diag/src/lib.rs`) hold the render mechanics in the leaf crate, and `tokens_carry_spans_of_their_written_spelling_at_their_base` and `a_comma_piece_of_a_feature_list_spans_its_written_spelling` (`crates/phloem/src/locktext.rs`) hold the tokenizer's, including that a quoted token's span covers its written spelling at written length, escapes included.
+`an_attached_source_renders_its_label_line_and_column` and `a_note_becomes_a_second_label_in_the_rendered_report` (`crates/pith-diag/src/lib.rs`) hold the render mechanics in the leaf crate, and `tokens_carry_spans_of_their_written_spelling_at_their_base` and `a_comma_piece_of_a_feature_list_spans_its_written_spelling` (`crates/phloem/src/lock/text.rs`) hold the tokenizer's, including that a quoted token's span covers its written spelling at written length, escapes included.
 
-by count: the three parser files (`locktext.rs`, `lockfile.rs`, `registry.rs`) construct no `Span::none()` diagnostic and no `line {number}` message; before the round they held nineteen of the latter. thirty-one construction sites attach a span and a source. the workspace suite is 722 tests, 0 failures, against 710 before.
+by count: the three parser files (`lock/text.rs`, `lock/file.rs`, `registry.rs`) construct no `Span::none()` diagnostic and no `line {number}` message; before the round they held nineteen of the latter. thirty-one construction sites attach a span and a source. the workspace suite is 722 tests, 0 failures, against 710 before.
 
 ## unresolved
 
