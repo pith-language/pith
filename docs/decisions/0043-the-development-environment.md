@@ -140,6 +140,6 @@ entering the environment — applying the rendered record to a shell, direnv-sty
 
 the declaration names processes and services not at all. devenv's whole ground — supervised process sets as environment content — is unmodeled here, and whether it belongs to the package library or to a composition over it is a question for a repository that needs it.
 
-what an environment declares about machines, placements, and deployment targets — the M-5 and M-6 compositions — is untouched, on the terms 0040 left M-6: the protocol is there when those domains declare their own constraints.
+what an environment declares about machines, placements, and deployment targets — the M-5a and M-6 compositions — is untouched, on the terms 0040 left M-6: the protocol is there when those domains declare their own constraints.
 
 the environment record's text format carries no version line and no merge tooling. pre-release it breaks freely on the lock's terms; when the lock's file becomes a stable contract, this file's question returns with it.
