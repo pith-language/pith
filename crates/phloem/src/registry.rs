@@ -403,7 +403,7 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
+    #[cfg(all(unix, not(target_vendor = "apple")))]
     #[test]
     fn a_non_utf8_directory_child_is_refused() {
         use std::os::unix::ffi::OsStringExt as _;

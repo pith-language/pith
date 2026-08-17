@@ -9,7 +9,7 @@ list:
 # Enter the nix devshell (for environments without direnv).
 [group('setup')]
 dev:
-    nix develop
+    nix develop -c $SHELL
 
 # Print the toolchain versions the devshell resolved to.
 [group('setup')]
@@ -66,6 +66,18 @@ watch-clippy:
 # Everything CI checks, in one target. Use before pushing.
 [group('ci')]
 ci: fmt-check clippy test test-doc docs-check deny typos repo-check zizmor just-fmt-check
+
+# Check all formats managed by treefmt, including Rust, Nix, and this justfile,
+# and run the configured spelling check.
+[group('ci')]
+treefmt-check:
+    treefmt --ci
+
+# Use Cargo's built-in runner to match the historical GitHub Actions check.
+# Unlike `test`, this also runs doctests.
+[group('ci')]
+test-ci:
+    cargo test --workspace
 
 # Run every repository-specific check maintained by xtask.
 [group('ci')]
