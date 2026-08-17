@@ -374,6 +374,8 @@ fn two_toolchain_engine(
 
 #[path = "two_source_build/basic_builds.rs"]
 mod basic_builds;
+#[path = "two_source_build/equivalence.rs"]
+mod equivalence;
 #[path = "two_source_build/generation.rs"]
 mod generation;
 #[path = "two_source_build/invalidation.rs"]

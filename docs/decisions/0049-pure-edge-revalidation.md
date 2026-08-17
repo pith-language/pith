@@ -113,6 +113,16 @@ transitive validity, argued above and not taken. a dependency at depth two whose
 
 K-9's own text does not cover what this record fixes. `requirements/kernel.md` states the equivalence "under the same declared inputs," and a rule set is not an input, so the reproduced violation is a violation of a stronger property nobody has written down. `requirements/index.md` says "a semantic change gets a new requirement or an explicit migration," so re-scoping K-9 to quantify over the rule set is a requirement edit this record owes and does not make.
 
-the property is still not executable. what closes that is a differential harness that runs a generated scenario incrementally and from an empty cache and compares the results, and its edit script must generate revision-moving and input-changing edits only — a rule body edited *without* moving its revision retains cached results by design under 0023, so generating that case would fail forever and would be testing the wrong thing. it belongs on `MemoryEngineStateStore`, which the cross-adapter conformance suite already uses as its reference model, because the sqlite adapter costs roughly a millisecond per computation and a suite that runs each scenario twice is a suite nobody runs. it should be host-agnostic rather than gated on linux, or the author's own host compiles it out.
+the property is now executable on one path and not in general.
+`two_source_build::equivalence::an_incremental_build_matches_the_same_state_built_from_empty`
+builds two sources, edits one, rebuilds incrementally over the warm store and
+index, and compares the executable against the same declared inputs built in a
+fresh engine over an empty store. it guards itself against passing vacuously: it
+asserts the rebuild served something (fewer than a cold build's five actions) and
+that the edit moved the output. what it does not do is quantify over a
+population, so it catches a regression on the shape a build has rather than
+establishing the property.
+
+the general form is a differential harness that runs a generated scenario incrementally and from an empty cache and compares the results, and its edit script must generate revision-moving and input-changing edits only — a rule body edited *without* moving its revision retains cached results by design under 0023, so generating that case would fail forever and would be testing the wrong thing. it belongs on `MemoryEngineStateStore`, which the cross-adapter conformance suite already uses as its reference model, because the sqlite adapter costs roughly a millisecond per computation and a suite that runs each scenario twice is a suite nobody runs. it should be host-agnostic rather than gated on linux, or the author's own host compiles it out.
 
 nothing enforces that a revision moves when a body changes. this record makes a moved revision propagate correctly; it does not make an author move one. 0047 derives revisions from the declarations an interface names, which covers interface-level change automatically and leaves body-level change to discipline, and 0038's represented tier is what would make a body's digest its revision.
