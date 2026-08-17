@@ -81,7 +81,7 @@ the rule leaves engine evaluation exactly where it was: an evaluation has no tex
 
 ### measured
 
-`a_malformed_lock_read_back_carries_its_file_and_renders_its_position` (`crates/phloem/tests/written_lock.rs`) is the round's headline: a lock published through `lockpublish::write`, its bind line's digest corrupted to `sha256:not-hex`, read back through `lockpublish::read`, refuses with a diagnostic whose source label is the path it was read from, whose span selects exactly `sha256:not-hex`, and whose miette graphical render prints `pith.lock:7:27` with the field quoted in the snippet — producer to render, one chain, identity untouched by any of it.
+`a_malformed_lock_read_back_carries_its_file_and_renders_its_position` (`crates/phloem/tests/written_lock.rs`) is the round's headline: a lock published through `lockpublish::write`, its bind line's digest corrupted to `blake3:not-hex`, read back through `lockpublish::read`, refuses with a diagnostic whose source label is the path it was read from, whose span selects exactly `blake3:not-hex`, and whose miette graphical render prints `pith.lock:7:27` with the field quoted in the snippet — producer to render, one chain, identity untouched by any of it.
 
 `a_union_merge_binding_one_package_twice_is_refused_naming_both_lines` (`crates/phloem/src/lock/file.rs`) now asserts the structure the sentence used to spell: the primary span selects the second `bind` line and the note's span selects the first, both by comparing the selected bytes against the fixture.
 
