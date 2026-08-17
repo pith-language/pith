@@ -132,6 +132,17 @@ this file tracks sources already used or queued for a deeper pass. a link here d
 - [pubgrub-rs guide](https://pubgrub-rs-guide.netlify.app/)
 - [CUDF 2.0 specification](https://www.mancoosi.org/reports/tr3.pdf)
 
+## arithmetic and numeric representation
+
+- [PEP 237: unifying long integers and integers](https://peps.python.org/pep-0237/) and [CPython `longintrepr.h`](https://github.com/python/cpython/blob/main/Include/cpython/longintrepr.h)
+- [Nix language types](https://nix.dev/manual/nix/latest/language/types), [NixOS/nix#11188](https://github.com/NixOS/nix/pull/11188), and the [Nix 2.25 release notes](https://nix.dev/manual/nix/2.29/release-notes/rl-2.25.html)
+- [Dhall standard](https://github.com/dhall-lang/dhall-lang/blob/master/standard/README.md), [beta normalization](https://github.com/dhall-lang/dhall-lang/blob/master/standard/beta-normalization.md), and [binary encoding](https://github.com/dhall-lang/dhall-lang/blob/master/standard/binary.md)
+- [CUE specification](https://cuelang.org/docs/reference/spec/)
+- [Starlark specification](https://github.com/bazelbuild/starlark/blob/master/spec.md) and [starlark-go `int.go`](https://github.com/google/starlark-go/blob/master/starlark/int.go)
+- [RFC 8949: CBOR](https://www.rfc-editor.org/rfc/rfc8949.html)
+- [`java.math.BigInteger`](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/math/BigInteger.html)
+- [protobuf encoding](https://protobuf.dev/programming-guides/encoding/)
+
 ## tooling
 
 - [Language Server Protocol](https://microsoft.github.io/language-server-protocol/)

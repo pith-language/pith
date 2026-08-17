@@ -39,6 +39,7 @@ each lineage starts with the pressure that created a system. it records the mech
 - [development environments](dev-environments.md)
 - [package builds](package-builds.md)
 - [declarations and their identity](declarations.md)
+- [unbounded integers](arithmetic.md)
 - [tooling and inspectability](tooling.md)
 - [source ledger](sources.md)
 - [composing a system from declared parts](system-composition.md)
@@ -47,6 +48,8 @@ each lineage starts with the pressure that created a system. it records the mech
 the development-environments note draws mkShell from its nixpkgs source, `nix develop` and `nix print-dev-env` from the Nix manual, direnv's caching from its wiki, Guix's shells and containers, Spack's `spack.yaml`/`spack.lock` split, conda's environment files and their lockfile history, rustup's toolchain overrides, mise and asdf's pin files, the devcontainers specification, and PEP 405 from primary sources. it grounds decision 0043 and records the disagreement those systems never settled about whether an environment is a lock consumer, a lock producer, or a lock of its own.
 
 the incremental-revalidation note draws Salsa's LRU RFC and rust-analyzer's account of lazy revalidation, the rustc dev guide on `try_mark_green` and the previous dependency graph, Bazel's Skyframe reference and its memory page including Skyfocus, the Nix manual's garbage-collection chapter, and the *Build Systems à la Carte* rebuilder taxonomy from primary sources. it grounds decision 0051 and records the disagreement those systems never settled about where the transitive cost of a validity check is paid — at check time as a walk and a retained closure, or at record time as a summary and a lost early cutoff.
+
+the arithmetic note draws PEP 237 and CPython's `longintrepr.h` from python.org and the CPython tree, the Nix language manual and the pull request that banned integer overflow from nix.dev and the NixOS repository, Dhall's standard README, beta-normalization, and binary encoding from the dhall-lang standard, the CUE and Starlark specifications with starlark-go's `int.go` beside the latter, RFC 8949's bignum and deterministic-encoding sections, `java.math.BigInteger`, and protobuf's encoding guide from primary sources. it grounds decision 0055 and records what those systems agree on rather than what they dispute: that unboundedness makes addition, subtraction, and multiplication total and leaves division partial in every one of them, and that an unbounded integer needs a stated normal form, because equality, hashing, and any digest over the value all fail when one number has two representations.
 
 the package-builds note draws stdenv's phases from nixpkgs's setup.sh, Spack's package.py and builder from its documentation and source, Guix's build systems and g-expressions from its manual, Debian's source-package format and `debian/rules` from policy and the debhelper and dpkg manuals, cargo's `.crate` and `build.rs` from its reference, portage's ebuild phases from the gentoo development guide, and Homebrew's formula DSL from its cookbook and API docs. it grounds decision 0045 and records the disagreement those systems never settled about whether a package's build is data the system can inspect or code it can only run.
 
