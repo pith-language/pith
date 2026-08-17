@@ -7,10 +7,11 @@
 //! `&mut Engine`; the call between them needs neither, which is what lets the
 //! driver park the requesting chain and run other work meanwhile.
 
-use pith_core::{Action, ActionSpec, Content, Request, RuleId, Type, Value, select_rule};
+mod content;
+
+use pith_core::{Action, ActionSpec, Request, RuleId, Type, Value, select_rule};
 use pith_diag::{Diag, DiagnosticSink, EngineCode, PithResult, Span};
-use pith_ids::{ComputationId, ContentId};
-use pith_store::{Tree, TreeEntry, TreeEntryContent};
+use pith_ids::ComputationId;
 use smallvec::SmallVec;
 
 use super::Engine;
@@ -18,16 +19,10 @@ use super::ir::{
     ActionPlan, ActionRecord, AttemptState, ComputationKind, ComputationNode, DependencyEdge,
     Evaluation, ReuseDecision, ReuseReason, StopReason,
 };
-use crate::action::{
-    ActionExecution, ActionInvocation, CapturedFileContent, CapturedOutputContent,
-    CapturedTreeEntryContent, ExecutionReport, MaterializedActionInput, MaterializedBlob,
-    MaterializedContent, MaterializedFileContent, MaterializedTree, MaterializedTreeEntryContent,
-    ProducedOutput,
-};
+use crate::action::{ActionExecution, ActionInvocation, ExecutionReport};
 use crate::graph::capabilities::canonical_capabilities;
 use crate::graph::diagnostics::{
-    InternalInvariant, content_unavailable_diag, internal_diag, one_diag, store_error_diag,
-    validate_action_result, validate_execution_platform,
+    InternalInvariant, internal_diag, one_diag, validate_action_result, validate_execution_platform,
 };
 use crate::policy::ActionAuthorization;
 
@@ -111,7 +106,6 @@ impl Engine {
             Ok(plan) => plan,
             Err(diagnostics) => return ActionStart::PlanningFailed(diagnostics),
         };
-        let rule = plan.rule;
         let authorization = policy.authorize(&plan);
         let denial = match &authorization {
             ActionAuthorization::Allowed { .. } => None,
@@ -122,19 +116,12 @@ impl Engine {
             ))),
         };
 
-        let Some(action_rule) = self.action_rules.get(rule) else {
-            return ActionStart::PlanningFailed(internal_diag(
-                InternalInvariant::SelectedActionRuleHasNoMetadata,
-            ));
-        };
-        let rule_meta = ActionRuleMeta {
-            rule,
-            declared_output: action_rule.interface.output.clone(),
-            span: action_rule.span,
-            label: action_rule.label.clone(),
+        let rule_meta = match self.action_rule_meta(plan.rule) {
+            Ok(rule_meta) => rule_meta,
+            Err(diagnostics) => return ActionStart::PlanningFailed(diagnostics),
         };
 
-        let key = match self.action_computation_key(rule, request, plan.spec_digest) {
+        let key = match self.action_computation_key(plan.rule, request, plan.spec_digest) {
             Ok(key) => key,
             Err(diagnostics) => return ActionStart::PlanningFailed(diagnostics),
         };
@@ -154,39 +141,10 @@ impl Engine {
             }
         }
 
-        let computation = self.computations.push(ComputationNode {
-            kind: ComputationKind::Action(request.clone()),
-            rule,
-            dependencies: SmallVec::new(),
-            state: AttemptState::Pending,
-            action: Some(ActionRecord {
-                key,
-                spec_digest: plan.spec_digest,
-                spec: plan.spec.clone(),
-                authorization: authorization.clone(),
-                executor_report: None,
-                imported_report: None,
-            }),
-            capabilities: canonical_capabilities(&plan.spec.capabilities),
-        });
-
-        let durable_plan = match self.durable_action_plan(rule, &plan.spec) {
-            Ok(durable_plan) => durable_plan,
-            Err(diagnostics) => {
-                self.mark_action_failed(computation, &diagnostics);
-                return ActionStart::PlanningFailed(diagnostics);
-            }
-        };
-        let durable_computation = crate::state::DurableComputation::Action {
-            computation_digest: key.digest,
-            request: durable_action_request(request),
-            plan: Box::new(durable_plan),
-            authorization,
-        };
+        let computation = self.allocate_action_computation(request, &plan, key, &authorization);
         if let Err(diagnostics) =
-            self.create_pending_action_attempt(computation, durable_computation)
+            self.persist_pending_action(computation, request, &plan, key, authorization)
         {
-            self.stop_action(computation, &diagnostics, StopReason::Failed);
             return ActionStart::PlanningFailed(diagnostics);
         }
 
@@ -213,6 +171,74 @@ impl Engine {
             rule_meta,
             invocation,
         }))
+    }
+
+    fn action_rule_meta(&self, rule: RuleId) -> PithResult<ActionRuleMeta> {
+        let Some(action_rule) = self.action_rules.get(rule) else {
+            return Err(internal_diag(
+                InternalInvariant::SelectedActionRuleHasNoMetadata,
+            ));
+        };
+        Ok(ActionRuleMeta {
+            rule,
+            declared_output: action_rule.interface.output.clone(),
+            span: action_rule.span,
+            label: action_rule.label.clone(),
+        })
+    }
+
+    fn allocate_action_computation(
+        &mut self,
+        request: &Request<Action>,
+        plan: &ActionPlan,
+        key: pith_core::ActionComputationKey,
+        authorization: &ActionAuthorization,
+    ) -> ComputationId {
+        self.computations.push(ComputationNode {
+            kind: ComputationKind::Action(request.clone()),
+            rule: plan.rule,
+            dependencies: SmallVec::new(),
+            state: AttemptState::Pending,
+            action: Some(ActionRecord {
+                key,
+                spec_digest: plan.spec_digest,
+                spec: plan.spec.clone(),
+                authorization: authorization.clone(),
+                executor_report: None,
+                imported_report: None,
+            }),
+            capabilities: canonical_capabilities(&plan.spec.capabilities),
+        })
+    }
+
+    fn persist_pending_action(
+        &mut self,
+        computation: ComputationId,
+        request: &Request<Action>,
+        plan: &ActionPlan,
+        key: pith_core::ActionComputationKey,
+        authorization: ActionAuthorization,
+    ) -> PithResult<()> {
+        let durable_plan = match self.durable_action_plan(plan.rule, &plan.spec) {
+            Ok(durable_plan) => durable_plan,
+            Err(diagnostics) => {
+                self.mark_action_failed(computation, &diagnostics);
+                return Err(diagnostics);
+            }
+        };
+        let durable_computation = crate::state::DurableComputation::Action {
+            computation_digest: key.digest,
+            request: durable_action_request(request),
+            plan: Box::new(durable_plan),
+            authorization,
+        };
+        if let Err(diagnostics) =
+            self.create_pending_action_attempt(computation, durable_computation)
+        {
+            self.stop_action(computation, &diagnostics, StopReason::Failed);
+            return Err(diagnostics);
+        }
+        Ok(())
     }
 
     /// Import, validate, and record one action's result, after its executor
@@ -374,153 +400,6 @@ impl Engine {
         };
         action.imported_report = Some(report);
         Ok(())
-    }
-
-    fn materialize_action(&self, spec: &ActionSpec) -> PithResult<ActionInvocation> {
-        let mut inputs = Vec::with_capacity(spec.inputs.len());
-        for input in &spec.inputs {
-            let content = match &input.content {
-                Content::Blob(id) => self.materialize_blob(*id)?,
-                Content::Tree(id) => MaterializedContent::Tree(self.materialize_tree(*id)?),
-            };
-            inputs.push(MaterializedActionInput {
-                path: input.path.clone(),
-                content,
-            });
-        }
-        let program = match spec.executable.content() {
-            Some(id) => {
-                let MaterializedContent::Blob(blob) = self.materialize_blob(id)? else {
-                    return Err(internal_diag(InternalInvariant::TreeFileMaterializedAsTree));
-                };
-                Some(blob)
-            }
-            None => None,
-        };
-        Ok(ActionInvocation {
-            spec: spec.clone(),
-            inputs: inputs.into_boxed_slice(),
-            program,
-        })
-    }
-
-    fn materialize_blob(&self, id: ContentId) -> PithResult<MaterializedContent> {
-        match self.store.get_blob(id).map_err(store_error_diag)? {
-            Some(blob) => Ok(MaterializedContent::Blob(MaterializedBlob {
-                id,
-                bytes: blob.as_bytes().to_vec().into_boxed_slice(),
-            })),
-            None => Err(content_unavailable_diag(id)),
-        }
-    }
-
-    fn materialize_tree(&self, id: ContentId) -> PithResult<MaterializedTree> {
-        let tree = match self.store.get_tree(id).map_err(store_error_diag)? {
-            Some(tree) => tree,
-            None => return Err(content_unavailable_diag(id)),
-        };
-        let mut entries = Vec::with_capacity(tree.entries().len());
-        for entry in tree.entries() {
-            let content = match entry.content() {
-                TreeEntryContent::File(pith_store::FileContent {
-                    content,
-                    executable,
-                }) => {
-                    let MaterializedContent::Blob(materialized) =
-                        self.materialize_blob(*content)?
-                    else {
-                        return Err(internal_diag(InternalInvariant::TreeFileMaterializedAsTree));
-                    };
-                    MaterializedTreeEntryContent::File(MaterializedFileContent {
-                        content: *content,
-                        executable: *executable,
-                        bytes: materialized.bytes,
-                    })
-                }
-                TreeEntryContent::Tree(child) => {
-                    MaterializedTreeEntryContent::Tree(self.materialize_tree(*child)?)
-                }
-                TreeEntryContent::Symlink { target } => MaterializedTreeEntryContent::Symlink {
-                    target: target.clone(),
-                },
-            };
-            entries.push(
-                TreeEntry::new(entry.name(), content)
-                    .map_err(|_| internal_diag(InternalInvariant::TreeFileMaterializedAsTree))?,
-            );
-        }
-        Ok(MaterializedTree {
-            id,
-            entries: entries.into_boxed_slice(),
-        })
-    }
-
-    fn import_execution(
-        &mut self,
-        report: &crate::CapturedExecutionReport,
-        exit: Option<crate::ActionExit>,
-    ) -> PithResult<ActionExecution> {
-        let mut outputs = Vec::with_capacity(report.outputs.len());
-        for output in &report.outputs {
-            let content = self.import_output(&output.content)?;
-            outputs.push(ProducedOutput {
-                path: output.path.clone(),
-                content,
-            });
-        }
-        Ok(ActionExecution {
-            report: ExecutionReport {
-                executor: report.executor.clone(),
-                platform: report.platform.clone(),
-                access: report.access,
-                outputs: outputs.into_boxed_slice(),
-                capabilities_used: report.capabilities_used.clone(),
-            },
-            exit,
-        })
-    }
-
-    /// Content-address a captured output into the store, returning the typed
-    /// content the engine retains. The Blob/Tree discriminator travels in the
-    /// `Content` payload, so there is no separate `kind` to disagree with it:
-    /// the previous 2×2 mismatch match and its diagnostic are gone.
-    fn import_output(
-        &mut self,
-        content: &CapturedOutputContent,
-    ) -> PithResult<Content<ContentId, ContentId>> {
-        match content {
-            Content::Blob(bytes) => Ok(Content::Blob(
-                self.store.put_blob(bytes).map_err(store_error_diag)?,
-            )),
-            Content::Tree(tree) => Ok(Content::Tree(self.import_tree(tree)?)),
-        }
-    }
-
-    fn import_tree(&mut self, tree: &crate::action::CapturedTree) -> PithResult<ContentId> {
-        let mut entries = Vec::with_capacity(tree.entries.len());
-        for entry in tree.entries.iter() {
-            let content = match entry.content() {
-                CapturedTreeEntryContent::File(CapturedFileContent { bytes, executable }) => {
-                    let content = self.store.put_blob(bytes).map_err(store_error_diag)?;
-                    TreeEntryContent::File(pith_store::FileContent {
-                        content,
-                        executable: *executable,
-                    })
-                }
-                CapturedTreeEntryContent::Tree(tree) => {
-                    TreeEntryContent::Tree(self.import_tree(tree)?)
-                }
-                CapturedTreeEntryContent::Symlink { target } => TreeEntryContent::Symlink {
-                    target: target.clone(),
-                },
-            };
-            entries.push(
-                TreeEntry::new(entry.name(), content)
-                    .map_err(|_| internal_diag(InternalInvariant::TreeFileMaterializedAsTree))?,
-            );
-        }
-        let tree = Tree::new(entries).map_err(store_error_diag)?;
-        self.store.put_tree(tree).map_err(store_error_diag)
     }
 
     fn validate_execution(&self, spec: &ActionSpec, execution: &ActionExecution) -> PithResult<()> {
