@@ -794,6 +794,42 @@ mod tests {
     }
 
     #[test]
+    fn the_written_form_spells_its_digest_algorithm() {
+        let text = render(&lock());
+        assert!(
+            text.contains("blake3:"),
+            "every digest field names the algorithm that hashed it: {text}"
+        );
+        assert!(
+            !text.contains("sha256"),
+            "no field claims an algorithm the kernel does not hash with: {text}"
+        );
+    }
+
+    #[test]
+    fn a_digest_spelling_another_algorithm_is_refused_naming_the_expected_one() {
+        // A lock written by an earlier tree of this workspace spelled the
+        // prefix `sha256:` over the same blake3 bytes. the bytes hash one
+        // way whatever the line claims, so the claim is what moves: the read
+        // refuses it and names the expected spelling, and under 0048 the
+        // pre-release answer is to re-render, with no format version change.
+        let universe = format!("blake3:{}", lock().universe.digest());
+        let spelled = format!("sha256:{}", lock().universe.digest());
+        let text = render(&lock()).replace(&universe, &spelled);
+        let error = parse("pith.lock", &text).unwrap_err();
+        let diagnostic = error.iter().next().unwrap();
+        assert!(
+            diagnostic.message.0.contains("blake3:"),
+            "the refusal names the expected spelling: {error:?}"
+        );
+        assert_eq!(
+            select(&text, diagnostic.span),
+            Some(spelled.as_str()),
+            "the span selects the mislabeled field"
+        );
+    }
+
+    #[test]
     fn the_file_moves_when_an_input_moves_and_not_otherwise() {
         let base = lock();
         let moved = Lock::new(

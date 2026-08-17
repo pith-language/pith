@@ -598,6 +598,15 @@ mod tests {
     }
 
     #[test]
+    fn the_written_digest_prefix_names_the_kernels_hash_function() {
+        assert_eq!(
+            BLAKE3,
+            format!("{}:", pith_ids::DIGEST_ALGORITHM),
+            "the written prefix and the hasher are one fact, bound here"
+        );
+    }
+
+    #[test]
     fn a_comma_piece_of_a_feature_list_spans_its_written_spelling() {
         let line = r#"[ok,"two words"]"#;
         let tokens = tokenize(line, ByteOffset(0)).unwrap();
