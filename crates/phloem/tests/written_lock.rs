@@ -420,3 +420,85 @@ fn the_value_spelling_survives_the_codec_boundary_unchanged() {
     assert_eq!(read_back, lock);
     assert_eq!(read_back.content_id(), lock.content_id());
 }
+
+/// A malformed lock read back from its path is refused by a diagnostic that
+/// carries the file itself: the source is the file at the path it was read
+/// from, the span selects the offending field's written spelling, and a
+/// miette render over that diagnostic names the file, the line, and the
+/// column, so a reader renders position from structure rather than prose
+/// (decision 0053).
+#[test]
+fn a_malformed_lock_read_back_carries_its_file_and_renders_its_position() {
+    let scratch = TempDir::new().unwrap();
+    let path = scratch.path().join("pith.lock");
+    let universe = CandidateUniverse::new(vec![candidate("zlib", "1.3", b"zlib-1.3")]);
+    let mut engine = engine_with(&SharedState::default());
+    let answer = engine
+        .evaluate_pure(&request_over(
+            NUMERIC_SEGMENTS,
+            &constraint_set_value(&[zlib_constraint()]),
+            &universe.to_value(),
+            &preference_list_value(&newest()),
+            100,
+        ))
+        .unwrap();
+    let lock = Lock::from_resolution(
+        NUMERIC_SEGMENTS,
+        &newest(),
+        &Resolution::from_value(&answer.value).unwrap(),
+    )
+    .unwrap();
+    lockpublish::write(&lock, &path).unwrap();
+    let good = std::fs::read_to_string(&path).unwrap();
+    let bad = good.replace(
+        &format!("sha256:{}", ContentId::of_blob(b"zlib-1.3").digest()),
+        "sha256:not-hex",
+    );
+    std::fs::write(&path, &bad).unwrap();
+
+    let error = lockpublish::read(&path).unwrap_err();
+    let diagnostic = error.iter().next().unwrap();
+    let file = diagnostic
+        .source
+        .as_ref()
+        .expect("the refusal carries the file it was refused in");
+    assert_eq!(
+        file.label.as_ref(),
+        path.display().to_string(),
+        "the source is named by the path the reader read"
+    );
+    assert_eq!(
+        file.source_text()
+            .get(diagnostic.span.start.0 as usize..diagnostic.span.end.0 as usize),
+        Some("sha256:not-hex"),
+        "the span selects the offending digest field, prefix included"
+    );
+
+    let (line_number, column) = {
+        let (number, line) = bad
+            .lines()
+            .enumerate()
+            .find(|(_, line)| line.contains("sha256:not-hex"))
+            .map(|(index, line)| (index.saturating_add(1), line))
+            .unwrap();
+        let column = line
+            .find("sha256:not-hex")
+            .map(|at| line.get(..at).unwrap().chars().count().saturating_add(1))
+            .unwrap();
+        (number, column)
+    };
+    let handler = miette::GraphicalReportHandler::new();
+    let report = miette::Report::new(diagnostic.clone());
+    let mut rendered = String::new();
+    handler
+        .render_report(&mut rendered, report.as_ref())
+        .unwrap();
+    assert!(
+        rendered.contains(&format!("pith.lock:{line_number}:{column}")),
+        "the rendered header names the file, the line, and the column: {rendered}"
+    );
+    assert!(
+        rendered.contains("sha256:not-hex"),
+        "the rendered snippet quotes the offending field: {rendered}"
+    );
+}
