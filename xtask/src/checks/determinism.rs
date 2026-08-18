@@ -28,12 +28,12 @@ pub(crate) fn run(root: &Path) -> Report {
         };
 
         for (line_index, line) in source.lines().enumerate() {
-            if contains_hash_map(line) {
+            if contains_hash_map(line) || contains_hash_set(line) {
                 let line_number = line_index.checked_add(1).unwrap_or(line_index);
                 report.push(Diagnostic::line(
                     &path,
                     line_number,
-                    "HashMap is forbidden by decision 0021",
+                    "HashMap and HashSet are forbidden by decision 0021",
                 ));
             }
         }
@@ -47,4 +47,10 @@ fn contains_hash_map(line: &str) -> bool {
     line.contains("HashMap<")
         || line.contains("use std::collections::HashMap")
         || line.contains("use ::std::collections::HashMap")
+}
+
+fn contains_hash_set(line: &str) -> bool {
+    line.contains("HashSet<")
+        || line.contains("use std::collections::HashSet")
+        || line.contains("use ::std::collections::HashSet")
 }
