@@ -45,6 +45,7 @@ each lineage starts with the pressure that created a system. it records the mech
 - [composing a system from declared parts](system-composition.md)
 - [diagnostic spans](diagnostic-spans.md)
 - [extension interfaces](extension-interfaces.md)
+- [finding the implementation for a call](dispatch.md)
 
 the development-environments note draws mkShell from its nixpkgs source, `nix develop` and `nix print-dev-env` from the Nix manual, direnv's caching from its wiki, Guix's shells and containers, Spack's `spack.yaml`/`spack.lock` split, conda's environment files and their lockfile history, rustup's toolchain overrides, mise and asdf's pin files, the devcontainers specification, and PEP 405 from primary sources. it grounds decision 0043 and records the disagreement those systems never settled about whether an environment is a lock consumer, a lock producer, or a lock of its own.
 
@@ -88,3 +89,5 @@ the current order is based on architectural leverage:
 the arrows in these lineages mean influence or reaction unless a source establishes direct ancestry.
 
 the diagnostic-spans note draws rustc's span and diagnostics chapters from the rustc dev guide, cpplib's line numbering from the GCC internals manual, miette's `Diagnostic` trait and `SourceCode` from its api documentation, and the Diagnostic structure and position-encoding negotiation from the LSP 3.17 specification. it grounds decision 0053 and records the disagreement those systems never settled about where the text a diagnostic points into lives — a session table the producer owns, an attachment the renderer adds, or a document the client already holds — and when position becomes line and column: eagerly in negotiated units, or lazily from offsets at render.
+
+the dispatch note draws the JVM specification's method-resolution section, the Common Lisp HyperSpec's effective-method procedure, the Julia manual and its developer documentation on method tables, SWI-Prolog's just-in-time clause indexing, the GHC user's guide on instance resolution with the rough-match note from GHC's own source, and the GNU make manual's pattern-matching rule from primary sources. it grounds decision 0057 and finds the six agreeing on the question and splitting on one rule: the JVM demands an exact signature and looks the answer up, the other five admit inexact matches, and a ranking forces a search that an index can only shorten. it also records where they disagree at a tie — an error naming the candidates in Julia and GHC, the first line of the makefile in make, the first clause in Prolog — and that no system in the set is both exact and dynamic, which is the position 0015 put pith in.
