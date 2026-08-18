@@ -1,5 +1,6 @@
 //! Rules, typed interfaces, requests, and deterministic selection.
 
+use indexmap::IndexMap;
 use pith_arena::define_arena;
 use pith_diag::{Diag, EngineCode, Span};
 use pith_ids::{
@@ -336,25 +337,87 @@ pub enum SelectOutcome {
     Ambiguous(SmallVec<[RuleId; 2]>),
 }
 
-/// Select rules by exact typed-interface match, independent of registration
-/// order. Candidate order is canonical so diagnostics are deterministic.
-#[must_use]
-pub fn select_rule<K: EffectCategory>(
-    request: &Request<K>,
-    rules: &RuleArena<Rule<K>>,
-) -> SelectOutcome {
-    let mut candidates: Vec<(Interface, Box<str>, RuleId)> = rules
-        .iter()
-        .filter(|(_, rule)| rule.interface == request.interface)
-        .map(|(id, rule)| (rule.interface.clone(), rule.label.clone(), id))
-        .collect();
-    candidates.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+/// The registered rules of one effect category, indexed by the interface they
+/// provide (decision 0057).
+///
+/// The arena is the population and the index is a view of it, so the table owns
+/// both and is the only way to add a rule. There is no accessor handing out a
+/// mutable rule: an interface that could be edited in place would leave the
+/// index naming a bucket the rule no longer belongs to, and registration is the
+/// one event either structure has to observe.
+pub struct RuleTable<K: EffectCategory = Pure> {
+    rules: RuleArena<Rule<K>>,
+    by_interface: IndexMap<Interface, SmallVec<[RuleId; 2]>>,
+}
 
-    let candidates: SmallVec<[RuleId; 2]> = candidates.into_iter().map(|(_, _, id)| id).collect();
-    match candidates.as_slice() {
-        [] => SelectOutcome::NoMatch,
-        [only] => SelectOutcome::One(*only),
-        _ => SelectOutcome::Ambiguous(candidates),
+impl<K: EffectCategory> RuleTable<K> {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            rules: RuleArena::new(),
+            by_interface: IndexMap::new(),
+        }
+    }
+
+    /// Register `rule` and return its id.
+    pub fn push(&mut self, rule: Rule<K>) -> RuleId {
+        let interface = rule.interface.clone();
+        let id = self.rules.push(rule);
+        self.by_interface.entry(interface).or_default().push(id);
+        id
+    }
+
+    #[must_use]
+    pub fn get(&self, id: RuleId) -> Option<&Rule<K>> {
+        self.rules.get(id)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (RuleId, &Rule<K>)> {
+        self.rules.iter()
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.rules.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.rules.is_empty()
+    }
+
+    /// Select the rules providing the request's interface, independent of
+    /// registration order (decision 0015).
+    ///
+    /// The index keys on the interface under the same `Eq` the scan this
+    /// replaced evaluated per rule, so a bucket holds exactly the rules that
+    /// scan would have kept. Ordering the candidates is left to the ambiguous
+    /// branch, which is a failure path: a run that reports `E-1102` is about to
+    /// stop, and the ordinary outcome allocates nothing.
+    #[must_use]
+    pub fn select(&self, request: &Request<K>) -> SelectOutcome {
+        let Some(candidates) = self.by_interface.get(&request.interface) else {
+            return SelectOutcome::NoMatch;
+        };
+        match candidates.as_slice() {
+            [] => SelectOutcome::NoMatch,
+            [only] => SelectOutcome::One(*only),
+            _ => {
+                let mut candidates = candidates.clone();
+                candidates.sort_by(|left, right| self.label(*left).cmp(&self.label(*right)));
+                SelectOutcome::Ambiguous(candidates)
+            }
+        }
+    }
+
+    fn label(&self, id: RuleId) -> Option<&str> {
+        self.rules.get(id).map(|rule| rule.label.as_ref())
+    }
+}
+
+impl<K: EffectCategory> Default for RuleTable<K> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -365,7 +428,7 @@ impl SelectOutcome {
     pub fn into_result<K: EffectCategory>(
         self,
         request: &Request<K>,
-        rules: &RuleArena<Rule<K>>,
+        rules: &RuleTable<K>,
     ) -> Result<RuleId, Diag> {
         match self {
             Self::One(id) => Ok(id),
@@ -408,7 +471,6 @@ mod tests {
         TAG_BLOB, TAG_BOOL, TAG_BYTES, TAG_INT, TAG_LIST, TAG_NOMINAL, TAG_RECORD, TAG_SUM,
         TAG_TEXT, TAG_UNIT,
     };
-    use pith_arena::Arena;
 
     #[test]
     fn type_and_value_tags_are_distinct_and_share_numbering() {
@@ -719,10 +781,11 @@ mod tests {
 
     #[test]
     fn no_match_produces_error_with_typed_signature() {
-        let arena: RuleArena<Rule> = Arena::new();
+        let rules: RuleTable = RuleTable::new();
         let request = request("answer", interface([], Type::Int), []);
-        let err = select_rule(&request, &arena)
-            .into_result(&request, &arena)
+        let err = rules
+            .select(&request)
+            .into_result(&request, &rules)
             .unwrap_err();
         assert_eq!(err.code, EngineCode::NoRuleForInterface.into());
         assert_eq!(err.severity, pith_diag::Severity::Error);
@@ -731,13 +794,14 @@ mod tests {
 
     #[test]
     fn labels_do_not_participate_in_selection() {
-        let mut arena: RuleArena<Rule> = Arena::new();
-        let bool_rule = arena.push(rule("same label", interface([], Type::Bool)));
-        let int_rule = arena.push(rule("same label", interface([], Type::Int)));
+        let mut rules: RuleTable = RuleTable::new();
+        let bool_rule = rules.push(rule("same label", interface([], Type::Bool)));
+        let int_rule = rules.push(rule("same label", interface([], Type::Int)));
         let request = request("different label", interface([], Type::Int), []);
 
-        let selected = select_rule(&request, &arena)
-            .into_result(&request, &arena)
+        let selected = rules
+            .select(&request)
+            .into_result(&request, &rules)
             .unwrap();
 
         assert_ne!(selected, bool_rule);
@@ -746,14 +810,15 @@ mod tests {
 
     #[test]
     fn ambiguity_names_every_candidate_and_interface() {
-        let mut arena: RuleArena<Rule> = Arena::new();
+        let mut rules: RuleTable = RuleTable::new();
         let signature = interface([Type::Text], Type::Int);
-        arena.push(rule("a", signature.clone()));
-        arena.push(rule("b", signature.clone()));
+        rules.push(rule("a", signature.clone()));
+        rules.push(rule("b", signature.clone()));
         let request = request("thing", signature, [Value::Text("input".into())]);
 
-        let err = select_rule(&request, &arena)
-            .into_result(&request, &arena)
+        let err = rules
+            .select(&request)
+            .into_result(&request, &rules)
             .unwrap_err();
 
         assert_eq!(err.code, EngineCode::AmbiguousRule.into());
@@ -768,7 +833,7 @@ mod tests {
     #[test]
     fn ambiguity_diagnostics_ignore_registration_order() {
         fn notes(reversed: bool) -> Vec<Box<str>> {
-            let mut arena: RuleArena<Rule> = Arena::new();
+            let mut rules: RuleTable = RuleTable::new();
             let signature = interface([], Type::Int);
             let labels = if reversed {
                 ["beta", "alpha"]
@@ -776,11 +841,12 @@ mod tests {
                 ["alpha", "beta"]
             };
             for label in labels {
-                arena.push(rule(label, signature.clone()));
+                rules.push(rule(label, signature.clone()));
             }
             let request = request("answer", signature, []);
-            select_rule(&request, &arena)
-                .into_result(&request, &arena)
+            rules
+                .select(&request)
+                .into_result(&request, &rules)
                 .unwrap_err()
                 .notes
                 .iter()

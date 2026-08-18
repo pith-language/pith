@@ -6,7 +6,7 @@
 //! leaving the effect to a driver — which is what keeps the claim "the core is
 //! structurally pure" checkable rather than aspirational.
 
-use pith_core::{Action, Pure, Request, RuleId, Value, select_rule};
+use pith_core::{Action, Pure, Request, RuleId, Value};
 use pith_diag::{Diag, DiagnosticSink, EngineCode, PithResult};
 use pith_ids::{ComputationId, ContentId};
 use smallvec::SmallVec;
@@ -300,7 +300,8 @@ impl Engine {
 
     pub(super) fn resolve_pure_rule(&self, request: &Request<Pure>) -> PithResult<RuleId> {
         request.validate_inputs().map_err(one_diag)?;
-        select_rule(request, &self.rules)
+        self.rules
+            .select(request)
             .into_result(request, &self.rules)
             .map_err(one_diag)
     }

@@ -9,7 +9,7 @@
 
 mod content;
 
-use pith_core::{Action, ActionSpec, Request, RuleId, Type, Value, select_rule};
+use pith_core::{Action, ActionSpec, Request, RuleId, Type, Value};
 use pith_diag::{Diag, DiagnosticSink, EngineCode, PithResult, Span};
 use pith_ids::ComputationId;
 use smallvec::SmallVec;
@@ -71,7 +71,9 @@ pub(super) struct PreparedAction {
 impl Engine {
     pub(super) fn plan_action(&self, request: &Request<Action>) -> PithResult<ActionPlan> {
         request.validate_inputs().map_err(one_diag)?;
-        let rule = select_rule(request, &self.action_rules)
+        let rule = self
+            .action_rules
+            .select(request)
             .into_result(request, &self.action_rules)
             .map_err(one_diag)?;
         let Some(body) = self.action_bodies.get(&rule) else {

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use pith_core::{Action, CapabilityRequirement, Pure, Request, Rule, RuleId, select_rule};
+use pith_core::{Action, CapabilityRequirement, Pure, Request, Rule, RuleId};
 use pith_diag::{Diag, PithResult};
 use pith_ids::ComputationId;
 
@@ -24,8 +24,11 @@ impl<'engine> EngineQuery<'engine> {
     /// exactly one rule.
     pub fn select(&self, request: &Request<Pure>) -> Result<RuleSelection, Diag> {
         request.validate_inputs()?;
-        let rule =
-            select_rule(request, &self.engine.rules).into_result(request, &self.engine.rules)?;
+        let rule = self
+            .engine
+            .rules
+            .select(request)
+            .into_result(request, &self.engine.rules)?;
         Ok(RuleSelection {
             rule,
             interface: request.interface.clone(),

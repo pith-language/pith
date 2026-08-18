@@ -31,7 +31,7 @@ use std::num::NonZeroUsize;
 
 use indexmap::IndexMap;
 use pith_core::{
-    Action, Pure, PureComputationKey, Request, Rule, RuleArena, RuleId, RuleIdentity, RuleRevision,
+    Action, Pure, PureComputationKey, Request, Rule, RuleId, RuleIdentity, RuleRevision, RuleTable,
 };
 use pith_diag::PithResult;
 use pith_ids::{ComputationArena, ComputationId, ContentId};
@@ -47,7 +47,7 @@ use ir::StopReason;
 use reuse::{ActionComputationIndex, PureComputationIndex};
 
 pub struct Engine {
-    pub(crate) rules: RuleArena<Rule<Pure>>,
+    pub(crate) rules: RuleTable<Pure>,
     pub(crate) bodies: IndexMap<RuleId, Box<dyn PureRule>>,
     /// The revision each pure rule identity is registered at, indexed off
     /// `rules` so revalidating a recorded pure edge does not scan the arena
@@ -55,7 +55,7 @@ pub struct Engine {
     /// different revisions: the map cannot answer for it, and revalidation
     /// treats that as invalid rather than picking one.
     pub(crate) pure_rule_revisions: IndexMap<RuleIdentity, Option<RuleRevision>>,
-    pub(crate) action_rules: RuleArena<Rule<Action>>,
+    pub(crate) action_rules: RuleTable<Action>,
     pub(crate) action_bodies: IndexMap<RuleId, Box<dyn ActionRule>>,
     pub(crate) computations: ComputationArena<ComputationNode>,
     pure_computations: PureComputationIndex,
@@ -100,10 +100,10 @@ impl Engine {
         state_store: impl EngineStateStore + 'static,
     ) -> Self {
         Self {
-            rules: RuleArena::new(),
+            rules: RuleTable::new(),
             bodies: IndexMap::new(),
             pure_rule_revisions: IndexMap::new(),
-            action_rules: RuleArena::new(),
+            action_rules: RuleTable::new(),
             action_bodies: IndexMap::new(),
             computations: ComputationArena::new(),
             pure_computations: IndexMap::new(),

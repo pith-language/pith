@@ -29,7 +29,7 @@ pub use pith_ids::DeclarationDigest;
 pub use pith_ids::{RuleIdentity, RuleRevision};
 pub use rule::{
     ActionComputationKey, BodyRevision, Interface, PureComputationKey, Request, Rule, RuleArena,
-    RuleId, SelectOutcome, select_rule,
+    RuleId, RuleTable, SelectOutcome,
 };
 pub use value::{
     DuplicateNameError, NominalType, RecordField, SumConstructor, SumType, Type, Value, ValueArena,

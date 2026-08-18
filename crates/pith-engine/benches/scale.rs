@@ -1,8 +1,9 @@
-//! Wall-clock cost of pure evaluation at graph sizes the test suite does not
-//! reach. Four shapes, because they stress different parts of the engine:
-//! a deep chain puts N frames on one stack, a wide sequence puts N requests
-//! through a stack two deep, a fan-out opens N chains, and a reused chain
-//! revalidates a recorded subtree N times.
+//! Wall-clock cost of pure evaluation at sizes the test suite does not reach.
+//! Five shapes, because they stress different parts of the engine: a deep chain
+//! puts N frames on one stack, a wide sequence puts N requests through a stack
+//! two deep, a fan-out opens N chains, a reused chain revalidates a recorded
+//! subtree N times, and a crowded arena holds the requests fixed while the
+//! registered rule population grows.
 //!
 //! `harness = false`, so this is a plain binary and needs no benchmark
 //! framework. The numbers are coarse by design — what they exist for is
@@ -21,13 +22,23 @@
 
 use std::time::{Duration, Instant};
 
-use pith_core::{Interface, Pure, Request, Rule, RuleIdentity, RuleRevision, Type, Value};
+use pith_core::{
+    DeclarationTable, Interface, Pure, Request, Rule, RuleIdentity, RuleRevision, Type, Value,
+};
 use pith_diag::{PithResult, Span};
 use pith_engine::{Engine, PureRule, PureRuleFrame, PureStep, Resumption};
 
 /// Sizes each shape is measured at. Doubling makes a superlinear curve visible
 /// without a fit: a linear shape doubles its time, a quadratic one quadruples.
 const SIZES: [u64; 5] = [1_000, 2_000, 4_000, 8_000, 16_000];
+
+/// Rule populations the crowded-arena shape is measured at. The request count
+/// is fixed there, so what varies is how many rules selection has to answer
+/// against.
+const RULE_COUNTS: [u64; 5] = [0, 256, 1_024, 4_096, 16_384];
+
+/// Requests the crowded-arena shape runs at every rule population.
+const CROWDED_REQUESTS: u64 = 2_000;
 
 fn main() {
     println!("shape                    n      ms   ms/n");
@@ -48,6 +59,16 @@ fn main() {
     // smaller range as fan-out.
     for size in SIZES.iter().take(3) {
         report("reused-chain", *size, reused_chain(*size));
+    }
+    // Selection answers against the whole rule population, so this shape holds
+    // the requests fixed and grows the population. `ms/n` is per request, and
+    // comparable with wide-sequence at the same request count.
+    for rules in RULE_COUNTS {
+        report(
+            &format!("crowded-arena r={rules}"),
+            CROWDED_REQUESTS,
+            crowded_arena(rules),
+        );
     }
 }
 
@@ -126,6 +147,55 @@ fn reused_chain(depth: u64) -> Duration {
     engine
         .evaluate_pure(&request)
         .expect("the revisited chain evaluates");
+    start.elapsed()
+}
+
+/// A wide sequence of a fixed width, run while the arena holds `rules` further
+/// rules that no request ever names. Every one of them declares its own nominal
+/// output type, which is what 0015 forces a domain to do to make two rules
+/// distinguishable, so the population grows the way a domain model grows.
+///
+/// The decoys are the cheapest population selection can be given: their inputs
+/// match the leaf's, so a structural comparison against one fails on the output
+/// constructor after a single equal `Int`. What this measures is therefore a
+/// floor on what scanning the arena costs, not a worst case.
+fn crowded_arena(rules: u64) -> Duration {
+    let mut engine = Engine::new();
+    let signature = interface();
+    engine.register_rule(rule("leaf", signature.clone()), LeafRule);
+    let root = root_interface();
+    engine.register_rule(
+        rule("sequence", root.clone()),
+        SequenceRule {
+            child: "leaf",
+            signature: signature.clone(),
+        },
+    );
+    let mut declarations = DeclarationTable::new("pith-engine.scale-bench");
+    for index in 0..rules {
+        let declared = declarations
+            .nominal(&format!("Decoy{index}"), Type::Int)
+            .expect("each decoy is declared once");
+        engine.register_rule(
+            rule(
+                &format!("decoy{index}"),
+                Interface {
+                    inputs: signature.inputs.clone(),
+                    output: declared,
+                },
+            ),
+            LeafRule,
+        );
+    }
+    let request = request(
+        "sequence",
+        root,
+        [Value::int(as_int(CROWDED_REQUESTS)), Value::Bool(true)],
+    );
+    let start = Instant::now();
+    engine
+        .evaluate_pure(&request)
+        .expect("the sequential root evaluates");
     start.elapsed()
 }
 
