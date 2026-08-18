@@ -75,13 +75,14 @@ first-party libraries take names from the parts of a plant stem. each name lines
 - `cambium` is the rule and graph engine, the growth layer that produces the rest.
 - `xylem` is build and dependency transport, the tissue that carries water and nutrients upward.
 - `phloem` is packaging, the tissue that carries the products of photosynthesis outward.
+- `stele` is system composition, the central cylinder that holds every tissue in one axis.
 - `bark` is policy, the outer protective layer.
 - `periderm` is secrets and the capability boundary, the selective outer barrier.
 - `lenticel` is the adapter ports, the pores that let things cross the bark.
 
 the intent is that the names are self-explaining once the mapping is known.
 
-the scheme holds for the domain libraries and not yet for the kernel. `xylem` and `phloem` exist under these names and in these roles. the kernel ships as ten `pith-*` crates rather than one `pith`, split along the boundaries the implementation found — `pith-core` for the typed ir, `pith-engine` and `pith-arena` for the rule and graph engine that `cambium` names, then `pith-ids`, `pith-store`, `pith-state-sqlite`, `pith-diag`, `pith-output`, `pith-executor-local`, and `pith-cli`. `bark`, `periderm`, and `lenticel` name roles no crate fills.
+the scheme holds for the domain libraries and not yet for the kernel. `xylem`, `phloem`, and `stele` exist under these names and in these roles. the kernel ships as ten `pith-*` crates rather than one `pith`, split along the boundaries the implementation found — `pith-core` for the typed ir, `pith-engine` and `pith-arena` for the rule and graph engine that `cambium` names, then `pith-ids`, `pith-store`, `pith-state-sqlite`, `pith-diag`, `pith-output`, `pith-executor-local`, and `pith-cli`. `bark`, `periderm`, and `lenticel` name roles no crate fills.
 
 whether the kernel's split is permanent or collapses toward `pith` and `cambium` is a question the release record owns, since crate boundaries become a published surface at that point and not before. until then the `pith-*` prefix says what a crate is part of, which is the property a twelve-crate workspace needs and a seven-name scheme does not supply.
 
@@ -127,6 +128,6 @@ one root domain is used, with subdomains for each surface.
 
 ## namespaces
 
-- the reserved crate names are `pith`, `cambium`, `xylem`, `phloem`, `bark`, `periderm`, and `lenticel`. the workspace today publishes none of them: `xylem` and `phloem` exist, the kernel is ten `pith-*` crates, and `publish = false` holds across all of them under 0048.
+- the reserved crate names are `pith`, `cambium`, `xylem`, `phloem`, `stele`, `bark`, `periderm`, and `lenticel`. the workspace today publishes none of them: `xylem`, `phloem`, and `stele` exist, the kernel is ten `pith-*` crates, and `publish = false` holds across all of them under 0048.
 - the github organization is `pith-language` and the codeberg organization is `pith`.
 - the package registry namespace is `pithpkgs`.
