@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 200" width="900" height="200" role="img" aria-label="Pith — a computation kernel for build, package, environment, and system tooling.">
+<style>
+  :root { --ink: #191e1b; --muted: #6a716c; --line: #b9beb9; }
+  @media (prefers-color-scheme: dark) { :root { --ink: #e9ebe7; --muted: #8d948e; --line: #4d544e; } }
+  text { font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  .ring { fill: none; stroke: var(--line); stroke-width: 1.4; }
+  .tissue { fill: var(--ink); }
+  .word { font-size: 70px; font-weight: 600; letter-spacing: -0.5px; fill: var(--ink); }
+  .line { font-size: 15px; fill: var(--muted); }
+</style>
+<circle class="ring" cx="110" cy="100" r="66" stroke="#b9beb9"/>
+<circle class="tissue" cx="110" cy="100" r="23" fill="#191e1b"/>
+<circle class="tissue" cx="176.0" cy="100.0" r="5.2" fill="#191e1b"/>
+<circle class="tissue" cx="156.7" cy="53.3" r="5.2" fill="#191e1b"/>
+<circle class="tissue" cx="110.0" cy="34.0" r="5.2" fill="#191e1b"/>
+<circle class="tissue" cx="63.3" cy="53.3" r="5.2" fill="#191e1b"/>
+<circle class="tissue" cx="44.0" cy="100.0" r="5.2" fill="#191e1b"/>
+<circle class="tissue" cx="63.3" cy="146.7" r="5.2" fill="#191e1b"/>
+<circle class="tissue" cx="110.0" cy="166.0" r="5.2" fill="#191e1b"/>
+<circle class="tissue" cx="156.7" cy="146.7" r="5.2" fill="#191e1b"/>
+<text class="word" x="216" y="110" fill="#191e1b">pith</text>
+<text class="line" x="219" y="150" fill="#6a716c">a computation kernel for build, package, environment, and system tooling</text>
+</svg>
