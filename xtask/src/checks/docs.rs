@@ -9,11 +9,7 @@ use crate::report::{Diagnostic, Report};
 const SCHEMA_V1: &str = "design-doc/v1";
 
 pub(crate) fn run(root: &Path) -> Report {
-    let (mut paths, walk_diagnostics) = files::with_extension(root, Path::new("docs"), "md");
-    if root.join("README.md").is_file() {
-        paths.push(PathBuf::from("README.md"));
-        paths.sort();
-    }
+    let (paths, walk_diagnostics) = files::with_extension(root, Path::new("docs"), "md");
 
     let mut report = Report::new(
         "docs",
@@ -409,7 +405,7 @@ fn is_kebab_case(value: &str) -> bool {
 }
 
 fn expected_kind(path: &Path) -> Option<Kind> {
-    if path == Path::new("README.md") || path == Path::new("docs/index.md") {
+    if path == Path::new("docs/index.md") {
         return Some(Kind::Index);
     }
 

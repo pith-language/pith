@@ -1,84 +1,79 @@
----
-schema: design-doc/v1
-id: project-readme
-title: pith
-summary: entry point for the design notebook
-kind: index
-status: active
-created: 2026-08-04
-updated: 2026-08-17
-tags:
-  - project
-  - design
-relations:
-  informed_by: []
-  depends_on: []
-  supersedes: []
----
+# Pith
 
-# pith
+Pith is an experimental computation kernel for build, package, environment,
+and system tooling.
 
-this repository is the design notebook for **Pith**, a system built from the ideas that made Nix useful, without treating Nix's current architecture as a constraint.
+The project explores what these domains can share without making any one of
+them the kernel's model. Values, rules, dependencies, effects, identities,
+content, and provenance belong to the common layer. Builds, packages, services,
+and systems are defined by libraries over it.
 
-the rough idea is a typed, incremental, capability-controlled computation kernel. builds, packages, development environments, services, system management, deployment, and other automation models are libraries built on that kernel. the first-party libraries should be useful enough to make a complete tool, but they do not get private access to the engine.
+This repository contains both the design notebook and the implementations used
+to test that design.
 
-## start here
+## Shape of the project
 
-- [documentation index](docs/index.md) is the complete map.
-- [name and brand](docs/foundation/name.md) defines the project's name, word forms, file extension, store paths, ecosystem vocabulary, forge strategy, and domain plan.
-- [scope](docs/foundation/scope.md) defines what the project owns and where it stops.
-- [principles](docs/foundation/principles.md) contains the design rules that constrain the architecture.
-- [kernel architecture](docs/design/kernel.md) draws the boundary between the generic engine and domain libraries.
-- [requirements](docs/requirements/index.md) turns the discussion into requirements that can eventually be tested.
-- [research](docs/research/index.md) records what existing systems tried, why they made those choices, and what later systems changed.
-- [decisions](docs/decisions/index.md) contains the decisions made so far.
-- [open questions](docs/planning/open-questions.md) is where unresolved design work lives.
-
-## building and testing
-
-the repository builds inside a nix devshell, which pins the rust toolchain and the tools the checks use.
-
+```text
+  xylem             phloem             stele
+  builds       packages and envs      systems
+       \             |             /
+        typed values, rules, and requests
+                       |
+                  Pith kernel
+       graph, effects, identity, storage
+                       |
+            executors and state adapters
 ```
+
+The first-party domain libraries use the same registration and execution
+interfaces available to another library. The kernel itself has no built-in
+concept of a package, service, machine, or deployment.
+
+## Current state
+
+Pith is a working prototype, not yet a tool for general use. There is no source
+language or complete user-facing workflow, and the command-line interface is
+currently limited to a small evaluation stub and content-store materialization.
+
+The implemented slices currently cover:
+
+- typed rule selection and incremental graph evaluation
+- content-addressed blobs and trees, persistent engine state, and reuse
+- bounded local actions with declared inputs and outputs
+- a Linux local executor using Landlock and seccomp confinement
+- build, package, development-environment, and immutable-system prototypes
+
+Linux system activation is the next planned slice. Deployment, external-state
+reconciliation, and the source language remain design work. The
+[milestones](docs/planning/milestones.md) document keeps the detailed boundary
+between what has been demonstrated and what is still proposed.
+
+## Reading the design
+
+Start with the [problem](docs/foundation/problem.md), [scope](docs/foundation/scope.md),
+and [design overview](docs/design/overview.md). The [principles](docs/foundation/principles.md)
+explain the constraints behind the architecture, and the
+[documentation index](docs/index.md) maps the full notebook: requirements,
+research, decisions, and planning.
+
+Most documents describe a direction rather than released behavior. Their
+status distinguishes accepted decisions, proposals, research, and living
+references; the milestones link implementation claims to their evidence.
+
+## Working with the repository
+
+The development environment is pinned with Nix:
+
+```sh
 nix develop
-just
+just test
 ```
 
-`just` with no recipe lists the rest. `just test` runs the suite, `just check` is format plus clippy, and `just ci` is everything the github workflow gates plus the checks it does not yet run.
+Run `just` to list the available checks and development commands. `just check`
+runs formatting and static analysis; `just ci` runs the full local CI suite.
 
-the linux-gated fixtures are the evidence base for most of what the milestones claim, and they compile to nothing off linux — on a darwin host those suites report zero tests rather than failing, so a green local run there is not a measured one.
+Linux-specific executor and system fixtures compile to zero tests on other
+platforms, so a successful run there does not exercise those paths.
 
-## current position
-
-milestones M-1 through M-4 and M-5a are complete at their own scopes, and [milestones](docs/planning/milestones.md) carries the evidence for each. M-5b, linux system activation, is next. the workspace is fourteen crates: the kernel as `pith-core`, `pith-engine`, `pith-arena`, `pith-ids`, `pith-store`, `pith-state-sqlite`, `pith-diag`, `pith-output`, `pith-executor-local` and the `pith` cli, with the domain libraries beside them — `xylem` for builds, `phloem` for packages and environments, `stele` for system composition, and the example fixture domain that proves a peer can register.
-
-accepted so far:
-
-- domain concepts are library types, not language keywords or hidden engine concepts
-- configuration denotes values, constraints, and acceptable states; it does not prescribe an operation sequence
-- first-party code uses the same extension surface as third-party code
-- build, package, system, and deployment functionality share one graph and provenance model without being forced into one domain hierarchy
-- a consumer of an action revalidates by re-planning it (0033), the written lock is a text projection whose write is a caller effect (0041), and the local executor confines an action with landlock and seccomp (0028)
-
-the proposed design separates pure computation, bounded actions, observations, and mutations, with an `Opaque` category for unmodeled effectful work; makes authority explicit through capabilities; permits tracked dynamic dependencies; and distinguishes semantic, computation, content, external, and managed-object identity. rule selection matches typed interfaces and refuses ambiguity (0015); the kernel is rust with arena-and-index graph modeling and no unsafe for structure (0016); pure evaluation is total by construction, with the graph carrying recursion (0018); and the type calculus is one closed structural set with nominal identity by declaration (0026, superseding 0017), whose declaration site 0047 builds.
-
-what a build does today, end to end: the engine plans an action contract from a request, materializes only the declared executable and inputs, runs the child under a landlock ruleset and an 80-entry seccomp allowlist so it reports `AccessVerification::Prevented`, imports the captured outputs into its own content store, and keys the attempt by the request rather than the execution (0031). an unchanged compile is served from the reusable index within a run and across runs; a second build of unchanged sources reuses at the root, and a fresh engine over the same sqlite state hydrates it without allocating beneath the root. touching one source recompiles that object and re-links while the other object's compile is served. two toolchains share one graph, header dependencies are discovered by their own action rather than declared, and a test's exit status is a declared outcome so a failing test is a reusable verdict.
-
-what is built and unproved, which the milestones state per item: the `Observation`, `Mutation`, and `Opaque` effect categories are marker types with no step variant, scheduler path, or durable record, so three of the five categories have no operational support. retention and garbage collection are framed (0027) and unbuilt — nothing in the tree deletes a byte. the durable half of invalidation explanation is built and held by the cross-adapter conformance suite; the live query surface has no caller, and its reason taxonomy names configuration rather than change, so it does not yet answer why something recomputed. there is no surface language: every declaration is a rust api call, and the frontend is gated on the 0026 calculus landing rather than on a milestone.
-
-[0047](docs/decisions/0047-the-declaration-table.md) is built. a nominal type carries its declaration rather than a bare name, so `is_type` verifies that a value naming a coordinate also holds a representation the declaration admits — a `Text` claiming to be `xylem.Object` no longer inhabits a link interface, which `crates/xylem/tests/declaration_hole.rs` asserted for as long as it did. declarations live in a per-module table that refuses a duplicate name and a recursive alias, a recursive nominal is finite through a cut, and a rule's revision derives from the declarations its interface names, which retired the hand-bumped revision constant every domain library shipped. under [0048](docs/decisions/0048-pre-release-version-pinning.md) no encoding version moved for it: every version stays at 1 until the first release, and the pre-release database is discarded and rebuilt.
-
-arbitrary-precision `Int` landed with its arithmetic (0055) and transitive revalidation with it (0051). the next implementation items are the from-scratch-consistency harness [0049](docs/decisions/0049-pure-edge-revalidation.md) left open, and M-5b — the activation half that needs `Observation` and `Mutation`. M-5a closed on the convergence finding its record argued: stele composed files, users, a service, and boot configuration into one immutable tree through the kernel as it stood, driving no constructor and no encoding version, and what the milestone demanded was two measured changes in the first-party executor (0058).
-
-proposed decisions stay open until later milestones test their broader claims. completing a scoped prototype milestone does not accept those decisions in full.
-
-## document status
-
-`accepted` means the direction has been chosen for now. it can still be replaced by a later decision record.
-
-`proposed` means there is a concrete position worth arguing about.
-
-`researching` means the document mostly contains evidence and questions.
-
-`active` means a living reference document (an index, glossary, source ledger, or open-question list) that is always current rather than accepted, proposed, or under research.
-
-`draft` means the structure or wording is incomplete.
+Pith is licensed under [Apache 2.0](./LICENSE). Third-party notices are collected
+in [NOTICE](./NOTICE).
