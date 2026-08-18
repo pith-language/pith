@@ -358,6 +358,55 @@ async fn nested_tree_outputs_preserve_files_and_executable_bits() {
 }
 
 #[tokio::test]
+async fn tree_output_symlinks_are_captured_as_entries_not_dereferenced() {
+    let Some(mut invocation) = invocation(
+        "mkdir -p etc; cat hosts > etc/hosts; ln -s ../pool/hosts etc/localtime; ln -s absent etc/missing",
+    ) else {
+        return;
+    };
+    invocation.spec.environment = [EnvironmentVariable {
+        name: "PATH".into(),
+        value: support::path_for(&["cat", "ln"]).into_boxed_str(),
+    }]
+    .into();
+    add_blob_input(&mut invocation, "hosts", b"127.0.0.1 localhost\n");
+    declare_tree_output(&mut invocation, "etc");
+
+    let execution = LocalExecutor::new().execute(&invocation).await;
+    assert!(
+        execution.is_ok(),
+        "the tree-producing action should succeed"
+    );
+    let Some(execution) = execution.ok() else {
+        return;
+    };
+    let Some(output) = execution.report.outputs.first() else {
+        return;
+    };
+    let CapturedOutputContent::Tree(tree) = &output.content else {
+        return;
+    };
+
+    let hosts = tree.entries.iter().find(|entry| entry.name() == "hosts");
+    assert!(hosts.is_some_and(|entry| matches!(entry.content(), CapturedTreeEntryContent::File(file) if file.bytes.as_ref() == b"127.0.0.1 localhost\n")));
+
+    let localtime = tree
+        .entries
+        .iter()
+        .find(|entry| entry.name() == "localtime");
+    assert!(
+        localtime.is_some_and(|entry| matches!(entry.content(), CapturedTreeEntryContent::Symlink { target } if target.as_ref() == b"../pool/hosts")),
+        "a symlink is captured with its target, not with the bytes it points at"
+    );
+
+    let missing = tree.entries.iter().find(|entry| entry.name() == "missing");
+    assert!(
+        missing.is_some_and(|entry| matches!(entry.content(), CapturedTreeEntryContent::Symlink { target } if target.as_ref() == b"absent")),
+        "a symlink whose target does not exist is captured as declared content"
+    );
+}
+
+#[tokio::test]
 async fn materialized_tree_inputs_preserve_nesting_executability_and_symlinks() {
     let plain_bytes = b"tree-value\n";
     let executable_bytes = b"#!/bin/sh\n";
