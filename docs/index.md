@@ -56,4 +56,9 @@ the repository separates current design from the evidence and decisions that pro
 
 - [open questions](planning/open-questions.md)
 - [milestones](planning/milestones.md)
+- [the language frontend](planning/language-frontend.md)
+- [the module surface](planning/module-surface.md)
+- [the module system](planning/module-system.md)
+- [the frontend architecture](planning/frontend-architecture.md)
+- [the surface notation](planning/surface-notation.md)
 
