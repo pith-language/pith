@@ -60,7 +60,20 @@ async fn capture_tree(path: &Path) -> CaptureResult<CapturedTree> {
             .await
             .map_err(|error| io_diag("tree output entry type", error))?;
         let entry_path = entry.path();
-        let content = if file_type.is_dir() {
+        let content = if file_type.is_symlink() {
+            // A symlink is an entry in its own right: its target is part of
+            // the tree's identity the way a file's bytes are. Reading the
+            // link rather than following it also lets a target outside the
+            // captured tree, or one that does not exist yet, survive as
+            // declared content instead of failing or silently becoming a
+            // copy of what it points at.
+            let target = fs::read_link(&entry_path)
+                .await
+                .map_err(|error| io_diag("tree output symlink target", error))?;
+            CapturedTreeEntryContent::Symlink {
+                target: target_bytes(target.as_os_str()),
+            }
+        } else if file_type.is_dir() {
             // Box the recursive call: an async fn that recurses directly would
             // have an infinitely sized future.
             CapturedTreeEntryContent::Tree(Box::pin(capture_tree(&entry_path)).await?)
@@ -131,4 +144,21 @@ async fn sorted_directory_entries(path: &Path) -> CaptureResult<Vec<(Box<str>, f
 
 fn io_diag(what: &str, error: std::io::Error) -> pith_diag::DiagnosticSink {
     executor_diag(format!("capturing {what} failed: {error}"))
+}
+
+/// The target bytes of a captured symlink, as the tree manifest stores them.
+fn target_bytes(target: &std::ffi::OsStr) -> Box<[u8]> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        target.as_bytes().into()
+    }
+    #[cfg(not(unix))]
+    {
+        target
+            .to_string_lossy()
+            .into_owned()
+            .into_boxed_str()
+            .into_boxed_bytes()
+    }
 }

@@ -267,6 +267,12 @@ const ALLOWED_SYSCALLS: &[(libc::c_long, &str)] = allowlist![
     // A recursive walk holds each directory open and moves by descriptor. The
     // ruleset confines what those descriptors can reach either way.
     SYS_fchdir,
+    // Coreutils `mkdir -p` with several operands walks the relative
+    // components with the plain form instead (measured: stele's assembly
+    // script hands it the artifact's directories at once). The same walk
+    // `fchdir` above already sanctions, so the ruleset confines it the same
+    // way.
+    SYS_chdir,
     // `isatty` and friends: a child probes its stdio descriptors even when
     // they are pipes, and dies at startup if the probe is fatal.
     SYS_ioctl,
@@ -283,6 +289,15 @@ const ALLOWED_SYSCALLS: &[(libc::c_long, &str)] = allowlist![
     // clang writes its output to a temporary and renames it into place, so a
     // partial file never looks like a finished one.
     SYS_rename,
+    // Composing a tree of links: coreutils `ln -s` creates through
+    // `symlinkat` (the `at` form, measured), and an /etc assembled from
+    // declared parts is mostly symlinks, so an action that builds one writes
+    // its entries through here.
+    SYS_symlinkat,
+    // Coreutils `cat` splices with `copy_file_range` before falling back to
+    // `read`/`write`, so a shell action that places staged bytes into a tree
+    // it is about to declare as output takes this path first.
+    SYS_copy_file_range,
     // Randomness for temp names: glibc's `mkstemp` family draws from
     // `getrandom` and dies rather than falling back when the call is filtered.
     SYS_getrandom,
