@@ -12,6 +12,7 @@ members = [
     "crates/pith-state-sqlite",
     "crates/xylem",
     "crates/phloem",
+    "crates/example-domain",
     "crates/pith-cli",
     "xtask",
 ]

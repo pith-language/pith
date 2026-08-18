@@ -448,6 +448,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-domain"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "pith-core",
+ "pith-diag",
+ "pith-engine",
+ "pith-ids",
+ "pith-state-sqlite",
+ "pith-store",
+ "tempfile",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
