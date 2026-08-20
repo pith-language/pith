@@ -70,7 +70,7 @@ jobs:
             target
           key: cargo-${{ matrix.cache_key }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: cargo-${{ matrix.cache_key }}-
-      - name: Run ${{ matrix.name }}
+      - name: Run check via nix + just
         env:
           DEV_SHELL: ${{ matrix.dev_shell }}
           TASK: ${{ matrix.task }}
