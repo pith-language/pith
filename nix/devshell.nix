@@ -36,7 +36,10 @@
       config.treefmt.build.wrapper
       pkgs.just
     ];
+    # cargo-deny shells out to `cargo metadata`, so it needs the cargo from the
+    # pinned toolchain even though it never compiles anything.
     ciDenyPackages = [
+      rustToolchain
       pkgs.cargo-deny
       pkgs.just
     ];
