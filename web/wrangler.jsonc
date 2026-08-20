@@ -1,0 +1,13 @@
+{
+  "name": "pith-web",
+  "compatibility_date": "2026-05-25",
+  "assets": {
+    "directory": "./dist"
+  },
+  "routes": [
+    {
+      "pattern": "pith-lang.org",
+      "custom_domain": true
+    }
+  ]
+}

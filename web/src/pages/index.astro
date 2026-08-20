@@ -1,0 +1,305 @@
+---
+import Base from "../layouts/Base.astro";
+import Ledger from "../components/Ledger.astro";
+import EffectMark, {
+    type EffectCategory,
+} from "../components/EffectMark.svelte";
+
+const source = "https://codeberg.org/pith/pith";
+
+const categories: EffectCategory[] = [
+    {
+        name: "pure",
+        blurb: "computes from immutable values, terminating by construction",
+        status: "runs",
+        running: true,
+    },
+    {
+        name: "action",
+        blurb: "bounded external work with declared inputs, outputs, and capabilities",
+        status: "runs, confined",
+        running: true,
+    },
+    {
+        name: "observation",
+        blurb: "reads external state, recording source, revision, and freshness",
+        status: "designed",
+        running: false,
+    },
+    {
+        name: "mutation",
+        blurb: "changes external state",
+        status: "designed",
+        running: false,
+    },
+    {
+        name: "opaque",
+        blurb: "unmodeled work behind a fixed-output boundary; the escape hatch",
+        status: "designed",
+        running: false,
+    },
+];
+
+const code = `impl ExampleEngine for Engine {
+    fn register_example_domain(&mut self) {
+        self.register_action_rule(RenderAction::rule(), RenderAction);
+        self.register_rule(RenderRule::rule(), RenderRule);
+    }
+}`;
+---
+
+<Base
+    title="pith · a computation kernel"
+    description="One typed, incremental, capability-controlled graph of computation and effects: the mechanism build, package, environment, and system tools could have shared."
+    ogImage="/og/home.png"
+>
+    <section class="hero">
+        <p class="label">a kernel, grown</p>
+        <h1 class="display title">
+            the mechanism the tools could have shared<span class="dot">.</span>
+        </h1>
+        <div class="prose hero-copy">
+            <p>
+                Software passes through a chain of tools before it runs. One
+                resolves dependencies, another builds them, another assembles an
+                environment, another describes a machine, another deploys it.
+                Each rebuilds a version of the same graph under its own
+                identities, caches, and effect rules, and information is lost at
+                every handoff.
+            </p>
+            <p>
+                Pith is the kernel underneath all of them: one typed,
+                incremental, capability-controlled graph of computation and
+                effects.
+            </p>
+        </div>
+        <a class="box cta display" href={source}>read the source</a>
+    </section>
+
+    <section class="section">
+        <div class="rail label">i · the graph</div>
+        <div>
+            <h2 class="display sec-title">
+                one graph, and what it lets you skip
+            </h2>
+            <div class="prose">
+                <p>
+                    Every value is identified by its content and every
+                    computation by what it was derived from, so a second build
+                    is a question about identity rather than about timestamps.
+                </p>
+            </div>
+            <div class="ledger-wrap">
+                <Ledger />
+                <p class="prose caption">
+                    Two C sources over a shared header. Editing one leaves the
+                    other's header scan and compile answered from the durable
+                    index; the link runs only because the object it consumes
+                    moved. The last row is the one that needed a database: a new
+                    process over the same store hydrates the attempt an earlier
+                    engine recorded, rather than a copy of it.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <section class="section">
+        <div class="rail label">ii · effects</div>
+        <div>
+            <h2 class="display sec-title">
+                effects are where the kernel draws its line
+            </h2>
+            <div class="prose">
+                <p>
+                    Pure computation and external work share one graph without
+                    sharing semantics. Five sealed categories decide what may be
+                    cached, what must be declared, and what the scheduler may do
+                    with it.
+                </p>
+            </div>
+            <EffectMark client:idle categories={categories} />
+            <div class="prose">
+                <p>
+                    The categories are sealed on purpose. Adding one is a kernel
+                    change, not something a library can reach for.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <section class="section">
+        <div class="rail label">iii · domains</div>
+        <div>
+            <h2 class="display sec-title">
+                domains are libraries, ours included
+            </h2>
+            <div class="prose">
+                <p>
+                    Values, rules, dependencies, effects, identities, content,
+                    and provenance belong to the kernel. Builds, packages,
+                    services, and systems do not. A domain plugs in with two
+                    registration calls:
+                </p>
+            </div>
+            <div class="terminal code-tile">
+                <pre class="machine"><code>{code}</code></pre>
+            </div>
+            <div class="prose">
+                <p>
+                    Incremental reuse, cross-process hydration, and contract
+                    inspection follow from those two calls and nothing else.
+                    <code>xylem</code> (builds), <code>phloem</code> (packages and
+                    environments), and <code>stele</code> (system composition) are
+                    clients on exactly these terms; they take their names from the
+                    tissues around a stem's pith.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <section class="section">
+        <div class="rail label">iv · status</div>
+        <div>
+            <h2 class="display sec-title">what runs today</h2>
+            <div class="prose">
+                <p>
+                    A working prototype, not a tool for general use. There is no
+                    source language yet, and the command line covers an
+                    evaluation stub and content materialization. What exists is
+                    one vertical slice, deep enough that the parts push back:
+                </p>
+            </div>
+            <ul class="runs">
+                <li>
+                    typed rule selection, incremental evaluation, and
+                    equality-based pruning when a recomputed dependency lands on
+                    the value it already had
+                </li>
+                <li>
+                    content-addressed blobs and trees, engine state in SQLite,
+                    and two state adapters held to each other by a generated
+                    conformance suite
+                </li>
+                <li>
+                    confined local execution on Linux, with an 80-syscall
+                    allowlist whose every entry was measured from a tool that
+                    asked for it
+                </li>
+                <li>
+                    builds under two real toolchains with discovered header
+                    dependencies; package resolution, locks, and admitted binary
+                    substitution; development environments over a lock; and an
+                    immutable Linux tree composed from files, users, units, and
+                    boot configuration
+                </li>
+            </ul>
+            <div class="prose">
+                <p>
+                    Linux system activation is next, and it waits on a question
+                    rather than on code.
+                </p>
+            </div>
+        </div>
+    </section>
+</Base>
+
+<style>
+    .hero {
+        padding-block: clamp(4rem, 9vw, 7.5rem) clamp(3rem, 6vw, 5rem);
+    }
+
+    .hero .label {
+        margin-bottom: 2.2rem;
+    }
+
+    .title {
+        font-size: clamp(40px, 11vw, 120px);
+        max-width: 10.5em;
+        margin-bottom: 2.4rem;
+    }
+
+    .hero-copy {
+        font-size: 19.5px;
+    }
+
+    @media (max-width: 560px) {
+        .hero {
+            padding-block-start: 2.5rem;
+        }
+
+        .hero-copy {
+            font-size: 18px;
+        }
+    }
+
+    .cta {
+        display: inline-block;
+        margin-top: 3rem;
+        padding: 13px 26px 15px;
+        font-size: 19px;
+        font-weight: 700;
+        text-decoration: none;
+        transition:
+            translate 100ms ease,
+            box-shadow 100ms ease;
+    }
+
+    .cta:hover,
+    .cta:focus-visible {
+        translate: -2px -2px;
+        box-shadow: 12px 12px 0 var(--accent);
+    }
+
+    .ledger-wrap {
+        margin-block: 2.6rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1.6rem;
+        max-width: 640px;
+    }
+
+    .caption {
+        font-size: 15.5px;
+        color: var(--sub);
+    }
+
+    .section :global(.effects) {
+        margin-block: 2.6rem;
+    }
+
+    .code-tile {
+        margin-block: 2rem;
+        max-width: 640px;
+        padding: 22px 26px;
+        overflow-x: auto;
+    }
+
+    @media (max-width: 560px) {
+        .code-tile pre {
+            white-space: pre-wrap;
+        }
+    }
+
+    .runs {
+        margin-block: 1.6rem;
+        display: grid;
+        gap: 14px;
+        max-width: 70ch;
+    }
+
+    .runs li {
+        position: relative;
+        padding-left: 26px;
+        color: var(--ink);
+    }
+
+    .runs li::before {
+        content: "";
+        position: absolute;
+        left: 2px;
+        top: 0.62em;
+        width: 9px;
+        height: 9px;
+        background: var(--pith);
+    }
+</style>

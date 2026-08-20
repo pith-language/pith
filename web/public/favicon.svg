@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Pith mark">
+  <rect width="100" height="100" rx="24" fill="#1A1C17"/>
+  <g fill="#F0EAD8">
+    <path d="M50,7 C56,19 56,31 50,43 C44,31 44,19 50,7 Z"/>
+    <path d="M50,7 C56,19 56,31 50,43 C44,31 44,19 50,7 Z" transform="rotate(72 50 50)"/>
+    <path d="M50,7 C56,19 56,31 50,43 C44,31 44,19 50,7 Z" transform="rotate(144 50 50)"/>
+    <path d="M50,7 C56,19 56,31 50,43 C44,31 44,19 50,7 Z" transform="rotate(216 50 50)" fill="#C9D96B"/>
+    <path d="M50,7 C56,19 56,31 50,43 C44,31 44,19 50,7 Z" transform="rotate(288 50 50)"/>
+  </g>
+</svg>

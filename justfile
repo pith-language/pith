@@ -151,6 +151,42 @@ cov-open: cov
 cov-open: cov
     open target/llvm-cov/html/index.html
 
+# Start the web/ dev server (Astro + Svelte).
+[group('web')]
+web-dev:
+    cd web && pnpm dev
+
+# Install web/ dependencies. Node and pnpm come from the nix devshell.
+[group('web')]
+web-install:
+    cd web && pnpm install
+
+# Production-build the site into web/dist (regenerates the OG cards first).
+[group('web')]
+web-build:
+    cd web && pnpm build
+
+# Regenerate the Open Graph cards into web/public/og.
+[group('web')]
+web-og:
+    cd web && pnpm og
+
+# Run astro diagnostics over the site.
+[group('web')]
+web-check:
+    cd web && pnpm check
+
+# Serve the web/ production build locally.
+[group('web')]
+web-preview:
+    cd web && pnpm preview
+
+# Build and deploy the site to Cloudflare Workers (pith-lang.org). Requires
+# `wrangler login` once; the custom domain is attached by the config.
+[group('web')]
+web-deploy: web-build
+    cd web && wrangler deploy
+
 # Run cargo-mutants across the whole workspace. Output lands in mutants.out/.
 [group('mutants')]
 mutants:

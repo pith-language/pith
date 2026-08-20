@@ -6,6 +6,9 @@ locale = "en-us"
 hd = "hd"
 intra = "intra"
 flate = "flate"
+# opentype variation axis tags used by the web fonts
+wdth = "wdth"
+opsz = "opsz"
 # british spellings used throughout the project's prose
 behaviour = "behaviour"
 flavour = "flavour"
@@ -18,4 +21,6 @@ extend-exclude = [
     "Cargo.lock",
     "*.snap",
     "*.snap.new",
+    # machine-generated: @font-face blocks carry unicode-range codepoints
+    "web/src/styles/fonts.css",
 ]

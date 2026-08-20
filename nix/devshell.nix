@@ -81,6 +81,11 @@
           pkgs.git
           pkgs.clang
           pkgs.jujutsu
+
+          # web
+          pkgs.nodejs
+          pkgs.pnpm
+          pkgs.wrangler
         ];
 
         shellHook = ''
@@ -92,6 +97,8 @@
             echo "pith devshell"
             echo "  rust   $(rustc --version)"
             echo "  nightly $("${nightlyToolchain}/bin/rustc" --version)"
+            echo "  node   $(node --version)"
+            echo "  pnpm   $(pnpm --version)"
           fi
         '';
       };
