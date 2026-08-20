@@ -65,7 +65,7 @@ watch-clippy:
 
 # Everything CI checks, in one target. Use before pushing.
 [group('ci')]
-ci: treefmt-check clippy test-ci docs-check deny repo-check zizmor
+ci: treefmt-check clippy test-ci docs-check deny repo-check
 
 # Check Rust and Nix formatting, spelling, and the justfile's canonical format.
 [group('ci')]
@@ -73,8 +73,8 @@ treefmt-check:
     treefmt --ci
     just --fmt --check
 
-# Use Cargo's built-in runner to match the historical GitHub Actions check.
-# Unlike `test`, this also runs doctests.
+# Use Cargo's built-in runner to match the historical CI check. Unlike `test`,
+# this also runs doctests.
 [group('ci')]
 test-ci:
     cargo test --locked --workspace
@@ -113,11 +113,6 @@ deny:
 [group('ci')]
 typos:
     typos
-
-# Audit GitHub Actions workflows and local actions.
-[group('ci')]
-zizmor:
-    zizmor --pedantic --strict-collection .github
 
 # Check that this justfile is canonically formatted.
 [group('ci')]

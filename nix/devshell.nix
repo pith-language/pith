@@ -40,10 +40,6 @@
       pkgs.cargo-deny
       pkgs.just
     ];
-    ciZizmorPackages = [
-      pkgs.zizmor
-      pkgs.just
-    ];
   in {
     _module.args = {
       inherit pkgs pkgsUnstable craneLib rustToolchain nightlyToolchain;
@@ -54,14 +50,13 @@
       # shells below so each isolated runner realizes only what its job needs.
       ci = pkgs.mkShell {
         packages = pkgs.lib.unique (
-          ciRustPackages ++ ciFormatPackages ++ ciDenyPackages ++ ciZizmorPackages
+          ciRustPackages ++ ciFormatPackages ++ ciDenyPackages
         );
       };
 
       ci-rust = pkgs.mkShell {packages = ciRustPackages;};
       ci-format = pkgs.mkShell {packages = ciFormatPackages;};
       ci-deny = pkgs.mkShell {packages = ciDenyPackages;};
-      ci-zizmor = pkgs.mkShell {packages = ciZizmorPackages;};
 
       default = pkgs.mkShell {
         packages = [
@@ -86,7 +81,6 @@
           pkgs.git
           pkgs.clang
           pkgs.jujutsu
-          pkgs.zizmor
         ];
 
         shellHook = ''
