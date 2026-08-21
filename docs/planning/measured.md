@@ -145,3 +145,38 @@ older kind of debt, a record describing a facility nobody built; 0018's configur
 0022's step-machine-form question are answered in their own unresolved sections, and 0022's promotion
 now waits on partial cancellation alone. cpu, address-space and file-descriptor limits compose on the
 same invocation seam and are named, not built, in 0059's unresolved section.
+
+## M-9: observation identity and freshness
+
+status: complete.
+
+evidence: [0060](../decisions/0060-observation-identity-and-freshness.md) splits observation identity the
+way 0031 split action identity without giving the two effects the same semantics. the request half is an
+`ObservationComputationKey` over selected rule identity and revision, typed interface and inputs, and the
+subject the observation rule deterministically derives. the world half is `ObserverIdentity` plus the
+revision value returned by `observe`. a recorded edge is admitted only when the current rule re-selects,
+the inputs re-derive the same subject and key, the current observer has the recorded identity, and its
+`attest` returns the recorded revision. the observation attempt itself never enters the durable reusable
+result index; the pure consumer above it does, and 0051's transitive walk reaches the observation before
+that consumer is reused or hydrated.
+
+`NeedObservation` is now in `PureStep` before M-11 fixes the represented-ir constructor set. the existing
+`Resumption::One` carries the observed value back, so no parallel resumption form was invented. the
+synchronous `evaluate_pure` path stays synchronous and rejects the step with `E-1206`; `Engine::run` has
+an async reuse path that can attest observation edges in live and durable pure results. no configured
+observer is `E-1217`. `Observer::attest` and `observe` both receive the caller's `RunBound`, extending
+M-8's authority seam to the new external operation.
+
+the thin prototype is a real file mtime. its five engine tests measure the relevant branches: first
+observation followed by live root reuse after one attestation; cross-engine root hydration from shared
+durable state after attestation and without observing again; changed mtime causing recomputation and a
+second observation; observer-identity mismatch causing recomputation without asking the mismatched
+observer to attest another observer's record; and the `E-1206`/`E-1217` boundaries. the key tests assert
+subject sensitivity and digest-domain separation.
+
+the durable record carries the request inputs, derived subject, intended observer, observed result and
+revision. interrupted pending observations retain the observer they intended to use. both state adapters
+validate that the stored key is derivable and provenance names that observer; SQLite round-trips the
+widest observation record. the generated conformance grammar now creates observations, completes and
+stops them, and places observation edges in later attempts, so the reference adapter and SQLite are held
+to the same category, provenance and dependency rules rather than only fixture examples.

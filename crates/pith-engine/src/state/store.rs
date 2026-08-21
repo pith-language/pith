@@ -43,6 +43,14 @@ pub enum EngineStateError {
     ActionComputationDigestMismatch {
         attempt: DurableAttemptId,
     },
+    /// The observation computation's stored digest is not the one its
+    /// retained request, rule, and subject produce.
+    ObservationComputationDigestMismatch {
+        attempt: DurableAttemptId,
+    },
+    ObservationObserverMismatch {
+        attempt: DurableAttemptId,
+    },
     ProvenanceCategoryMismatch {
         attempt: DurableAttemptId,
     },
@@ -96,6 +104,14 @@ impl std::fmt::Display for EngineStateError {
                 formatter,
                 "engine-state action attempt {attempt} has a computation digest its retained request does not produce"
             ),
+            Self::ObservationComputationDigestMismatch { attempt } => write!(
+                formatter,
+                "engine-state observation attempt {attempt} has a computation digest its retained request does not produce"
+            ),
+            Self::ObservationObserverMismatch { attempt } => write!(
+                formatter,
+                "engine-state observation attempt {attempt} has provenance from a different observer"
+            ),
             Self::ProvenanceCategoryMismatch { attempt } => write!(
                 formatter,
                 "engine-state attempt {attempt} has provenance for a different effect category"
@@ -115,6 +131,7 @@ pub enum InvalidDependencyReason {
     FailedDependencyForCompleteAttempt,
     ExpectedPureAttempt,
     ExpectedActionAttempt,
+    ExpectedObservationAttempt,
     PureComputationMismatch,
 }
 
@@ -129,6 +146,9 @@ impl InvalidDependencyReason {
             }
             Self::ExpectedPureAttempt => "a pure edge must reference a pure attempt",
             Self::ExpectedActionAttempt => "an action edge must reference an action attempt",
+            Self::ExpectedObservationAttempt => {
+                "an observation edge must reference an observation attempt"
+            }
             Self::PureComputationMismatch => {
                 "the pure edge key does not match the referenced attempt"
             }

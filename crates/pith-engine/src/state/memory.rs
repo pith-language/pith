@@ -11,9 +11,10 @@ use super::{
 };
 
 /// Deterministic in-memory implementation of [`EngineStateStore`].
+#[derive(Clone)]
 pub struct MemoryEngineStateStore {
     versions: EngineStateVersions,
-    records: Mutex<Records>,
+    records: Arc<Mutex<Records>>,
 }
 
 #[derive(Default)]
@@ -39,10 +40,10 @@ impl MemoryEngineStateStore {
     pub fn new(versions: EngineStateVersions) -> Self {
         Self {
             versions,
-            records: Mutex::new(Records {
+            records: Arc::new(Mutex::new(Records {
                 next_attempt_identifier: 1,
                 ..Records::default()
-            }),
+            })),
         }
     }
 
@@ -87,6 +88,7 @@ impl MemoryEngineStateStore {
                     records.latest_reusable_action.insert(key, attempt);
                 }
             }
+            Some(DurableComputation::Observation { .. }) => {}
             None => {}
         }
         Ok(())

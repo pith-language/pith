@@ -28,8 +28,8 @@ pub use int::{Int, OutOfRangeError};
 pub use pith_ids::DeclarationDigest;
 pub use pith_ids::{RuleIdentity, RuleRevision};
 pub use rule::{
-    ActionComputationKey, BodyRevision, Interface, PureComputationKey, Request, Rule, RuleArena,
-    RuleId, RuleTable, SelectOutcome,
+    ActionComputationKey, BodyRevision, Interface, ObservationComputationKey, PureComputationKey,
+    Request, Rule, RuleArena, RuleId, RuleTable, SelectOutcome,
 };
 pub use value::{
     DuplicateNameError, NominalType, RecordField, SumConstructor, SumType, Type, Value, ValueArena,

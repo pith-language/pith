@@ -209,6 +209,7 @@ impl Engine {
                 executor_report: None,
                 imported_report: None,
             }),
+            observation: None,
             capabilities: canonical_capabilities(&plan.spec.capabilities),
         })
     }
@@ -235,7 +236,7 @@ impl Engine {
             authorization,
         };
         if let Err(diagnostics) =
-            self.create_pending_action_attempt(computation, durable_computation)
+            self.create_pending_effect_attempt(computation, durable_computation)
         {
             self.stop_action(computation, &diagnostics, StopReason::Failed);
             return Err(diagnostics);

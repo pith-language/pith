@@ -2,7 +2,7 @@
 
 use pith_core::{
     ActionComputationKey, ActionSpec, CapabilityRequirement, Content, Interface,
-    PureComputationKey, RuleIdentity, RuleRevision, Type, Value,
+    ObservationComputationKey, PureComputationKey, RuleIdentity, RuleRevision, Type, Value,
 };
 use pith_diag::{Severity, Span, StableCode};
 use pith_ids::{ContentDigest, ContentId, DIGEST_LEN, PureComputationDigest};
@@ -12,7 +12,7 @@ use crate::action::{ExecutionPlatform, ExecutionReport, ProducedOutput};
 use crate::policy::ActionAuthorization;
 use crate::state::{
     DurableActionPlan, DurableActionRequest, DurableComputation, DurableDiagnostic,
-    DurableDiagnosticNote, DurableRule, EncodedValue,
+    DurableDiagnosticNote, DurableObservationRequest, DurableRule, EncodedValue,
 };
 
 pub(super) fn diagnostics(message_len: u8, notes: u8) -> Box<[DurableDiagnostic]> {
@@ -34,6 +34,31 @@ pub(super) fn diagnostics(message_len: u8, notes: u8) -> Box<[DurableDiagnostic]
             .into(),
         notes,
     }])
+}
+
+pub(super) fn observation_computation(rule: u8, input: u8) -> DurableComputation {
+    let identity =
+        RuleIdentity::of_module_declaration("pith-conformance", &format!("observation-{rule}"));
+    let revision = RuleRevision::of_manifest(identity, &[rule]);
+    let interface = Interface {
+        inputs: Box::new([Type::Int]),
+        output: Type::Int,
+    };
+    let inputs = [Value::int(i64::from(input))];
+    let subject = Value::Text(format!("subject-{input}").into());
+    let digest =
+        ObservationComputationKey::from_parts(identity, revision, &interface, &inputs, &subject)
+            .digest;
+    DurableComputation::Observation {
+        computation_digest: digest,
+        request: DurableObservationRequest {
+            interface,
+            inputs: inputs.iter().map(EncodedValue::from_value).collect(),
+        },
+        rule: DurableRule::new(revision),
+        subject: EncodedValue::from_value(&subject),
+        observer: "conformance".into(),
+    }
 }
 
 pub(super) fn pure_key(rule: u8, input: u8) -> PureComputationKey {
@@ -101,7 +126,7 @@ pub(super) fn action_computation(
 pub(super) fn imported_report(computation: &DurableComputation) -> ExecutionReport {
     let capabilities_used = match computation {
         DurableComputation::Action { plan, .. } => plan.spec().capabilities.clone(),
-        DurableComputation::Pure(_) => Box::new([]),
+        DurableComputation::Pure(_) | DurableComputation::Observation { .. } => Box::new([]),
     };
     ExecutionReport {
         executor: "conformance".into(),

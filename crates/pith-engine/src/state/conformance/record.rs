@@ -44,6 +44,9 @@ pub(super) enum ResolvedDependency {
     Action {
         tracked: usize,
     },
+    Observation {
+        tracked: usize,
+    },
     Blob {
         content: ContentId,
     },
@@ -57,19 +60,25 @@ pub(super) fn resolve_dependencies(
     tracked: &[Tracked],
     eligible: fn(TerminalKind) -> bool,
 ) -> Vec<ResolvedDependency> {
-    let candidates = |want_pure: bool| -> Vec<usize> {
+    let candidates = |category: u8| -> Vec<usize> {
         tracked
             .iter()
             .enumerate()
             .filter(|(_, entry)| {
                 entry.terminal.is_some_and(eligible)
-                    && matches!(&entry.computation, DurableComputation::Pure(_)) == want_pure
+                    && matches!(
+                        (&entry.computation, category),
+                        (DurableComputation::Pure(_), 0)
+                            | (DurableComputation::Action { .. }, 1)
+                            | (DurableComputation::Observation { .. }, 2)
+                    )
             })
             .map(|(position, _)| position)
             .collect()
     };
-    let pure_candidates = candidates(true);
-    let action_candidates = candidates(false);
+    let pure_candidates = candidates(0);
+    let action_candidates = candidates(1);
+    let observation_candidates = candidates(2);
 
     let mut edges = Vec::new();
     for dependency in dependencies {
@@ -88,6 +97,11 @@ pub(super) fn resolve_dependencies(
             GeneratedDependency::Action(selector) => {
                 if let Some(position) = pick(*selector, &action_candidates).copied() {
                     edges.push(ResolvedDependency::Action { tracked: position });
+                }
+            }
+            GeneratedDependency::Observation(selector) => {
+                if let Some(position) = pick(*selector, &observation_candidates).copied() {
+                    edges.push(ResolvedDependency::Observation { tracked: position });
                 }
             }
             GeneratedDependency::Blob(seed) => edges.push(ResolvedDependency::Blob {
@@ -116,6 +130,11 @@ pub(super) fn materialize(
             ResolvedDependency::Action { tracked: position } => Some(DurableDependency::Action {
                 attempt: space.identifier(tracked.get(*position)?),
             }),
+            ResolvedDependency::Observation { tracked: position } => {
+                Some(DurableDependency::Observation {
+                    attempt: space.identifier(tracked.get(*position)?),
+                })
+            }
             ResolvedDependency::Blob { content } => {
                 Some(DurableDependency::Blob { content: *content })
             }
@@ -145,11 +164,15 @@ pub(super) fn required_capabilities(
                     }
                     | ResolvedDependency::Action {
                         tracked: position, ..
+                    }
+                    | ResolvedDependency::Observation {
+                        tracked: position, ..
                     } => tracked.get(*position),
                     ResolvedDependency::Blob { .. } => None,
                 })
                 .flat_map(|entry| entry.capabilities.iter()),
         ),
+        DurableComputation::Observation { .. } => Box::new([]),
     }
 }
 
@@ -207,9 +230,9 @@ pub(super) fn reuse_decision(
 ) -> ReuseOutcome {
     let first_non_reusable = dependencies.iter().find_map(|dependency| {
         let position = match dependency {
-            ResolvedDependency::Pure { tracked, .. } | ResolvedDependency::Action { tracked } => {
-                *tracked
-            }
+            ResolvedDependency::Pure { tracked, .. }
+            | ResolvedDependency::Action { tracked }
+            | ResolvedDependency::Observation { tracked } => *tracked,
             ResolvedDependency::Blob { .. } => return None,
         };
         let entry = tracked.get(position)?;

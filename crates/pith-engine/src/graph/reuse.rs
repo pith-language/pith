@@ -6,7 +6,7 @@ mod pure;
 mod revalidation;
 
 use indexmap::IndexMap;
-use pith_core::{ActionComputationKey, PureComputationKey};
+use pith_core::{ActionComputationKey, ObservationComputationKey, PureComputationKey};
 use pith_diag::DiagnosticSink;
 use pith_ids::ComputationId;
 
@@ -59,6 +59,7 @@ impl Engine {
             let computation = match dependency {
                 DependencyEdge::Blob { .. } | DependencyEdge::CapabilityUse { .. } => continue,
                 DependencyEdge::Action { computation, .. }
+                | DependencyEdge::Observation { computation, .. }
                 | DependencyEdge::Request { computation, .. } => *computation,
             };
             let Some(node) = self.computations.get(computation) else {
@@ -96,3 +97,4 @@ fn read_failed(error: crate::state::EngineStateError) -> DiagnosticSink {
 
 pub(super) type PureComputationIndex = IndexMap<PureComputationKey, ComputationId>;
 pub(super) type ActionComputationIndex = IndexMap<ActionComputationKey, ComputationId>;
+pub(super) type ObservationComputationIndex = IndexMap<ObservationComputationKey, ComputationId>;

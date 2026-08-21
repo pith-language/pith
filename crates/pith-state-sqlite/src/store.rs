@@ -193,7 +193,8 @@ impl SqliteEngineStateStore {
                     let lookup = ConnectionLookup::publishing(connection);
                     validate_publication(&lookup, attempt, &computation, &terminal_state)?;
                 }
-                let reusable = terminal_state.is_reusable();
+                let reusable = terminal_state.is_reusable()
+                    && !matches!(computation, DurableComputation::Observation { .. });
                 write_terminal_state(connection, attempt, &terminal_state)?;
                 if reusable {
                     publish_reusable(connection, computation_id, attempt)?;

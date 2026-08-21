@@ -52,6 +52,7 @@ fn result_value() -> impl Strategy<Value = Value> {
 pub enum GeneratedDependency {
     Pure(Selector),
     Action(Selector),
+    Observation(Selector),
     Blob(u8),
 }
 
@@ -66,6 +67,10 @@ pub enum Step {
         executable: u8,
         capabilities: Box<[u8]>,
         denied: bool,
+    },
+    CreateObservation {
+        rule: u8,
+        input: u8,
     },
     Complete {
         attempt: Selector,
@@ -121,6 +126,8 @@ fn step() -> impl Strategy<Value = Step> {
                 capabilities,
                 denied,
             }),
+        2 => (0u8..3, 0u8..4)
+            .prop_map(|(rule, input)| Step::CreateObservation { rule, input }),
         3 => (any::<Selector>(), generated_dependencies(), result_value(), one_in(8))
             .prop_map(|(attempt, dependencies, result, corrupt_reuse)| Step::Complete {
                 attempt,
@@ -157,6 +164,7 @@ fn generated_dependency() -> impl Strategy<Value = GeneratedDependency> {
     prop_oneof![
         3 => any::<Selector>().prop_map(GeneratedDependency::Pure),
         2 => any::<Selector>().prop_map(GeneratedDependency::Action),
+        2 => any::<Selector>().prop_map(GeneratedDependency::Observation),
         1 => any::<u8>().prop_map(GeneratedDependency::Blob),
     ]
 }

@@ -40,8 +40,8 @@ so labels do not move and do not imply position. that is
 rule — a stable identity, and a separate thing that moves. the order is the order of this file, and it is
 stated once, here:
 
-M-1, M-2, M-3, M-4 and M-5a are complete, the latency spike has run, and M-8 is complete. then M-9,
-M-10, M-11, M-12, M-13, M-14, M-15, and then M-5b, M-6 and M-7.
+M-1, M-2, M-3, M-4, M-5a, M-8 and M-9 are complete, and the latency spike has run. then M-10,
+M-11, M-12, M-13, M-14, M-15, and then M-5b, M-6 and M-7.
 
 ## why the order changed
 
@@ -74,6 +74,9 @@ in the frontend architecture; the code is discarded.
 
 ## M-9: observation identity and freshness
 
+status: complete. the evidence is in [measured](measured.md), and
+[0060](../decisions/0060-observation-identity-and-freshness.md) is the record.
+
 the record M-5b opens with, detached from the activation library it was going to open.
 
 M-5b already separates the two, "because the shape of the problem is not implementation":
@@ -93,8 +96,8 @@ nothing is released, so taking that amendment late would be cheap. the reason to
 migration cost — it is that a constructor set enumerated against a vocabulary known to be incomplete
 records a design nobody argued.
 
-open: whether one thin observation ships prototyped beside the record. a file's mtime is the cheapest, and
-an unexercised step variant is a guess. [the reordering](reordering.md) leaves this fork unpicked.
+the fork is picked: one thin file-mtime observation ships as the prototype witness, so the step, async
+adapter boundary, durable record and freshness admission are exercised rather than inferred.
 
 ## M-10: the declaration artifact
 
@@ -231,14 +234,14 @@ placement, continuous reconciliation, and richer transition protocols.
 ## complete
 
 M-1 semantic prototype, M-2 action prototype, M-3 first build library, M-4 package and environment
-libraries, M-5a Linux system composition, and M-8 the backstop limit are complete at their own scopes.
+libraries, M-5a Linux system composition, M-8 the backstop limit and M-9 observation identity are complete at their own scopes.
 their evidence is in [what the completed milestones measured](measured.md).
 
 what they still owe is a claim about work, not about evidence, so it stays here:
 
 M-1 owes nothing. persistent storage, change pruning and invalidation explanations went to M-2 as that
-paragraph said they would, and operational support for `Observation`, `Mutation` and `Opaque` is now
-scheduled — the first in M-9 and M-5b, the third in M-15.
+paragraph said they would. operational support for `Observation` landed in M-9; `Mutation` and `Opaque`
+remain scheduled in M-5b and M-15.
 
 M-2 owed timeouts and partial cancellation. the timeout half is discharged in M-8 and
 [0059](../decisions/0059-a-caller-declared-run-bound.md); the partial-cancellation half stays open beside

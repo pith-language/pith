@@ -6,7 +6,9 @@
 //! leaving the effect to a driver — which is what keeps the claim "the core is
 //! structurally pure" checkable rather than aspirational.
 
-use pith_core::{Action, Pure, Request, RuleId, Value};
+mod run;
+
+use pith_core::{Action, Observation, Pure, Request, RuleId, Value};
 use pith_diag::{Diag, DiagnosticSink, EngineCode, PithResult};
 use pith_ids::{ComputationId, ContentId};
 use smallvec::SmallVec;
@@ -33,6 +35,8 @@ pub(super) enum ChainPause {
     Blob(ContentId),
     /// The chain needs an action executed before it can continue.
     Action(Request<Action>),
+    /// The chain needs external state observed before it can continue.
+    Observation(Request<Observation>),
 }
 
 /// One request of a fan-out group, once the engine knows whether it needs
@@ -127,6 +131,9 @@ impl Engine {
                 }
                 PureStep::NeedBlob(id) => return Ok(ChainPause::Blob(id)),
                 PureStep::NeedAction(request) => return Ok(ChainPause::Action(request)),
+                PureStep::NeedObservation(request) => {
+                    return Ok(ChainPause::Observation(request));
+                }
             }
         }
     }
@@ -350,6 +357,7 @@ impl Engine {
             dependencies: SmallVec::new(),
             state: AttemptState::Pending,
             action: None,
+            observation: None,
             capabilities: Box::new([]),
         });
         self.index_pure_computation(key, computation);

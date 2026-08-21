@@ -7,14 +7,16 @@ use std::process::Command;
 
 use diesel::Connection as _;
 use pith_core::{
-    ActionComputationKey, ActionSpec, CapabilityRequirement, Content, Interface, Pure,
-    PureComputationKey, Request, Rule, RuleIdentity, RuleRevision, Type, Value,
+    ActionComputationKey, ActionSpec, CapabilityRequirement, Content, Interface,
+    ObservationComputationKey, Pure, PureComputationKey, Request, Rule, RuleIdentity, RuleRevision,
+    Type, Value,
 };
 use pith_diag::{PithResult, Severity, Span, StableCode};
 use pith_engine::state::{
     CompletedAttempt, DurableActionProvenance, DurableActionRequest, DurableAttemptState,
-    DurableComputation, DurableDependency, DurableDiagnostic, DurableProvenance,
-    DurableReuseDecision, DurableRule, EncodedValue, EngineStateStore, StoppedAttempt,
+    DurableComputation, DurableDependency, DurableDiagnostic, DurableObservationProvenance,
+    DurableObservationRequest, DurableProvenance, DurableReuseDecision, DurableRule, EncodedValue,
+    EngineStateStore, StoppedAttempt,
 };
 use pith_engine::{
     AccessVerification, ActionAuthorization, Engine, EvaluationSource, ExecutionPlatform,
@@ -423,6 +425,55 @@ fn an_action_attempt_round_trips_its_plan_and_provenance() {
         Ok(None) => unreachable!("the reusable action index did not answer for its own key"),
         Err(error) => unreachable!("the reusable action index is unreadable: {error}"),
     }
+}
+
+#[test]
+fn an_observation_attempt_round_trips_its_subject_and_revision() {
+    let scratch = Scratch::new("observation");
+    let state = open(&scratch.database());
+    let identity = RuleIdentity::of_module_declaration("pith-state-sqlite-tests", "file-mtime");
+    let revision = RuleRevision::of_manifest(identity, b"file-mtime-v1");
+    let interface = Interface {
+        inputs: [Type::Text].into(),
+        output: Type::Text,
+    };
+    let inputs = [Value::Text("src/main.rs".into())];
+    let subject = Value::Text("/workspace/src/main.rs".into());
+    let key =
+        ObservationComputationKey::from_parts(identity, revision, &interface, &inputs, &subject);
+    let computation = DurableComputation::Observation {
+        computation_digest: key.digest,
+        request: DurableObservationRequest {
+            interface,
+            inputs: inputs.iter().map(EncodedValue::from_value).collect(),
+        },
+        rule: DurableRule::new(revision),
+        subject: EncodedValue::from_value(&subject),
+        observer: "file-mtime-v1".into(),
+    };
+    let attempt = state
+        .create_pending_attempt(computation.clone())
+        .unwrap_or_else(|error| unreachable!("could not create observation attempt: {error}"));
+    let completion = CompletedAttempt {
+        dependencies: Box::new([]),
+        result: EncodedValue::from_value(&Value::Text("1712345678:42".into())),
+        provenance: DurableProvenance::Observation(DurableObservationProvenance::Observed {
+            observer: "file-mtime-v1".into(),
+            revision: EncodedValue::from_value(&Value::Text("1712345678:42".into())),
+        }),
+        reuse: DurableReuseDecision::Reusable,
+        capabilities: Box::new([]),
+    };
+    state
+        .publish_complete(attempt, completion.clone())
+        .unwrap_or_else(|error| unreachable!("could not publish observation attempt: {error}"));
+
+    let restored = state
+        .attempt(attempt)
+        .unwrap_or_else(|error| unreachable!("observation attempt is unreadable: {error}"))
+        .expect("observation attempt exists");
+    assert_eq!(restored.computation, computation);
+    assert_eq!(restored.state, DurableAttemptState::Complete(completion));
 }
 
 #[test]
