@@ -4,9 +4,9 @@ id: decision-0015-interface-rule-selection
 title: select rules by interface match and refuse ambiguity
 summary: rule selection matches typed requests against declared interfaces; more than one match is an error, never a silent ranking
 kind: decision
-status: proposed
+status: accepted
 created: 2026-04-17
-updated: 2026-04-17
+updated: 2026-08-21
 tags:
   - rules
   - selection
@@ -79,9 +79,39 @@ the common path stays short when interfaces are precise. most requests match one
 
 first-party and third-party rules compete on the same interface. nothing in the kernel breaks the tie in favor of the project's own libraries. if a first-party rule and a third-party rule both match, the caller decides, or the request is ambiguous.
 
+## measured
+
+this record moves to `accepted`: the selection rule it exists to settle is measured, and the prototype its
+unresolved section asked for exists four times over.
+
+the interface is the requested input types and the output type, matched by derived equality, and
+[0057](0057-the-rule-index.md) made that a lookup into `IndexMap<Interface, …>` rather than a scan. four
+domains and the frontend design have now put pressure on it, and every collision it predicted was answered
+the way this record says it should be — by making the types distinguish the rules, never by a rule that
+picks. xylem's two content-producing rules collapsed to `() -> Blob` and collided as `E-1102` until
+`CSource`, `Object` and `Executable` became distinct nominals; its generate and test rules share their
+input types and differ only in output; stele's three text renders needed the same treatment; and
+[the frontend architecture](../planning/frontend-architecture.md) reports the fourth independent instance
+before writing a line — `interface-of`, `bodies-of` and `index-of` over identical input lists, needing
+three distinct nominal outputs.
+
+that is the load this record wanted and it has not produced a case where refusing was the wrong answer.
+`E-1102` has been a design signal every time it fired, which is the claim priority numbers and scores
+would have hidden.
+
 ## unresolved
 
-the exact fields of a rule interface need a prototype. capabilities, input constraints, target platform, and domain-noun identity are the current candidates, but which are required and how they combine into a match is open.
+two items stay open and neither blocks acceptance, because both are spellings rather than semantics and
+both wait on a surface language that milestone M-13 delivers.
+
+how explicit selection at a call site is expressed, and how it stays visible in provenance rather than
+becoming a hidden preference, needs the notation. so does whether a request can carry a preferred
+interface to narrow the match, and how that differs from naming a rule. until then there is no call-site
+syntax to make a preference invisible in, and `EngineQuery::select` already answers which rule serves a
+request and whether it is ambiguous.
+
+what the unresolved section asked for and got: the exact fields of a rule interface needed a prototype,
+and four domains supplied one.
 
 how explicit selection at a call site is expressed in the language, and how it stays visible in provenance rather than becoming a hidden preference, needs design alongside the values-and-types work.
 

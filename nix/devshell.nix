@@ -89,6 +89,9 @@
           pkgs.nodejs
           pkgs.pnpm
           pkgs.wrangler
+
+          # source
+          pkgs.forgejo-cli
         ];
 
         shellHook = ''

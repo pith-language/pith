@@ -6,7 +6,7 @@ summary: map of the project foundation, current design, requirements, research, 
 kind: index
 status: active
 created: 2026-02-24
-updated: 2026-08-20
+updated: 2026-08-21
 tags:
   - documentation
 relations:
@@ -61,6 +61,7 @@ the repository separates current design from the evidence and decisions that pro
 
 - [open questions](planning/open-questions.md)
 - [milestones](planning/milestones.md)
+- [the reordering](planning/reordering.md)
 - [the language frontend](planning/language-frontend.md)
 - [the module surface](planning/module-surface.md)
 - [the module system](planning/module-system.md)

@@ -6,7 +6,7 @@ summary: why the frontend is three separable projects, what each is gated on, an
 kind: planning
 status: draft
 created: 2026-08-17
-updated: 2026-08-17
+updated: 2026-08-21
 tags:
   - planning
   - language
@@ -20,6 +20,7 @@ relations:
     - research-dispatch
   depends_on:
     - planning-open-questions
+    - planning-reordering
     - planning-module-surface
     - planning-module-system
     - planning-frontend-architecture
@@ -112,9 +113,11 @@ rest on that claim being honest.
 past those three, the missing piece is a peer domain library in the shape of `stdenv.mkDerivation`, not a
 language feature: nix's answer to "why is packaging easy" is its generic builder, and nobody packages
 software there by writing per-compile derivations either. that library is an ordinary peer under 0004 and
-0009, which is the right architecture and also means it is unbuilt work no milestone covers — M-5a is system
-composition, M-5b activation, M-6 deployment, M-7 broader execution, and the gap sits between M-4 and
-anything a person would use.
+0009, which is the right architecture and also meant it was unbuilt work no milestone covered — M-5a is
+system composition, M-5b activation, M-6 deployment, M-7 broader execution, and the gap sat between M-4 and
+anything a person would use. [the reordering](reordering.md) took that finding as one of its four and gave
+the library milestone M-15, with `Opaque`'s step protocol landing there because a foreign build is the
+caller that needs it, and the backstop limit ahead of it as M-8 because a hung configure is unbounded.
 
 the language is the last item in that chain, not the first.
 
@@ -165,9 +168,17 @@ which module the builtin declarations live in.
 
 ## records, in gatedness order
 
-no milestone covers this work — M-1 through M-7 are semantic, domain and execution milestones — and
-open-questions gates surface syntax on the calculus rather than on a milestone. so this is a record sequence,
-not a milestone, and each round owes a measured claim.
+when this was written no milestone covered the work — M-1 through M-7 were semantic, domain and execution
+milestones — and open-questions gated surface syntax on the calculus rather than on a milestone. so it was
+filed as a record sequence.
+
+that filing turned out to have a scheduling consequence rather than being a neutral description: work
+inside [milestones](milestones.md) gets rounds and work outside it gets planning documents, and this
+proposal accumulated four documents and no commits. [the reordering](reordering.md) puts the sequence into
+the milestone track. the rounds below are unchanged and their measured claims stand; what each gained is a
+label — round one is M-10, round two M-11, round three M-12, round four M-13 together with the CLI half of
+round six, and round five M-14. round seven, migration, stays distributed the way it is described here:
+step one inside round one, and the two body migrations as their own rounds after the notation exists.
 
 1. the declaration artifact and [the module surface](module-surface.md). `Declaration::encode_canonical`, a
    table encoder, the ABI and revision digests, the `.pi` declaration grammar (three forms plus rule

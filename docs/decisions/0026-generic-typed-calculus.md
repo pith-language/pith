@@ -6,7 +6,7 @@ summary: one closed structural calculus (records, declared sums, parametric gene
 kind: decision
 status: proposed
 created: 2026-05-13
-updated: 2026-08-14
+updated: 2026-08-21
 tags:
   - types
   - language
@@ -193,6 +193,25 @@ the canonical codec's reserved `TAG_NOMINAL = 6`, which the comment in `value_co
 `Record` is the third constructor to land (0039 needed a package description and a lock entry, and neither is honestly spellable in scalars plus `Nominal` plus `List`). `Value::Record` and `Type::Record` carry a sorted slice of named fields; construction sorts and rejects duplicate names, `TAG_RECORD = 8` writes the count then each length-prefixed name and payload in both grammars, and the decoder accepts strictly ascending name order only, so the canonical form this record's canonicalization section specifies is the only one on the wire. `RECORD_ENCODING_VERSION` moves to 4: tag 8 is new and no existing byte sequence changes meaning, but the retained-value grammar the version gates has grown, so the gate moves on the same moved-aside-and-rebuilt terms. what does not land: the merge operator (the value-level composition this record's own section reserves for design alongside the first configuration library) and row variables, which stay rejected. `is_type` matches a record against a record type field by field — same names, each payload inhabiting the declared field type — with no width or depth subtyping, and `value_type` answers for a record field by field. a record introduces no asymmetry of its own, but it inherits any its fields carry: a record with an empty-list field types as `{f: List<Unit>}` while inhabiting `{f: List<Int>}` just the same, and a record with a sum field inherits the singleton problem. the guarantee that holds everywhere is weaker than agreement: `is_type` accepts every value against its own `value_type`, and records keep that reflexivity without adding a third exception to the two `List` and `Sum` already found.
 
 declared sums are the fourth constructor to land (0039's source binding is a fixed set of constructors carrying different payloads — a registry archive, a git revision, a local path — and the tag-field spelling re-creates the flat-namespace ambiguity this record rejected polymorphic variants for, at a smaller scale). `Type::Sum` carries the sum's name and its constructor set, constructors sorted by name at construction; `Value::Sum` carries the sum's name the way `Value::Nominal` carries its own — the declaration site that would resolve the name does not exist yet — plus the selected constructor and its optional payload. `TAG_SUM = 9` writes the name then, for a type, the sorted constructors with a presence byte and payload type each, and for a value, the constructor name, a presence byte, and the payload. `RECORD_ENCODING_VERSION` moves to 5 on the same terms as the move to 4. the asymmetry `List` found arrives here from the other direction: a sum value cannot recover its sibling constructors, so `value_type` names only the singleton sum holding the constructor the value selected, while `is_type` accepts every declared sum of that name containing that constructor with a matching payload. request-input checking already compares with `is_type`, so nothing gates on the singleton. what does not land: pattern matching, which is a rule-body concern (0038), and the declaration site itself, which keeps the deferral this record's unresolved section already records — landing it was not required to type a sum value, because the value carries its sum's name the way a nominal value does.
+
+M-5a is the convergence measurement M-4 asked this section for, and it came back clean. stele declares
+twelve types over the four constructors above plus the six scalars and the recursion cut, drives no new
+constructor, and required no engine, core or encoding change — the first domain whose shapes this calculus
+was not extended for, and the first milestone whose convergence entry is an empty diff over the seven
+kernel crates. the four constructors that did land each came from a named domain pressure — `Nominal` from
+0015's selection collision, `List` from 0034's discovered header set, `Record` and `Sum` from 0039 — so the
+claim this record can now make is not that the kernel does not change but that it converges, one domain at
+a time, and that the convergence is measured rather than asserted.
+
+that does not promote this record, and the reason is worth stating so a later reader does not mistake the
+measurement for acceptance. the constructor set that converged is the built subset. rank-1 prenex
+polymorphism is mandated here and the kernel cannot hold it — `Interface` is two concrete `Type`s and
+selection is exact equality — so a mandated feature has no implementation and no spelling. the uncertainty
+constructors are unbuilt, with 0047 gating each on the subsystem that would read it. the merge operator
+this record reserves shipped in stele under [0052](0052-the-merge-operator.md) rather than in the value
+layer. acceptance waits on the amendment [the language frontend](../planning/language-frontend.md) names —
+that generics have no surface — and on the parametric half either landing or being withdrawn. what has
+been measured is the part that is built, and it is the part every domain has used.
 
 ## unresolved
 
