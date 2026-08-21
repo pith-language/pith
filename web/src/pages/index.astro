@@ -22,9 +22,9 @@ const categories: EffectCategory[] = [
     },
     {
         name: "observation",
-        blurb: "reads external state, recording source, revision, and freshness",
-        status: "designed",
-        running: false,
+        blurb: "reads external state, recording subject, observer, and revision",
+        status: "runs, attested",
+        running: true,
     },
     {
         name: "mutation",
@@ -181,6 +181,11 @@ const code = `impl ExampleEngine for Engine {
                     conformance suite
                 </li>
                 <li>
+                    external observations with typed subjects and revisions;
+                    pure consumers are reused, including across processes, only
+                    after the same observer attests the recorded revision
+                </li>
+                <li>
                     confined local execution on Linux, with an 80-syscall
                     allowlist whose every entry was measured from a tool that
                     asked for it
@@ -195,8 +200,9 @@ const code = `impl ExampleEngine for Engine {
             </ul>
             <div class="prose">
                 <p>
-                    Linux system activation is next, and it waits on a question
-                    rather than on code.
+                    The declaration artifact is next: the first frontend round,
+                    making the kernel and its domain libraries reachable from
+                    typed <code>.pi</code> declarations.
                 </p>
             </div>
         </div>
