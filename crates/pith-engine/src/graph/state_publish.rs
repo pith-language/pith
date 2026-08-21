@@ -40,7 +40,7 @@ impl Engine {
         Ok(())
     }
 
-    pub(super) fn create_pending_action_attempt(
+    pub(super) fn create_pending_effect_attempt(
         &mut self,
         computation: ComputationId,
         computation_kind: crate::state::DurableComputation,
@@ -51,6 +51,76 @@ impl Engine {
             .map_err(engine_state_diag)?;
         self.durable_attempts.insert(computation, attempt);
         Ok(())
+    }
+
+    pub(super) fn publish_observation_completion(
+        &mut self,
+        computation: ComputationId,
+    ) -> PithResult<()> {
+        let Some(node) = self.computations.get(computation) else {
+            return Err(internal_diag(
+                InternalInvariant::ObservationLostComputationNode,
+            ));
+        };
+        let AttemptState::Complete { result, reuse } = &node.state else {
+            return Err(internal_diag(
+                InternalInvariant::DurablePublicationForNonCompleteAttempt,
+            ));
+        };
+        let Some(observation) = node.observation.as_ref() else {
+            return Err(internal_diag(
+                InternalInvariant::ObservationLostObservationRecord,
+            ));
+        };
+        let completion = CompletedAttempt {
+            dependencies: Box::new([]),
+            result: EncodedValue::from_value(result),
+            provenance: DurableProvenance::Observation(
+                crate::state::DurableObservationProvenance::Observed {
+                    observer: observation.observer.observer.clone(),
+                    revision: EncodedValue::from_value(&observation.revision),
+                },
+            ),
+            reuse: self.translate_reuse_decision(reuse, &[])?,
+            capabilities: Box::new([]),
+        };
+        let attempt = self.require_durable_attempt(computation)?;
+        self.state_store
+            .publish_complete(attempt, completion)
+            .map_err(engine_state_diag)
+    }
+
+    pub(super) fn fail_observation(
+        &mut self,
+        computation: ComputationId,
+        observer: &crate::ObserverIdentity,
+        diagnostics: &DiagnosticSink,
+        revision: Option<&pith_core::Value>,
+    ) -> PithResult<()> {
+        let Some(node) = self.computations.get_mut(computation) else {
+            return Err(internal_diag(
+                InternalInvariant::ObservationLostComputationNode,
+            ));
+        };
+        node.state = AttemptState::Failed {
+            diagnostics: diagnostics.iter().cloned().collect(),
+        };
+        let provenance = match revision {
+            Some(revision) => crate::state::DurableObservationProvenance::Observed {
+                observer: observer.observer.clone(),
+                revision: EncodedValue::from_value(revision),
+            },
+            None => crate::state::DurableObservationProvenance::NotObserved {
+                observer: observer.observer.clone(),
+            },
+        };
+        let stopped = StoppedAttempt {
+            dependencies: Box::new([]),
+            diagnostics: diagnostics.iter().map(DurableDiagnostic::from).collect(),
+            provenance: DurableProvenance::Observation(provenance),
+        };
+        let attempt = self.require_durable_attempt(computation)?;
+        self.publish_stopped(attempt, stopped, StopReason::Failed)
     }
 
     pub(super) fn publish_pure_completion(&mut self, computation: ComputationId) -> PithResult<()> {
@@ -259,6 +329,9 @@ impl Engine {
                 DependencyEdge::Action { computation, .. } => {
                     self.translate_action_edge(*computation)
                 }
+                DependencyEdge::Observation { computation, .. } => {
+                    self.translate_observation_edge(*computation)
+                }
                 DependencyEdge::Blob { id } => Ok(DurableDependency::Blob { content: *id }),
                 DependencyEdge::CapabilityUse { capability } => {
                     Ok(DurableDependency::CapabilityUse {
@@ -283,6 +356,14 @@ impl Engine {
     fn translate_action_edge(&self, computation: ComputationId) -> PithResult<DurableDependency> {
         let attempt = self.require_durable_attempt(computation)?;
         Ok(DurableDependency::Action { attempt })
+    }
+
+    fn translate_observation_edge(
+        &self,
+        computation: ComputationId,
+    ) -> PithResult<DurableDependency> {
+        let attempt = self.require_durable_attempt(computation)?;
+        Ok(DurableDependency::Observation { attempt })
     }
 
     /// The durable reuse decision for a completed attempt. Both categories
@@ -311,6 +392,10 @@ impl Engine {
                                 ..
                             }
                             | DependencyEdge::Action {
+                                computation: target,
+                                ..
+                            }
+                            | DependencyEdge::Observation {
                                 computation: target,
                                 ..
                             } if target == computation => Some(*target),

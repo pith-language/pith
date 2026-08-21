@@ -3,15 +3,16 @@
 use pith_core::{ActionSpec, Interface, PureComputationKey, RuleRevision};
 use pith_engine::ActionAuthorization;
 use pith_engine::state::{
-    DurableActionPlan, DurableActionRequest, DurableComputation, DurableRule, EncodedValue,
+    DurableActionPlan, DurableActionRequest, DurableComputation, DurableObservationRequest,
+    DurableRule, EncodedValue,
 };
-use pith_ids::ActionComputationDigest;
+use pith_ids::{ActionComputationDigest, ObservationComputationDigest};
 
 use crate::columns::{
-    StoredActionDigest, StoredActionSpecDigest, StoredPureDigest, StoredRevisionDigest,
-    StoredRuleIdentity,
+    StoredActionDigest, StoredActionSpecDigest, StoredObservationDigest, StoredPureDigest,
+    StoredRevisionDigest, StoredRuleIdentity,
 };
-use crate::schema::{action_request_inputs, computations};
+use crate::schema::{action_request_inputs, computations, observation_request_inputs};
 
 use diesel::prelude::*;
 use diesel::sqlite::Sqlite;
@@ -27,9 +28,13 @@ struct ComputationRow {
     rule_revision: StoredRevisionDigest,
     pure_digest: Option<StoredPureDigest>,
     action_digest: Option<StoredActionDigest>,
+    observation_digest: Option<StoredObservationDigest>,
     action_spec_digest: Option<StoredActionSpecDigest>,
     action_spec: Option<Vec<u8>>,
     action_interface: Option<Vec<u8>>,
+    observation_interface: Option<Vec<u8>>,
+    observation_subject: Option<Vec<u8>>,
+    observation_observer: Option<String>,
     authorization_denied: Option<bool>,
     authorization_policy: Option<String>,
     authorization_reason: Option<String>,
@@ -42,9 +47,13 @@ struct NewComputation {
     rule_revision: StoredRevisionDigest,
     pure_digest: Option<StoredPureDigest>,
     action_digest: Option<StoredActionDigest>,
+    observation_digest: Option<StoredObservationDigest>,
     action_spec_digest: Option<StoredActionSpecDigest>,
     action_spec: Option<Vec<u8>>,
     action_interface: Option<Vec<u8>>,
+    observation_interface: Option<Vec<u8>>,
+    observation_subject: Option<Vec<u8>>,
+    observation_observer: Option<String>,
     authorization_denied: Option<bool>,
     authorization_policy: Option<String>,
     authorization_reason: Option<String>,
@@ -60,6 +69,15 @@ struct ActionInputRow {
     value: Vec<u8>,
 }
 
+#[derive(Insertable, Queryable, Selectable)]
+#[diesel(table_name = observation_request_inputs)]
+#[diesel(check_for_backend(Sqlite))]
+struct ObservationInputRow {
+    computation: i64,
+    position: i32,
+    value: Vec<u8>,
+}
+
 impl NewComputation {
     fn pure(key: PureComputationKey) -> Self {
         Self {
@@ -67,9 +85,13 @@ impl NewComputation {
             rule_revision: StoredRevisionDigest(key.rule_revision.digest()),
             pure_digest: Some(StoredPureDigest(key.digest)),
             action_digest: None,
+            observation_digest: None,
             action_spec_digest: None,
             action_spec: None,
             action_interface: None,
+            observation_interface: None,
+            observation_subject: None,
+            observation_observer: None,
             authorization_denied: None,
             authorization_policy: None,
             authorization_reason: None,
@@ -93,12 +115,41 @@ impl NewComputation {
             rule_revision: StoredRevisionDigest(plan.rule().revision().digest()),
             pure_digest: None,
             action_digest: Some(StoredActionDigest(computation_digest)),
+            observation_digest: None,
             action_spec_digest: Some(StoredActionSpecDigest(plan.spec_digest())),
             action_spec: Some(plan.spec().encode_stored()),
             action_interface: Some(request.interface.encode_canonical()),
+            observation_interface: None,
+            observation_subject: None,
+            observation_observer: None,
             authorization_denied: Some(denied),
             authorization_policy: Some(policy),
             authorization_reason: reason,
+        }
+    }
+
+    fn observation(
+        computation_digest: ObservationComputationDigest,
+        request: &DurableObservationRequest,
+        rule: &DurableRule,
+        subject: &EncodedValue,
+        observer: &str,
+    ) -> Self {
+        Self {
+            rule_identity: StoredRuleIdentity(rule.identity()),
+            rule_revision: StoredRevisionDigest(rule.revision().digest()),
+            pure_digest: None,
+            action_digest: None,
+            observation_digest: Some(StoredObservationDigest(computation_digest)),
+            action_spec_digest: None,
+            action_spec: None,
+            action_interface: None,
+            observation_interface: Some(request.interface.encode_canonical()),
+            observation_subject: Some(subject.as_bytes().to_vec()),
+            observation_observer: Some(observer.to_string()),
+            authorization_denied: None,
+            authorization_policy: None,
+            authorization_reason: None,
         }
     }
 }
@@ -132,7 +183,55 @@ pub fn intern_computation(
             write_request_inputs(connection, id, request)?;
             Ok(id)
         }
+        DurableComputation::Observation {
+            computation_digest,
+            request,
+            rule,
+            subject,
+            observer,
+        } => {
+            let id: i64 = diesel::insert_into(computations::table)
+                .values(NewComputation::observation(
+                    *computation_digest,
+                    request,
+                    rule,
+                    subject,
+                    observer,
+                ))
+                .returning(computations::id)
+                .get_result(connection)?;
+            write_observation_request_inputs(connection, id, request)?;
+            Ok(id)
+        }
     }
+}
+
+fn write_observation_request_inputs(
+    connection: &mut SqliteConnection,
+    computation: i64,
+    request: &DurableObservationRequest,
+) -> Result<(), Failure> {
+    if request.inputs.is_empty() {
+        return Ok(());
+    }
+    let rows = request
+        .inputs
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            Ok(ObservationInputRow {
+                computation,
+                position: i32::try_from(index).map_err(|_| {
+                    corrupt("an observation request has more inputs than a position can name")
+                })?,
+                value: value.as_bytes().to_vec(),
+            })
+        })
+        .collect::<Result<Vec<_>, Failure>>()?;
+    diesel::insert_into(observation_request_inputs::table)
+        .values(rows)
+        .execute(connection)?;
+    Ok(())
 }
 
 fn write_request_inputs(
@@ -173,6 +272,26 @@ fn load_request_inputs(
             EncodedValue::from_bytes(row.value).map_err(|error| {
                 corrupt(format!(
                     "a stored action request input is unreadable: {error}"
+                ))
+            })
+        })
+        .collect()
+}
+
+fn load_observation_request_inputs(
+    connection: &mut SqliteConnection,
+    computation: i64,
+) -> Result<Box<[EncodedValue]>, Failure> {
+    let rows: Vec<ObservationInputRow> = observation_request_inputs::table
+        .filter(observation_request_inputs::computation.eq(computation))
+        .order(observation_request_inputs::position.asc())
+        .select(ObservationInputRow::as_select())
+        .load(connection)?;
+    rows.into_iter()
+        .map(|row| {
+            EncodedValue::from_bytes(row.value).map_err(|error| {
+                corrupt(format!(
+                    "a stored observation request input is unreadable: {error}"
                 ))
             })
         })
@@ -222,8 +341,8 @@ pub(super) fn load_pure_key(
 ) -> Result<PureComputationKey, Failure> {
     match load_computation(connection, id)? {
         DurableComputation::Pure(key) => Ok(key),
-        DurableComputation::Action { .. } => {
-            Err(corrupt("a pure edge references an action computation"))
+        DurableComputation::Action { .. } | DurableComputation::Observation { .. } => {
+            Err(corrupt("a pure edge references a non-pure computation"))
         }
     }
 }
@@ -247,6 +366,38 @@ impl ComputationRow {
             }));
         }
         let revision = self.revision();
+        if let Some(observation_digest) = self.observation_digest {
+            let encoded_interface = self.observation_interface.ok_or_else(|| {
+                corrupt("an observation computation retains no request interface")
+            })?;
+            let interface = Interface::decode_canonical(&encoded_interface).map_err(|error| {
+                corrupt(format!(
+                    "a stored observation request interface is unreadable: {error}"
+                ))
+            })?;
+            let subject = EncodedValue::from_bytes(
+                self.observation_subject
+                    .ok_or_else(|| corrupt("an observation computation retains no subject"))?,
+            )
+            .map_err(|error| {
+                corrupt(format!(
+                    "a stored observation subject is unreadable: {error}"
+                ))
+            })?;
+            return Ok(DurableComputation::Observation {
+                computation_digest: observation_digest.0,
+                request: DurableObservationRequest {
+                    interface,
+                    inputs: load_observation_request_inputs(connection, self.id)?,
+                },
+                rule: DurableRule::new(revision),
+                subject,
+                observer: self
+                    .observation_observer
+                    .ok_or_else(|| corrupt("an observation computation retains no observer"))?
+                    .into(),
+            });
+        }
         let (
             Some(action_digest),
             Some(stored_digest),

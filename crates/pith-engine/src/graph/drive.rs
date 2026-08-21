@@ -125,7 +125,7 @@ impl Engine {
         while let Some(chain) = scheduler.next_ready() {
             match self.advance_chain(scheduler, chain, &ReuseContext::PureOnly, &mut budget)? {
                 ChainPause::Settled => {}
-                ChainPause::Blob(_) | ChainPause::Action(_) => {
+                ChainPause::Blob(_) | ChainPause::Action(_) | ChainPause::Observation(_) => {
                     return Err(effectful_in_pure_diag());
                 }
             }
@@ -191,7 +191,10 @@ impl Engine {
                 if bound.deadline_exceeded() {
                     return Err(bound_abort());
                 }
-                match self.advance_chain(scheduler, chain, &context, &mut steps)? {
+                match self
+                    .advance_chain_run(scheduler, chain, &context, &mut steps, bound)
+                    .await?
+                {
                     ChainPause::Settled => {}
                     ChainPause::Blob(id) => {
                         let bytes = self.fetch_blob(id)?;
@@ -200,6 +203,18 @@ impl Engine {
                         scheduler.resume(chain, Resumption::One(Value::Bytes(bytes)))?;
                     }
                     ChainPause::Action(request) => waiting.push_back((chain, request)),
+                    ChainPause::Observation(request) => {
+                        let serving = self.serve_observation(&request, bound).await?;
+                        let parent = scheduler.top(chain)?.computation;
+                        self.record_edge(
+                            parent,
+                            DependencyEdge::Observation {
+                                computation: serving.computation,
+                                request,
+                            },
+                        )?;
+                        scheduler.resume(chain, Resumption::One(serving.value))?;
+                    }
                 }
             }
 

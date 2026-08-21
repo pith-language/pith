@@ -18,7 +18,7 @@ use pith_engine::AccessVerification;
 use pith_engine::state::{DurableAttemptId, DurableAttemptStatus};
 use pith_ids::{
     ActionComputationDigest, ActionSpecDigest, ContentDigest, ContentId, DIGEST_LEN,
-    PureComputationDigest, RuleIdentity,
+    ObservationComputationDigest, PureComputationDigest, RuleIdentity,
 };
 
 fn digest_from_bytes(bytes: &[u8]) -> deserialize::Result<ContentDigest> {
@@ -76,6 +76,12 @@ digest_column!(
     StoredActionDigest,
     ActionComputationDigest,
     ActionComputationDigest::from_digest,
+    |digest| digest.digest()
+);
+digest_column!(
+    StoredObservationDigest,
+    ObservationComputationDigest,
+    ObservationComputationDigest::from_digest,
     |digest| digest.digest()
 );
 digest_column!(
@@ -166,6 +172,7 @@ stored_enum!(StoredOutputKind, OutputKind, {
 pub enum DependencyKind {
     Pure,
     Action,
+    Observation,
     Blob,
     CapabilityUse,
 }
@@ -173,8 +180,9 @@ pub enum DependencyKind {
 stored_enum!(StoredDependencyKind, DependencyKind, {
     DependencyKind::Pure => 0,
     DependencyKind::Action => 1,
-    DependencyKind::Blob => 2,
-    DependencyKind::CapabilityUse => 3,
+    DependencyKind::Observation => 2,
+    DependencyKind::Blob => 3,
+    DependencyKind::CapabilityUse => 4,
 });
 
 /// Which provenance an attempt row carries, and for an action whether the
@@ -185,6 +193,8 @@ pub enum ProvenanceKind {
     ActionNotExecuted,
     ActionCaptured,
     ActionImported,
+    ObservationNotObserved,
+    ObservationObserved,
 }
 
 stored_enum!(StoredProvenanceKind, ProvenanceKind, {
@@ -192,6 +202,8 @@ stored_enum!(StoredProvenanceKind, ProvenanceKind, {
     ProvenanceKind::ActionNotExecuted => 1,
     ProvenanceKind::ActionCaptured => 2,
     ProvenanceKind::ActionImported => 3,
+    ProvenanceKind::ObservationNotObserved => 4,
+    ProvenanceKind::ObservationObserved => 5,
 });
 
 /// A completed attempt's reuse decision, flattened to its discriminant. The

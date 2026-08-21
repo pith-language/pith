@@ -126,9 +126,9 @@ fn named_dependency(reason: &DurableReuseReason) -> Option<DurableAttemptId> {
 /// `CapabilityUse` edges name no attempt and cannot anchor a chain.
 fn edge_target(edge: &DurableDependency) -> Option<DurableAttemptId> {
     match edge {
-        DurableDependency::Pure { attempt, .. } | DurableDependency::Action { attempt } => {
-            Some(*attempt)
-        }
+        DurableDependency::Pure { attempt, .. }
+        | DurableDependency::Action { attempt }
+        | DurableDependency::Observation { attempt } => Some(*attempt),
         DurableDependency::Blob { .. } | DurableDependency::CapabilityUse { .. } => None,
     }
 }

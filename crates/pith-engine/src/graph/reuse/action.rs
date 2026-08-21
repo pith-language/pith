@@ -148,6 +148,7 @@ impl Engine {
                 executor_report: None,
                 imported_report: Some(imported_report.clone()),
             }),
+            observation: None,
             capabilities: canonical_capabilities(&plan.spec.capabilities),
         });
         self.index_action_computation(key, computation);

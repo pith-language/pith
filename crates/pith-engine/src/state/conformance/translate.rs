@@ -90,6 +90,9 @@ pub(super) fn translate_dependencies(
             DurableDependency::Action { attempt } => DurableDependency::Action {
                 attempt: translate(*attempt, translation),
             },
+            DurableDependency::Observation { attempt } => DurableDependency::Observation {
+                attempt: translate(*attempt, translation),
+            },
             blob_or_capability @ (DurableDependency::Blob { .. }
             | DurableDependency::CapabilityUse { .. }) => blob_or_capability.clone(),
         })
@@ -180,6 +183,16 @@ pub(super) fn translate_error(
                 attempt: translate(*attempt, translation),
             }
         }
+        EngineStateError::ObservationComputationDigestMismatch { attempt } => {
+            EngineStateError::ObservationComputationDigestMismatch {
+                attempt: translate(*attempt, translation),
+            }
+        }
+        EngineStateError::ObservationObserverMismatch { attempt } => {
+            EngineStateError::ObservationObserverMismatch {
+                attempt: translate(*attempt, translation),
+            }
+        }
         EngineStateError::ProvenanceCategoryMismatch { attempt } => {
             EngineStateError::ProvenanceCategoryMismatch {
                 attempt: translate(*attempt, translation),
@@ -232,6 +245,9 @@ fn translate_single_edge(edge: &DurableDependency, translation: &Translation) ->
             attempt: translate(*attempt, translation),
         },
         DurableDependency::Action { attempt } => DurableDependency::Action {
+            attempt: translate(*attempt, translation),
+        },
+        DurableDependency::Observation { attempt } => DurableDependency::Observation {
             attempt: translate(*attempt, translation),
         },
         blob_or_capability @ (DurableDependency::Blob { .. }

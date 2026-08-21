@@ -12,16 +12,16 @@
 
 use std::sync::Arc;
 
-use pith_core::{ActionComputationKey, CapabilityRequirement};
+use pith_core::{ActionComputationKey, CapabilityRequirement, ObservationComputationKey};
 
 use crate::ActionAuthorization;
 use crate::graph::canonical_capabilities;
 
 use super::{
     CompletedAttempt, DurableActionProvenance, DurableAttempt, DurableAttemptId,
-    DurableAttemptState, DurableComputation, DurableDependency, DurableProvenance,
-    DurableReuseDecision, DurableReuseReason, EngineStateError, ExpectedReuseDecision,
-    InvalidActionLifecycleReason, InvalidDependencyReason, StoppedAttempt,
+    DurableAttemptState, DurableComputation, DurableDependency, DurableObservationProvenance,
+    DurableProvenance, DurableReuseDecision, DurableReuseReason, EngineStateError,
+    ExpectedReuseDecision, InvalidActionLifecycleReason, InvalidDependencyReason, StoppedAttempt,
 };
 
 /// The terminal state an adapter is being asked to publish.
@@ -105,6 +105,8 @@ pub fn validate_publication(
 ) -> Result<(), EngineStateError> {
     validate_provenance_category(attempt, computation, terminal_state.provenance())?;
     validate_action_computation_digest(attempt, computation)?;
+    validate_observation_computation_digest(attempt, computation)?;
+    validate_observation_observer(attempt, computation, terminal_state.provenance())?;
     validate_action_lifecycle(attempt, computation, terminal_state)?;
 
     let mut first_non_reusable_dependency = None;
@@ -144,6 +146,28 @@ pub fn validate_publication(
     Ok(())
 }
 
+fn validate_observation_observer(
+    attempt: DurableAttemptId,
+    computation: &DurableComputation,
+    provenance: &DurableProvenance,
+) -> Result<(), EngineStateError> {
+    let DurableComputation::Observation { observer, .. } = computation else {
+        return Ok(());
+    };
+    let DurableProvenance::Observation(provenance) = provenance else {
+        return Ok(());
+    };
+    let recorded = match provenance {
+        DurableObservationProvenance::NotObserved { observer }
+        | DurableObservationProvenance::Observed { observer, .. } => observer,
+    };
+    if observer == recorded {
+        Ok(())
+    } else {
+        Err(EngineStateError::ObservationObserverMismatch { attempt })
+    }
+}
+
 fn validate_dependency(
     lookup: &impl AttemptLookup,
     attempt: DurableAttemptId,
@@ -151,7 +175,9 @@ fn validate_dependency(
     dependency: &DurableDependency,
 ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
     let dependency_attempt = match dependency {
-        DurableDependency::Pure { attempt, .. } | DurableDependency::Action { attempt } => *attempt,
+        DurableDependency::Pure { attempt, .. }
+        | DurableDependency::Action { attempt }
+        | DurableDependency::Observation { attempt } => *attempt,
         DurableDependency::Blob { .. } | DurableDependency::CapabilityUse { .. } => {
             return Ok(None);
         }
@@ -197,14 +223,54 @@ fn validate_dependency(
             DurableComputation::Action { .. } => {
                 Err(invalid(InvalidDependencyReason::ExpectedPureAttempt))
             }
+            DurableComputation::Observation { .. } => {
+                Err(invalid(InvalidDependencyReason::ExpectedPureAttempt))
+            }
         },
         DurableDependency::Action { .. } => match &dependency_record.computation {
             DurableComputation::Action { .. } => Ok(Some(dependency_record)),
-            DurableComputation::Pure(_) => {
+            DurableComputation::Pure(_) | DurableComputation::Observation { .. } => {
                 Err(invalid(InvalidDependencyReason::ExpectedActionAttempt))
             }
         },
+        DurableDependency::Observation { .. } => match &dependency_record.computation {
+            DurableComputation::Observation { .. } => Ok(Some(dependency_record)),
+            DurableComputation::Pure(_) | DurableComputation::Action { .. } => {
+                Err(invalid(InvalidDependencyReason::ExpectedObservationAttempt))
+            }
+        },
         DurableDependency::Blob { .. } | DurableDependency::CapabilityUse { .. } => Ok(None),
+    }
+}
+
+fn validate_observation_computation_digest(
+    attempt: DurableAttemptId,
+    computation: &DurableComputation,
+) -> Result<(), EngineStateError> {
+    let DurableComputation::Observation {
+        computation_digest,
+        request,
+        rule,
+        subject,
+        ..
+    } = computation
+    else {
+        return Ok(());
+    };
+    let mismatch = EngineStateError::ObservationComputationDigestMismatch { attempt };
+    let inputs = request.decoded_inputs().map_err(|_| mismatch.clone())?;
+    let subject = subject.decode().map_err(|_| mismatch.clone())?;
+    let derived = ObservationComputationKey::from_parts(
+        rule.identity(),
+        rule.revision(),
+        &request.interface,
+        &inputs,
+        &subject,
+    );
+    if derived.digest == *computation_digest {
+        Ok(())
+    } else {
+        Err(mismatch)
     }
 }
 
@@ -258,6 +324,7 @@ fn validate_capability_requirements(
             canonical_capabilities(plan.spec().capabilities.iter())
         }
         DurableComputation::Pure(_) => canonical_capabilities(dependency_capabilities),
+        DurableComputation::Observation { .. } => Box::new([]),
     };
     if expected == completion.capabilities {
         Ok(())
@@ -277,6 +344,10 @@ fn validate_provenance_category(
             | (
                 DurableComputation::Action { .. },
                 DurableProvenance::Action(_)
+            )
+            | (
+                DurableComputation::Observation { .. },
+                DurableProvenance::Observation(_)
             )
     ) {
         Ok(())
@@ -341,6 +412,7 @@ fn validate_capability_dependencies(
             DurableDependency::CapabilityUse { capability } => Some(capability),
             DurableDependency::Pure { .. }
             | DurableDependency::Action { .. }
+            | DurableDependency::Observation { .. }
             | DurableDependency::Blob { .. } => None,
         });
     if expected.iter().eq(recorded) {

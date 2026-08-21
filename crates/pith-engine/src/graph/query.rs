@@ -84,7 +84,8 @@ impl<'engine> EngineQuery<'engine> {
                 DependencyEdge::CapabilityUse { capability } => Some(capability),
                 DependencyEdge::Request { .. }
                 | DependencyEdge::Blob { .. }
-                | DependencyEdge::Action { .. } => None,
+                | DependencyEdge::Action { .. }
+                | DependencyEdge::Observation { .. } => None,
             })
         })
     }

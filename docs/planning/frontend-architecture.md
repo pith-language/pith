@@ -129,16 +129,16 @@ absent from `rules` and named in `incomplete`, and registration registers what i
 into a broken state has its rules temporarily missing, which is the correct semantics, and its diagnostics
 hydrate as an ordinary reusable result rather than living on a `Failed` attempt.
 
-no engine entry point admits `NeedBlob` today without an executor. `evaluate_pure` rejects `NeedBlob`
-and `NeedAction` with `E-1206`, and every other entry point requires a runtime, an action policy and an
+no engine entry point admits `NeedBlob` today without an executor. `evaluate_pure` rejects `NeedBlob`,
+`NeedAction` and `NeedObservation` with `E-1206`, and every other entry point requires a runtime, an action policy and an
 executor. so `interface-of`, whose whole body is one `NeedBlob` per file, cannot be evaluated by
 `evaluate_pure`, and `pith check` — a command that performs no external work — would have to construct a
 tokio runtime and an executor to typecheck a file. two answers, and the proposal takes the second now and
-names the first: a new `evaluate_with_content` entry point admitting `NeedBlob` and refusing `NeedAction` is
+names the first: a new `evaluate_with_content` entry point admitting `NeedBlob` and refusing `NeedAction` and `NeedObservation` is
 better and answers `open-questions.md`'s "should the synchronous pure step machine be unable to even name
 effectful steps at the type level" in the direction of three step tiers; constructing the frontend engine
 with a refusing executor and a deny-all policy is shippable today and needs no kernel change. the frontend
-is the first consumer that wants `NeedBlob` without `NeedAction`, and it is therefore the named reader for
+is the first consumer that wants `NeedBlob` without `NeedAction` or `NeedObservation`, and it is therefore the named reader for
 that open question, the way it is the named reader for `Unknown`.
 
 ## where incrementality lives

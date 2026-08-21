@@ -41,9 +41,13 @@ pub const CREATE_SCHEMA: &str = "
         rule_revision blob not null,
         pure_digest blob,
         action_digest blob,
+        observation_digest blob,
         action_spec_digest blob,
         action_spec blob,
         action_interface blob,
+        observation_interface blob,
+        observation_subject blob,
+        observation_observer text,
         authorization_denied integer,
         authorization_policy text,
         authorization_reason text
@@ -53,6 +57,13 @@ pub const CREATE_SCHEMA: &str = "
     -- request order (decision 0033). Each is the canonical bytes of one typed
     -- value, because rebuilding the computation digest has to reproduce them.
     create table if not exists action_request_inputs (
+        computation integer not null references computations (id),
+        position integer not null,
+        value blob not null,
+        primary key (computation, position)
+    ) strict;
+
+    create table if not exists observation_request_inputs (
         computation integer not null references computations (id),
         position integer not null,
         value blob not null,
@@ -82,7 +93,9 @@ pub const CREATE_SCHEMA: &str = "
         executor text,
         platform_operating_system text,
         platform_architecture text,
-        access integer
+        access integer,
+        observer text,
+        observation_revision blob
     ) strict;
 
     create index if not exists attempts_by_computation on attempts (computation, id);
@@ -180,9 +193,13 @@ diesel::table! {
         rule_revision -> Binary,
         pure_digest -> Nullable<Binary>,
         action_digest -> Nullable<Binary>,
+        observation_digest -> Nullable<Binary>,
         action_spec_digest -> Nullable<Binary>,
         action_spec -> Nullable<Binary>,
         action_interface -> Nullable<Binary>,
+        observation_interface -> Nullable<Binary>,
+        observation_subject -> Nullable<Binary>,
+        observation_observer -> Nullable<Text>,
         authorization_denied -> Nullable<Bool>,
         authorization_policy -> Nullable<Text>,
         authorization_reason -> Nullable<Text>,
@@ -203,6 +220,8 @@ diesel::table! {
         platform_operating_system -> Nullable<Text>,
         platform_architecture -> Nullable<Text>,
         access -> Nullable<Integer>,
+        observer -> Nullable<Text>,
+        observation_revision -> Nullable<Binary>,
     }
 }
 
@@ -221,6 +240,14 @@ diesel::table! {
 
 diesel::table! {
     action_request_inputs (computation, position) {
+        computation -> BigInt,
+        position -> Integer,
+        value -> Binary,
+    }
+}
+
+diesel::table! {
+    observation_request_inputs (computation, position) {
         computation -> BigInt,
         position -> Integer,
         value -> Binary,
@@ -290,6 +317,7 @@ diesel::joinable!(attempts -> computations (computation));
 diesel::joinable!(reusable_index -> computations (computation));
 diesel::allow_tables_to_appear_in_same_query!(
     action_request_inputs,
+    observation_request_inputs,
     attempts,
     computations,
     dependencies,

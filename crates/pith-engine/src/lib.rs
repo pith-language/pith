@@ -8,6 +8,7 @@ pub mod action;
 pub mod bound;
 pub mod cancel;
 pub mod graph;
+pub mod observation;
 pub mod policy;
 pub mod runtime;
 pub mod state;
@@ -28,6 +29,7 @@ pub use graph::{
     LiveInvalidationReason, PureRule, PureRuleFrame, PureStep, Resumption, ReuseContext,
     ReuseDecision, ReuseReason, RuleSelection,
 };
+pub use observation::{ObservationRule, Observed, Observer, ObserverIdentity};
 pub use policy::{ActionAuthorization, ActionPolicy, AllowAllActions};
 pub use runtime::{Runtime, RuntimeError, TokioRuntime};
 pub use state::{EngineStateStore, MemoryEngineStateStore};

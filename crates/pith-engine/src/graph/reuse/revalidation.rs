@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use indexmap::IndexSet;
-use pith_core::{Action, Content, PureComputationKey, Request};
+use pith_core::{
+    Action, Content, Observation, ObservationComputationKey, PureComputationKey, Request,
+};
 use pith_diag::{PithResult, Span};
 use pith_ids::ComputationId;
 
@@ -13,10 +15,171 @@ use crate::policy::ActionAuthorization;
 use crate::state::{
     CompletedAttempt, DurableActionProvenance, DurableActionRequest, DurableAttempt,
     DurableAttemptId, DurableAttemptState, DurableComputation, DurableDependency,
-    DurableProvenance, DurableReuseDecision,
+    DurableObservationProvenance, DurableObservationRequest, DurableProvenance,
+    DurableReuseDecision,
 };
 
 impl Engine {
+    /// Revalidate a completed arena node, including asynchronous observation
+    /// attestations, under one run's policy, environment, and bound.
+    ///
+    /// # Errors
+    /// Returns diagnostics when durable state cannot be read, a retained
+    /// record violates an invariant, or an observer cannot attest its subject.
+    pub async fn durable_reuse_is_valid_run(
+        &self,
+        computation: ComputationId,
+        context: &ReuseContext<'_>,
+        bound: &crate::RunBound,
+    ) -> PithResult<bool> {
+        let Some(attempt_id) = self.durable_attempts.get(&computation).copied() else {
+            return Ok(false);
+        };
+        let Some(attempt) = self.state_store.attempt(attempt_id).map_err(read_failed)? else {
+            return Ok(false);
+        };
+        let DurableAttemptState::Complete(completion) = &attempt.state else {
+            return Ok(false);
+        };
+        self.durable_completion_is_valid_run(completion, context, bound)
+            .await
+    }
+
+    pub(super) async fn durable_completion_is_valid_run(
+        &self,
+        completion: &CompletedAttempt,
+        context: &ReuseContext<'_>,
+        bound: &crate::RunBound,
+    ) -> PithResult<bool> {
+        let mut walk = RecordWalk::default();
+        if !self
+            .durable_edges_are_valid_run(&completion.dependencies, context, bound, &mut walk)
+            .await?
+        {
+            return Ok(false);
+        }
+        while let Some(attempt) = walk.frontier.pop() {
+            let DurableAttemptState::Complete(completion) = &attempt.state else {
+                return Err(internal_diag(
+                    InternalInvariant::DurableDependencyAttemptNotComplete,
+                ));
+            };
+            if !self
+                .durable_edges_are_valid_run(&completion.dependencies, context, bound, &mut walk)
+                .await?
+            {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    async fn durable_edges_are_valid_run(
+        &self,
+        dependencies: &[DurableDependency],
+        context: &ReuseContext<'_>,
+        bound: &crate::RunBound,
+        walk: &mut RecordWalk,
+    ) -> PithResult<bool> {
+        for dependency in dependencies {
+            let valid = match dependency {
+                DurableDependency::Pure {
+                    computation,
+                    attempt,
+                } => self.durable_pure_dependency_is_valid(*computation, *attempt, walk)?,
+                DurableDependency::Action { attempt } => {
+                    self.durable_action_dependency_is_valid(*attempt, context)?
+                }
+                DurableDependency::Observation { attempt } => {
+                    self.durable_observation_dependency_is_valid(*attempt, bound)
+                        .await?
+                }
+                DurableDependency::Blob { .. } | DurableDependency::CapabilityUse { .. } => true,
+            };
+            if !valid {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    async fn durable_observation_dependency_is_valid(
+        &self,
+        recorded: DurableAttemptId,
+        bound: &crate::RunBound,
+    ) -> PithResult<bool> {
+        let Some(observer) = self.observer.as_deref() else {
+            return Ok(false);
+        };
+        let Some(attempt) = self.state_store.attempt(recorded).map_err(read_failed)? else {
+            return Ok(false);
+        };
+        let DurableAttemptState::Complete(completion) = &attempt.state else {
+            return Ok(false);
+        };
+        if completion.reuse != DurableReuseDecision::Reusable {
+            return Ok(false);
+        }
+        let DurableComputation::Observation {
+            request, subject, ..
+        } = &attempt.computation
+        else {
+            return Err(internal_diag(
+                InternalInvariant::DurableObservationEdgeTargetNotObservation,
+            ));
+        };
+        let DurableProvenance::Observation(DurableObservationProvenance::Observed {
+            observer: recorded_observer,
+            revision,
+        }) = &completion.provenance
+        else {
+            return Err(internal_diag(
+                InternalInvariant::CompletedObservationMissingRevision,
+            ));
+        };
+        if observer.identity().observer != *recorded_observer {
+            return Ok(false);
+        }
+
+        let request = recorded_observation_request(request)?;
+        let subject = subject.decode().map_err(|error| {
+            internal_diag(InternalInvariant::RecordedObservationSubjectUndecodable(
+                error,
+            ))
+        })?;
+        let Ok(rule) = self
+            .observation_rules
+            .select(&request)
+            .into_result(&request, &self.observation_rules)
+        else {
+            return Ok(false);
+        };
+        let Some(body) = self.observation_bodies.get(&rule) else {
+            return Err(internal_diag(
+                InternalInvariant::SelectedObservationRuleHasNoBody,
+            ));
+        };
+        let Ok(current_subject) = body.subject(&request.inputs) else {
+            return Ok(false);
+        };
+        let Some(metadata) = self.observation_rules.get(rule) else {
+            return Err(internal_diag(
+                InternalInvariant::SelectedObservationRuleHasNoMetadata,
+            ));
+        };
+        let current_key = ObservationComputationKey::new(metadata, &request, &current_subject);
+        if attempt.computation.observation_key() != Some(current_key) || current_subject != subject
+        {
+            return Ok(false);
+        }
+        let revision = revision.decode().map_err(|error| {
+            internal_diag(InternalInvariant::RecordedObservationRevisionUndecodable(
+                error,
+            ))
+        })?;
+        Ok(observer.attest(&subject, bound).await? == revision)
+    }
+
     /// Revalidate the durable record of a completed arena node against engine
     /// state.
     ///
@@ -98,6 +261,10 @@ impl Engine {
             DurableDependency::Action { attempt } => {
                 self.durable_action_dependency_is_valid(*attempt, context)
             }
+            // Observation admission requires an async observer call. The
+            // synchronous path is used only by `evaluate_pure`; a run uses the
+            // async mirror and can re-attest this edge.
+            DurableDependency::Observation { .. } => Ok(false),
             DurableDependency::Blob { .. } | DurableDependency::CapabilityUse { .. } => Ok(true),
         }
     }
@@ -324,6 +491,22 @@ impl RecordWalk {
 fn recorded_action_request(recorded: &DurableActionRequest) -> PithResult<Request<Action>> {
     let inputs = recorded.decoded_inputs().map_err(|error| {
         internal_diag(InternalInvariant::RecordedActionRequestUndecodable(error))
+    })?;
+    Ok(Request::new(
+        "",
+        recorded.interface.clone(),
+        inputs,
+        Span::none(),
+    ))
+}
+
+fn recorded_observation_request(
+    recorded: &DurableObservationRequest,
+) -> PithResult<Request<Observation>> {
+    let inputs = recorded.decoded_inputs().map_err(|error| {
+        internal_diag(InternalInvariant::RecordedObservationRequestUndecodable(
+            error,
+        ))
     })?;
     Ok(Request::new(
         "",

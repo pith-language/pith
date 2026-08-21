@@ -19,8 +19,8 @@ use super::corrupt;
 use super::dependency::{load_dependencies, write_dependencies};
 use super::diagnostic::{load_diagnostics, write_diagnostics};
 use super::provenance::{
-    load_provenance, load_required_capabilities, provenance_kind, report_columns,
-    write_report_rows, write_required_capabilities,
+    load_provenance, load_required_capabilities, observation_columns, provenance_kind,
+    report_columns, write_report_rows, write_required_capabilities,
 };
 use diesel::prelude::*;
 use diesel::sqlite::Sqlite;
@@ -43,6 +43,8 @@ pub struct AttemptRow {
     pub(crate) platform_operating_system: Option<String>,
     pub(crate) platform_architecture: Option<String>,
     pub(crate) access: Option<StoredAccess>,
+    pub(crate) observer: Option<String>,
+    pub(crate) observation_revision: Option<Vec<u8>>,
 }
 
 pub fn insert_pending_attempt(
@@ -69,6 +71,7 @@ pub fn write_terminal_state(
     let stored = StoredAttemptId(attempt);
     let provenance = terminal_state.provenance();
     let report = report_columns(provenance);
+    let observation = observation_columns(provenance);
     let status = match terminal_state {
         TerminalAttemptState::Complete(_) => DurableAttemptStatus::Complete,
         TerminalAttemptState::Failed(_) => DurableAttemptStatus::Failed,
@@ -100,6 +103,12 @@ pub fn write_terminal_state(
             attempts::platform_architecture
                 .eq(report.as_ref().map(|report| report.architecture.clone())),
             attempts::access.eq(report.as_ref().map(|report| report.access)),
+            attempts::observer.eq(observation
+                .as_ref()
+                .map(|observation| observation.observer.clone())),
+            attempts::observation_revision.eq(observation
+                .as_ref()
+                .and_then(|observation| observation.revision.clone())),
         ))
         .execute(connection)?;
 
