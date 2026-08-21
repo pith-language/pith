@@ -5,6 +5,7 @@
 //! `Action` / `Observation` / `Mutation` / `Opaque` (decisions 0021, 0022).
 
 pub mod action;
+pub mod bound;
 pub mod cancel;
 pub mod graph;
 pub mod policy;
@@ -19,6 +20,7 @@ pub use action::{
     MaterializedBlob, MaterializedContent, MaterializedFileContent, MaterializedTree,
     MaterializedTreeEntry, MaterializedTreeEntryContent, ProducedOutput,
 };
+pub use bound::RunBound;
 pub use cancel::{CancelSignal, NeverCancelled};
 pub use graph::{
     ActionPlan, ActionRecord, AttemptState, ComputationKind, ComputationNode, DependencyEdge,

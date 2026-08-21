@@ -6,7 +6,7 @@ summary: a recorded pure edge is valid only if everything beneath it is, checked
 kind: decision
 status: proposed
 created: 2026-08-05
-updated: 2026-08-05
+updated: 2026-08-21
 tags:
   - caching
   - incrementality
@@ -129,7 +129,7 @@ the concurrent-writer premise the live-frontier bound rests on. this record stat
 
 0027's numbers, which this record only floors. what an N-attempts-per-key window means when N attempts inside a closure are load-bearing, and whether the collector should be able to see the closure at all before it prunes, are the questions the workload-evidence record inherits from here. Bazel's Skyfocus is the one primary example of pruning a closure deliberately, and its answer — error at the boundary — is the one pith does not need to copy.
 
-the walk is bounded by the recorded graph, and nothing bounds the recorded graph. a chain long enough makes a cold hydration expensive, and unlike the evaluator's own depth this cost is paid to decide *not* to work. the time and resource bounds M-6 already owes four callers are where a ceiling on it would live.
+the walk is bounded by the recorded graph, and nothing bounds the recorded graph. a chain long enough makes a cold hydration expensive, and unlike the evaluator's own depth this cost is paid to decide *not* to work. the time and resource bounds this paragraph named as owed are [0059](0059-a-caller-declared-run-bound.md)'s now, and the ceiling it asked for is the run's wall clock: `open_roots` runs inside the bounded run, and the first scheduling boundary after the walk checks it. a step budget would not cover this — the walk spends no steps — so the clock is the half that does.
 
 K-9 still does not cover this. 0049 recorded that `requirements/kernel.md` scopes the equivalence to "the same declared inputs" and a rule set is not an input, so both records fix violations of a property nobody has written down. that requirement edit is now owed twice and made zero times.
 

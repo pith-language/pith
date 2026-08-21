@@ -40,6 +40,7 @@ impl Engine {
             spec: spec.clone(),
             inputs: inputs.into_boxed_slice(),
             program,
+            deadline: None,
         })
     }
 

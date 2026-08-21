@@ -6,7 +6,7 @@ summary: the pure language fragment has no general recursion; repetition goes th
 kind: decision
 status: proposed
 created: 2026-04-22
-updated: 2026-04-22
+updated: 2026-08-21
 tags:
   - language
   - evaluation
@@ -77,4 +77,4 @@ which total constructs the pure fragment supports is open. folds and structural 
 
 the cycle diagnostic's exact shape, and how it presents a long or dense cycle readably, needs a prototype.
 
-how the impure backstop limit is configured, whether per action, per capability, or globally, and how it interacts with cancellation, is part of the action prototype milestone.
+how the impure backstop limit is configured, whether per action, per capability, or globally, and how it interacts with cancellation, was part of the action prototype milestone and outlived it; [0059](0059-a-caller-declared-run-bound.md) answers both. the bound is declared by the caller per run — a wall-clock deadline and a step budget, never defaulted — the deadline is polled where cancellation is polled, and it descends into every action invocation so the executor enforces it in the child. the escape hatch this record reserves stays unbuilt, on 0047's ground that no reader has appeared for it.

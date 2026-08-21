@@ -61,8 +61,9 @@ diff."
 
 that was the question domains-first existed to answer, and it is answered. M-5b and M-6 as scheduled would
 gather more evidence for a settled question. the questions that can still move the architecture — the
-elaborator's latency bet, whether the ABI cutoff pays for itself, whether the declaration surface can
-express the corpus — have no evidence at all and sit behind four planning documents with no milestone
+elaborator's latency bet (measured since, by the spike below), whether the ABI cutoff pays for itself,
+whether the declaration surface can express the corpus — had no evidence at all and sat behind four
+planning documents with no milestone
 number, because [the language frontend](language-frontend.md) files itself as "a record sequence, not a
 milestone".
 
@@ -188,12 +189,13 @@ for deferring the sequence.
 ## the proposed order
 
 a spike, before anything, and it is not a round. measure the latency bet.
-[the frontend architecture](frontend-architecture.md) calls it "the design's central latency bet and it is
-unmeasured", and [0021](../decisions/0021-arena-graph-engine.md) forecloses the obvious fallback by an
-accepted record. generate two hundred modules from stele's declaration shapes, write a throwaway parser
-and elaborator, and get one number against the 50 ms bracket. the code is discarded and the number goes
-into the frontend architecture as measured or refuted. if the bet fails the frontend changes shape, and
-better to know that before the round it gates than after.
+[the frontend architecture](frontend-architecture.md) calls it "the design's central latency bet", and
+[0021](../decisions/0021-arena-graph-engine.md) forecloses the obvious fallback by an accepted record.
+generate two hundred modules from stele's declaration shapes, write a throwaway parser and elaborator, and
+get one number against the 50 ms bracket. the code is discarded and the number goes into the frontend
+architecture as measured or refuted. if the bet fails the frontend changes shape, and better to know that
+before the round it gates than after. it ran on 2026-08-21 and the bet holds — the edited module's path
+measured about 106 µs at p50 against the 50 ms bracket — and the number is in the frontend architecture.
 
 the labels below are new, not renumbered, and that is a decision here rather than a convenience. five records and a research note cite `M-5b`, `M-6` and `M-7` with weight — 0051 on "the time
 and resource bounds M-6 already owes four callers", 0052 on "the deployment library M-6 opens", 0040 on a

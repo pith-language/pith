@@ -74,6 +74,8 @@
           pkgs.cargo-deny
           pkgs.cargo-fuzz
           pkgs.cargo-modules
+          pkgs.cargo-outdated
+          pkgs.cargo-edit
           pkgs.tokei
           pkgs.typos
           pkgs.lychee

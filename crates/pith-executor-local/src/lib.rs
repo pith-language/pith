@@ -47,12 +47,15 @@ pub(crate) const EXECUTOR_ADAPTER_CODE: StableCode = StableCode(1211);
 /// error. Every executor failure path goes through here so the error shape is
 /// uniform.
 pub(crate) fn executor_diag(message: impl Into<Box<str>>) -> DiagnosticSink {
-    let diag = Diag::new(
-        Severity::Error,
-        EXECUTOR_ADAPTER_CODE,
-        Span::none(),
-        message,
-    );
+    executor_diag_as(EXECUTOR_ADAPTER_CODE, message)
+}
+
+/// The same diagnostic shape under a code the engine defines, for an adapter
+/// failure that has one. The run bound (decision 0059) is the first: a child
+/// killed at its deadline refuses with the bound's code so the engine can
+/// record what it stopped rather than what broke.
+pub(crate) fn executor_diag_as(code: StableCode, message: impl Into<Box<str>>) -> DiagnosticSink {
+    let diag = Diag::new(Severity::Error, code, Span::none(), message);
     let mut sink = DiagnosticSink::new();
     sink.push(diag);
     sink

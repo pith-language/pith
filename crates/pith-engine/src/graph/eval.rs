@@ -13,7 +13,7 @@ use smallvec::SmallVec;
 
 use super::diagnostics::{
     InternalInvariant, content_unavailable_diag, cycle_diag, internal_diag, one_diag,
-    store_error_diag,
+    step_budget_diag, store_error_diag,
 };
 use super::ir::{
     AttemptState, ComputationKind, ComputationNode, DependencyEdge, EvalFrame, Evaluation,
@@ -22,6 +22,7 @@ use super::ir::{
 use super::reuse::ReuseContext;
 use super::scheduler::{ChainId, Scheduler};
 use super::{Engine, PureComputationKey};
+use crate::bound::StepBudget;
 
 /// Why [`Engine::advance_chain`] stopped.
 pub(super) enum ChainPause {
@@ -86,13 +87,24 @@ pub(super) fn single_evaluation(evaluations: Box<[Evaluation]>) -> PithResult<Ev
 
 impl Engine {
     /// Run `chain` on the step machine until it settles or needs an effect.
+    ///
+    /// Each step spends one unit of `budget`. A body that yields an unbounded
+    /// sequence of distinct requests steps many times between two scheduling
+    /// boundaries, so the budget is spent here rather than at the boundary
+    /// (decision 0059).
     pub(super) fn advance_chain(
         &mut self,
         scheduler: &mut Scheduler,
         chain: ChainId,
         context: &ReuseContext<'_>,
+        budget: &mut StepBudget,
     ) -> PithResult<ChainPause> {
         loop {
+            if !budget.spend() {
+                let label = scheduler.top(chain)?.request.label.clone();
+                let total = budget.total().unwrap_or_default();
+                return Err(step_budget_diag(total, &label));
+            }
             let step = {
                 let Some(frame) = scheduler.stack_mut(chain)?.last_mut() else {
                     return Err(internal_diag(InternalInvariant::PureLostRootFrame));

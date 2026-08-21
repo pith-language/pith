@@ -65,6 +65,7 @@ fn invocation(script: &str, operand: &str) -> ActionInvocation {
             }),
         }]
         .into(),
+        deadline: None,
     }
 }
 
@@ -342,4 +343,58 @@ async fn action_failure_surfaces_as_a_diagnostic() {
         message.contains("nothing to stderr"),
         "the error should say the action was silent, got: {message}"
     );
+}
+
+#[tokio::test]
+async fn a_child_that_exceeds_its_deadline_is_refused_with_the_bound_code() {
+    let executor = LocalExecutor::new();
+    if !shell_present() {
+        eprintln!("skipping: /bin/sh is not readable");
+        return;
+    }
+    // A sleep far past the deadline: what is measured is that the child dies
+    // at the deadline rather than after its own lifetime.
+    let mut invocation = invocation("sleep 30", "x");
+    invocation.deadline = Some(std::time::Instant::now() + std::time::Duration::from_millis(150));
+    let started = std::time::Instant::now();
+
+    let error = executor
+        .execute(&invocation)
+        .await
+        .expect_err("a child past its run's deadline is refused");
+
+    let code = error.iter().next().expect("one diagnostic").code;
+    assert_eq!(
+        code,
+        pith_diag::StableCode::from(pith_diag::EngineCode::RunBoundExceeded),
+        "the refusal carries the bound's code"
+    );
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(10),
+        "the child was killed at the deadline, not left to sleep it out"
+    );
+}
+
+#[tokio::test]
+async fn a_generous_deadline_leaves_a_quick_action_untouched() {
+    let executor = LocalExecutor::new();
+    if !shell_present() {
+        eprintln!("skipping: /bin/sh is not readable");
+        return;
+    }
+    let mut invocation = invocation("wc -c < operand | tr -d ' ' > result", "hello");
+    invocation.deadline = Some(std::time::Instant::now() + std::time::Duration::from_secs(60));
+
+    let captured = executor
+        .execute(&invocation)
+        .await
+        .expect("a quick action inside its deadline runs");
+    let output = captured.report.outputs.first().expect("one output");
+    match &output.content {
+        pith_engine::CapturedOutputContent::Blob(bytes) => {
+            let text = std::str::from_utf8(bytes).expect("utf-8 output");
+            assert_eq!(text.trim(), "5");
+        }
+        other => unreachable!("expected a blob output, got {other:?}"),
+    }
 }

@@ -6,7 +6,7 @@ summary: one boundary derived from content addressing, three graph nodes with an
 kind: planning
 status: draft
 created: 2026-08-18
-updated: 2026-08-18
+updated: 2026-08-21
 tags:
   - planning
   - language
@@ -151,13 +151,32 @@ local layer untouched — a graceful failure and a consequence of the boundary r
 tier two, in-process, is nothing, deliberately. no salsa, no query engine, no memo table beyond a map from
 module to elaboration. on a keystroke, re-parse and re-elaborate the edited module. sorbet is the control
 case and the strongest one: no incremental engine at all, around 100,000 lines per second per core, and one
-of the fastest language servers in production. two hundred modules of two hundred lines is forty thousand
-lines, about 0.4 ms per core at that rate; twenty times worse is 8 ms, inside a 50 ms keystroke bracket.
-pith starts closer to sorbet's shape than a general-purpose language does — no subtyping, no rows, no
-higher-kinded types, no type-level computation, no inference pass, an interface of two fields, and selection
-as one map lookup.
+of the fastest language servers in production. pith starts closer to sorbet's shape than a general-purpose
+language does — no subtyping, no rows, no higher-kinded types, no type-level computation, no inference
+pass, an interface of two fields, and selection as one map lookup.
 
-this is the design's central latency bet and it is unmeasured.
+this is the design's central latency bet, and it is measured. the spike [milestones](milestones.md) put in
+front of M-10 ran it: two hundred modules generated from stele's declaration shapes — 35 declarations and
+8 rules each, about 185 lines, 36,961 lines in all, up to three imports resolved per module — with a
+throwaway lexer, recursive-descent parser and elaborator deriving per-declaration digests and the module
+ABI digest as [the module surface](module-surface.md) specifies them, timing the keystroke path against an
+import environment holding the other one hundred and ninety-nine modules. on an AMD Ryzen AI MAX+ PRO 395,
+re-parse plus re-elaboration of the edited module is 105.6 µs at p50 and 117.3 µs at p99 over two thousand
+samples, the same whether the edit holds the ABI digest or moves it; parsing alone is about a quarter of
+the path. the whole world elaborates cold in 21.9 ms, about 1.7 million lines per second against sorbet's
+hundred thousand, on hardware faster than the machines that figure was measured on. against the 50 ms
+bracket the edited-module path holds a factor of about four hundred and twenty, and the cold-world pass —
+what re-elaborating everything per keystroke would cost — fits inside the bracket too, which is headroom
+the design does not need and should not spend. the bet holds.
+
+two boundaries on the number. the spike elaborates declarations, signatures and shallow pure bodies, not
+the represented bodies M-12's elaborator will check, and it interns nothing, so every nominal restates the
+full path the way stele's `FileSet` does before a type pool amortizes it. the first boundary reads as
+optimistic and the second as pessimistic, and neither moves a factor of four hundred. one correction stays
+beside the measurement: an earlier draft of this section put forty thousand lines at sorbet's rate at
+"about 0.4 ms per core", which is off by a thousand — forty thousand lines at a hundred thousand per
+second is about 0.4 s, and the figure the argument wanted was the edited module's two hundred lines at
+about 2 ms.
 
 salsa is not merely unpersuasive here, it is refused by an accepted record.
 [0021](../decisions/0021-arena-graph-engine.md) rejects it on three named grounds and is `accepted`. the

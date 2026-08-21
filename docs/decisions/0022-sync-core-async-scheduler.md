@@ -6,7 +6,7 @@ summary: the Pure fragment of decision 0019 evaluates on a synchronous determini
 kind: decision
 status: proposed
 created: 2026-04-29
-updated: 2026-06-01
+updated: 2026-08-21
 tags:
   - effects
   - engine
@@ -122,7 +122,7 @@ cancellation is prototyped for the case the scheduler owns: a caller stopping a 
 
 a cancelled attempt is a distinct terminal state, in the arena and in the durable record, and the cross-adapter conformance suite generates cancellations alongside failures. the distinction is the point: a failure says the computation cannot work, and a cancellation says nothing about the computation at all, so a later reader can tell "do not bother re-running this" from "this never got to run." cancelled work leaves ordinary graph structure behind — recorded dependency edges and a terminal attempt — rather than partial structure needing collection, which answers the second half of the question this record left open. the local executor sets `kill_on_drop`, so dropping a cancelled action's future ends the child process it started.
 
-timeouts are still not prototyped, and cancelling one superseded request while a run continues is not expressible: cancellation is currently all-or-nothing per run. the decision remains proposed until those are settled.
+timeouts are now measured rather than missing: [0059](0059-a-caller-declared-run-bound.md) lands the caller-declared run bound — a wall-clock deadline polled at this scheduler's boundaries and handed to every action invocation, and a step budget spent inside the step machine — with the executor killing the child at the deadline and refusing before capture, so this record's step-machine question ("step count, recursion depth, or fuel") is answered as a step count. cancelling one superseded request while a run continues is still not expressible: cancellation remains all-or-nothing per run, and the decision remains proposed until that is settled.
 
 ## unresolved
 
@@ -132,4 +132,4 @@ cancelling part of a run rather than all of it is not expressible. a caller stop
 
 the interrupted-attempt classification this section previously named as wrong is fixed. reopening a database marks attempts left `Pending` by a dead owner as `Cancelled` with `E-1214`, not `Failed`, which is the distinction this record's own cancellation work introduced: the attempt was stopped, not broken. the correction is recorded in [0024](0024-persistent-engine-state.md), whose recovery path it belongs to.
 
-whether the step machine's depth backstop (0018) is best expressed as a step count, a recursion depth, or a fuel mechanism, and how it interacts with the scheduler's right to cancel, is open.
+whether the step machine's depth backstop (0018) is best expressed as a step count, a recursion depth, or a fuel mechanism, and how it interacts with the scheduler's right to cancel, was open here until [0059](0059-a-caller-declared-run-bound.md) took it: a step count, spent per step inside the machine because a body yielding unbounded distinct requests crosses no scheduling boundary, declared by the caller per run and never defaulted.
