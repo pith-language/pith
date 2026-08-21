@@ -104,3 +104,44 @@ two things already in the tree become load-bearing here rather than latent. outp
 evidence: `crates/stele`, the system library, registers three merges (etc, users, unit), three renders (unit file, passwd, boot entry), one assembly action, and the entry that requests them, through the same two registration calls every domain uses. 0058 is its record, and the round's finding is the one this section said it would be watching for: the calculus converged. stele declares twelve types over constructors that all predate it and drives no constructor, no engine or core change, and no encoding version — the first milestone whose convergence entry is an empty diff, stated as a diff over the seven kernel crates rather than an assertion. what the milestone demanded is in the first-party executor, both halves predicted above and each measured with a failing witness: capture now reads symlink targets instead of following them, so links and dangling links survive as declared content, and the allowlist admits three syscalls — `symlinkat`, `copy_file_range`, and `chdir` — named by the coreutils operations that issued them, 80 against 77 when the milestone opened. a third executor fact was measured rather than changed: 0030's finding that a toolchain is a closure, not a binary, reappears on the system tools, and the Tools value carries the loader's closure or the confined child cannot start.
 
 0052's operator ships in this library with the signature and policy set its unresolved section deferred here: `agree` and `concat` per declared field, fail-closed for unlisted fields, the keyed overlay for files and users, and replacement naming the owner it expects to replace. the three tests 0052's measured section named as owed exist in `crates/stele/tests/merge.rs` and fail honestly — the conflict refusal names the field, both values, and both owners; the stale replacement names who declares the field now; the permutation test merges to one canonical result. the composed artifact is one canonical tree, and the confined linux suite drives it end to end: a real assembly under landlock and seccomp produces `Symlink` entries that survive capture, materializes with `read_link` reading what the store asserted by identity, reuses on the second compose, hydrates in a fresh engine, and two cold engines over two roots compose to the same identity. the granularity claim is a count: editing one unit fragment recomputes exactly three pure computations and one action, and the other merges are served. the host-agnostic composition suite runs the same contract script through a portable fixture executor that claims no confinement, so the artifact's claims are checkable where the first-party executor does not build, and the linux suite measures the confined half.
+
+## M-8: the backstop limit
+
+a time and resource bound on evaluation and on an action, as one mechanism.
+
+status: complete.
+
+evidence: [0059](../decisions/0059-a-caller-declared-run-bound.md) is the record, and the mechanism is
+`RunBound` — a wall-clock deadline and a step budget declared by the caller per run, never defaulted,
+taken by `Engine::run_bounded` and `Engine::run_many_bounded` while every earlier entry point stays
+unbounded. the deadline is polled at the scheduling boundaries cancellation already polls; the step
+budget is spent one step at a time inside the step machine, because a body yielding an unbounded
+sequence of distinct requests — the shape 0050's predicate cannot refuse, since no request repeats —
+crosses no boundary at all; and the deadline descends into every `ActionInvocation`, so the executor
+holding a child enforces the clock while the driver sleeps waiting for it, which keeps a timer out of
+the engine on the same discipline that keeps the runtime out of signatures. the bound's code is
+`E-1216` beside `E-1215`, with one terminal rule: work the run was merely holding is recorded
+cancelled, exactly as caller cancellation records it, while the action that exceeded its wall clock is
+recorded failed carrying the bound's code, because it ran and produced nothing within the authority it
+was given — and the refusal happens inside the executor before capture, which answers 0037's open
+question by construction: no `Reported` rule ever reads a timeout kill as a signal-death verdict. the
+deadline is authority, not content, so it participates in no computation key on 0031's own split.
+
+the witnesses are six tests. `a_body_that_yields_forever_is_stopped_by_the_step_budget` stops a body
+yielding fresh requests forever under a budget of fifty, with `E-1216` naming the stepping request's
+label and the budget, every attempt terminal, nothing failed, the held work cancelled.
+`an_expired_deadline_stops_the_run_before_any_work` is the boundary check, and
+`a_generous_bound_leaves_an_ordinary_run_untouched` the control.
+`a_timed_out_action_fails_itself_and_cancels_what_was_waiting_on_it` is the split: exactly one failed
+attempt — the action's, carrying `E-1216` — and one cancelled attempt, the chain parked waiting on it.
+in the executor, `a_child_that_exceeds_its_deadline_is_refused_with_the_bound_code` runs `sleep 30`
+under a deadline one hundred fifty milliseconds out and finishes in a quarter second — the child died
+at the deadline — and `a_generous_deadline_leaves_a_quick_action_untouched` is the control. the
+workspace suite is 778 tests, 0 failures, with clippy and the xtask checks clean.
+
+what the round also owes the notebook it paid: 0028's unresolved-section sentence claiming "the
+executor accepts an optional timeout in its configuration" is retracted in place and named as the
+older kind of debt, a record describing a facility nobody built; 0018's configuration question and
+0022's step-machine-form question are answered in their own unresolved sections, and 0022's promotion
+now waits on partial cancellation alone. cpu, address-space and file-descriptor limits compose on the
+same invocation seam and are named, not built, in 0059's unresolved section.

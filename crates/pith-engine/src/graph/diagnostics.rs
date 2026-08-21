@@ -256,6 +256,41 @@ pub(super) fn cancelled_diag() -> DiagnosticSink {
     ))
 }
 
+/// The diagnostic a run that passed its declared wall clock carries, checked
+/// at a scheduling boundary. Stopped, not broken: nothing about the work in
+/// flight is known to be wrong, which is why the attempts it stops are
+/// recorded as cancelled rather than failed (decision 0059).
+pub(super) fn wall_bound_diag() -> DiagnosticSink {
+    one_diag(Diag::engine(
+        EngineCode::RunBoundExceeded,
+        Span::none(),
+        "the run passed the wall-clock deadline its caller declared; the work in \
+         flight was stopped, not broken, and a larger bound changes the answer",
+    ))
+}
+
+/// The diagnostic a run that spent its declared step budget carries, raised
+/// from inside the step machine where the budget ran out. Names the request
+/// whose body was stepping, which is the runaway (decision 0059).
+pub(super) fn step_budget_diag(budget: u64, label: &str) -> DiagnosticSink {
+    one_diag(Diag::engine(
+        EngineCode::RunBoundExceeded,
+        Span::none(),
+        format!(
+            "the run spent its caller-declared step budget of {budget} while `{label}` was \
+             stepping; the budget is generous or the body yields without bound"
+        ),
+    ))
+}
+
+/// Whether `diagnostics` carries the bound's code, so the driver records what
+/// a bound stopped as cancelled while an ordinary failure stays failed
+/// (decision 0059).
+pub(super) fn is_bound_stop(diagnostics: &pith_diag::DiagnosticSink) -> bool {
+    let code = pith_diag::StableCode::from(EngineCode::RunBoundExceeded);
+    diagnostics.iter().any(|diag| diag.code == code)
+}
+
 pub(super) fn store_error_diag(error: pith_store::StoreError) -> DiagnosticSink {
     one_diag(Diag::engine(
         EngineCode::StoreError,

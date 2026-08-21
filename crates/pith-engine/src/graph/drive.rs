@@ -22,13 +22,14 @@ use pith_diag::PithResult;
 use pith_ids::ComputationId;
 
 use super::action_pipeline::{ActionRuleMeta, ActionStart, PreparedAction};
-use super::diagnostics::{cancelled_diag, effectful_in_pure_diag};
+use super::diagnostics::{cancelled_diag, effectful_in_pure_diag, is_bound_stop, wall_bound_diag};
 use super::eval::ChainPause;
 use super::ir::{Resumption, StopReason};
 use super::reuse::ReuseContext;
 use super::scheduler::{ChainId, Scheduler};
 use super::{DependencyEdge, Engine};
 use crate::action::{CapturedActionExecution, Executor};
+use crate::bound::{RunBound, StepBudget};
 use crate::cancel::CancelSignal;
 use crate::policy::ActionPolicy;
 
@@ -42,8 +43,17 @@ struct RunAbort {
 
 impl From<pith_diag::DiagnosticSink> for RunAbort {
     fn from(diagnostics: pith_diag::DiagnosticSink) -> Self {
+        // A diagnostic the bound produced stops the run the way cancellation
+        // does: the work being held is stopped, not broken. The action that
+        // exceeded a wall clock is the exception — it was recorded failed
+        // where it ran, before this conversion sees it (decision 0059).
+        let reason = if is_bound_stop(&diagnostics) {
+            StopReason::Cancelled
+        } else {
+            StopReason::Failed
+        };
         Self {
-            reason: StopReason::Failed,
+            reason,
             diagnostics,
         }
     }
@@ -94,11 +104,26 @@ fn cancelled_abort() -> RunAbort {
     }
 }
 
+fn bound_abort() -> RunAbort {
+    RunAbort {
+        reason: StopReason::Cancelled,
+        diagnostics: wall_bound_diag(),
+    }
+}
+
+/// What one action's start needs from its run: the reuse context it plans
+/// under and the bound its deadline descends from (decision 0059).
+struct Serving<'a> {
+    context: &'a ReuseContext<'a>,
+    bound: RunBound,
+}
+
 impl Engine {
     /// Drive every chain to completion without leaving the synchronous core.
     pub(super) fn drive_pure(&mut self, scheduler: &mut Scheduler) -> PithResult<()> {
+        let mut budget = StepBudget::unbounded();
         while let Some(chain) = scheduler.next_ready() {
-            match self.advance_chain(scheduler, chain, &ReuseContext::PureOnly)? {
+            match self.advance_chain(scheduler, chain, &ReuseContext::PureOnly, &mut budget)? {
                 ChainPause::Settled => {}
                 ChainPause::Blob(_) | ChainPause::Action(_) => {
                     return Err(effectful_in_pure_diag());
@@ -110,20 +135,21 @@ impl Engine {
 
     /// Drive every chain to completion, serving the effects they stop for.
     ///
-    /// A run that ends early — cancelled, or aborted by a diagnostic — leaves
-    /// chains parked and actions in flight. Both are recorded here, under the
-    /// terminal state that matches why the run ended, before the diagnostics
-    /// propagate.
+    /// A run that ends early — cancelled, past its bound, or aborted by a
+    /// diagnostic — leaves chains parked and actions in flight. Both are
+    /// recorded here, under the terminal state that matches why the run ended,
+    /// before the diagnostics propagate.
     pub(super) async fn drive_run<P: ActionPolicy, E: Executor, C: CancelSignal>(
         &mut self,
         scheduler: &mut Scheduler,
         policy: &P,
         executor: &E,
         cancel: &C,
+        bound: &RunBound,
     ) -> PithResult<()> {
         let mut started = StartedActions::default();
         let Err(abort) = self
-            .drive_chains(scheduler, policy, executor, cancel, &mut started)
+            .drive_chains(scheduler, policy, executor, cancel, bound, &mut started)
             .await
         else {
             return Ok(());
@@ -144,6 +170,7 @@ impl Engine {
         policy: &P,
         executor: &'a E,
         cancel: &C,
+        bound: &RunBound,
         started: &mut StartedActions<'a>,
     ) -> Result<(), RunAbort> {
         // Revalidating a recorded action edge re-plans the request behind it and
@@ -154,13 +181,17 @@ impl Engine {
             policy,
             environment: &environment,
         };
+        let mut steps = bound.step_budget();
         let mut waiting: VecDeque<(ChainId, Request<Action>)> = VecDeque::new();
         loop {
             while let Some(chain) = scheduler.next_ready() {
                 if cancel.is_cancelled() {
                     return Err(cancelled_abort());
                 }
-                match self.advance_chain(scheduler, chain, &context)? {
+                if bound.deadline_exceeded() {
+                    return Err(bound_abort());
+                }
+                match self.advance_chain(scheduler, chain, &context, &mut steps)? {
                     ChainPause::Settled => {}
                     ChainPause::Blob(id) => {
                         let bytes = self.fetch_blob(id)?;
@@ -176,7 +207,11 @@ impl Engine {
                 let Some((chain, request)) = waiting.pop_front() else {
                     break;
                 };
-                self.start_action(scheduler, chain, request, executor, &context, started)?;
+                let serving = Serving {
+                    context: &context,
+                    bound: *bound,
+                };
+                self.start_action(scheduler, chain, request, executor, &serving, started)?;
             }
             // A reused action has no future to finish, so nothing else will
             // wake the chain that asked for it.
@@ -200,9 +235,17 @@ impl Engine {
             // Checked after the await as well as before stepping a chain: an
             // action can be the only thing a long run is doing, and a caller
             // that cancelled while it ran should not wait for the next one.
+            // The bound's deadline is checked here for the same reason, and
+            // covers an executor that ignored the deadline it was handed —
+            // a first-party executor kills the child at it and refuses, which
+            // arrives as the bound's diagnostic (decision 0059).
             if cancel.is_cancelled() {
                 self.cancel_action(finished.computation, &cancelled_diag());
                 return Err(cancelled_abort());
+            }
+            if bound.deadline_exceeded() {
+                self.cancel_action(finished.computation, &wall_bound_diag());
+                return Err(bound_abort());
             }
             let value = self.finish_action(
                 finished.computation,
@@ -224,11 +267,11 @@ impl Engine {
         chain: ChainId,
         request: Request<Action>,
         executor: &'a E,
-        context: &ReuseContext<'_>,
+        serving: &Serving<'_>,
         started: &mut StartedActions<'a>,
     ) -> PithResult<()> {
         let parent = scheduler.top(chain)?.computation;
-        match self.begin_action(&request, context) {
+        match self.begin_action(&request, serving.context) {
             ActionStart::PlanningFailed(diagnostics) => Err(diagnostics),
             ActionStart::Refused {
                 computation,
@@ -259,7 +302,7 @@ impl Engine {
                     computation,
                     spec,
                     rule_meta,
-                    invocation,
+                    mut invocation,
                 } = *prepared;
                 self.record_edge(
                     parent,
@@ -268,6 +311,7 @@ impl Engine {
                         request: request.clone(),
                     },
                 )?;
+                invocation.deadline = serving.bound.action_deadline();
                 started.in_flight.push(InFlightAction {
                     chain,
                     computation,

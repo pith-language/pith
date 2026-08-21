@@ -224,6 +224,13 @@ pub enum EngineCode {
     /// `E-1215` — the caller cancelled the run. Not a fault: the work that was
     /// in flight is recorded as cancelled, and re-running it is reasonable.
     RunCancelled = 215,
+    /// `E-1216` — the run exceeded a bound its caller declared: a wall-clock
+    /// deadline or a step budget. Not a fault of any computation the run was
+    /// merely holding, and re-running under a larger bound is reasonable; the
+    /// action that exceeded a wall clock did run and produced nothing within
+    /// the authority it was given, so its own attempt is a failure carrying
+    /// this code.
+    RunBoundExceeded = 216,
 }
 
 impl From<EngineCode> for StableCode {

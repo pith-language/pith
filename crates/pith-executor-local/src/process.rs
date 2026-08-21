@@ -7,9 +7,11 @@
 
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::time::Instant;
 
 use async_trait::async_trait;
 use pith_core::{ExitStatusContract, NetworkPolicy, PlatformRequirement};
+use pith_diag::{EngineCode, StableCode};
 use pith_engine::{
     AccessVerification, ActionExit, ActionInvocation, CapturedActionExecution,
     CapturedExecutionReport, ExecutionPlatform, Executor, ExecutorIdentity,
@@ -216,6 +218,28 @@ async fn run_child(command: &mut Command) -> pith_diag::PithResult<std::process:
         .map_err(|error| crate::executor_diag(format!("waiting for the action failed: {error}")))
 }
 
+/// Wait for the child no longer than the run's deadline allows (decision 0059).
+///
+/// On elapse the wait future is dropped and `kill_on_drop` ends the child. The
+/// action is then refused with the bound's code rather than captured: a killed
+/// child wrote nothing the declared contract stands behind, and under
+/// `Reported` a timeout must never reach a rule as a signal-death verdict
+/// (decision 0037).
+async fn run_child_bounded(
+    command: &mut Command,
+    deadline: Instant,
+) -> pith_diag::PithResult<std::process::Output> {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    match tokio::time::timeout(remaining, run_child(command)).await {
+        Ok(result) => result,
+        Err(_elapsed) => Err(crate::executor_diag_as(
+            StableCode::from(EngineCode::RunBoundExceeded),
+            "the action exceeded the wall-clock bound its run declared; the child was \
+             killed at the deadline and nothing was captured",
+        )),
+    }
+}
+
 async fn run_in_scratch(
     invocation: &ActionInvocation,
     scratch_root: &std::path::Path,
@@ -261,7 +285,10 @@ async fn run_in_scratch(
     })?;
     register_sandbox_hook(&mut command, paths);
 
-    let output = run_child(&mut command).await?;
+    let output = match invocation.deadline {
+        Some(deadline) => run_child_bounded(&mut command, deadline).await?,
+        None => run_child(&mut command).await?,
+    };
     // Under `SuccessRequired` a nonzero exit means the declared outputs were
     // never written, so there is nothing to capture and the action failed. Under
     // `Reported` the status is the result, and the rule reads it (decision 0037).

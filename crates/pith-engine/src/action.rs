@@ -65,6 +65,13 @@ pub struct ActionInvocation {
     /// touches the store. `None` for a host-path program, whose bytes belong to
     /// the host.
     pub program: Option<MaterializedBlob>,
+    /// The wall-clock deadline of the run starting this action, when that run
+    /// declared one (decision 0059). An executor that receives one ends the
+    /// child at it and refuses with the bound's code rather than capturing
+    /// anything. Authority for an execution, not content of the contract: it
+    /// participates in no computation key, and a recorded attempt serves a run
+    /// under any bound, because reuse serves it without running anything.
+    pub deadline: Option<std::time::Instant>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

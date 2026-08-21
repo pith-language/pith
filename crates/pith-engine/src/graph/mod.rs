@@ -38,6 +38,7 @@ use pith_ids::{ComputationArena, ComputationId, ContentId};
 use pith_store::{ContentStore, MemoryContentStore};
 
 use crate::action::{AccessVerification, ActionRule, Executor};
+use crate::bound::RunBound;
 use crate::cancel::{CancelSignal, NeverCancelled};
 use crate::policy::ActionPolicy;
 use crate::runtime::{Runtime, RuntimeError};
@@ -293,6 +294,34 @@ impl Engine {
         self.run_cancellable(request, runtime, policy, executor, &NeverCancelled)
     }
 
+    /// [`Engine::run`] under a caller-declared bound (decision 0059): a
+    /// wall-clock deadline polled at the scheduling boundaries and handed to
+    /// every action the run starts, and a step budget spent inside the step
+    /// machine. A run without a bound — every entry point that does not take
+    /// one — is unbounded.
+    ///
+    /// # Errors
+    /// The same as [`Engine::run`], plus `E-1216` when the run exceeded its
+    /// bound. Work the bound stopped is recorded cancelled, not failed;
+    /// re-running under a larger bound is reasonable.
+    pub fn run_bounded<R: Runtime, P: ActionPolicy, E: Executor>(
+        &mut self,
+        request: &Request<Pure>,
+        runtime: &R,
+        policy: &P,
+        executor: &E,
+        bound: &RunBound,
+    ) -> Result<PithResult<Evaluation>, RuntimeError> {
+        let evaluations = runtime.block_on(self.run_inner(
+            std::slice::from_ref(request),
+            policy,
+            executor,
+            &NeverCancelled,
+            bound,
+        ))?;
+        Ok(evaluations.and_then(single_evaluation))
+    }
+
     /// [`Engine::run`], stoppable. `cancel` is polled at scheduling boundaries;
     /// when it reports cancellation the run stops, every computation it was
     /// still working on is recorded `Cancelled`, and the result is `E-1215`.
@@ -312,6 +341,7 @@ impl Engine {
             policy,
             executor,
             cancel,
+            &RunBound::none(),
         ))?;
         Ok(evaluations.and_then(single_evaluation))
     }
@@ -336,6 +366,23 @@ impl Engine {
         self.run_many_cancellable(requests, runtime, policy, executor, &NeverCancelled)
     }
 
+    /// [`Engine::run_many`] under a caller-declared bound. See
+    /// [`Engine::run_bounded`].
+    ///
+    /// # Errors
+    /// The same as [`Engine::run_many`], plus `E-1216` when the run exceeded
+    /// its bound.
+    pub fn run_many_bounded<R: Runtime, P: ActionPolicy, E: Executor>(
+        &mut self,
+        requests: &[Request<Pure>],
+        runtime: &R,
+        policy: &P,
+        executor: &E,
+        bound: &RunBound,
+    ) -> Result<PithResult<Box<[Evaluation]>>, RuntimeError> {
+        runtime.block_on(self.run_inner(requests, policy, executor, &NeverCancelled, bound))
+    }
+
     /// [`Engine::run_many`], stoppable. See [`Engine::run_cancellable`].
     ///
     /// # Errors
@@ -349,7 +396,7 @@ impl Engine {
         executor: &E,
         cancel: &C,
     ) -> Result<PithResult<Box<[Evaluation]>>, RuntimeError> {
-        runtime.block_on(self.run_inner(requests, policy, executor, cancel))
+        runtime.block_on(self.run_inner(requests, policy, executor, cancel, &RunBound::none()))
     }
 
     async fn run_inner<P: ActionPolicy, E: Executor, C: CancelSignal>(
@@ -358,6 +405,7 @@ impl Engine {
         policy: &P,
         executor: &E,
         cancel: &C,
+        bound: &RunBound,
     ) -> PithResult<Box<[Evaluation]>> {
         let environment = executor.identity();
         let mut plan = self.open_roots(
@@ -369,7 +417,7 @@ impl Engine {
         )?;
         // `drive_run` records whatever it was holding before returning, so
         // there is nothing left Pending to clean up here.
-        self.drive_run(&mut plan.scheduler, policy, executor, cancel)
+        self.drive_run(&mut plan.scheduler, policy, executor, cancel, bound)
             .await?;
         plan.into_evaluations()
     }

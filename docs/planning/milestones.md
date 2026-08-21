@@ -40,8 +40,8 @@ so labels do not move and do not imply position. that is
 rule — a stable identity, and a separate thing that moves. the order is the order of this file, and it is
 stated once, here:
 
-M-1, M-2, M-3, M-4 and M-5a are complete. then the latency spike, then M-8, M-9, M-10, M-11, M-12, M-13,
-M-14, M-15, and then M-5b, M-6 and M-7.
+M-1, M-2, M-3, M-4 and M-5a are complete, the latency spike has run, and M-8 is complete. then M-9,
+M-10, M-11, M-12, M-13, M-14, M-15, and then M-5b, M-6 and M-7.
 
 ## why the order changed
 
@@ -60,31 +60,17 @@ move the architecture are all in front of that boundary.
 ## the latency spike
 
 not a milestone and not a round. [the frontend architecture](frontend-architecture.md) rests on a bet it
-names as such — "this is the design's central latency bet and it is unmeasured" — that no in-process
-incremental layer is needed because re-elaborating an edited module is fast enough, with sorbet as the
-control case. [0021](../decisions/0021-arena-graph-engine.md) forecloses the fallback by an accepted
-record, so a failed bet changes the frontend's shape rather than its tuning.
+names as such — the design's central latency bet — that no in-process incremental layer is needed because
+re-elaborating an edited module is fast enough, with sorbet as the control case.
+[0021](../decisions/0021-arena-graph-engine.md) forecloses the fallback by an accepted record, so a failed
+bet changes the frontend's shape rather than its tuning.
 
-generate two hundred modules from stele's declaration shapes, write a throwaway parser and elaborator, and
-measure against the 50 ms keystroke bracket. the code is discarded; the number lands in the frontend
-architecture as measured or refuted. it runs before M-10 because M-10 gates everything after it.
-
-## M-8: the backstop limit
-
-a time and resource bound on evaluation and on an action, as one mechanism.
-
-it is owed to five callers and has never had a milestone. [0018](../decisions/0018-termination-and-recursion.md)
-requires it, 0022 requires it, [0028](../decisions/0028-sandboxed-local-executor.md)'s unresolved section
-claims the executor already accepts one, 0051 names it as the ceiling on an unbounded revalidation walk,
-M-5a's image tools want one, M-6's mutations cannot be unbounded, and the configure-script case in
-[the language frontend](language-frontend.md) is blocked on it. there is no `Duration`, timeout or deadline
-anywhere under `crates/*/src` — the only occurrences in the workspace are in `pith-engine/benches/scale.rs`.
-
-one mechanism owed to five callers is one record, not five deferrals. the round also retracts 0028's claim
-to have one. that is the older kind of debt: a record describing a facility nobody built.
-
-this is where M-2's remaining timeout debt is discharged. M-2's other remainder, cancelling part of a run
-rather than all of it, belongs here or beside it and is the cheaper half.
+it ran on 2026-08-21, before M-10, which gates everything after it: two hundred modules generated from
+stele's declaration shapes, a throwaway parser and elaborator, measured against the 50 ms keystroke
+bracket. the bet holds — the edited module's path is 105.6 µs at p50 and 117.3 µs at p99, about four
+hundred and twenty times inside the bracket, and the whole world elaborates cold in 21.9 ms. the number,
+its boundaries and one arithmetic correction it found in the architecture's sorbet paragraph are recorded
+in the frontend architecture; the code is discarded.
 
 ## M-9: observation identity and freshness
 
@@ -245,8 +231,8 @@ placement, continuous reconciliation, and richer transition protocols.
 ## complete
 
 M-1 semantic prototype, M-2 action prototype, M-3 first build library, M-4 package and environment
-libraries, and M-5a Linux system composition are complete at their own scopes. their evidence is in
-[what the completed milestones measured](measured.md).
+libraries, M-5a Linux system composition, and M-8 the backstop limit are complete at their own scopes.
+their evidence is in [what the completed milestones measured](measured.md).
 
 what they still owe is a claim about work, not about evidence, so it stays here:
 
@@ -254,8 +240,9 @@ M-1 owes nothing. persistent storage, change pruning and invalidation explanatio
 paragraph said they would, and operational support for `Observation`, `Mutation` and `Opaque` is now
 scheduled — the first in M-9 and M-5b, the third in M-15.
 
-M-2 owed timeouts and partial cancellation. both now have an owner in M-8. that is the first time the
-timeout debt has appeared as scheduled work instead of as a sentence closing an evidence paragraph.
+M-2 owed timeouts and partial cancellation. the timeout half is discharged in M-8 and
+[0059](../decisions/0059-a-caller-declared-run-bound.md); the partial-cancellation half stays open beside
+it, as 0059's unresolved section names, and is what still holds 0022 from acceptance.
 
 M-3 owes nothing its own statement named. what remains is scale rather than capability — the fixture is a
 handful of files, not a small project — and M-15 is where a real one comes from. U-5's remainder is
@@ -266,3 +253,7 @@ M-4 owes nothing, after the four rounds that followed its close: 0044, 0045, 004
 
 M-5a owes nothing. it is the milestone that answered the convergence question M-4 posed, which is why the
 order after it is different from the order before it.
+
+M-8 owes nothing its own statement named. what it leaves beside it is named in 0059's unresolved section:
+partial cancellation, a bound and a cancel signal in one run, the rlimit half of the resource bound, and
+whether the pure-only entry point carries a bound once represented bodies evaluate on it.

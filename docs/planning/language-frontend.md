@@ -104,7 +104,9 @@ three things block the right form, and none of them is notation. the first is th
 filter admits 77 syscalls each measured from a compiler, the linker or a shell fixture, and a configure script
 runs hundreds of small probe programs doing what a compiler never does; 0028 already predicted the list widens
 per toolchain and it has been measured twice, clang alone needing `sigaltstack`, `rename` and `alarm`. the
-second is the absent timeout, since a hung configure is unbounded. the third is `Opaque`'s lack of a step
+second was the absent timeout, since a hung configure is unbounded — no longer absent: M-8's run bound
+([0059](../decisions/0059-a-caller-declared-run-bound.md)) kills a hung child at the run's deadline. the
+third is `Opaque`'s lack of a step
 protocol, and it is the subtle one: running a foreign build as a plain `Action` works, but an `Action`'s
 contract *claims* these inputs and these outputs and this is what happened, and for a foreign build the last
 clause is false, so the run does not fail — it overclaims in provenance, and 0014's reproducibility properties

@@ -59,6 +59,7 @@ fn invocation(script: &str) -> Option<ActionInvocation> {
         },
         inputs: Box::new([]),
         program: None,
+        deadline: None,
     })
 }
 
@@ -608,6 +609,7 @@ async fn an_executable_path_that_does_not_exist_is_a_spawn_error() {
         },
         inputs: Box::new([]),
         program: None,
+        deadline: None,
     };
 
     let error = LocalExecutor::new().execute(&invocation).await.err();

@@ -6,7 +6,7 @@ summary: add an exit-status contract to ActionSpec so a program whose nonzero ex
 kind: decision
 status: proposed
 created: 2026-06-15
-updated: 2026-06-15
+updated: 2026-08-21
 tags:
   - actions
   - build
@@ -100,4 +100,4 @@ whether the raw exit status belongs in provenance alongside the derived value is
 
 `ExitStatusContract` is declared by the rule that plans the contract, so it is a property of the rule rather than of the request. a build that wanted to run the same program once as a test and once as a required step would need two rules. whether that ever comes up is unknown, and inventing a request-level override before it does would be guessing.
 
-timeouts interact with this and are still out of scope, as 0028 left them. a program killed for exceeding a timeout would arrive at a `Reported` rule as a signal death indistinguishable from a crash, and the timeout design is where that needs answering.
+timeouts interact with this and were out of scope here, as 0028 left them. a program killed for exceeding a timeout would have arrived at a `Reported` rule as a signal death indistinguishable from a crash, and the timeout design was where that needed answering. [0059](0059-a-caller-declared-run-bound.md) answers it: the executor kills the child at the run's deadline and refuses with the bound's code before capturing anything, so `complete` never runs and no rule reads a verdict from a kill. a signal death that does reach a rule remains what this record says it is — a crash the rule may legitimately read.
