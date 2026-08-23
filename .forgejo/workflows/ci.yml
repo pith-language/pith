@@ -15,6 +15,11 @@ env:
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: 1
   RUSTFLAGS: "-D warnings"
+  # The runners cannot hold two full-debug test-binary links at once: the
+  # linker was SIGKILled (exit 137) on phloem's largest test binaries. Line
+  # tables keep backtraces symbolized while cutting the debuginfo that
+  # dominates the linker's peak memory. Local `just test-ci` is unaffected.
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
 
 jobs:
   checks:
