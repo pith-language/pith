@@ -6,13 +6,14 @@
 
 use std::cmp::Ordering;
 
-use pith_core::{SumConstructor, Type, Value};
+use pith_core::{DeclarationTable, SumConstructor, Type, Value};
 use pith_diag::PithResult;
 
 use crate::codec::{
     FIELD_DOMAIN, FIELD_FEATURES, FIELD_PACKAGE, FIELD_VERSION, canonical_list, field_of,
-    record_type, record_value, sum_type, sum_value, text_list, text_of,
+    record_type, record_value, sum_value, text_list, text_of,
 };
+use crate::declarations::declared_name;
 use crate::diag;
 use crate::identity::{DomainIdentity, PackageIdentity, VersionScheme};
 
@@ -108,8 +109,12 @@ pub enum Range {
 /// `Between({lower, upper})`.
 #[must_use]
 pub fn range_type() -> Type {
-    sum_type(
-        RANGE,
+    crate::declarations::declared_type(RANGE)
+}
+
+pub(crate) fn declare_range(table: &mut DeclarationTable) -> Type {
+    match table.sum(
+        &declared_name(RANGE),
         [
             SumConstructor {
                 name: ANY.into(),
@@ -132,7 +137,10 @@ pub fn range_type() -> Type {
                 payload: Some(record_type([(LOWER, bound_type()), (UPPER, bound_type())])),
             },
         ],
-    )
+    ) {
+        Ok(declared) => declared,
+        Err(error) => unreachable!("phloem declares `{RANGE}` once: {error}"),
+    }
 }
 
 impl Range {
@@ -385,17 +393,21 @@ pub struct Constraint {
     pub attribution: Box<str>,
 }
 
+pub(crate) fn constraint_over(range: &Type) -> Type {
+    record_type([
+        (DOMAIN, Type::Text),
+        (PACKAGE, Type::Text),
+        (RANGE_FIELD, range.clone()),
+        (FEATURES, Type::List(Box::new(Type::Text))),
+        (ATTRIBUTION, Type::Text),
+    ])
+}
+
 /// The constraint record type: `{domain, package, range, features,
 /// attribution}`.
 #[must_use]
 pub fn constraint_type() -> Type {
-    record_type([
-        (DOMAIN, Type::Text),
-        (PACKAGE, Type::Text),
-        (RANGE_FIELD, range_type()),
-        (FEATURES, Type::List(Box::new(Type::Text))),
-        (ATTRIBUTION, Type::Text),
-    ])
+    constraint_over(&range_type())
 }
 
 impl Constraint {

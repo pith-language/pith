@@ -23,21 +23,23 @@ pub use publish::{read, write};
 
 pub(crate) use file::parse_binding_line;
 
-use pith_core::{SumConstructor, Type, Value};
+use pith_core::{DeclarationTable, SumConstructor, Type, Value};
 use pith_diag::PithResult;
 use pith_ids::ContentId;
 
 use crate::codec::{
     FIELD_DOMAIN, FIELD_FEATURES, FIELD_VERSION, blob_field, field_of, record_type, record_value,
-    sum_type, sum_value, text_field, text_list, value_content_id,
+    sum_value, text_field, text_list, value_content_id,
 };
+use crate::declarations::declared_name;
 use crate::diag;
 use crate::identity::PackageVersion;
 
 /// The digest domain for one revision of a lock entry. NUL-terminated so it
 /// is self-delimiting against the canonical bytes that follow, mirroring the
 /// domain separation `pith-ids` applies to every digest kind it owns.
-const LOCK_ENTRY_DOMAIN: &[u8] = b"phloem.lock-entry-v1\0";
+const LOCK_ENTRY_DOMAIN: pith_ids::DigestDomain =
+    pith_ids::DigestDomain::new("phloem-lock-entry", 1);
 
 /// The declared origin sum's name.
 pub const ORIGIN: &str = "phloem.Origin";
@@ -163,8 +165,12 @@ impl std::fmt::Display for Origin {
 /// location as text.
 #[must_use]
 pub fn origin_type() -> Type {
-    sum_type(
-        ORIGIN,
+    crate::declarations::declared_type(ORIGIN)
+}
+
+pub(crate) fn declare_origin(table: &mut DeclarationTable) -> Type {
+    match table.sum(
+        &declared_name(ORIGIN),
         [
             SumConstructor {
                 name: REGISTRY.into(),
@@ -179,7 +185,10 @@ pub fn origin_type() -> Type {
                 payload: Some(Type::Text),
             },
         ],
-    )
+    ) {
+        Ok(declared) => declared,
+        Err(error) => unreachable!("phloem declares `{ORIGIN}` once: {error}"),
+    }
 }
 
 /// Returns the declared lock-entry record type.

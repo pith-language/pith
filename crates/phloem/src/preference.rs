@@ -5,10 +5,11 @@
 
 use std::cmp::Ordering;
 
-use pith_core::{SumConstructor, Type, Value};
+use pith_core::{DeclarationTable, SumConstructor, Type, Value};
 use pith_diag::PithResult;
 
-use crate::codec::{sum_type, sum_value};
+use crate::codec::sum_value;
+use crate::declarations::declared_name;
 use crate::diag;
 use crate::identity::VersionScheme;
 
@@ -34,8 +35,12 @@ pub enum Preference {
 /// The declared preference sum type: `Newest`, `Oldest`.
 #[must_use]
 pub fn preference_type() -> Type {
-    sum_type(
-        PREFERENCE,
+    crate::declarations::declared_type(PREFERENCE)
+}
+
+pub(crate) fn declare(table: &mut DeclarationTable) -> Type {
+    match table.sum(
+        &declared_name(PREFERENCE),
         [
             SumConstructor {
                 name: NEWEST.into(),
@@ -46,7 +51,10 @@ pub fn preference_type() -> Type {
                 payload: None,
             },
         ],
-    )
+    ) {
+        Ok(declared) => declared,
+        Err(error) => unreachable!("phloem declares `{PREFERENCE}` once: {error}"),
+    }
 }
 
 /// The preference-list type: a lexicographic list of declared orderings.

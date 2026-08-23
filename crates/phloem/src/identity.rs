@@ -5,9 +5,10 @@
 
 use std::cmp::Ordering;
 
-use pith_core::{Type, Value};
+use pith_core::{DeclarationTable, Type, Value};
 use pith_diag::PithResult;
 
+use crate::declarations::declared_name;
 use crate::diag;
 
 /// A namespace authority a package is named within: either a first-party
@@ -137,7 +138,15 @@ pub const DEBIAN: &str = "debian";
 /// The version-scheme type: nominal over the scheme's declared name.
 #[must_use]
 pub fn version_scheme_type() -> Type {
-    crate::declarations::nominal(&version_scheme_spelling(), Type::Text)
+    crate::declarations::declared_type(&version_scheme_spelling())
+}
+
+pub(crate) fn declare_version_scheme(table: &mut DeclarationTable) -> Type {
+    let spelling = version_scheme_spelling();
+    match table.nominal(&declared_name(&spelling), Type::Text) {
+        Ok(declared) => declared,
+        Err(error) => unreachable!("phloem declares `{spelling}` once: {error}"),
+    }
 }
 
 /// Creates a version-scheme value naming `scheme`.

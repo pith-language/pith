@@ -4,18 +4,21 @@
 //! The resolver request includes the declared version scheme, constraints,
 //! candidate universe, preferences, and search budget.
 
-use pith_core::{Interface, Pure, RecordField, Request, SumConstructor, Type, Value};
+use pith_core::{
+    DeclarationTable, Interface, Pure, RecordField, Request, SumConstructor, Type, Value,
+};
 use pith_diag::{PithResult, Span};
 use pith_ids::ContentId;
 
 use crate::codec::{
     FIELD_DOMAIN, FIELD_PACKAGE, blob_field, field_of, int_field, record_type, record_value,
-    sum_type, sum_value, text_field,
+    sum_value, text_field,
 };
-use crate::constraint::{Constraint, constraint_set_type, constraint_set_value};
+use crate::constraint::{Constraint, constraint_set_type, constraint_set_value, range_type};
+use crate::declarations::declared_name;
 use crate::identity::{DomainIdentity, PackageIdentity, version_scheme_type};
 use crate::preference::{Preference, PreferenceList, preference_list_type, preference_list_value};
-use crate::universe::{Candidate, candidate_type, universe_type};
+use crate::universe::{Candidate, universe_type};
 
 /// The declared resolution sum's name.
 pub const RESOLUTION: &str = "phloem.Resolution";
@@ -88,13 +91,19 @@ pub fn trail_entry_type() -> Type {
     ])
 }
 
-/// The derivation record type: `{domain, package, constraints, candidates}`.
 #[must_use]
 pub fn derivation_type() -> Type {
+    derivation_over(&range_type())
+}
+
+pub(crate) fn derivation_over(range: &Type) -> Type {
     record_type([
         (FIELD_DOMAIN, Type::Text),
         (FIELD_PACKAGE, Type::Text),
-        (CONSTRAINTS, constraint_set_type()),
+        (
+            CONSTRAINTS,
+            Type::List(Box::new(crate::constraint::constraint_over(range))),
+        ),
         (CANDIDATES, Type::List(Box::new(Type::Text))),
     ])
 }
@@ -104,21 +113,33 @@ pub fn derivation_type() -> Type {
 /// orderings})`, `BudgetExhausted({budget, decisions})`.
 #[must_use]
 pub fn resolution_type() -> Type {
+    crate::declarations::declared_type(RESOLUTION)
+}
+
+pub(crate) fn declare(
+    table: &mut DeclarationTable,
+    source: &Type,
+    origin: &Type,
+    range: &Type,
+    preference: &Type,
+) -> Type {
+    let requirement = crate::universe::requirement_over(range);
+    let candidate = crate::universe::candidate_over(source, origin, &requirement);
     let solved = record_type([
-        (CHOICE, Type::List(Box::new(candidate_type()))),
+        (CHOICE, Type::List(Box::new(candidate.clone()))),
         (TRAIL, Type::List(Box::new(trail_entry_type()))),
         (UNIVERSE, Type::Blob),
     ]);
-    let unsatisfiable = record_type([(DERIVATION, derivation_type())]);
+    let unsatisfiable = record_type([(DERIVATION, derivation_over(range))]);
     let underdetermined = record_type([
         (FIELD_DOMAIN, Type::Text),
         (FIELD_PACKAGE, Type::Text),
-        (TIED, Type::List(Box::new(candidate_type()))),
-        (ORDERINGS, preference_list_type()),
+        (TIED, Type::List(Box::new(candidate))),
+        (ORDERINGS, Type::List(Box::new(preference.clone()))),
     ]);
     let budget_exhausted = record_type([(BUDGET, Type::Int), (DECISIONS, Type::Int)]);
-    sum_type(
-        RESOLUTION,
+    match table.sum(
+        &declared_name(RESOLUTION),
         [
             SumConstructor {
                 name: SOLVED.into(),
@@ -137,7 +158,10 @@ pub fn resolution_type() -> Type {
                 payload: Some(budget_exhausted),
             },
         ],
-    )
+    ) {
+        Ok(declared) => declared,
+        Err(error) => unreachable!("phloem declares `{RESOLUTION}` once: {error}"),
+    }
 }
 
 /// Returns the resolution interface over its five declared inputs.

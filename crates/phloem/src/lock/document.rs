@@ -19,7 +19,7 @@ use crate::source::SourceBinding;
 use crate::universe::Candidate;
 
 /// Digest domain for lock document values.
-const LOCK_DOMAIN: &[u8] = b"phloem.lock-v1\0";
+const LOCK_DOMAIN: pith_ids::DigestDomain = pith_ids::DigestDomain::new("phloem-lock", 1);
 
 const RESOLVER: &str = "resolver";
 const SCHEME: &str = "version-scheme";

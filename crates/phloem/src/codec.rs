@@ -3,9 +3,9 @@
 //! Record and sum codecs use the field-name constants defined here so their
 //! encoders and decoders share one spelling.
 
-use pith_core::{RecordField, SumConstructor, Type, Value};
+use pith_core::{RecordField, Type, Value};
 use pith_diag::PithResult;
-use pith_ids::{ContentDigest, ContentId, DIGEST_LEN};
+use pith_ids::{ContentDigest, ContentId, DIGEST_LEN, DigestDomain};
 
 use crate::diag;
 
@@ -26,15 +26,6 @@ pub(crate) fn record_type<const N: usize>(fields: [(&str, Type); N]) -> Type {
         payload,
     }));
     record.unwrap_or_else(|error| unreachable!("{error}"))
-}
-
-/// The use-site type of one of phloem's declared sums.
-///
-/// Declared in phloem's own table rather than constructed inline, so the sum
-/// carries its declaration and a rule revision can derive from it
-/// (decision 0047).
-pub(crate) fn sum_type<const N: usize>(name: &str, constructors: [SumConstructor; N]) -> Type {
-    crate::declarations::sum(name, constructors)
 }
 
 /// Build a record value from `(name, payload)` pairs, on the same terms as
@@ -68,14 +59,8 @@ pub(crate) fn canonical_list(values: impl IntoIterator<Item = Value>) -> Value {
     Value::List(entries.into_iter().map(|(_, value)| value).collect())
 }
 
-/// A value's content identity under a NUL-terminated domain prefix.
-pub(crate) fn value_content_id(domain: &[u8], value: &Value) -> ContentId {
-    debug_assert_eq!(domain.last(), Some(&0));
-    let canonical = value.encode_canonical();
-    let mut bytes = Vec::with_capacity(domain.len().saturating_add(canonical.len()));
-    bytes.extend_from_slice(domain);
-    bytes.extend_from_slice(&canonical);
-    ContentId::from_digest(ContentDigest::of_bytes(&bytes))
+pub(crate) fn value_content_id(domain: DigestDomain, value: &Value) -> ContentId {
+    ContentId::of_domain(domain, &value.encode_canonical())
 }
 
 /// Decode exactly one SHA-256 digest written as hexadecimal.

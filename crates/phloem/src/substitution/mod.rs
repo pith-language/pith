@@ -5,7 +5,7 @@
 //! offer leaves the package build request in place.
 
 mod admission;
-mod model;
+pub(crate) mod model;
 mod serving;
 
 pub use self::admission::{Refusal, admit};

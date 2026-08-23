@@ -3,11 +3,12 @@
 //! Bindings represent registry archives, unresolved Git references,
 //! materialized Git trees, and local paths.
 
-use pith_core::{SumConstructor, Type, Value};
+use pith_core::{DeclarationTable, SumConstructor, Type, Value};
 use pith_diag::PithResult;
 use pith_ids::ContentId;
 
-use crate::codec::{field_of, record_type, record_value, sum_type, sum_value};
+use crate::codec::{field_of, record_type, record_value, sum_value};
+use crate::declarations::declared_name;
 use crate::diag;
 
 /// The declared sum's name.
@@ -40,6 +41,10 @@ pub const PATH_CONTENT: &str = "content";
 /// `Path({path: Text, content: Blob})`.
 #[must_use]
 pub fn source_type() -> Type {
+    crate::declarations::declared_type(SOURCE)
+}
+
+pub(crate) fn declare(table: &mut DeclarationTable) -> Type {
     let git = record_type([(GIT_REVISION, Type::Text), (GIT_TREE, Type::Text)]);
     let git_tree = record_type([
         (GIT_REVISION, Type::Text),
@@ -48,8 +53,8 @@ pub fn source_type() -> Type {
     ]);
     let path = record_type([(PATH_PATH, Type::Text), (PATH_CONTENT, Type::Blob)]);
     // Field and constructor names are distinct literals.
-    sum_type(
-        SOURCE,
+    match table.sum(
+        &declared_name(SOURCE),
         [
             SumConstructor {
                 name: ARCHIVE.into(),
@@ -68,7 +73,10 @@ pub fn source_type() -> Type {
                 payload: Some(path),
             },
         ],
-    )
+    ) {
+        Ok(declared) => declared,
+        Err(error) => unreachable!("phloem declares `{SOURCE}` once: {error}"),
+    }
 }
 
 /// One source binding, as declared.
