@@ -7,6 +7,7 @@
     system,
     pkgs,
     craneLib,
+    rustToolchain,
     ...
   }: let
     # Shared by every cargo derivation: mismatched RUSTFLAGS or profiles
@@ -76,6 +77,32 @@
         touch $out
       '';
   in {
+    packages = lib.mkIf (system == "x86_64-linux") {
+      # The complement to `tests`: phloem's host-integration suite needs
+      # a live nix daemon to answer its closure queries and a kernel
+      # without a syscall sandbox over the executor's own seccomp (the
+      # hosted NixCI test sandbox kills its actions with SIGSYS). The
+      # nix-ci.nix test job stays disabled until such a worker exists;
+      # the package is the ready runner for when one does.
+      phloem-host-tests = pkgs.writeShellScriptBin "phloem-host-tests" ''
+        set -euo pipefail
+        # Fully self-contained, and exported before anything else: the
+        # test worker starts the program with an empty PATH, and any
+        # host compiler leaking in would make discovery fail outside
+        # /nix/store.
+        export PATH="${lib.makeBinPath [rustToolchain pkgs.stdenv.cc pkgs.clang pkgs.nix pkgs.coreutils]}"
+        export CARGO_HOME="${craneLib.vendorCargoDeps {src = craneLib.cleanCargoSource self.outPath;}}"
+        # The worker's root filesystem is read-only; put the build
+        # somewhere the run is given write access to.
+        export CARGO_TARGET_DIR="''${TMPDIR:-$PWD}/pith-target"
+        mkdir -p "$CARGO_TARGET_DIR"
+        export CARGO_NET_OFFLINE=true
+        export RUSTFLAGS="-D warnings"
+        cd "${self.outPath}"
+        cargo test --locked --workspace
+      '';
+    };
+
     checks = lib.mkIf (system == "x86_64-linux") {
       clippy = craneLib.cargoClippy (commonArgs
         // {
