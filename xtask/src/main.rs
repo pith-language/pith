@@ -35,6 +35,11 @@ fn main() -> ExitCode {
 }
 
 fn workspace_root() -> Option<PathBuf> {
+    // CARGO_MANIFEST_DIR is a build-time path that may not exist where
+    // the binary runs, so allow the caller to name the root instead.
+    if let Some(root) = std::env::var_os("PITH_WORKSPACE_ROOT") {
+        return Some(PathBuf::from(root));
+    }
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .map(Path::to_path_buf)
