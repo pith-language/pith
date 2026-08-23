@@ -78,8 +78,20 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-${{ matrix.cache_key }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: cargo-${{ matrix.cache_key }}-
+          # Cache entries are immutable under one key, so a key pinned to the
+          # lockfile alone can never be updated: every fingerprint-affecting
+          # change restored a stale entry, recompiled the world, and had its
+          # own save refused. The key carries the commit so each run saves
+          # its progress — including runs that fail partway, which keeps a
+          # big workspace bootstrappable under the runner's time cap — and
+          # the prefix restore picks up the newest earlier entry. The
+          # fingerprint-relevant inputs (lockfile, toolchain pin, workflow
+          # flags) scope the prefix so a change there falls back to the bare
+          # key rather than a mismatched cache.
+          key: cargo-${{ matrix.cache_key }}-${{ hashFiles('Cargo.lock', 'flake.lock', '.forgejo/workflows/ci.yml') }}-${{ github.sha }}
+          restore-keys: |
+            cargo-${{ matrix.cache_key }}-${{ hashFiles('Cargo.lock', 'flake.lock', '.forgejo/workflows/ci.yml') }}-
+            cargo-${{ matrix.cache_key }}-
       - name: Run check via nix + just
         env:
           DEV_SHELL: ${{ matrix.dev_shell }}
