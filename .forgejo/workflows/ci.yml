@@ -14,7 +14,17 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: 1
-  RUSTFLAGS: "-D warnings"
+  # The shared runners' RAM quota counts filesystem writes, and their storage
+  # drains writeback too slowly for the build's peak moments: lld was
+  # SIGKILled (137) on phloem's largest test binaries even serialized and
+  # streaming. CI test binaries therefore carry no debuginfo at all —
+  # backtraces keep test names and messages but lose line numbers — the
+  # linker streams (--no-keep-memory), one build job bounds the compiler
+  # fleet, and the job syncs the cache restore's pages away before
+  # building. Local `just test-ci` is unaffected by all of it.
+  CARGO_PROFILE_TEST_DEBUG: "0"
+  CARGO_BUILD_JOBS: 1
+  RUSTFLAGS: "-D warnings -C link-arg=-Wl,--no-keep-memory"
 
 jobs:
   checks:
@@ -68,10 +78,32 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-${{ matrix.cache_key }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: cargo-${{ matrix.cache_key }}-
+          # Cache entries are immutable under one key, so a key pinned to the
+          # lockfile alone can never be updated: every fingerprint-affecting
+          # change restored a stale entry, recompiled the world, and had its
+          # own save refused. The key carries the commit so each run saves
+          # its progress — including runs that fail partway, which keeps a
+          # big workspace bootstrappable under the runner's time cap — and
+          # the prefix restore picks up the newest earlier entry. The
+          # fingerprint-relevant inputs (lockfile, toolchain pin, workflow
+          # flags) scope the prefix so a change there falls back to the bare
+          # key rather than a mismatched cache.
+          key: cargo-${{ matrix.cache_key }}-${{ hashFiles('Cargo.lock', 'flake.lock', '.forgejo/workflows/ci.yml') }}-${{ github.sha }}
+          restore-keys: |
+            cargo-${{ matrix.cache_key }}-${{ hashFiles('Cargo.lock', 'flake.lock', '.forgejo/workflows/ci.yml') }}-
+            cargo-${{ matrix.cache_key }}-
       - name: Run check via nix + just
         env:
           DEV_SHELL: ${{ matrix.dev_shell }}
           TASK: ${{ matrix.task }}
-        run: nix develop --print-build-logs ".#$DEV_SHELL" --command just "$TASK"
+        # The runner's RAM quota counts filesystem writes, and the cache
+        # restore leaves gigabytes of dirty pages behind that its storage
+        # drains lazily; a build that starts on top of that backlog gets a
+        # process killed whenever it allocates. Sync drains the backlog
+        # before the build, and the counters say what the budget really
+        # was when something still dies.
+        run: |
+          trap 'grep -H . /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory.peak /sys/fs/cgroup/memory.current /sys/fs/cgroup/memory.events /sys/fs/cgroup/memory.stat 2>/dev/null || true' EXIT
+          grep -H . /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory.current /proc/meminfo 2>/dev/null || true
+          sync || true
+          nix develop --print-build-logs ".#$DEV_SHELL" --command just "$TASK"

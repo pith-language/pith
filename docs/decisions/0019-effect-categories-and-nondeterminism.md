@@ -154,6 +154,8 @@ an operation that spans two categories is modeled as a composition (one category
 
 the category set is closed. a sixth category requires a decision record and either amends or supersedes this one.
 
+[0060](0060-observation-identity-and-freshness.md) makes the third category operational: an observation rule derives a subject, an observer returns a value and revision, and recorded consumers revalidate freshness by attesting that revision. `Pure`, `Action` and `Observation` therefore exercise the structural split; `Mutation` and `Opaque` remain marker types, so this record stays proposed.
+
 ## unresolved
 
 the granular nondeterminism taxonomy — which sources the first-party library names, how it specializes the kernel primitive, and whether the taxonomy is stable enough that static type analysis meaningfully predicts reproducibility — needs library design alongside the first build library. the reproducibility lineage's enumeration is the starting set; whether it is complete enough is empirical.

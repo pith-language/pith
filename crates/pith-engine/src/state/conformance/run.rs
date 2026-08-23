@@ -10,7 +10,9 @@ use crate::state::{
 };
 
 use super::compare::{Divergence, DivergenceDetail, compare_outcome};
-use super::fixtures::{action_computation, diagnostics, imported_report, pure_key};
+use super::fixtures::{
+    action_computation, diagnostics, imported_report, observation_computation, pure_key,
+};
 use super::record::{
     ReuseOutcome, Space, materialize, required_capabilities, resolve_dependencies, reuse_decision,
     with_capability_edges,
@@ -64,6 +66,13 @@ pub(super) fn run_step(
             // property.
             None => Ok(()),
         },
+        Step::CreateObservation { rule, input } => create(
+            index,
+            observation_computation(*rule, *input),
+            model,
+            subject,
+            tracked,
+        ),
         Step::Complete {
             attempt,
             dependencies,
@@ -167,6 +176,12 @@ fn complete(
                 imported_report: imported_report(&target.computation),
             })
         }
+        DurableComputation::Observation { .. } => {
+            DurableProvenance::Observation(crate::state::DurableObservationProvenance::Observed {
+                observer: "conformance".into(),
+                revision: EncodedValue::from_value(&Value::int(1)),
+            })
+        }
     };
     let reuse = reuse_decision(&target.computation, &resolved, tracked, corrupt_reuse);
     let capabilities = required_capabilities(&target.computation, &resolved, tracked);
@@ -228,6 +243,11 @@ fn stop(
         DurableComputation::Action { .. } => {
             DurableProvenance::Action(DurableActionProvenance::NotExecuted)
         }
+        DurableComputation::Observation { .. } => DurableProvenance::Observation(
+            crate::state::DurableObservationProvenance::NotObserved {
+                observer: "conformance".into(),
+            },
+        ),
     };
     let diagnostics = diagnostics(message_len, notes);
     let stopped = |space: Space| StoppedAttempt {
@@ -285,6 +305,11 @@ fn republish_terminal(
             DurableComputation::Action { .. } => {
                 DurableProvenance::Action(DurableActionProvenance::NotExecuted)
             }
+            DurableComputation::Observation { .. } => DurableProvenance::Observation(
+                crate::state::DurableObservationProvenance::NotObserved {
+                    observer: "conformance".into(),
+                },
+            ),
         },
     };
     let model_outcome = model.publish_failed(target.model, failure.clone());

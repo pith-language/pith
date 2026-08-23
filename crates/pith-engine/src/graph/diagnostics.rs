@@ -54,10 +54,18 @@ pub(super) enum InternalInvariant {
     SelectedActionRuleHasNoBody,
     /// The metadata of a selected action rule was missing.
     SelectedActionRuleHasNoMetadata,
+    /// The body of a selected observation rule was missing.
+    SelectedObservationRuleHasNoBody,
+    /// The metadata of a selected observation rule was missing.
+    SelectedObservationRuleHasNoMetadata,
     /// The computation node of an in-flight action was missing.
     ActionLostComputationNode,
     /// The action record on an in-flight action computation was missing.
     ActionLostActionRecord,
+    /// The computation node of an observation attempt was missing.
+    ObservationLostComputationNode,
+    /// A completed observation node had no observation record.
+    ObservationLostObservationRecord,
     /// A tree file entry materialized as a tree instead of a blob.
     TreeFileMaterializedAsTree,
     /// A durable publication was requested for an attempt that is not Complete.
@@ -70,6 +78,16 @@ pub(super) enum InternalInvariant {
     DurableAttemptMissingForComputation,
     /// A pure durable dependency edge targeted a non-pure computation.
     DurablePureEdgeTargetNotPure,
+    /// An observation dependency edge targeted a non-observation computation.
+    DurableObservationEdgeTargetNotObservation,
+    /// A completed observation has no recorded observer revision.
+    CompletedObservationMissingRevision,
+    /// A recorded observation request could not be decoded.
+    RecordedObservationRequestUndecodable(pith_core::CanonicalDecodeError),
+    /// A recorded observation subject could not be decoded.
+    RecordedObservationSubjectUndecodable(pith_core::CanonicalDecodeError),
+    /// A recorded observation revision could not be decoded.
+    RecordedObservationRevisionUndecodable(pith_core::CanonicalDecodeError),
     /// The engine-state adapter rejected a publication (adapter validation or
     /// commit failure). The store's validation is a safety net; reaching this
     /// means the engine's mapping fed it inconsistent data.
@@ -155,11 +173,23 @@ impl InternalInvariant {
             InternalInvariant::SelectedActionRuleHasNoMetadata => {
                 "selected action rule has no metadata".to_string()
             }
+            InternalInvariant::SelectedObservationRuleHasNoBody => {
+                "selected observation rule has no body".to_string()
+            }
+            InternalInvariant::SelectedObservationRuleHasNoMetadata => {
+                "selected observation rule has no metadata".to_string()
+            }
             InternalInvariant::ActionLostComputationNode => {
                 "action evaluator lost its computation node".to_string()
             }
             InternalInvariant::ActionLostActionRecord => {
                 "action evaluator lost its action record".to_string()
+            }
+            InternalInvariant::ObservationLostComputationNode => {
+                "observation evaluator lost its computation node".to_string()
+            }
+            InternalInvariant::ObservationLostObservationRecord => {
+                "completed observation has no observation record".to_string()
             }
             InternalInvariant::TreeFileMaterializedAsTree => {
                 "tree file content materialized as a tree".to_string()
@@ -178,6 +208,22 @@ impl InternalInvariant {
             }
             InternalInvariant::DurablePureEdgeTargetNotPure => {
                 "a pure durable dependency edge targets a non-pure computation".to_string()
+            }
+            InternalInvariant::DurableObservationEdgeTargetNotObservation => {
+                "an observation durable dependency edge targets a non-observation computation"
+                    .to_string()
+            }
+            InternalInvariant::CompletedObservationMissingRevision => {
+                "a completed observation has no recorded observer revision".to_string()
+            }
+            InternalInvariant::RecordedObservationRequestUndecodable(error) => {
+                format!("a recorded observation request could not be decoded: {error}")
+            }
+            InternalInvariant::RecordedObservationSubjectUndecodable(error) => {
+                format!("a recorded observation subject could not be decoded: {error}")
+            }
+            InternalInvariant::RecordedObservationRevisionUndecodable(error) => {
+                format!("a recorded observation revision could not be decoded: {error}")
             }
             InternalInvariant::EngineStateStoreError(error) => {
                 format!("engine-state adapter rejected a publication: {error}")
@@ -241,7 +287,15 @@ pub(super) fn effectful_in_pure_diag() -> DiagnosticSink {
     one_diag(Diag::engine(
         EngineCode::EffectfulStepInPure,
         Span::none(),
-        "effectful step (NeedBlob/NeedAction) in a pure-only evaluation; use Engine::run",
+        "effectful step (NeedBlob/NeedAction/NeedObservation) in a pure-only evaluation; use Engine::run",
+    ))
+}
+
+pub(super) fn observer_missing_diag(span: Span) -> DiagnosticSink {
+    one_diag(Diag::engine(
+        EngineCode::ObserverMissing,
+        span,
+        "observation requested but no observer is configured",
     ))
 }
 

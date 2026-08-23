@@ -5,10 +5,13 @@
 
 use pith_core::{
     ActionComputationKey, ActionSpec, CanonicalDecodeError, CapabilityRequirement, Interface,
-    OutputKind, PureComputationKey, Value,
+    ObservationComputationKey, OutputKind, PureComputationKey, Value,
 };
 use pith_diag::{Diag, Severity, Span, StableCode};
-use pith_ids::{ActionComputationDigest, ActionSpecDigest, ContentId, RuleIdentity, RuleRevision};
+use pith_ids::{
+    ActionComputationDigest, ActionSpecDigest, ContentId, ObservationComputationDigest,
+    RuleIdentity, RuleRevision,
+};
 
 use crate::{
     AccessVerification, ActionAuthorization, CapturedExecutionReport, ExecutionPlatform,
@@ -198,6 +201,13 @@ pub enum DurableComputation {
         plan: Box<DurableActionPlan>,
         authorization: ActionAuthorization,
     },
+    Observation {
+        computation_digest: ObservationComputationDigest,
+        request: DurableObservationRequest,
+        rule: DurableRule,
+        subject: EncodedValue,
+        observer: Box<str>,
+    },
 }
 
 /// The typed request one action computation was made from, without the
@@ -206,6 +216,15 @@ pub enum DurableComputation {
 /// any other record.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DurableActionRequest {
+    pub interface: Interface,
+    pub inputs: Box<[EncodedValue]>,
+}
+
+/// The typed request retained for an observation computation. Labels and
+/// source spans do not participate in identity and do not cross the adapter
+/// boundary.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DurableObservationRequest {
     pub interface: Interface,
     pub inputs: Box<[EncodedValue]>,
 }
@@ -221,11 +240,21 @@ impl DurableActionRequest {
     }
 }
 
+impl DurableObservationRequest {
+    /// Decode the inputs needed to re-derive the recorded observation key.
+    ///
+    /// # Errors
+    /// Returns a canonical decoding error if a retained input is unsupported.
+    pub fn decoded_inputs(&self) -> Result<Box<[Value]>, CanonicalDecodeError> {
+        self.inputs.iter().map(EncodedValue::decode).collect()
+    }
+}
+
 impl DurableComputation {
     pub const fn pure_key(&self) -> Option<PureComputationKey> {
         match self {
             Self::Pure(key) => Some(*key),
-            Self::Action { .. } => None,
+            Self::Action { .. } | Self::Observation { .. } => None,
         }
     }
 
@@ -243,6 +272,23 @@ impl DurableComputation {
                 digest: *computation_digest,
             }),
             Self::Pure(_) => None,
+            Self::Observation { .. } => None,
+        }
+    }
+
+    /// The request-side identity of an observation attempt.
+    pub fn observation_key(&self) -> Option<ObservationComputationKey> {
+        match self {
+            Self::Observation {
+                computation_digest,
+                rule,
+                ..
+            } => Some(ObservationComputationKey {
+                rule_identity: rule.identity(),
+                rule_revision: rule.revision(),
+                digest: *computation_digest,
+            }),
+            Self::Pure(_) | Self::Action { .. } => None,
         }
     }
 }
@@ -255,6 +301,9 @@ pub enum DurableDependency {
         attempt: DurableAttemptId,
     },
     Action {
+        attempt: DurableAttemptId,
+    },
+    Observation {
         attempt: DurableAttemptId,
     },
     Blob {
@@ -272,6 +321,18 @@ pub enum DurableDependency {
 pub enum DurableProvenance {
     Pure,
     Action(DurableActionProvenance),
+    Observation(DurableObservationProvenance),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DurableObservationProvenance {
+    NotObserved {
+        observer: Box<str>,
+    },
+    Observed {
+        observer: Box<str>,
+        revision: EncodedValue,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

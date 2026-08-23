@@ -38,7 +38,7 @@ must be declared, and what the scheduler may do with it:
 | --- | --- | --- | --- |
 | `Pure` | computes from immutable values, terminating by construction | indefinitely | runs |
 | `Action` | bounded external work with declared inputs, outputs, platform, and capabilities | when the executor honored the contract | runs, confined |
-| `Observation` | reads external state, recording source, revision, and freshness | no | designed |
+| `Observation` | reads external state, recording source, revision, and freshness | across an attested revision | runs |
 | `Mutation` | changes external state | no | designed |
 | `Opaque` | unmodeled work behind a fixed-output boundary; the escape hatch | no | designed |
 
@@ -95,10 +95,11 @@ What exists is one vertical slice, deep enough that the parts push back:
   over a lock; and an immutable Linux tree composed from files, users, units,
   and boot configuration
 
-Linux system activation is next, and it waits on a question rather than on code.
-An observation has no computation key, so equality pruning has no analogue on an
-observation edge and every consumer of one would be permanently non-reusable.
-What an observation's identity and freshness are is the next record to write.
+Observation identity and freshness now run in the kernel. An observation rule
+derives a typed subject, an observer returns a value and revision, and a pure
+consumer is reused or hydrated only after the same observer attests the same
+revision. The thin prototype observes a file's modification time; Linux system
+activation remains the first domain consumer.
 
 [`docs/planning/milestones.md`](docs/planning/milestones.md) is the boundary
 between demonstrated and proposed. Each milestone records what was measured,

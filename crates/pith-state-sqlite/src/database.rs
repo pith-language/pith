@@ -9,8 +9,8 @@ use pith_diag::{Diag, EngineCode, Span};
 use pith_engine::state::validate::{AttemptLookup, TerminalAttemptState, validate_publication};
 use pith_engine::state::{
     DurableActionProvenance, DurableAttempt, DurableAttemptId, DurableAttemptStatus,
-    DurableComputation, DurableDiagnostic, DurableProvenance, EngineStateError,
-    EngineStateVersions, SchemaVersion, SemanticEncodingVersion, StoppedAttempt,
+    DurableComputation, DurableDiagnostic, DurableObservationProvenance, DurableProvenance,
+    EngineStateError, EngineStateVersions, SchemaVersion, SemanticEncodingVersion, StoppedAttempt,
 };
 
 use crate::rows::{
@@ -208,6 +208,11 @@ fn interrupted_attempt(computation: &DurableComputation) -> StoppedAttempt {
         DurableComputation::Pure(_) => DurableProvenance::Pure,
         DurableComputation::Action { .. } => {
             DurableProvenance::Action(DurableActionProvenance::NotExecuted)
+        }
+        DurableComputation::Observation { observer, .. } => {
+            DurableProvenance::Observation(DurableObservationProvenance::NotObserved {
+                observer: observer.clone(),
+            })
         }
     };
     let diagnostic = DurableDiagnostic::from(&Diag::engine(

@@ -2,8 +2,8 @@
 //! evaluator's private frame. Pure data; no engine logic.
 
 use pith_core::{
-    Action, ActionComputationKey, ActionSpec, CapabilityRequirement, Interface, Pure, Request,
-    RuleId, Value,
+    Action, ActionComputationKey, ActionSpec, CapabilityRequirement, Interface, Observation,
+    ObservationComputationKey, Pure, Request, RuleId, Value,
 };
 use pith_diag::{Diag, PithResult};
 use pith_ids::{ActionSpecDigest, ComputationId, ContentId, PureComputationDigest};
@@ -27,6 +27,14 @@ pub enum PureStep {
     /// Request the result of an action rule. The engine plans an inspectable
     /// contract, gives it to an executor, and resumes with the result.
     NeedAction(Request<Action>),
+    /// Request the result of an observation rule. The engine derives the
+    /// subject, gives it to the host's observer, and resumes with the observed
+    /// value; the revision the observer attested is recorded beside the
+    /// attempt as its freshness (decision 0060). The resumption is
+    /// [`Resumption::One`]: a plan's pin set is a projection of the recorded
+    /// graph, so the revision reaches bodies only if the observer embeds it in
+    /// the value (0012, 0060).
+    NeedObservation(Request<Observation>),
     /// Finish the rule body with a final value.
     Complete(Value),
 }
@@ -90,6 +98,10 @@ pub enum DependencyEdge {
         request: Request<Action>,
         computation: ComputationId,
     },
+    Observation {
+        request: Request<Observation>,
+        computation: ComputationId,
+    },
 }
 
 impl DependencyEdge {
@@ -97,9 +109,9 @@ impl DependencyEdge {
     /// edges point at non-computation dependencies.
     pub fn computation_id(&self) -> Option<ComputationId> {
         match self {
-            Self::Request { computation, .. } | Self::Action { computation, .. } => {
-                Some(*computation)
-            }
+            Self::Request { computation, .. }
+            | Self::Action { computation, .. }
+            | Self::Observation { computation, .. } => Some(*computation),
             Self::Blob { .. } | Self::CapabilityUse { .. } => None,
         }
     }
@@ -110,6 +122,7 @@ impl DependencyEdge {
 pub enum ComputationKind {
     Pure(Request<Pure>),
     Action(Request<Action>),
+    Observation(Request<Observation>),
 }
 
 /// An action selected and planned without executing it.
@@ -131,6 +144,23 @@ pub struct ActionRecord {
     pub executor_report: Option<crate::CapturedExecutionReport>,
     /// The same report after captured outputs have engine-owned content identities.
     pub imported_report: Option<crate::ExecutionReport>,
+}
+
+/// The observation attempt's identity and freshness, retained as provenance
+/// (decision 0060). The key is the request half of observation identity; the
+/// attested revision is the world half, re-attested when a later run considers
+/// this attempt for reuse.
+#[derive(Clone, Debug)]
+pub struct ObservationRecord {
+    /// The reusable index key for this rule application (decision 0060).
+    pub key: ObservationComputationKey,
+    /// The subject the rule derived, what the observer was asked about.
+    pub subject: Value,
+    /// Who observed, so a record attested by one observer is not admitted by
+    /// another (0031's split applied to observations).
+    pub observer: crate::ObserverIdentity,
+    /// The revision the observer attested when it looked.
+    pub revision: Value,
 }
 
 /// Lifecycle of one allocated computation attempt. The three terminal states
@@ -211,6 +241,7 @@ pub struct ComputationNode {
     pub dependencies: SmallVec<[DependencyEdge; 4]>,
     pub state: AttemptState,
     pub action: Option<ActionRecord>,
+    pub observation: Option<ObservationRecord>,
     pub capabilities: Box<[CapabilityRequirement]>,
 }
 

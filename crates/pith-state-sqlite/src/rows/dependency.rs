@@ -70,6 +70,16 @@ pub(super) fn write_dependencies(
                 capability_name: None,
                 capability_scope: None,
             },
+            DurableDependency::Observation { attempt: target } => NewDependency {
+                attempt,
+                position,
+                kind: StoredDependencyKind(DependencyKind::Observation),
+                pure_computation: None,
+                dependency_attempt: Some(StoredAttemptId(*target)),
+                content: None,
+                capability_name: None,
+                capability_scope: None,
+            },
             DurableDependency::Blob { content } => NewDependency {
                 attempt,
                 position,
@@ -119,6 +129,9 @@ pub(super) fn load_dependencies(
                 attempt: row.dependency_attempt.ok_or_else(|| missing("attempt"))?.0,
             },
             DependencyKind::Action => DurableDependency::Action {
+                attempt: row.dependency_attempt.ok_or_else(|| missing("attempt"))?.0,
+            },
+            DependencyKind::Observation => DurableDependency::Observation {
                 attempt: row.dependency_attempt.ok_or_else(|| missing("attempt"))?.0,
             },
             DependencyKind::Blob => DurableDependency::Blob {

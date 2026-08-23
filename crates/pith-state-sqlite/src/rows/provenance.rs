@@ -3,7 +3,7 @@
 use pith_core::{CapabilityRequirement, Content, OutputKind};
 use pith_engine::state::{
     DurableActionProvenance, DurableCapturedExecutionReport, DurableCapturedOutput,
-    DurableProvenance,
+    DurableObservationProvenance, DurableProvenance, EncodedValue,
 };
 use pith_engine::{ExecutionPlatform, ExecutionReport, ProducedOutput};
 use pith_ids::ContentId;
@@ -71,6 +71,27 @@ pub(super) struct ReportColumns {
     pub(super) operating_system: String,
     pub(super) architecture: String,
     pub(super) access: StoredAccess,
+}
+
+pub(super) struct ObservationColumns {
+    pub(super) observer: String,
+    pub(super) revision: Option<Vec<u8>>,
+}
+
+pub(super) fn observation_columns(provenance: &DurableProvenance) -> Option<ObservationColumns> {
+    let DurableProvenance::Observation(observation) = provenance else {
+        return None;
+    };
+    Some(match observation {
+        DurableObservationProvenance::NotObserved { observer } => ObservationColumns {
+            observer: observer.to_string(),
+            revision: None,
+        },
+        DurableObservationProvenance::Observed { observer, revision } => ObservationColumns {
+            observer: observer.to_string(),
+            revision: Some(revision.as_bytes().to_vec()),
+        },
+    })
 }
 
 /// The columns an attempt row carries for `provenance`.
@@ -147,6 +168,12 @@ pub(super) const fn provenance_kind(provenance: &DurableProvenance) -> Provenanc
         }
         DurableProvenance::Action(DurableActionProvenance::Imported { .. }) => {
             ProvenanceKind::ActionImported
+        }
+        DurableProvenance::Observation(DurableObservationProvenance::NotObserved { .. }) => {
+            ProvenanceKind::ObservationNotObserved
+        }
+        DurableProvenance::Observation(DurableObservationProvenance::Observed { .. }) => {
+            ProvenanceKind::ObservationObserved
         }
     }
 }
@@ -230,6 +257,29 @@ pub(super) fn load_provenance(
         .ok_or_else(|| corrupt("a terminal attempt has no provenance"))?;
     let action = match kind.0 {
         ProvenanceKind::Pure => return Ok(DurableProvenance::Pure),
+        ProvenanceKind::ObservationNotObserved => {
+            return Ok(DurableProvenance::Observation(
+                DurableObservationProvenance::NotObserved {
+                    observer: load_observer(row)?,
+                },
+            ));
+        }
+        ProvenanceKind::ObservationObserved => {
+            let revision = row
+                .observation_revision
+                .clone()
+                .ok_or_else(|| corrupt("an observed attempt retains no revision"))?;
+            return Ok(DurableProvenance::Observation(
+                DurableObservationProvenance::Observed {
+                    observer: load_observer(row)?,
+                    revision: EncodedValue::from_bytes(revision).map_err(|error| {
+                        corrupt(format!(
+                            "a stored observation revision is unreadable: {error}"
+                        ))
+                    })?,
+                },
+            ));
+        }
         ProvenanceKind::ActionNotExecuted => DurableActionProvenance::NotExecuted,
         ProvenanceKind::ActionCaptured => DurableActionProvenance::Captured {
             executor_report: DurableCapturedExecutionReport {
@@ -272,6 +322,14 @@ pub(super) fn load_provenance(
         }
     };
     Ok(DurableProvenance::Action(action))
+}
+
+fn load_observer(row: &AttemptRow) -> Result<Box<str>, Failure> {
+    Ok(row
+        .observer
+        .clone()
+        .ok_or_else(|| corrupt("an observation provenance names no observer"))?
+        .into())
 }
 
 fn load_executor(row: &AttemptRow) -> Result<Box<str>, Failure> {

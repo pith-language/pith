@@ -4,13 +4,14 @@ use indexmap::IndexMap;
 use pith_arena::define_arena;
 use pith_diag::{Diag, EngineCode, Span};
 use pith_ids::{
-    ActionComputationDigest, ActionSpecDigest, PureComputationDigest, RuleIdentity, RuleRevision,
+    ActionComputationDigest, ActionSpecDigest, ObservationComputationDigest, PureComputationDigest,
+    RuleIdentity, RuleRevision,
 };
 use smallvec::SmallVec;
 use std::marker::PhantomData;
 
 use crate::{
-    Action, EffectCategory, Pure, Type, Value,
+    Action, EffectCategory, Observation, Pure, Type, Value,
     manifest::encode_length,
     value_codec::{encode_type_payload, encode_value_payload},
 };
@@ -137,6 +138,54 @@ impl ActionComputationKey {
             rule_identity,
             rule_revision,
             digest: ActionComputationDigest::of_manifest(&manifest),
+        }
+    }
+}
+
+/// Cache-invalidating identity of one observation rule application (decision
+/// 0060), on the split 0031 fixed for actions: the request half is a key, and
+/// the world half — the revision an observer attested — is tested when a
+/// recorded attempt is considered for reuse.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ObservationComputationKey {
+    pub rule_identity: RuleIdentity,
+    pub rule_revision: RuleRevision,
+    /// Digest of the rule identity, revision, request interface, inputs, and
+    /// the subject the rule derived from those inputs.
+    pub digest: ObservationComputationDigest,
+}
+
+impl ObservationComputationKey {
+    /// `subject` is the value naming what is observed, which the observation
+    /// rule derived from `request`'s inputs the way an action rule plans a
+    /// contract. The key commits to it and to the request inputs.
+    pub fn new(rule: &Rule<Observation>, request: &Request<Observation>, subject: &Value) -> Self {
+        Self::from_parts(
+            rule.identity,
+            rule.revision,
+            &request.interface,
+            &request.inputs,
+            subject,
+        )
+    }
+
+    /// The same key, derived from material a durable record holds rather than
+    /// from a live [`Rule`] and [`Request`], on the same terms as
+    /// [`ActionComputationKey::from_parts`].
+    pub fn from_parts(
+        rule_identity: RuleIdentity,
+        rule_revision: RuleRevision,
+        interface: &Interface,
+        inputs: &[Value],
+        subject: &Value,
+    ) -> Self {
+        let mut manifest =
+            encode_application_parts(rule_identity, rule_revision, interface, inputs);
+        manifest.extend_from_slice(&subject.encode_canonical());
+        Self {
+            rule_identity,
+            rule_revision,
+            digest: ObservationComputationDigest::of_manifest(&manifest),
         }
     }
 }
@@ -666,6 +715,12 @@ mod tests {
         ActionSpecDigest::of_manifest(contract)
     }
 
+    fn observation_rule(label: &str, interface: Interface) -> Rule<Observation> {
+        let identity = RuleIdentity::of_module_declaration("pith-core.rule-tests", label);
+        let revision = RuleRevision::of_manifest(identity, b"rule-tests-observation-v1");
+        Rule::new(revision, label, interface, Span::none())
+    }
+
     #[test]
     fn action_computation_key_is_stable_for_same_application() {
         let signature = interface([Type::Int], Type::Text);
@@ -742,6 +797,29 @@ mod tests {
 
         assert_eq!(pure.rule_identity, action.rule_identity);
         assert_ne!(pure.digest.digest(), action.digest.digest());
+    }
+
+    #[test]
+    fn observation_computation_key_commits_to_inputs_and_derived_subject() {
+        let signature = interface([Type::Text], Type::Text);
+        let selected = observation_rule("file-mtime", signature.clone());
+        let request = Request::<Observation>::new(
+            "mtime",
+            signature,
+            [Value::Text("src/main.rs".into())],
+            Span::none(),
+        );
+        let absolute = Value::Text("/workspace/src/main.rs".into());
+        let other = Value::Text("/other/src/main.rs".into());
+
+        assert_eq!(
+            ObservationComputationKey::new(&selected, &request, &absolute),
+            ObservationComputationKey::new(&selected, &request, &absolute),
+        );
+        assert_ne!(
+            ObservationComputationKey::new(&selected, &request, &absolute),
+            ObservationComputationKey::new(&selected, &request, &other),
+        );
     }
 
     #[test]

@@ -329,6 +329,42 @@ impl std::fmt::Debug for ActionComputationDigest {
     }
 }
 
+/// Stable digest of a canonical observation rule application: the request that
+/// was asked for and the subject the rule derived from it (decision 0060).
+///
+/// The request half of observation identity, on 0031's split. The world half —
+/// the revision the observer attested when it looked — is knowable only after
+/// observing, so decision 0060 tests it when a recorded attempt is considered
+/// for reuse and keeps it out of this digest.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ObservationComputationDigest(ContentDigest);
+
+impl ObservationComputationDigest {
+    pub fn of_manifest(manifest: &[u8]) -> Self {
+        Self(ContentId::with_domain(
+            domain::OBSERVATION_COMPUTATION,
+            manifest,
+        ))
+    }
+
+    /// Restore a digest read back from a persistence adapter. See
+    /// [`ActionSpecDigest::from_digest`] for why restoration is distinct from
+    /// derivation.
+    pub const fn from_digest(digest: ContentDigest) -> Self {
+        Self(digest)
+    }
+
+    pub fn digest(self) -> ContentDigest {
+        self.0
+    }
+}
+
+impl std::fmt::Debug for ObservationComputationDigest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ObservationComputationDigest({:?})", self.0)
+    }
+}
+
 /// Domain-separation prefixes for blake3 hashing. Each prefix is a NUL-terminated
 /// byte literal of the form `pith:<kind>:<version>\0`, where every prefix shares
 /// the same `<version>` segment (`v1` today).
@@ -346,6 +382,7 @@ mod domain {
     pub const RULE_REVISION: &[u8] = b"pith:rule-revision:v1\0";
     pub const PURE_COMPUTATION: &[u8] = b"pith:pure-computation:v1\0";
     pub const ACTION_COMPUTATION: &[u8] = b"pith:action-computation:v1\0";
+    pub const OBSERVATION_COMPUTATION: &[u8] = b"pith:observation-computation:v1\0";
     pub const DECLARATION: &[u8] = b"pith:declaration:v1\0";
 
     /// Every prefix in this module. Distinctness and a shared version
@@ -360,6 +397,7 @@ mod domain {
         RULE_REVISION,
         PURE_COMPUTATION,
         ACTION_COMPUTATION,
+        OBSERVATION_COMPUTATION,
         DECLARATION,
     ];
 }
@@ -467,6 +505,20 @@ mod tests {
             PureComputationDigest::of_manifest(b"same").digest()
         );
         assert_ne!(computation.digest(), ContentDigest::of_bytes(b"same"));
+    }
+
+    #[test]
+    fn observation_computation_digest_is_domain_separated() {
+        let observation = ObservationComputationDigest::of_manifest(b"same");
+
+        assert_ne!(
+            observation.digest(),
+            PureComputationDigest::of_manifest(b"same").digest()
+        );
+        assert_ne!(
+            observation.digest(),
+            ActionComputationDigest::of_manifest(b"same").digest()
+        );
     }
 
     #[test]

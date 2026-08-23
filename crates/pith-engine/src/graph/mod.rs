@@ -13,6 +13,7 @@ mod diagnostics;
 mod drive;
 mod eval;
 pub mod ir;
+mod observation_pipeline;
 pub mod query;
 mod reuse;
 mod scheduler;
@@ -21,8 +22,9 @@ mod state_publish;
 pub(crate) use capabilities::canonical_capabilities;
 pub use ir::{
     ActionPlan, ActionRecord, AttemptState, ComputationKind, ComputationNode, DependencyEdge,
-    Evaluation, EvaluationSource, LiveInvalidationExplanation, LiveInvalidationReason, PureRule,
-    PureRuleFrame, PureStep, Resumption, ReuseDecision, ReuseReason, RuleSelection,
+    Evaluation, EvaluationSource, LiveInvalidationExplanation, LiveInvalidationReason,
+    ObservationRecord, PureRule, PureRuleFrame, PureStep, Resumption, ReuseDecision, ReuseReason,
+    RuleSelection,
 };
 pub use query::EngineQuery;
 pub use reuse::ReuseContext;
@@ -31,7 +33,8 @@ use std::num::NonZeroUsize;
 
 use indexmap::IndexMap;
 use pith_core::{
-    Action, Pure, PureComputationKey, Request, Rule, RuleId, RuleIdentity, RuleRevision, RuleTable,
+    Action, Observation, Pure, PureComputationKey, Request, Rule, RuleId, RuleIdentity,
+    RuleRevision, RuleTable,
 };
 use pith_diag::PithResult;
 use pith_ids::{ComputationArena, ComputationId, ContentId};
@@ -43,9 +46,10 @@ use crate::cancel::{CancelSignal, NeverCancelled};
 use crate::policy::ActionPolicy;
 use crate::runtime::{Runtime, RuntimeError};
 use crate::state::{DurableAttemptId, EngineStateStore, MemoryEngineStateStore};
+use crate::{ObservationRule, Observer};
 use eval::single_evaluation;
 use ir::StopReason;
-use reuse::{ActionComputationIndex, PureComputationIndex};
+use reuse::{ActionComputationIndex, ObservationComputationIndex, PureComputationIndex};
 
 pub struct Engine {
     pub(crate) rules: RuleTable<Pure>,
@@ -58,9 +62,12 @@ pub struct Engine {
     pub(crate) pure_rule_revisions: IndexMap<RuleIdentity, Option<RuleRevision>>,
     pub(crate) action_rules: RuleTable<Action>,
     pub(crate) action_bodies: IndexMap<RuleId, Box<dyn ActionRule>>,
+    pub(crate) observation_rules: RuleTable<Observation>,
+    pub(crate) observation_bodies: IndexMap<RuleId, Box<dyn ObservationRule>>,
     pub(crate) computations: ComputationArena<ComputationNode>,
     pure_computations: PureComputationIndex,
     pub(crate) action_computations: ActionComputationIndex,
+    pub(crate) observation_computations: ObservationComputationIndex,
     pub(crate) store: Box<dyn ContentStore>,
     /// Durable engine metadata. Arena handles never cross this boundary; the
     /// process-local `durable_attempts` side-table maps computation nodes to
@@ -71,6 +78,7 @@ pub struct Engine {
     action_concurrency: NonZeroUsize,
     action_caching: bool,
     minimum_access_verification: AccessVerification,
+    pub(crate) observer: Option<Box<dyn Observer>>,
 }
 
 /// How many actions a run keeps in flight when the caller does not say.
@@ -106,15 +114,19 @@ impl Engine {
             pure_rule_revisions: IndexMap::new(),
             action_rules: RuleTable::new(),
             action_bodies: IndexMap::new(),
+            observation_rules: RuleTable::new(),
+            observation_bodies: IndexMap::new(),
             computations: ComputationArena::new(),
             pure_computations: IndexMap::new(),
             action_computations: IndexMap::new(),
+            observation_computations: IndexMap::new(),
             store: Box::new(store),
             state_store: Box::new(state_store),
             durable_attempts: IndexMap::new(),
             action_concurrency: default_action_concurrency(),
             action_caching: true,
             minimum_access_verification: AccessVerification::Unverified,
+            observer: None,
         }
     }
 
@@ -228,6 +240,26 @@ impl Engine {
         let id = self.action_rules.push(rule);
         self.action_bodies.insert(id, Box::new(body));
         id
+    }
+
+    /// Register an observation rule together with its deterministic subject
+    /// derivation.
+    pub fn register_observation_rule<B>(&mut self, rule: Rule<Observation>, body: B) -> RuleId
+    where
+        B: ObservationRule + 'static,
+    {
+        let id = self.observation_rules.push(rule);
+        self.observation_bodies.insert(id, Box::new(body));
+        id
+    }
+
+    /// Configure the adapter that serves observation steps and attests
+    /// recorded revisions during reuse.
+    pub fn set_observer<O>(&mut self, observer: O)
+    where
+        O: Observer + 'static,
+    {
+        self.observer = Some(Box::new(observer));
     }
 
     /// Insert a blob into the engine's content store and return its identity.
@@ -408,13 +440,16 @@ impl Engine {
         bound: &RunBound,
     ) -> PithResult<Box<[Evaluation]>> {
         let environment = executor.identity();
-        let mut plan = self.open_roots(
-            requests,
-            &ReuseContext::Run {
-                policy,
-                environment: &environment,
-            },
-        )?;
+        let mut plan = self
+            .open_roots_run(
+                requests,
+                &ReuseContext::Run {
+                    policy,
+                    environment: &environment,
+                },
+                bound,
+            )
+            .await?;
         // `drive_run` records whatever it was holding before returning, so
         // there is nothing left Pending to clean up here.
         self.drive_run(&mut plan.scheduler, policy, executor, cancel, bound)

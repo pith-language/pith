@@ -18,6 +18,7 @@
 
 #![cfg(target_os = "linux")]
 
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -328,13 +329,26 @@ fn register_participants(engine: &mut Engine) -> Option<Vec<Request<Pure>>> {
     Some(requests)
 }
 
+/// An engine that keeps two actions in flight, whatever the host reports.
+///
+/// The default width is the host's available parallelism, and a CI runner
+/// whose CPU quota reports one available core would serialize the rendezvous
+/// these tests exist to observe. The overlap under test is the scheduler's
+/// willingness, not the host's core count, so the width is declared the way
+/// [`Engine::set_action_concurrency`] exists for.
+fn overlap_engine() -> Engine {
+    let mut engine = Engine::new();
+    engine.set_action_concurrency(NonZeroUsize::new(2).unwrap_or(NonZeroUsize::MIN));
+    engine
+}
+
 #[test]
 fn two_real_child_processes_run_at_the_same_time() {
     let Some(base) = scratch_base() else {
         eprintln!("skipping: could not create a scratch base");
         return;
     };
-    let mut engine = Engine::new();
+    let mut engine = overlap_engine();
     let Some(requests) = register_participants(&mut engine) else {
         eprintln!("skipping: /bin/sh is not readable on this host");
         return;
@@ -379,7 +393,7 @@ fn a_fan_out_overlaps_real_child_processes() {
         eprintln!("skipping: could not create a scratch base");
         return;
     };
-    let mut engine = Engine::new();
+    let mut engine = overlap_engine();
     let Some(requests) = register_participants(&mut engine) else {
         eprintln!("skipping: /bin/sh is not readable on this host");
         return;

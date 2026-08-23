@@ -231,6 +231,10 @@ pub enum EngineCode {
     /// the authority it was given, so its own attempt is a failure carrying
     /// this code.
     RunBoundExceeded = 216,
+    /// `E-1217` — a rule body requested an observation and the engine has no
+    /// observer configured. The observation effect cannot be served by the
+    /// engine itself; a host supplies the adapter (decision 0060).
+    ObserverMissing = 217,
 }
 
 impl From<EngineCode> for StableCode {
