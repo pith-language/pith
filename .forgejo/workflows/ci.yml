@@ -14,13 +14,15 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: 1
-  # The runners cannot link the largest test binaries at full debug info or
-  # with the linker holding the whole link resident: lld was SIGKILled
-  # (exit 137) on phloem's test binaries even under line tables. Line tables
-  # cut the debuginfo that dominates the link footprint, and
-  # --no-keep-memory makes lld trade I/O for peak memory. Local `just
-  # test-ci` is unaffected by both.
+  # The shared runners cannot feed cargo's default parallel fleet: with full
+  # debug info or the linker holding a whole link resident, lld was SIGKILled
+  # (exit 137) on phloem's test binaries, and once the linker streamed
+  # (--no-keep-memory), a parallel rustc on regex-automata was killed instead.
+  # Line tables shrink every artifact, --no-keep-memory trades i/o for link
+  # memory, and two build jobs bound the concurrent compiler processes. Local
+  # `just test-ci` is unaffected by all three.
   CARGO_PROFILE_TEST_DEBUG: line-tables-only
+  CARGO_BUILD_JOBS: 2
   RUSTFLAGS: "-D warnings -C link-arg=-Wl,--no-keep-memory"
 
 jobs:
