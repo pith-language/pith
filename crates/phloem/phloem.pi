@@ -1,0 +1,47 @@
+import xylem
+
+-- One source binding: a registry archive, an unresolved git reference, a
+-- materialized git tree, or a local path.
+sum Source = Archive(Blob)
+           | Git({revision: Text, tree: Text})
+           | GitTree({revision: Text, tree: Text, content: Blob})
+           | Path({path: Text, content: Blob})
+
+-- A version range evaluated against the declared ordering. Bounds retain
+-- inclusivity so intersection and negation stay closed over the range
+-- constructors.
+sum Range = Any
+          | Exactly(Text)
+          | AtLeast({version: Text, inclusive: Bool})
+          | AtMost({version: Text, inclusive: Bool})
+          | Between({lower: {version: Text, inclusive: Bool}, upper: {version: Text, inclusive: Bool}})
+
+-- Where a binding came from, as provenance. Origin does not participate in
+-- binding identity.
+sum Origin = Registry(Text) | Forge(Text) | LocalPath(Text)
+
+-- One declared ordering over candidates, under the domain's version scheme.
+sum Preference = Newest | Oldest
+
+-- The resolver answer and the evidence for how it was reached.
+sum Resolution = Solved({choice: List<{domain: Text, package: Text, version: Text, features: List<Text>, provenance: Source, origin: Origin, requires: List<{domain: Text, package: Text, range: Range, features: List<Text>}>}>, trail: List<{domain: Text, package: Text, considered: Int, decided_by: Text}>, universe: Blob})
+               | Unsatisfiable({derivation: {domain: Text, package: Text, constraints: List<{domain: Text, package: Text, range: Range, features: List<Text>, attribution: Text}>, candidates: List<Text>}})
+               | Underdetermined({domain: Text, package: Text, tied: List<{domain: Text, package: Text, version: Text, features: List<Text>, provenance: Source, origin: Origin, requires: List<{domain: Text, package: Text, range: Range, features: List<Text>}>}>, orderings: List<Preference>})
+               | BudgetExhausted({budget: Int, decisions: Int})
+
+-- The version-scheme nominal a request carries to name the ordering it runs
+-- under.
+nominal VersionScheme = Text
+
+-- The evidence retained for an admitted binary substitution. An alias, so
+-- substitution values stay the structural records they always were.
+type Substitution = {domain: Text, package: Text, version: Text, features: List<Text>, "built-from": Blob, "operating-system": Text, architecture: Text, toolchain: xylem.Toolchain, binary: Blob, "authorized-by": Origin}
+
+-- Resolves constraints against a candidate universe under declared preferences.
+pure rule resolve(VersionScheme, List<{domain: Text, package: Text, range: Range, features: List<Text>, attribution: Text}>, List<{domain: Text, package: Text, version: Text, features: List<Text>, provenance: Source, origin: Origin, requires: List<{domain: Text, package: Text, range: Range, features: List<Text>}>}>, List<Preference>, Int) -> Resolution = host
+
+-- Builds a package executable and links its dependencies in declared order.
+pure rule "package-build"(xylem.Toolchain, List<{path: Text, content: Blob}>, {sources: List<Text>, includes: List<Text>}, List<{tree: List<{path: Text, content: Blob}>, build: {sources: List<Text>, includes: List<Text>}}>) -> xylem.Executable = host
+
+-- Builds the objects and headers consumed by dependent packages.
+pure rule "package-library"(xylem.Toolchain, List<{path: Text, content: Blob}>, {sources: List<Text>, includes: List<Text>}) -> {objects: List<xylem.Object>, headers: List<{path: Text, content: Blob}>} = host
