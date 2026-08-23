@@ -2,11 +2,11 @@
 schema: design-doc/v1
 id: planning-measured
 title: what the completed milestones measured
-summary: the evidence paragraphs for M-1 through M-5a, moved out of the milestone file so that file can state an order
+summary: evidence recorded when completed milestones close
 kind: planning
 status: active
 created: 2026-08-21
-updated: 2026-08-21
+updated: 2026-08-24
 tags:
   - planning
   - milestones
@@ -180,3 +180,27 @@ validate that the stored key is derivable and provenance names that observer; SQ
 widest observation record. the generated conformance grammar now creates observations, completes and
 stops them, and places observation edges in later attempts, so the reference adapter and SQLite are held
 to the same category, provenance and dependency rules rather than only fixture examples.
+
+## M-10: the declaration artifact
+
+status: complete.
+
+evidence: [0061](../decisions/0061-the-declaration-artifact.md) records the artifact and binding boundary.
+Xylem, phloem, stele and example-domain each have a `.pi` surface whose elaborated declarations agree
+coordinate-for-coordinate and digest-for-digest with the live Rust table. Xylem's five action and four
+pure declarations derive the same rule revisions as its live registrations. Example-domain binds its real
+pure and action bodies through `HostRuleDeclaration<Pure>` and `HostRuleDeclaration<Action>` while its
+peerhood test still proves no other crate names it.
+
+The source artifact and semantic ABI move independently: documentation, formatting, declaration order and
+rule-label edits move the source `ContentId` without moving the ABI; declaration representation, imported
+ABI, interface and effect-category edits move the ABI. Golden tests fix the canonical declaration bytes,
+table bytes and declaration digest. Phloem's first table read contains all seven declarations, including
+the substitution alias the lazy table never reached.
+
+The loader refuses undeclared qualified access, duplicate imports, declarations, rule coordinates and
+same-category interfaces. It admits forward references and direct recursion and refuses mutual cycles.
+Its position sidecar resolves local aliases and imported definitions and retains documentation spans.
+Arbitrary UTF-8 property input terminates without panic and produces stable diagnostic positions. The
+complete `just ci` target passes, including 811 workspace tests, Clippy, rustdoc, the document graph,
+repository checks and dependency policy.

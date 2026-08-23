@@ -6,7 +6,7 @@ summary: the order the work runs in, what each milestone owes, and why the seque
 kind: planning
 status: draft
 created: 2026-03-23
-updated: 2026-08-21
+updated: 2026-08-24
 tags:
   - planning
   - milestones
@@ -40,7 +40,7 @@ so labels do not move and do not imply position. that is
 rule — a stable identity, and a separate thing that moves. the order is the order of this file, and it is
 stated once, here:
 
-M-1, M-2, M-3, M-4, M-5a, M-8 and M-9 are complete, and the latency spike has run. then M-10,
+M-1, M-2, M-3, M-4, M-5a, M-8, M-9 and M-10 are complete, and the latency spike has run. then
 M-11, M-12, M-13, M-14, M-15, and then M-5b, M-6 and M-7.
 
 ## why the order changed
@@ -100,6 +100,9 @@ the fork is picked: one thin file-mtime observation ships as the prototype witne
 adapter boundary, durable record and freshness admission are exercised rather than inferred.
 
 ## M-10: the declaration artifact
+
+status: complete. the evidence is in [measured](measured.md), and
+[0061](../decisions/0061-the-declaration-artifact.md) is the record.
 
 round one of [the language frontend](language-frontend.md), designed in
 [the module surface](module-surface.md). `Declaration::encode_canonical`, a table encoder, the ABI and
@@ -234,7 +237,8 @@ placement, continuous reconciliation, and richer transition protocols.
 ## complete
 
 M-1 semantic prototype, M-2 action prototype, M-3 first build library, M-4 package and environment
-libraries, M-5a Linux system composition, M-8 the backstop limit and M-9 observation identity are complete at their own scopes.
+libraries, M-5a Linux system composition, M-8 the backstop limit, M-9 observation identity and
+M-10 the declaration artifact are complete at their own scopes.
 their evidence is in [what the completed milestones measured](measured.md).
 
 what they still owe is a claim about work, not about evidence, so it stays here:
@@ -260,3 +264,9 @@ order after it is different from the order before it.
 M-8 owes nothing its own statement named. what it leaves beside it is named in 0059's unresolved section:
 partial cancellation, a bound and a cancel signal in one run, the rlimit half of the resource bound, and
 whether the pure-only entry point carries a bound once represented bodies evaluate on it.
+
+M-10 owes nothing its own statement named. the kernel-change ledger's remaining items keep their
+owners: a `tier` field landed with this round, and interned coordinates, the engine accessors and the
+read-only state adapter wait on the rounds that read them (M-11, M-12, M-13). the action-host
+spelling question the module surface left open was answered by the grammar this round shipped:
+the category is written before `rule`, so a represented body replaces only the `= host` clause.
