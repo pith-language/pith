@@ -112,9 +112,9 @@ fn xylem_rule_revisions_agree() {
         ("test", xylem::TestAction::new(toolchains).rule().revision),
     ];
     for (label, live_revision) in live_actions {
-        let Some(declaration) = loaded.action_rule(label) else {
-            return;
-        };
+        let declaration = loaded
+            .action_rule(label)
+            .unwrap_or_else(|| unreachable!("xylem.pi declares no action rule `{label}`"));
         assert_eq!(declaration.rule(BodyRevision(1)).revision, live_revision);
     }
 
@@ -125,9 +125,9 @@ fn xylem_rule_revisions_agree() {
         ("test-entry", xylem::TestRule::rule().revision),
     ];
     for (label, live_revision) in live_pure {
-        let Some(declaration) = loaded.pure_rule(label) else {
-            return;
-        };
+        let declaration = loaded
+            .pure_rule(label)
+            .unwrap_or_else(|| unreachable!("xylem.pi declares no pure rule `{label}`"));
         assert_eq!(declaration.rule(BodyRevision(1)).revision, live_revision);
     }
 }
