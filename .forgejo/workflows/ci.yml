@@ -96,4 +96,13 @@ jobs:
         env:
           DEV_SHELL: ${{ matrix.dev_shell }}
           TASK: ${{ matrix.task }}
-        run: nix develop --print-build-logs ".#$DEV_SHELL" --command just "$TASK"
+        # The runner's RAM quota counts filesystem writes, and the cache
+        # restore leaves gigabytes of dirty pages behind that its storage
+        # drains lazily; a build that starts on top of that backlog gets a
+        # process killed whenever it allocates. Sync drains the backlog
+        # before the build, and the counters say what the budget really
+        # was when something still dies.
+        run: |
+          grep -H . /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory.current /proc/meminfo 2>/dev/null || true
+          sync || true
+          nix develop --print-build-logs ".#$DEV_SHELL" --command just "$TASK"
