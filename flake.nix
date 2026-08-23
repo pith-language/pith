@@ -30,6 +30,7 @@
         ./nix/toolchain.nix
         ./nix/devshell.nix
         ./nix/treefmt.nix
+        ./nix/ci.nix
       ];
     };
 }
