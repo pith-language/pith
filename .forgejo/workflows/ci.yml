@@ -14,15 +14,16 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: 1
-  # The shared runners cannot feed cargo's default parallel fleet: with full
-  # debug info or the linker holding a whole link resident, lld was SIGKILled
-  # (exit 137) on phloem's test binaries, and once the linker streamed
-  # (--no-keep-memory), a parallel rustc on regex-automata was killed instead.
-  # Line tables shrink every artifact, --no-keep-memory trades i/o for link
-  # memory, and two build jobs bound the concurrent compiler processes. Local
-  # `just test-ci` is unaffected by all three.
+  # The shared runners count filesystem writes against the RAM quota, and
+  # their storage drains writeback too slowly for two heavy processes at
+  # once: a rustc and an lld were SIGKILled (137) as a pair at two build
+  # jobs, with the linker already streaming (--no-keep-memory) and test
+  # artifacts already line-tables-only. One build job serializes the heavy
+  # processes and gives the writeback room to drain between them; the jobs
+  # setting is not part of cargo's fingerprints, so this keeps the failed
+  # run's cache warm. Local `just test-ci` is unaffected by all three.
   CARGO_PROFILE_TEST_DEBUG: line-tables-only
-  CARGO_BUILD_JOBS: 2
+  CARGO_BUILD_JOBS: 1
   RUSTFLAGS: "-D warnings -C link-arg=-Wl,--no-keep-memory"
 
 jobs:
