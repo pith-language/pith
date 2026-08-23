@@ -1,5 +1,5 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
     "crates/pith-diag",
     "crates/pith-output",
@@ -10,6 +10,7 @@ members = [
     "crates/pith-engine",
     "crates/pith-executor-local",
     "crates/pith-state-sqlite",
+    "crates/pith-loader",
     "crates/xylem",
     "crates/phloem",
     "crates/example-domain",
@@ -79,9 +80,12 @@ pith-arena = { path = "crates/pith-arena", version = "0.1.0" }
 pith-core = { path = "crates/pith-core", version = "0.1.0" }
 pith-engine = { path = "crates/pith-engine", version = "0.1.0" }
 pith-state-sqlite = { path = "crates/pith-state-sqlite", version = "0.1.0" }
+pith-loader = { path = "crates/pith-loader", version = "0.1.0" }
 pith-executor-local = { path = "crates/pith-executor-local", version = "0.1.0" }
 xylem = { path = "crates/xylem", version = "0.1.0" }
 phloem = { path = "crates/phloem", version = "0.1.0" }
+stele = { path = "crates/stele", version = "0.1.0" }
+example-domain = { path = "crates/example-domain", version = "0.1.0" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"
