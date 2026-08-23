@@ -7,7 +7,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use pith_core::{
     EffectCategory, Interface, Observation, Pure, Request, Rule, RuleIdentity, RuleRevision, Type,
@@ -194,8 +194,8 @@ impl Fixture {
         let previous = fs::metadata(&self.path)
             .and_then(|metadata| metadata.modified())
             .unwrap_or_else(|error| unreachable!("fixture mtime is unavailable: {error}"));
-        for length in 6..100 {
-            fs::write(&self.path, vec![b'x'; length]).unwrap_or_else(|error| {
+        for _ in 0..3 {
+            fs::write(&self.path, b"rewritten").unwrap_or_else(|error| {
                 unreachable!("could not update observation fixture: {error}")
             });
             let current = fs::metadata(&self.path)
@@ -204,10 +204,25 @@ impl Fixture {
             if current != previous {
                 return;
             }
-            std::thread::yield_now();
+            // A filesystem with one-second timestamps does not advance within
+            // a tick, so rewriting cannot help; wait for the boundary.
+            std::thread::sleep(until_next_tick());
         }
         unreachable!("filesystem did not advance the fixture mtime");
     }
+}
+
+/// How long to sleep before a write can land in the next one-second tick.
+/// Never called on a filesystem whose timestamps are finer than a second,
+/// where the first write already moved the mtime.
+fn until_next_tick() -> Duration {
+    let subsec_millis = u64::from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_millis(),
+    );
+    Duration::from_millis(1_050_u64.saturating_sub(subsec_millis))
 }
 
 impl Drop for Fixture {
