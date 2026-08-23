@@ -14,15 +14,15 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: 1
-  # The shared runners count filesystem writes against the RAM quota, and
-  # their storage drains writeback too slowly for two heavy processes at
-  # once: a rustc and an lld were SIGKILled (137) as a pair at two build
-  # jobs, with the linker already streaming (--no-keep-memory) and test
-  # artifacts already line-tables-only. One build job serializes the heavy
-  # processes and gives the writeback room to drain between them; the jobs
-  # setting is not part of cargo's fingerprints, so this keeps the failed
-  # run's cache warm. Local `just test-ci` is unaffected by all three.
-  CARGO_PROFILE_TEST_DEBUG: line-tables-only
+  # The shared runners' RAM quota counts filesystem writes, and their storage
+  # drains writeback too slowly for the build's peak moments: lld was
+  # SIGKILled (137) on phloem's largest test binaries even serialized and
+  # streaming. CI test binaries therefore carry no debuginfo at all —
+  # backtraces keep test names and messages but lose line numbers — the
+  # linker streams (--no-keep-memory), one build job bounds the compiler
+  # fleet, and the job syncs the cache restore's pages away before
+  # building. Local `just test-ci` is unaffected by all of it.
+  CARGO_PROFILE_TEST_DEBUG: "0"
   CARGO_BUILD_JOBS: 1
   RUSTFLAGS: "-D warnings -C link-arg=-Wl,--no-keep-memory"
 
@@ -103,6 +103,7 @@ jobs:
         # before the build, and the counters say what the budget really
         # was when something still dies.
         run: |
+          trap 'grep -H . /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory.peak /sys/fs/cgroup/memory.current /sys/fs/cgroup/memory.events /sys/fs/cgroup/memory.stat 2>/dev/null || true' EXIT
           grep -H . /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory.current /proc/meminfo 2>/dev/null || true
           sync || true
           nix develop --print-build-logs ".#$DEV_SHELL" --command just "$TASK"
