@@ -6,7 +6,7 @@ summary: five request constructs matching the step protocol, rules whose interfa
 kind: planning
 status: draft
 created: 2026-08-18
-updated: 2026-08-18
+updated: 2026-08-24
 tags:
   - planning
   - language
@@ -85,9 +85,9 @@ literal in inlay hints, hover, signature help and both selection diagnostics.
 ## rules and declarations
 
 ```
-rule compile-entry(tc: Toolchain, src: CSource, provided: Provided) -> Object = pure { … }
-rule compile(…) -> Object = action requires { process } { plan { … } complete(x) { … } }
-rule resolve(…) -> Resolution = host
+pure rule compile-entry(tc: Toolchain, src: CSource, provided: Provided) -> Object = { … }
+action rule compile(…) -> Object = requires { process } { plan { … } complete(x) { … } }
+pure rule resolve(…) -> Resolution = host
 ```
 
 the interface is *derived* from the signature, written once, and cannot drift; definition and use spell the

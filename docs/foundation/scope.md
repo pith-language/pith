@@ -6,7 +6,7 @@ summary: what the project should own, what belongs in libraries, and where the i
 kind: foundation
 status: proposed
 created: 2026-02-25
-updated: 2026-02-25
+updated: 2026-08-24
 tags:
   - scope
   - product
@@ -46,7 +46,7 @@ these areas share values and rules. none of them is the parent abstraction of al
 the kernel owns the pieces that have to be shared for correctness:
 
 - typed immutable values
-- modules and interfaces
+- canonical declared types and typed rule interfaces
 - rule evaluation
 - dependency tracking and incrementality
 - explicit effects and capabilities
@@ -56,6 +56,8 @@ the kernel owns the pieces that have to be shared for correctness:
 - provenance, diagnostics, and graph queries
 
 a feature belongs here when letting each domain implement it separately would make cross-domain composition incorrect, unsafe, or impossible to explain.
+
+source modules, imports, and interface linkage belong to the loader. the kernel consumes their elaborated declarations and typed rules.
 
 ## what libraries own
 
