@@ -63,9 +63,11 @@ watch:
 watch-clippy:
     bacon clippy
 
-# Everything CI checks, in one target. Use before pushing.
+# Everything CI checks, in one target: the flake's checks, built exactly
+# the way CI builds them. Use before pushing.
 [group('ci')]
-ci: treefmt-check clippy test-ci docs-check deny repo-check
+ci:
+    nix flake check -L
 
 # Check Rust and Nix formatting, spelling, and the justfile's canonical format.
 [group('ci')]
