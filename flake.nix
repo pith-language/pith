@@ -27,6 +27,7 @@
       ];
 
       imports = [
+        ./nix/toolchain.nix
         ./nix/devshell.nix
         ./nix/treefmt.nix
       ];

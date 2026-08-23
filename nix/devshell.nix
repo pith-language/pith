@@ -1,58 +1,37 @@
-{inputs, ...}: {
+{
   perSystem = {
-    system,
+    lib,
     config,
+    pkgs,
+    rustToolchain,
+    nightlyToolchain,
     ...
   }: let
-    pkgs = import inputs.nixpkgs {
-      inherit system;
-      overlays = [inputs.rust-overlay.overlays.default];
-    };
+    # Every CI shell drives its task through the justfile.
+    commonCiPackages = [pkgs.just];
 
-    pkgsUnstable = import inputs.nixpkgs-unstable {inherit system;};
-
-    rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./../rust-toolchain.toml;
-
-    # A nightly toolchain for investigative tools (miri, cargo-fuzz) that the
-    # stable toolchain cannot run. `selectLatestNightlyWith` skips a dated
-    # nightly whose components are unavailable instead of failing the whole
-    # build, which is the rust-overlay-recommended way to consume nightly.
-    nightlyToolchain = pkgs.rust-bin.selectLatestNightlyWith (
-      toolchain:
-        toolchain.minimal.override {
-          extensions = ["rust-src" "miri" "clippy"];
-        }
-    );
-
-    craneLib = (inputs.crane.mkLib pkgs).overrideToolchain rustToolchain;
-
-    ciRustPackages = [
-      rustToolchain
-      pkgs.just
-      pkgs.git
-      pkgs.clang
-    ];
-    ciFormatPackages = [
-      config.treefmt.build.wrapper
-      pkgs.just
-    ];
+    ciRustPackages =
+      commonCiPackages
+      ++ [
+        rustToolchain
+        pkgs.git
+        pkgs.clang
+      ];
+    ciFormatPackages = commonCiPackages ++ [config.treefmt.build.wrapper];
     # cargo-deny shells out to `cargo metadata`, so it needs the cargo from the
     # pinned toolchain even though it never compiles anything.
-    ciDenyPackages = [
-      rustToolchain
-      pkgs.cargo-deny
-      pkgs.just
-    ];
+    ciDenyPackages =
+      commonCiPackages
+      ++ [
+        rustToolchain
+        pkgs.cargo-deny
+      ];
   in {
-    _module.args = {
-      inherit pkgs pkgsUnstable craneLib rustToolchain nightlyToolchain;
-    };
-
     devShells = {
       # The combined shell is convenient locally. CI uses the task-specific
       # shells below so each isolated runner realizes only what its job needs.
       ci = pkgs.mkShell {
-        packages = pkgs.lib.unique (
+        packages = lib.unique (
           ciRustPackages ++ ciFormatPackages ++ ciDenyPackages
         );
       };
