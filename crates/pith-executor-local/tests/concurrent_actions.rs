@@ -269,7 +269,13 @@ fn inputs(arity: usize) -> Box<[Value]> {
 fn rule<K: pith_core::EffectCategory>(label: &str, interface: Interface) -> Rule<K> {
     let identity = RuleIdentity::of_module_declaration("local-executor-concurrency", label);
     let revision = RuleRevision::of_manifest(identity, b"v1");
-    Rule::new(revision, label, interface, Span::none())
+    Rule::new(
+        "local-executor-concurrency",
+        revision,
+        label,
+        interface,
+        Span::none(),
+    )
 }
 
 fn request<K: pith_core::EffectCategory>(

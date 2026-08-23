@@ -261,7 +261,13 @@ fn interface(inputs: &[Type], output: Type) -> Interface {
 fn pure_rule(label: &str, interface: Interface) -> Rule<Pure> {
     let identity = RuleIdentity::of_module_declaration("engine-state-wiring-tests", label);
     let revision = RuleRevision::of_manifest(identity, b"engine-state-wiring-tests-v1");
-    Rule::<Pure>::new(revision, label, interface, Span::none())
+    Rule::<Pure>::new(
+        "engine-state-wiring-tests",
+        revision,
+        label,
+        interface,
+        Span::none(),
+    )
 }
 
 /// The same rule at a different revision, which is what decision 0023 has an
@@ -269,6 +275,7 @@ fn pure_rule(label: &str, interface: Interface) -> Rule<Pure> {
 fn revised_pure_rule(label: &str, interface: Interface, revision: &[u8]) -> Rule<Pure> {
     let identity = RuleIdentity::of_module_declaration("engine-state-wiring-tests", label);
     Rule::<Pure>::new(
+        "engine-state-wiring-tests",
         RuleRevision::of_manifest(identity, revision),
         label,
         interface,
@@ -287,7 +294,13 @@ fn pure_request(
 fn action_rule(label: &str, interface: Interface) -> Rule<Action> {
     let identity = RuleIdentity::of_module_declaration("engine-state-wiring-tests", label);
     let revision = RuleRevision::of_manifest(identity, b"engine-state-wiring-tests-v1");
-    Rule::<Action>::new(revision, label, interface, Span::none())
+    Rule::<Action>::new(
+        "engine-state-wiring-tests",
+        revision,
+        label,
+        interface,
+        Span::none(),
+    )
 }
 
 fn action_request(

@@ -207,7 +207,13 @@ fn interface(inputs: &[Type], output: Type) -> Interface {
 fn rule(label: &str, interface: Interface) -> Rule {
     let identity = RuleIdentity::of_module_declaration("pure-step-machine-tests", label);
     let revision = RuleRevision::of_manifest(identity, b"pure-step-machine-tests-v1");
-    Rule::new(revision, label, interface, Span::none())
+    Rule::new(
+        "pure-step-machine-tests",
+        revision,
+        label,
+        interface,
+        Span::none(),
+    )
 }
 
 fn request(label: &str, interface: Interface, inputs: impl Into<Box<[Value]>>) -> Request {

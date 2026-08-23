@@ -87,7 +87,13 @@ fn leaf_interface() -> Interface {
 fn leaf_rule() -> Rule<Pure> {
     let identity = RuleIdentity::of_module_declaration("pith-state-sqlite-fixture", "leaf");
     let revision = RuleRevision::of_manifest(identity, b"pith-state-sqlite-fixture-v1");
-    Rule::<Pure>::new(revision, "leaf", leaf_interface(), Span::none())
+    Rule::<Pure>::new(
+        "pith-state-sqlite-fixture",
+        revision,
+        "leaf",
+        leaf_interface(),
+        Span::none(),
+    )
 }
 
 fn leaf_request() -> Request<Pure> {

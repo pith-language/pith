@@ -186,7 +186,13 @@ fn build_interface() -> pith_core::Interface {
 fn build_rule() -> Rule<Pure> {
     let identity = RuleIdentity::of_module_declaration("xylem-tests", "sources-build");
     let revision = RuleRevision::of_manifest(identity, b"xylem-tests-v1");
-    Rule::<Pure>::new(revision, "sources-build", build_interface(), Span::none())
+    Rule::<Pure>::new(
+        "xylem-tests",
+        revision,
+        "sources-build",
+        build_interface(),
+        Span::none(),
+    )
 }
 
 fn runtime() -> TokioRuntime {

@@ -14,7 +14,7 @@
 
 use pith_ids::DeclarationDigest;
 
-use crate::manifest::{encode_length, encode_str};
+use crate::manifest::{encode_bytes, encode_length, encode_str};
 use crate::value::{SumConstructor, Type};
 use crate::value_codec::encode_type_payload as encode_type_manifest;
 
@@ -127,6 +127,12 @@ impl Declaration {
     /// the declaration says.
     #[must_use]
     pub fn digest(&self) -> DeclarationDigest {
+        DeclarationDigest::of_manifest(&self.encode_canonical())
+    }
+
+    /// Encode the coordinate, kind, and body canonically.
+    #[must_use]
+    pub fn encode_canonical(&self) -> Vec<u8> {
         let mut manifest = Vec::new();
         encode_str(&mut manifest, &self.coordinate.module);
         encode_str(&mut manifest, &self.coordinate.name);
@@ -150,7 +156,7 @@ impl Declaration {
             }
             DeclarationBody::Alias { target } => encode_type_manifest(&mut manifest, target),
         }
-        DeclarationDigest::of_manifest(&manifest)
+        manifest
     }
 }
 
@@ -160,6 +166,8 @@ pub enum DeclarationError {
     /// The module already declares this name. The table's key is the pair, so
     /// this is a collision within one module and never across two.
     DuplicateName { module: Box<str>, name: Box<str> },
+    /// The name is empty or contains the coordinate separator.
+    InvalidName { module: Box<str>, name: Box<str> },
     /// An alias whose target reaches itself. Referencing an alias yields its
     /// target expanded, so a recursive one has no finite canonical form:
     /// expansion is its only semantics and it does not terminate. A nominal or
@@ -174,6 +182,11 @@ impl std::fmt::Display for DeclarationError {
             Self::DuplicateName { module, name } => {
                 write!(f, "module `{module}` already declares `{name}`")
             }
+            Self::InvalidName { module, name } => write!(
+                f,
+                "`{name}` cannot be declared in module `{module}`: a declared name is the half \
+                 after the dot in `{module}.<name>`, so it must be non-empty and dot-free"
+            ),
             Self::RecursiveAlias { module, name } => write!(
                 f,
                 "alias `{module}.{name}` refers to itself, and an alias has no spelling to \
@@ -257,6 +270,12 @@ impl DeclarationTable {
     }
 
     fn declare(&mut self, name: &str, body: DeclarationBody) -> Result<Type, DeclarationError> {
+        if name.is_empty() || name.contains('.') {
+            return Err(DeclarationError::InvalidName {
+                module: self.module.clone(),
+                name: name.into(),
+            });
+        }
         let coordinate = Coordinate::new(self.module.clone(), name);
         match self
             .entries
@@ -291,6 +310,18 @@ impl DeclarationTable {
     /// Every declaration in this module, in name order.
     pub fn iter(&self) -> impl Iterator<Item = &Declaration> {
         self.entries.iter()
+    }
+
+    /// Encode the module and declarations in name order.
+    #[must_use]
+    pub fn encode_canonical(&self) -> Vec<u8> {
+        let mut manifest = Vec::new();
+        encode_str(&mut manifest, &self.module);
+        encode_length(&mut manifest, self.entries.len());
+        for entry in &self.entries {
+            encode_bytes(&mut manifest, &entry.encode_canonical());
+        }
+        manifest
     }
 
     pub fn len(&self) -> usize {
@@ -553,6 +584,75 @@ mod tests {
                     .unwrap(),
                 )
                 .is_ok()
+        );
+    }
+
+    #[test]
+    fn an_empty_or_dotted_name_is_refused() {
+        let mut table = table();
+        for name in ["", "a.b", ".hidden", "trailing."] {
+            assert_eq!(
+                table.nominal(name, Type::Text),
+                Err(DeclarationError::InvalidName {
+                    module: "test".into(),
+                    name: name.into(),
+                }),
+                "`{name}` was accepted as a declared name"
+            );
+        }
+    }
+
+    #[test]
+    fn a_tables_encoding_is_registration_order_free_and_self_delimiting() {
+        let mut one = table();
+        one.nominal("A", Type::Blob).unwrap();
+        one.nominal("B", Type::Text).unwrap();
+        let mut two = table();
+        two.nominal("B", Type::Text).unwrap();
+        two.nominal("A", Type::Blob).unwrap();
+        assert_eq!(one.encode_canonical(), two.encode_canonical());
+
+        let mut elsewhere = DeclarationTable::new("other");
+        elsewhere.nominal("A", Type::Blob).unwrap();
+        assert_ne!(one.encode_canonical(), elsewhere.encode_canonical());
+        assert_ne!(
+            one.encode_canonical(),
+            table().encode_canonical(),
+            "an empty table must differ from a populated one"
+        );
+    }
+
+    #[test]
+    fn a_digest_is_the_domain_hash_of_the_canonical_encoding() {
+        let mut table = table();
+        table.nominal("CSource", Type::Blob).unwrap();
+        let declaration = table.get("CSource").unwrap();
+        assert_eq!(
+            declaration.digest(),
+            pith_ids::DeclarationDigest::of_manifest(&declaration.encode_canonical())
+        );
+    }
+
+    #[test]
+    fn declaration_and_table_encodings_match_the_golden_bytes() {
+        let mut table = table();
+        assert!(table.nominal("A", Type::Text).is_ok());
+        let Some(declaration) = table.get("A") else {
+            return;
+        };
+        let declaration_bytes = [
+            4, 0, 0, 0, 0, 0, 0, 0, b't', b'e', b's', b't', 1, 0, 0, 0, 0, 0, 0, 0, b'A', 0, 3,
+        ];
+        assert_eq!(declaration.encode_canonical(), declaration_bytes);
+
+        let mut table_bytes = vec![4, 0, 0, 0, 0, 0, 0, 0, b't', b'e', b's', b't'];
+        table_bytes.extend_from_slice(&[1, 0, 0, 0, 0, 0, 0, 0]);
+        table_bytes.extend_from_slice(&[23, 0, 0, 0, 0, 0, 0, 0]);
+        table_bytes.extend_from_slice(&declaration_bytes);
+        assert_eq!(table.encode_canonical(), table_bytes);
+        assert_eq!(
+            declaration.digest().digest().to_string(),
+            "9625090b93578f90d87b6c3f0cd6da2f1bc27fca26262d78f0c8991b298b9359"
         );
     }
 }

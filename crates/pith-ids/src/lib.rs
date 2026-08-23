@@ -47,6 +47,60 @@ pub const DIGEST_LEN: usize = 32;
 /// cannot drift apart silently.
 pub const DIGEST_ALGORITHM: &str = "blake3";
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct DigestDomain {
+    name: &'static str,
+    version: u16,
+}
+
+impl DigestDomain {
+    /// # Panics
+    ///
+    /// Panics unless `name` is lowercase ASCII with internal digits or hyphens and `version` is nonzero.
+    #[must_use]
+    pub const fn new(name: &'static str, version: u16) -> Self {
+        assert!(valid_domain_name(name));
+        assert!(version > 0);
+        Self { name, version }
+    }
+
+    #[must_use]
+    pub fn digest(self, bytes: &[u8]) -> ContentDigest {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(b"pith:");
+        hasher.update(self.name.as_bytes());
+        hasher.update(b":v");
+        hasher.update(self.version.to_string().as_bytes());
+        hasher.update(b"\0");
+        hasher.update(bytes);
+        ContentDigest(hasher.finalize().into())
+    }
+}
+
+#[allow(
+    clippy::arithmetic_side_effects,
+    clippy::indexing_slicing,
+    reason = "the loop condition bounds both the byte access and increment"
+)]
+const fn valid_domain_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    let Some(first) = bytes.first() else {
+        return false;
+    };
+    if !first.is_ascii_lowercase() {
+        return false;
+    }
+    let mut position = 1;
+    while position < bytes.len() {
+        let byte = bytes[position];
+        if !(byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-') {
+            return false;
+        }
+        position += 1;
+    }
+    true
+}
+
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ContentDigest([u8; DIGEST_LEN]);
 
@@ -97,6 +151,10 @@ impl ContentId {
 
     pub fn of_tree(manifest: &[u8]) -> Self {
         Self::from_digest(Self::with_domain(domain::CONTENT_TREE, manifest))
+    }
+
+    pub fn of_domain(domain: DigestDomain, bytes: &[u8]) -> Self {
+        Self::from_digest(domain.digest(bytes))
     }
 
     pub fn digest(self) -> ContentDigest {
@@ -296,6 +354,33 @@ impl std::fmt::Debug for DeclarationDigest {
     }
 }
 
+/// Stable digest of the semantic module interface consumed by elaboration.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ModuleAbiDigest(ContentDigest);
+
+impl ModuleAbiDigest {
+    pub fn of_manifest(manifest: &[u8]) -> Self {
+        Self(ContentId::with_domain(domain::MODULE_ABI, manifest))
+    }
+
+    /// Restore a digest read back from a persistence adapter. See
+    /// [`ActionSpecDigest::from_digest`] for why restoration is distinct from
+    /// derivation.
+    pub const fn from_digest(digest: ContentDigest) -> Self {
+        Self(digest)
+    }
+
+    pub fn digest(self) -> ContentDigest {
+        self.0
+    }
+}
+
+impl std::fmt::Debug for ModuleAbiDigest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ModuleAbiDigest({:?})", self.0)
+    }
+}
+
 /// Stable digest of a canonical action rule application: the request that was
 /// asked for and the contract the rule planned from it (decision 0031).
 ///
@@ -365,15 +450,6 @@ impl std::fmt::Debug for ObservationComputationDigest {
     }
 }
 
-/// Domain-separation prefixes for blake3 hashing. Each prefix is a NUL-terminated
-/// byte literal of the form `pith:<kind>:<version>\0`, where every prefix shares
-/// the same `<version>` segment (`v1` today).
-///
-/// These are the single source of truth for which bytes identify each digest
-/// kind: adding a digest kind means adding one prefix here and one call site,
-/// and a prefix must never be rederived inline at a hashing site. The
-/// `prefixes_follow_the_version_template` test refuses to compile/run if the
-/// version segments drift apart.
 mod domain {
     pub const CONTENT_BLOB: &[u8] = b"pith:blob:v1\0";
     pub const CONTENT_TREE: &[u8] = b"pith:tree:v1\0";
@@ -384,6 +460,7 @@ mod domain {
     pub const ACTION_COMPUTATION: &[u8] = b"pith:action-computation:v1\0";
     pub const OBSERVATION_COMPUTATION: &[u8] = b"pith:observation-computation:v1\0";
     pub const DECLARATION: &[u8] = b"pith:declaration:v1\0";
+    pub const MODULE_ABI: &[u8] = b"pith:module-abi:v1\0";
 
     /// Every prefix in this module. Distinctness and a shared version
     /// segment are checked over this one slice, so a new digest kind is
@@ -399,6 +476,7 @@ mod domain {
         ACTION_COMPUTATION,
         OBSERVATION_COMPUTATION,
         DECLARATION,
+        MODULE_ABI,
     ];
 }
 
@@ -457,6 +535,14 @@ mod tests {
             ContentDigest::of_bytes(b"same")
         );
         assert_ne!(ContentId::of_blob(b"same"), ContentId::of_tree(b"same"));
+    }
+
+    #[test]
+    fn public_digest_domains_share_the_kernel_encoding() {
+        assert_eq!(
+            ContentId::of_domain(DigestDomain::new("blob", 1), b"same"),
+            ContentId::of_blob(b"same")
+        );
     }
 
     #[test]

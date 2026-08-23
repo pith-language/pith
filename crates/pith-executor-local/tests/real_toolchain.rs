@@ -245,6 +245,7 @@ fn compile_engine(root: &Path, compiler: &HostCompiler) -> (Engine, Request<Pure
 
     engine.register_action_rule(
         Rule::<Action>::new(
+            "real-toolchain-tests",
             rule_revision("compile"),
             "compile",
             blob_interface(),
@@ -260,6 +261,7 @@ fn compile_engine(root: &Path, compiler: &HostCompiler) -> (Engine, Request<Pure
     );
     engine.register_rule(
         Rule::<Pure>::new(
+            "real-toolchain-tests",
             rule_revision("object"),
             "object",
             blob_interface(),

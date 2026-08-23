@@ -16,7 +16,7 @@ use crate::{
 /// migration. Four constructors have landed under that rule — `Nominal`, `List`,
 /// `Record`, `Sum` — each taking a reserved tag, so no existing byte sequence
 /// changed meaning and a foreign stream is still refused by the version byte.
-const ENCODING_VERSION: u8 = 1;
+pub const ENCODING_VERSION: u8 = 1;
 
 /// Discriminant tags for `Type`/`Value` variants. `Type` and `Value`
 /// deliberately share numbering for their overlapping variants so a value and

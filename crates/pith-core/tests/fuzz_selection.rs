@@ -89,6 +89,7 @@ fn table_of(population: &[(usize, Interface)]) -> RuleTable<Pure> {
         let identity = RuleIdentity::of_module_declaration("pith-core.selection-properties", label);
         let revision = RuleRevision::of_manifest(identity, b"selection-properties");
         table.push(Rule::<Pure>::new(
+            "pith-core.selection-properties",
             revision,
             *label,
             interface.clone(),
