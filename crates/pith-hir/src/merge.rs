@@ -2,41 +2,40 @@ use core::range::Range;
 use std::sync::Arc;
 
 use indexmap::IndexMap;
-use pith_diag::{ByteOffset, Diag, SourceFile, Span};
+use pith_diag::{ByteOffset, Diag, Severity, SourceFile, Span};
 
 use crate::FrontendCode;
-use crate::lex::error;
 use crate::surface::{
     ParsedSurface, SurfaceBody, SurfaceConstructor, SurfaceDeclaration, SurfaceField,
     SurfaceImport, SurfaceRule, SurfaceTypeArena, SurfaceTypeId, SurfaceTypeNode,
 };
 
-pub(crate) struct MergedModule {
+pub struct MergedModule {
     pub surface: ParsedSurface,
     pub files: ModuleFiles,
 }
 
-pub(crate) struct ModuleFiles {
+pub struct ModuleFiles {
     files: Box<[Arc<SourceFile>]>,
     bases: Box<[u32]>,
 }
 
 impl ModuleFiles {
-    pub(crate) fn one(source: &Arc<SourceFile>) -> Self {
+    pub fn one(source: &Arc<SourceFile>) -> Self {
         Self {
             files: [source.clone()].into(),
             bases: [0].into(),
         }
     }
 
-    pub(crate) fn source_of(&self, span: Span) -> &Arc<SourceFile> {
+    pub fn source_of(&self, span: Span) -> &Arc<SourceFile> {
         let Some(source) = self.files.get(self.position_of(span)) else {
             unreachable!("a module always holds at least one file");
         };
         source
     }
 
-    pub(crate) fn error(&self, code: FrontendCode, span: Span, message: impl Into<String>) -> Diag {
+    pub fn error(&self, code: FrontendCode, span: Span, message: impl Into<String>) -> Diag {
         let position = self.position_of(span);
         let Some(source) = self.files.get(position) else {
             unreachable!("a module always holds at least one file");
@@ -61,7 +60,7 @@ impl ModuleFiles {
     }
 }
 
-pub(crate) fn merge_module_files(files: &[(Arc<SourceFile>, ParsedSurface)]) -> MergedModule {
+pub fn merge_module_files(files: &[(Arc<SourceFile>, ParsedSurface)]) -> MergedModule {
     let mut types: SurfaceTypeArena<SurfaceTypeNode> = SurfaceTypeArena::new();
     let mut fields: Vec<SurfaceField> = Vec::new();
     let mut imports = Vec::new();
@@ -223,6 +222,15 @@ fn next_span_base(current_base: u32, file_length: usize) -> u32 {
 
 fn shift_all(spans: &[Span], base: u32) -> Box<[Span]> {
     spans.iter().map(|span| shifted(*span, base)).collect()
+}
+
+fn error(
+    code: FrontendCode,
+    span: Span,
+    message: impl Into<String>,
+    source: &Arc<SourceFile>,
+) -> Diag {
+    Diag::new(Severity::Error, code.stable(), span, message.into()).with_source(source.clone())
 }
 
 #[cfg(test)]

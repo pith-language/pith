@@ -26,6 +26,13 @@ nominal Object = Blob
 pure rule \"objects-of\"(List<Blob>) -> List<Object> = host
 ";
 
+const ALPHA_LABEL_EDIT: &str = "\
+-- Documents the object type a dependent elaborates against.
+nominal Object = Blob
+
+pure rule \"renamed-objects-of\"(List<Blob>) -> List<Object> = host
+";
+
 const ALPHA_REPRESENTATION_EDIT: &str = "\
 -- Documents the object type a dependent elaborates against.
 nominal Object = Text
@@ -53,6 +60,7 @@ struct Driver {
 struct PublishedInterface {
     abi: ModuleAbiDigest,
     surface: ContentId,
+    source: ContentId,
 }
 
 impl Driver {
@@ -118,6 +126,7 @@ impl Driver {
         PublishedInterface {
             abi: surface.abi_digest(),
             surface: published,
+            source,
         }
     }
 }
@@ -197,6 +206,8 @@ fn the_surface_artifact_round_trips_and_moves_only_for_semantic_edits() {
         surface.abi_digest(),
         "a documentation edit moved the ABI digest"
     );
+    let label_edited = Driver::load_module("alpha", ALPHA_LABEL_EDIT).interface_surface();
+    assert_eq!(label_edited.encode(), surface.encode());
 
     let representation_edited =
         Driver::load_module("alpha", ALPHA_REPRESENTATION_EDIT).interface_surface();
@@ -217,6 +228,15 @@ fn the_abi_cutoff_holds_across_an_import_edit_the_interface_does_not_cover() {
     let mut driver = Driver::new(MemoryEngineStateStore::default());
 
     let alpha_interface = driver.publish_interface("alpha", ALPHA);
+    let alpha_bodies = match bodies_of(
+        &mut driver.engine,
+        "alpha",
+        &[("alpha.pi".into(), alpha_interface.source)],
+        frontend_imports([]),
+    ) {
+        Ok(evaluation) => evaluation.value,
+        Err(diagnostics) => unreachable!("alpha did not elaborate: {diagnostics:?}"),
+    };
     let beta_blob = driver.publish(BETA.as_bytes());
     let imports = frontend_imports([frontend_import(alpha_interface)]);
 
@@ -240,12 +260,22 @@ fn the_abi_cutoff_holds_across_an_import_edit_the_interface_does_not_cover() {
         "an elaborable module carried diagnostics"
     );
 
-    let edited_interface = driver.publish_interface("alpha", ALPHA_DOC_EDIT);
+    let edited_interface = driver.publish_interface("alpha", ALPHA_LABEL_EDIT);
     assert_eq!(
         edited_interface.surface, alpha_interface.surface,
-        "the surface artifact moved under a documentation edit"
+        "the surface artifact moved under a rule-label edit"
     );
     assert_eq!(edited_interface.abi, alpha_interface.abi);
+    let edited_alpha_bodies = match bodies_of(
+        &mut driver.engine,
+        "alpha",
+        &[("alpha.pi".into(), edited_interface.source)],
+        frontend_imports([]),
+    ) {
+        Ok(evaluation) => evaluation.value,
+        Err(diagnostics) => unreachable!("edited alpha did not elaborate: {diagnostics:?}"),
+    };
+    assert_ne!(edited_alpha_bodies, alpha_bodies);
     let second = match bodies_of(
         &mut driver.engine,
         "beta",
@@ -258,7 +288,7 @@ fn the_abi_cutoff_holds_across_an_import_edit_the_interface_does_not_cover() {
     assert_eq!(
         second.source,
         EvaluationSource::Reused,
-        "the reusable lookup missed after an edit the interface did not cover"
+        "the reusable lookup missed after a rule-label edit"
     );
 
     let changed_interface = driver.publish_interface("alpha", ALPHA_REPRESENTATION_EDIT);

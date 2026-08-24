@@ -12,7 +12,7 @@ define_arena!(
     "An id for one type node in a parsed module surface's arena."
 );
 
-pub(crate) struct ParsedSurface {
+pub struct ParsedSurface {
     pub types: SurfaceTypeArena<SurfaceTypeNode>,
     pub fields: Vec<SurfaceField>,
     pub imports: Box<[SurfaceImport]>,
@@ -20,38 +20,38 @@ pub(crate) struct ParsedSurface {
     pub rules: Box<[SurfaceRule]>,
 }
 
-pub(crate) struct SurfaceField {
+pub struct SurfaceField {
     pub name: Box<str>,
     pub payload: SurfaceTypeId,
     pub span: Span,
 }
 
-pub(crate) struct SurfaceImport {
+pub struct SurfaceImport {
     pub module: Box<str>,
     pub span: Span,
 }
 
-pub(crate) enum SurfaceBody {
+pub enum SurfaceBody {
     Nominal(SurfaceTypeId),
     Sum(Box<[SurfaceConstructor]>),
     Alias(SurfaceTypeId),
 }
 
-pub(crate) struct SurfaceDeclaration {
+pub struct SurfaceDeclaration {
     pub name: Box<str>,
     pub name_span: Span,
     pub body: SurfaceBody,
     pub documentation: Box<[Span]>,
 }
 
-pub(crate) struct SurfaceConstructor {
+pub struct SurfaceConstructor {
     pub name: Box<str>,
     pub payload: Option<SurfaceTypeId>,
     pub span: Span,
 }
 
 #[derive(Clone)]
-pub(crate) enum SurfaceTypeNode {
+pub enum SurfaceTypeNode {
     Unit,
     Bool,
     Int,
@@ -69,7 +69,7 @@ pub(crate) enum SurfaceTypeNode {
     },
 }
 
-pub(crate) struct SurfaceRule {
+pub struct SurfaceRule {
     pub label: Box<str>,
     pub label_span: Span,
     pub inputs: Box<[SurfaceTypeId]>,

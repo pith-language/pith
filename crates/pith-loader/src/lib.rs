@@ -1,54 +1,25 @@
-mod abi;
-mod elaborate;
 mod graph;
-mod lex;
-mod merge;
-mod parse;
-mod position;
-mod surface;
 
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
 use pith_core::{Action, BodyRevision, Coordinate, DeclarationTable, Interface, Pure, Rule};
-use pith_diag::{ByteOffset, Diag, Severity, SourceFile, SourceId, StableCode};
+use pith_diag::{ByteOffset, Diag, Severity, SourceFile, SourceId};
+use pith_elaborator::{RuleSignature, abi_digest, elaborate, scope_imports};
 use pith_engine::{ActionRule, Engine, PureRule};
+use pith_hir::{ModuleFiles, ParsedSurface, SurfaceBody};
 use pith_ids::{ContentId, ModuleAbiDigest};
 
-pub use abi::{GRAMMAR_VERSION, RuleCategory};
 pub use graph::{
     ELABORATOR_SEMANTIC_VERSION, FrontendImport, FrontendImportEnv, FrontendInputError,
     FrontendSource, InterfaceSurface, RegisterFrontend, bodies_of_request, index_of_request,
     interface_of_request,
 };
-pub use position::{DefinitionKind, DefinitionLocation, PositionSidecar, ReferenceSite};
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum FrontendCode {
-    UnexpectedToken = 1,
-    InvalidString = 2,
-    DuplicateDeclaration = 3,
-    DuplicateField = 4,
-    RecursiveAlias = 5,
-    CyclicDeclaration = 6,
-    UnknownName = 7,
-    UnknownImport = 8,
-    MissingRule = 9,
-    DuplicateImport = 10,
-    DuplicateRule = 11,
-    DuplicateInterface = 12,
-    UndeclaredQualifiedAccess = 13,
-    SourceNotUtf8 = 14,
-    MalformedSurface = 15,
-}
-
-impl FrontendCode {
-    #[must_use]
-    pub const fn stable(self) -> StableCode {
-        StableCode::frontend(self as u32)
-    }
-}
+pub use pith_elaborator::{GRAMMAR_VERSION, ImportedModule};
+pub use pith_hir::{
+    DefinitionKind, DefinitionLocation, FrontendCode, PositionSidecar, ReferenceSite, RuleCategory,
+};
 
 pub struct ModuleSource {
     pub module: Box<str>,
@@ -78,7 +49,7 @@ pub struct ParsedModule {
     module: Box<str>,
     artifact_id: ContentId,
     source: Arc<SourceFile>,
-    surface: surface::ParsedSurface,
+    surface: ParsedSurface,
     diagnostics: Vec<Diag>,
     positions: PositionSidecar,
 }
@@ -118,7 +89,7 @@ pub fn parse_module(source: &ModuleSource) -> ParsedModule {
         source.text.clone(),
     ));
     let artifact_id = ContentId::of_blob(source_file.source_text().as_bytes());
-    let (surface, diagnostics) = parse::parse(&source_file);
+    let (surface, diagnostics) = pith_syntax::parse(&source_file);
     let definitions = definition_locations(&source.module, &surface, &source_file);
     ParsedModule {
         module: source.module.clone(),
@@ -130,34 +101,9 @@ pub fn parse_module(source: &ModuleSource) -> ParsedModule {
     }
 }
 
-#[derive(Clone)]
-pub struct ImportedModule {
-    abi_digest: ModuleAbiDigest,
-    table: DeclarationTable,
-    definitions: Box<[DefinitionLocation]>,
-}
-
-impl ImportedModule {
-    #[must_use]
-    pub fn of(loaded: &LoadedModule) -> Self {
-        Self {
-            abi_digest: loaded.abi_digest,
-            table: loaded.table.clone(),
-            definitions: loaded.positions.definitions().into(),
-        }
-    }
-
-    fn declaration_definition(&self, name: &str) -> Option<&DefinitionLocation> {
-        self.definitions.iter().find(|definition| {
-            definition.coordinate().name.as_ref() == name
-                && !matches!(definition.kind(), DefinitionKind::HostRule(_))
-        })
-    }
-}
-
 #[derive(Default)]
 pub struct ImportEnv {
-    modules: BTreeMap<Box<str>, ImportedModule>,
+    inner: pith_elaborator::ImportEnv,
 }
 
 impl ImportEnv {
@@ -167,39 +113,31 @@ impl ImportEnv {
     }
 
     pub fn insert_loaded(&mut self, loaded: &LoadedModule) {
-        self.modules
-            .insert(loaded.module.clone(), ImportedModule::of(loaded));
+        self.inner.insert(
+            loaded.module.clone(),
+            loaded.abi_digest,
+            loaded.table.clone(),
+            loaded.positions.definitions(),
+        );
     }
 
     pub(crate) fn insert_surface(&mut self, binding: &str, surface: &InterfaceSurface) {
-        self.modules.insert(
-            binding.into(),
-            ImportedModule {
-                abi_digest: surface.abi_digest(),
-                table: surface.table.clone(),
-                definitions: Box::new([]),
-            },
+        self.inner.insert(
+            binding,
+            surface.abi_digest(),
+            surface.table.clone(),
+            Box::<[DefinitionLocation]>::default(),
         );
     }
 
     #[must_use]
     pub fn get(&self, module: &str) -> Option<&ImportedModule> {
-        self.modules.get(module)
+        self.inner.get(module)
     }
 
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.modules.is_empty()
-    }
-}
-
-pub(crate) struct ScopedImports<'a> {
-    modules: BTreeMap<&'a str, &'a ImportedModule>,
-}
-
-impl<'a> ScopedImports<'a> {
-    pub fn get(&self, module: &str) -> Option<&'a ImportedModule> {
-        self.modules.get(module).copied()
+        self.inner.is_empty()
     }
 }
 
@@ -218,10 +156,10 @@ pub fn elaborate_module(
         mut diagnostics,
         positions,
     } = parsed;
-    let files = merge::ModuleFiles::one(&source);
-    let scoped = scope_imports(&surface, imports, &files, &mut diagnostics);
+    let files = ModuleFiles::one(&source);
+    let scoped = scope_imports(&surface, &imports.inner, &files, &mut diagnostics);
     let definitions = declaration_definitions(&positions);
-    let elaborated = elaborate::elaborate(
+    let elaborated = elaborate(
         &module,
         &surface,
         &scoped,
@@ -230,19 +168,18 @@ pub fn elaborate_module(
         &mut diagnostics,
     );
     let ordered_imports = scoped
-        .modules
         .iter()
-        .map(|(name, imported)| (Box::from(*name), imported.abi_digest))
+        .map(|(name, imported)| (Box::from(name), imported.abi_digest()))
         .collect::<Vec<_>>();
     let abi_signatures = elaborated
         .rules
         .iter()
-        .map(|rule| abi::RuleSignature {
+        .map(|rule| RuleSignature {
             category: rule.category,
             interface: rule.interface.clone(),
         })
         .collect::<Vec<_>>();
-    let abi_digest = abi::abi_digest(
+    let abi_digest = abi_digest(
         &module,
         &elaborated.table,
         &ordered_imports,
@@ -274,9 +211,8 @@ pub fn elaborate_module(
         }
     }
     let visible_imports = scoped
-        .modules
         .iter()
-        .map(|(name, imported)| (Box::from(*name), imported.definitions.clone()))
+        .map(|(name, imported)| (Box::from(name), imported.definitions().into()))
         .collect();
     Ok(LoadedModule {
         module,
@@ -483,45 +419,16 @@ impl LoadedModule {
     }
 }
 
-fn scope_imports<'a>(
-    surface: &'a surface::ParsedSurface,
-    environment: &'a ImportEnv,
-    files: &merge::ModuleFiles,
-    diagnostics: &mut Vec<Diag>,
-) -> ScopedImports<'a> {
-    let mut modules = BTreeMap::new();
-    for import in &surface.imports {
-        if modules.contains_key(import.module.as_ref()) {
-            diagnostics.push(files.error(
-                FrontendCode::DuplicateImport,
-                import.span,
-                format!("module `{}` is imported twice", import.module),
-            ));
-            continue;
-        }
-        let Some(imported) = environment.get(&import.module) else {
-            diagnostics.push(files.error(
-                FrontendCode::UnknownImport,
-                import.span,
-                format!("module `{}` is not available to import", import.module),
-            ));
-            continue;
-        };
-        modules.insert(import.module.as_ref(), imported);
-    }
-    ScopedImports { modules }
-}
-
 fn definition_locations(
     module: &str,
-    surface: &surface::ParsedSurface,
+    surface: &ParsedSurface,
     source: &Arc<SourceFile>,
 ) -> Vec<DefinitionLocation> {
     let declaration_definitions = surface.declarations.iter().map(|declaration| {
         let kind = match declaration.body {
-            surface::SurfaceBody::Nominal(_) => DefinitionKind::Nominal,
-            surface::SurfaceBody::Sum(_) => DefinitionKind::Sum,
-            surface::SurfaceBody::Alias(_) => DefinitionKind::Alias,
+            SurfaceBody::Nominal(_) => DefinitionKind::Nominal,
+            SurfaceBody::Sum(_) => DefinitionKind::Sum,
+            SurfaceBody::Alias(_) => DefinitionKind::Alias,
         };
         DefinitionLocation::new(
             Coordinate::new(module, declaration.name.clone()),

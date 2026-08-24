@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
 use pith_diag::{ByteOffset, Diag, Severity, SourceFile, Span};
-
-use crate::FrontendCode;
+use pith_hir::FrontendCode;
 
 #[derive(Clone)]
 pub(crate) struct Token {

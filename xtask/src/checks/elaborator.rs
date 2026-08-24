@@ -6,6 +6,12 @@ use crate::report::{Diagnostic, Report};
 
 const DIGEST_FILE: &str = "crates/pith-loader/elaborator-digest";
 const VERSION_FILE: &str = "crates/pith-loader/src/graph/mod.rs";
+const FRONTEND_CRATES: &[&str] = &[
+    "crates/pith-elaborator",
+    "crates/pith-hir",
+    "crates/pith-loader",
+    "crates/pith-syntax",
+];
 
 pub(crate) fn run(root: &Path) -> Report {
     let mut report = Report::new(
@@ -137,10 +143,12 @@ fn declared_version(root: &Path) -> Result<u32, Diagnostic> {
 }
 
 fn source_digest(root: &Path) -> Result<String, Diagnostic> {
-    let loader = root.join("crates/pith-loader");
     let mut paths = Vec::new();
-    collect_files(&loader.join("src"), &mut paths)?;
-    paths.push(loader.join("Cargo.toml"));
+    for frontend_crate in FRONTEND_CRATES {
+        let directory = root.join(frontend_crate);
+        collect_files(&directory.join("src"), &mut paths)?;
+        paths.push(directory.join("Cargo.toml"));
+    }
     paths.sort();
 
     let mut hasher = Hasher::new();

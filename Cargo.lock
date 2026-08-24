@@ -862,6 +862,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pith-elaborator"
+version = "0.1.0"
+dependencies = [
+ "pith-core",
+ "pith-diag",
+ "pith-hir",
+ "pith-ids",
+]
+
+[[package]]
 name = "pith-engine"
 version = "0.1.0"
 dependencies = [
@@ -897,6 +907,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pith-hir"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "pith-arena",
+ "pith-core",
+ "pith-diag",
+]
+
+[[package]]
 name = "pith-ids"
 version = "0.1.0"
 dependencies = [
@@ -909,14 +929,15 @@ dependencies = [
 name = "pith-loader"
 version = "0.1.0"
 dependencies = [
- "indexmap",
  "phloem",
- "pith-arena",
  "pith-core",
  "pith-diag",
+ "pith-elaborator",
  "pith-engine",
+ "pith-hir",
  "pith-ids",
  "pith-store",
+ "pith-syntax",
  "proptest",
  "stele",
  "xylem",
@@ -957,6 +978,14 @@ dependencies = [
  "pith-ids",
  "proptest",
  "tempfile",
+]
+
+[[package]]
+name = "pith-syntax"
+version = "0.1.0"
+dependencies = [
+ "pith-diag",
+ "pith-hir",
 ]
 
 [[package]]

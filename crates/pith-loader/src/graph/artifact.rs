@@ -1,10 +1,11 @@
 use pith_core::codec::{CanonicalDecodeError, CanonicalReader};
 use pith_core::manifest::{encode_bytes, encode_length, encode_str};
 use pith_core::{DeclarationTable, Interface};
+use pith_elaborator::{GRAMMAR_VERSION, RuleSignature, abi_digest};
+use pith_hir::RuleCategory;
 use pith_ids::{ContentId, ModuleAbiDigest};
 
 use crate::LoadedModule;
-use crate::abi::{self, RuleCategory, RuleSignature};
 
 const INTERFACE_SURFACE_VERSION: u8 = 1;
 
@@ -71,14 +72,14 @@ impl InterfaceSurface {
                 interface: interface.clone(),
             })
             .collect::<Vec<_>>();
-        abi::abi_digest(&self.module, &self.table, &self.imports, &signatures)
+        abi_digest(&self.module, &self.table, &self.imports, &signatures)
     }
 
     #[must_use]
     pub fn encode(&self) -> Vec<u8> {
         let mut artifact = vec![
             INTERFACE_SURFACE_VERSION,
-            abi::GRAMMAR_VERSION,
+            GRAMMAR_VERSION,
             pith_core::ENCODING_VERSION,
         ];
         encode_str(&mut artifact, &self.module);
@@ -104,7 +105,7 @@ impl InterfaceSurface {
         reader.read_version(INTERFACE_SURFACE_VERSION)?;
         let grammar = reader.read_byte()?;
         let kernel = reader.read_byte()?;
-        if grammar != abi::GRAMMAR_VERSION {
+        if grammar != GRAMMAR_VERSION {
             return Err(CanonicalDecodeError::UnsupportedVersion { version: grammar });
         }
         if kernel != pith_core::ENCODING_VERSION {

@@ -3,7 +3,9 @@ use std::sync::Arc;
 
 use pith_core::Value;
 use pith_diag::{Diag, DiagnosticSink, Severity, SourceFile, SourceId, Span};
+use pith_elaborator::{elaborate, scope_imports};
 use pith_engine::{PureRule, PureRuleFrame, PureStep, Resumption};
+use pith_hir::{ParsedSurface, merge_module_files};
 use pith_ids::{ContentId, ModuleAbiDigest};
 
 use super::artifact::InterfaceSurface;
@@ -12,9 +14,7 @@ use super::values::{
     ValueRuleBinding, bodies_value, index_value, module_interface_value, read_import_env,
     read_source,
 };
-use crate::merge::merge_module_files;
-use crate::surface::ParsedSurface;
-use crate::{FrontendCode, ImportEnv, elaborate, parse, scope_imports};
+use crate::{FrontendCode, ImportEnv};
 
 #[derive(Clone, Copy)]
 pub(crate) enum Projection {
@@ -116,12 +116,12 @@ impl FrontendFrame {
         }
         let scoped = scope_imports(
             &merged.surface,
-            &environment,
+            &environment.inner,
             &merged.files,
             &mut self.diagnostics,
         );
         let no_definitions = BTreeMap::new();
-        let elaborated = elaborate::elaborate(
+        let elaborated = elaborate(
             &self.source.module,
             &merged.surface,
             &scoped,
@@ -130,9 +130,8 @@ impl FrontendFrame {
             &mut self.diagnostics,
         );
         let ordered_imports = scoped
-            .modules
             .iter()
-            .map(|(name, imported)| (Box::from(*name), imported.abi_digest))
+            .map(|(name, imported)| (Box::from(name), imported.abi_digest()))
             .collect::<Vec<(Box<str>, ModuleAbiDigest)>>();
         let surface = InterfaceSurface::of_parts(
             &self.source.module,
@@ -215,7 +214,7 @@ impl FrontendFrame {
                             entry.path.clone(),
                             text.clone(),
                         ));
-                        let (surface, mut diagnostics) = parse::parse(&source_file);
+                        let (surface, mut diagnostics) = pith_syntax::parse(&source_file);
                         self.diagnostics.append(&mut diagnostics);
                         Some((source_file, surface))
                     }

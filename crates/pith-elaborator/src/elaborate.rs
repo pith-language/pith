@@ -1,38 +1,36 @@
 use core::range::Range;
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::ScopedImports;
 use pith_core::{
     Coordinate, DeclarationError, DeclarationTable, Interface, RecordField, SumConstructor, Type,
 };
 use pith_diag::{Diag, Severity, Span};
-
-use crate::merge::ModuleFiles;
-use crate::position::{DefinitionLocation, ReferenceSite};
-use crate::surface::{
-    ParsedSurface, SurfaceBody, SurfaceDeclaration, SurfaceTypeId, SurfaceTypeNode,
+use pith_hir::{
+    DefinitionLocation, FrontendCode, ModuleFiles, ParsedSurface, ReferenceSite, RuleCategory,
+    SurfaceBody, SurfaceDeclaration, SurfaceRule, SurfaceTypeId, SurfaceTypeNode,
 };
-use crate::{FrontendCode, RuleCategory, ScopedImports};
 
-pub(crate) struct ElaboratedRule {
+pub struct ElaboratedRule {
     pub label: Box<str>,
     pub category: RuleCategory,
     pub interface: Interface,
     pub span: Span,
 }
 
-pub(crate) struct Elaborated {
+pub struct Elaborated {
     pub table: DeclarationTable,
     pub rules: Vec<ElaboratedRule>,
     pub incomplete_rules: Vec<IncompleteRule>,
     pub references: Vec<ReferenceSite>,
 }
 
-pub(crate) struct IncompleteRule {
+pub struct IncompleteRule {
     pub label: Box<str>,
     pub diagnostics: Box<[Diag]>,
 }
 
-pub(crate) fn elaborate(
+pub fn elaborate(
     module: &str,
     surface: &ParsedSurface,
     imports: &ScopedImports<'_>,
@@ -158,7 +156,7 @@ impl<'a> Elaborator<'a> {
 
     fn elaborate_rule(
         &mut self,
-        rule: &crate::surface::SurfaceRule,
+        rule: &SurfaceRule,
         interfaces: &mut BTreeMap<(RuleCategory, Interface), Span>,
     ) -> Option<ElaboratedRule> {
         let inputs = rule

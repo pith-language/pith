@@ -1,0 +1,18 @@
+[package]
+name = "pith-hir"
+description = "Parsed and merged frontend representation for Pith modules"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+pith-arena.workspace = true
+pith-core.workspace = true
+pith-diag.workspace = true
+indexmap.workspace = true
