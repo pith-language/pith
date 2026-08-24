@@ -6,7 +6,7 @@ summary: the typed semantic representation is a single closed, elaborated, canon
 kind: decision
 status: proposed
 created: 2026-06-17
-updated: 2026-08-14
+updated: 2026-08-24
 tags:
   - language
   - rules
@@ -141,6 +141,11 @@ xylem's rules become the first migration. `ActionRequestFrame` and `CompileEntry
 the cost is the constructor set and the elaborator. the ir cannot be smaller than the step protocol plus the pure expression language it needs between yields, and the expression language is typed in the 0026 calculus, most of which is not built. this record therefore sits behind the same gate as surface syntax, the 0026 calculus landing in `pith-core`. it does not sit behind surface syntax itself: a frontend can elaborate programmatically, and the first frontend is the rust registration API wrapping hand-built ir, which is what migration runs through.
 
 ## unresolved
+
+> the first item below is [0062](0062-the-ir-constructor-set.md)'s: the constructor set is enumerated
+> there, and so are the other three — the evaluator-abi version is the `pith:body-ir` digest domain's
+> version segment, the fan-out split is `NeedAll` and `NeedEach`, and binders are de Bruijn indices in
+> the ir itself. read the paragraphs as the questions this record left.
 
 the constructor set of the expression language between yields is not enumerated here. it needs the 0026 calculus constructors that exist and a decision on which total constructs from 0018's open list (folds are the baseline; fixed points, generators, bounded search are open there) become ir constructs rather than graph patterns. that enumeration is the first design task this record gates, and it belongs with the calculus landing.
 
