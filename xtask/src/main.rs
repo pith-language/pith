@@ -22,6 +22,7 @@ fn main() -> ExitCode {
         Some("check") => run_checks(&root, checks::ALL),
         Some("check-determinism") => run_checks(&root, &[checks::determinism::run]),
         Some("check-docs") => run_checks(&root, &[checks::docs::run]),
+        Some("record-elaborator") => run_checks(&root, &[checks::elaborator::record]),
         Some("help") | None => {
             print_help();
             ExitCode::SUCCESS
@@ -67,4 +68,7 @@ fn print_help() {
     eprintln!("  check              run every repository-specific check");
     eprintln!("  check-determinism  fail if HashMap is used in non-test source");
     eprintln!("  check-docs         validate Markdown frontmatter and document relations");
+    eprintln!(
+        "  record-elaborator  rewrite the recorded elaborator digest after a deliberate change"
+    );
 }

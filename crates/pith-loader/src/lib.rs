@@ -1,6 +1,8 @@
 mod abi;
 mod elaborate;
+mod graph;
 mod lex;
+mod merge;
 mod parse;
 mod position;
 mod surface;
@@ -15,6 +17,11 @@ use pith_engine::{ActionRule, Engine, PureRule};
 use pith_ids::{ContentId, ModuleAbiDigest};
 
 pub use abi::{GRAMMAR_VERSION, RuleCategory};
+pub use graph::{
+    ELABORATOR_SEMANTIC_VERSION, FrontendImport, FrontendImportEnv, FrontendInputError,
+    FrontendSource, InterfaceSurface, RegisterFrontend, bodies_of_request, index_of_request,
+    interface_of_request,
+};
 pub use position::{DefinitionKind, DefinitionLocation, PositionSidecar, ReferenceSite};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -32,6 +39,8 @@ pub enum FrontendCode {
     DuplicateRule = 11,
     DuplicateInterface = 12,
     UndeclaredQualifiedAccess = 13,
+    SourceNotUtf8 = 14,
+    MalformedSurface = 15,
 }
 
 impl FrontendCode {
@@ -162,6 +171,17 @@ impl ImportEnv {
             .insert(loaded.module.clone(), ImportedModule::of(loaded));
     }
 
+    pub(crate) fn insert_surface(&mut self, binding: &str, surface: &InterfaceSurface) {
+        self.modules.insert(
+            binding.into(),
+            ImportedModule {
+                abi_digest: surface.abi_digest(),
+                table: surface.table.clone(),
+                definitions: Box::new([]),
+            },
+        );
+    }
+
     #[must_use]
     pub fn get(&self, module: &str) -> Option<&ImportedModule> {
         self.modules.get(module)
@@ -198,14 +218,15 @@ pub fn elaborate_module(
         mut diagnostics,
         positions,
     } = parsed;
-    let scoped = scope_imports(&surface, imports, &source, &mut diagnostics);
+    let files = merge::ModuleFiles::one(&source);
+    let scoped = scope_imports(&surface, imports, &files, &mut diagnostics);
     let definitions = declaration_definitions(&positions);
     let elaborated = elaborate::elaborate(
         &module,
         &surface,
         &scoped,
         &definitions,
-        &source,
+        &files,
         &mut diagnostics,
     );
     let ordered_imports = scoped
@@ -433,6 +454,11 @@ impl LoadedModule {
     }
 
     #[must_use]
+    pub fn interface_surface(&self) -> InterfaceSurface {
+        InterfaceSurface::of_module(self)
+    }
+
+    #[must_use]
     pub fn positions(&self) -> &PositionSidecar {
         &self.positions
     }
@@ -460,26 +486,24 @@ impl LoadedModule {
 fn scope_imports<'a>(
     surface: &'a surface::ParsedSurface,
     environment: &'a ImportEnv,
-    source: &Arc<SourceFile>,
+    files: &merge::ModuleFiles,
     diagnostics: &mut Vec<Diag>,
 ) -> ScopedImports<'a> {
     let mut modules = BTreeMap::new();
     for import in &surface.imports {
         if modules.contains_key(import.module.as_ref()) {
-            diagnostics.push(lex::error(
+            diagnostics.push(files.error(
                 FrontendCode::DuplicateImport,
                 import.span,
                 format!("module `{}` is imported twice", import.module),
-                source,
             ));
             continue;
         }
         let Some(imported) = environment.get(&import.module) else {
-            diagnostics.push(lex::error(
+            diagnostics.push(files.error(
                 FrontendCode::UnknownImport,
                 import.span,
                 format!("module `{}` is not available to import", import.module),
-                source,
             ));
             continue;
         };

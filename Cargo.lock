@@ -909,12 +909,14 @@ dependencies = [
 name = "pith-loader"
 version = "0.1.0"
 dependencies = [
+ "indexmap",
  "phloem",
  "pith-arena",
  "pith-core",
  "pith-diag",
  "pith-engine",
  "pith-ids",
+ "pith-store",
  "proptest",
  "stele",
  "xylem",
@@ -1674,6 +1676,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 name = "xtask"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "ignore",
  "serde",
  "serde_yaml_ng",

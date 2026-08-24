@@ -50,6 +50,7 @@ pub(crate) struct SurfaceConstructor {
     pub span: Span,
 }
 
+#[derive(Clone)]
 pub(crate) enum SurfaceTypeNode {
     Unit,
     Bool,

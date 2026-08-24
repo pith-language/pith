@@ -13,7 +13,7 @@ pub enum RuleCategory {
 }
 
 impl RuleCategory {
-    const fn abi_tag(self) -> u8 {
+    pub(crate) const fn abi_tag(self) -> u8 {
         match self {
             Self::Pure => 0,
             Self::Action => 1,
