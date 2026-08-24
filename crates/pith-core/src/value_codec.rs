@@ -239,16 +239,37 @@ pub(crate) fn encode_value_payload(encoded: &mut Vec<u8>, value: &Value) {
 /// Failure to decode a canonical [`Type`] or [`Value`] encoding.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CanonicalDecodeError {
-    UnsupportedVersion { version: u8 },
-    UnknownTypeTag { tag: u8 },
-    UnknownValueTag { tag: u8 },
-    InvalidBoolean { byte: u8 },
+    UnsupportedVersion {
+        version: u8,
+    },
+    UnknownTypeTag {
+        tag: u8,
+    },
+    UnknownValueTag {
+        tag: u8,
+    },
+    UnknownBodyTag {
+        tag: u8,
+    },
+    /// A type payload arrived in a body position reserved for one kind, such
+    /// as a non-sum where `MakeSum` writes its declaration.
+    TypeInBodyPosition,
+    InvalidBoolean {
+        byte: u8,
+    },
     Truncated,
     TrailingBytes,
     InvalidUtf8,
-    LengthOutOfRange { length: u64 },
-    NestingTooDeep { limit: u32 },
-    NamesOutOfOrder { earlier: Box<str>, later: Box<str> },
+    LengthOutOfRange {
+        length: u64,
+    },
+    NestingTooDeep {
+        limit: u32,
+    },
+    NamesOutOfOrder {
+        earlier: Box<str>,
+        later: Box<str>,
+    },
     NonCanonicalInteger,
 }
 
@@ -267,6 +288,13 @@ impl std::fmt::Display for CanonicalDecodeError {
             Self::UnknownValueTag { tag } => {
                 write!(formatter, "unknown canonical value tag {tag}")
             }
+            Self::UnknownBodyTag { tag } => {
+                write!(formatter, "unknown canonical body tag {tag}")
+            }
+            Self::TypeInBodyPosition => formatter.write_str(
+                "a canonical body holds a type where a specific kind is \
+                 required, such as a sum declaration",
+            ),
             Self::InvalidBoolean { byte } => {
                 write!(formatter, "invalid canonical boolean byte {byte}")
             }

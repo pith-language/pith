@@ -6,6 +6,8 @@
 
 pub mod action;
 mod action_codec;
+pub mod body;
+mod body_codec;
 pub mod codec;
 pub mod declaration;
 pub mod effect;
@@ -20,11 +22,14 @@ pub use action::{
     CapabilityRequirement, Content, EnvironmentVariable, ExitStatusContract, NetworkPolicy,
     OutputKind, PlatformRequirement,
 };
+pub use body::{BodyError, BodyExpr, BodyRequest, MAX_BODY_DEPTH, MatchArm, RuleBody};
+pub use body_codec::BODY_ENCODING_VERSION;
 pub use declaration::{
     Coordinate, Declaration, DeclarationBody, DeclarationError, DeclarationTable,
 };
 pub use effect::{Action, EffectCategory, Mutation, Observation, Opaque, Pure};
 pub use int::{Int, OutOfRangeError};
+pub use pith_ids::BodyIrDigest;
 pub use pith_ids::DeclarationDigest;
 pub use pith_ids::{RuleIdentity, RuleRevision};
 pub use rule::{

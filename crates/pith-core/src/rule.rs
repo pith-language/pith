@@ -61,9 +61,13 @@ pub struct Rule<K: EffectCategory = Pure> {
     effect: PhantomData<fn() -> K>,
 }
 
+/// The implementation tier a rule's body runs on (decision 0038). Host rules
+/// keep the author-maintained [`BodyRevision`]; represented rules derive their
+/// revision from the body's canonical encoding.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum RuleTier {
     Host,
+    Represented,
 }
 
 /// Persistent identity for a pure rule application over the current semantic
@@ -313,12 +317,66 @@ impl<K: EffectCategory> Rule<K> {
         interface: Interface,
         span: Span,
     ) -> Self {
-        let coordinate = Coordinate::new(module, label);
-        let identity = RuleIdentity::of_module_declaration(module, label);
-        let revision = RuleRevision::of_manifest(identity, &revision_manifest(body, &interface));
+        Self::of_tier(
+            coordinate_of(module, label),
+            RuleTier::Host,
+            revision_manifest(body, &interface),
+            label,
+            interface,
+            span,
+        )
+    }
+}
+
+impl Rule<Pure> {
+    /// Construct a represented rule whose revision derives from its body's
+    /// canonical encoding (decisions 0038, 0062): the digest domain's version
+    /// is the body-encoding version, so a change to evaluator semantics moves
+    /// the domain rather than the body bytes.
+    ///
+    /// The body is not re-validated here. Registration is the boundary that
+    /// validates; a rule built this way carries only the digest.
+    pub fn represented(
+        module: &str,
+        label: &str,
+        body: &crate::body::RuleBody,
+        interface: Interface,
+        span: Span,
+    ) -> Self {
+        let mut manifest = body.digest().digest().as_bytes().to_vec();
+        encode_interface(&mut manifest, &interface);
+        Self::of_tier(
+            coordinate_of(module, label),
+            RuleTier::Represented,
+            manifest,
+            label,
+            interface,
+            span,
+        )
+    }
+}
+
+fn coordinate_of(module: &str, label: &str) -> Coordinate {
+    Coordinate::new(module, label)
+}
+
+impl<K: EffectCategory> Rule<K> {
+    fn of_tier(
+        coordinate: Coordinate,
+        tier: RuleTier,
+        revision_manifest: Vec<u8>,
+        label: &str,
+        interface: Interface,
+        span: Span,
+    ) -> Self {
+        let identity = RuleIdentity::of_module_declaration(
+            coordinate.module.as_ref(),
+            coordinate.name.as_ref(),
+        );
+        let revision = RuleRevision::of_manifest(identity, &revision_manifest);
         Self {
             coordinate,
-            tier: RuleTier::Host,
+            tier,
             identity,
             revision,
             label: label.into(),
@@ -339,7 +397,7 @@ fn revision_manifest(body: BodyRevision, interface: &Interface) -> Vec<u8> {
     manifest
 }
 
-fn encode_interface(manifest: &mut Vec<u8>, interface: &Interface) {
+pub(crate) fn encode_interface(manifest: &mut Vec<u8>, interface: &Interface) {
     encode_length(manifest, interface.inputs.len());
     interface
         .inputs
@@ -1116,6 +1174,49 @@ mod derived_revisions {
             Rule::<Pure>::declared("m", "link", BodyRevision(1), interface, Span::none());
         assert_eq!(untouched.revision, untouched_again.revision);
         assert_ne!(bumped.revision, untouched.revision);
+    }
+
+    #[test]
+    fn a_represented_rule_derives_its_revision_from_its_body() {
+        // 0038's revision half: formatting and binder spelling cannot move a
+        // digest — there are no binder names to spell — and a change to the
+        // elaborated body must. The coordinate keeps 0023's identity half.
+        let interface = interface_over(Type::Int, Type::Int);
+        let body = |constant: i64| {
+            crate::RuleBody::new(crate::BodyExpr::Let {
+                bound: Box::new(crate::BodyExpr::Literal(crate::Value::int(constant))),
+                rest: Box::new(crate::BodyExpr::IntAdd {
+                    left: Box::new(crate::BodyExpr::Bound(0)),
+                    right: Box::new(crate::BodyExpr::Bound(1)),
+                }),
+            })
+        };
+        let first = Rule::<Pure>::represented("m", "r", &body(1), interface.clone(), Span::none());
+        let same = Rule::<Pure>::represented("m", "r", &body(1), interface.clone(), Span::none());
+        let changed = Rule::<Pure>::represented("m", "r", &body(2), interface, Span::none());
+
+        assert_eq!(first.tier, crate::RuleTier::Represented);
+        assert_eq!(first.revision, same.revision);
+        assert_ne!(first.revision, changed.revision);
+        assert_eq!(first.identity, changed.identity);
+        assert_eq!(
+            first.identity,
+            RuleIdentity::of_module_declaration("m", "r")
+        );
+    }
+
+    #[test]
+    fn a_represented_revision_differs_from_a_host_revision_over_the_same_rule() {
+        // The derivation's input is the body digest rather than an author's
+        // counter, so the two tiers cannot mint one revision for one rule.
+        let interface = interface_over(Type::Int, Type::Int);
+        let body = crate::RuleBody::new(crate::BodyExpr::Bound(0));
+        let represented =
+            Rule::<Pure>::represented("m", "r", &body, interface.clone(), Span::none());
+        let hosted = Rule::<Pure>::declared("m", "r", BodyRevision(1), interface, Span::none());
+
+        assert_eq!(represented.identity, hosted.identity);
+        assert_ne!(represented.revision, hosted.revision);
     }
 
     #[test]
