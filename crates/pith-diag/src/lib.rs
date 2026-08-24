@@ -248,6 +248,8 @@ pub enum EngineCode {
     /// observer configured. The observation effect cannot be served by the
     /// engine itself; a host supplies the adapter (decision 0060).
     ObserverMissing = 217,
+    /// `E-1218` — a represented rule body produced a declared value failure.
+    RepresentedBodyFailed = 218,
 }
 
 impl From<EngineCode> for StableCode {
@@ -500,6 +502,7 @@ mod tests {
         assert_eq!(StableCode::from(EngineCode::PlatformMismatch).0, 1212);
         assert_eq!(StableCode::from(EngineCode::PolicyDenied).0, 1213);
         assert_eq!(StableCode::from(EngineCode::InterruptedAttempt).0, 1214);
+        assert_eq!(StableCode::from(EngineCode::RepresentedBodyFailed).0, 1218);
     }
 
     #[test]

@@ -33,10 +33,10 @@ use std::num::NonZeroUsize;
 
 use indexmap::IndexMap;
 use pith_core::{
-    Action, Observation, Pure, PureComputationKey, Request, Rule, RuleId, RuleIdentity,
-    RuleRevision, RuleTable,
+    Action, BodyError, Interface, Observation, Pure, PureComputationKey, Request, Rule, RuleBody,
+    RuleId, RuleIdentity, RuleRevision, RuleTable,
 };
-use pith_diag::PithResult;
+use pith_diag::{PithResult, Span};
 use pith_ids::{ComputationArena, ComputationId, ContentId};
 use pith_store::{ContentStore, MemoryContentStore};
 
@@ -217,6 +217,24 @@ impl Engine {
         id
     }
 
+    /// Register a validated represented pure rule.
+    ///
+    /// # Errors
+    /// Returns the body's type error before either metadata or executable state
+    /// enters the engine.
+    pub fn register_represented_rule(
+        &mut self,
+        module: &str,
+        label: &str,
+        interface: Interface,
+        span: Span,
+        body: RuleBody,
+    ) -> Result<RuleId, BodyError> {
+        body.validate(&interface)?;
+        let rule = Rule::represented(module, label, &body, interface, span);
+        Ok(self.register_rule(rule, crate::represented::RepresentedRule::new(body)))
+    }
+
     /// Whether a pure rule identity is registered here at `revision`.
     ///
     /// A recorded pure edge names the revision its dependency was computed
@@ -298,6 +316,21 @@ impl Engine {
     pub fn evaluate_pure(&mut self, request: &Request<Pure>) -> PithResult<Evaluation> {
         let mut plan = self.open_roots(std::slice::from_ref(request), &ReuseContext::PureOnly)?;
         if let Err(diagnostics) = self.drive_pure(&mut plan.scheduler) {
+            self.stop_live_frames(&plan.scheduler, &diagnostics, StopReason::Failed);
+            return Err(diagnostics);
+        }
+        single_evaluation(plan.into_evaluations()?)
+    }
+
+    /// Evaluate a pure request while admitting content reads and refusing
+    /// actions and observations.
+    ///
+    /// # Errors
+    /// Returns the same diagnostics as [`Self::evaluate_pure`], plus `E-1205`
+    /// when requested content is absent and `E-1207` when the store fails.
+    pub fn evaluate_with_content(&mut self, request: &Request<Pure>) -> PithResult<Evaluation> {
+        let mut plan = self.open_roots(std::slice::from_ref(request), &ReuseContext::PureOnly)?;
+        if let Err(diagnostics) = self.drive_with_content(&mut plan.scheduler) {
             self.stop_live_frames(&plan.scheduler, &diagnostics, StopReason::Failed);
             return Err(diagnostics);
         }

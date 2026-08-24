@@ -133,6 +133,25 @@ impl Engine {
         Ok(())
     }
 
+    pub(super) fn drive_with_content(&mut self, scheduler: &mut Scheduler) -> PithResult<()> {
+        let mut budget = StepBudget::unbounded();
+        while let Some(chain) = scheduler.next_ready() {
+            match self.advance_chain(scheduler, chain, &ReuseContext::PureOnly, &mut budget)? {
+                ChainPause::Settled => {}
+                ChainPause::Blob(id) => {
+                    let bytes = self.fetch_blob(id)?;
+                    let parent = scheduler.top(chain)?.computation;
+                    self.record_edge(parent, DependencyEdge::Blob { id })?;
+                    scheduler.resume(chain, Resumption::One(Value::Bytes(bytes)))?;
+                }
+                ChainPause::Action(_) | ChainPause::Observation(_) => {
+                    return Err(effectful_in_pure_diag());
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Drive every chain to completion, serving the effects they stop for.
     ///
     /// A run that ends early — cancelled, past its bound, or aborted by a
