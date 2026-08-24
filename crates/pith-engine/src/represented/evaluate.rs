@@ -30,7 +30,6 @@ pub(super) fn evaluate(expression: BodyExpr, environment: Environment) -> Evalua
                 return internal("validated field access received a non-record value");
             };
             fields
-                .into_vec()
                 .into_iter()
                 .find(|field| field.name == name)
                 .map_or_else(
@@ -93,7 +92,7 @@ pub(super) fn evaluate(expression: BodyExpr, environment: Environment) -> Evalua
                 let Value::List(values) = value else {
                     return internal("validated list match received a non-list value");
                 };
-                let mut values = values.into_vec().into_iter();
+                let mut values = values.into_iter();
                 match values.next() {
                     Some(head) => evaluate(
                         *cons,
@@ -121,7 +120,7 @@ pub(super) fn evaluate(expression: BodyExpr, environment: Environment) -> Evalua
                     return internal("validated fold received a non-list source");
                 };
                 evaluate(*init, environment.clone()).and_then(move |initial| {
-                    continue_fold(values.into_vec().into_iter(), initial, *step, environment)
+                    continue_fold(values.into_iter(), initial, *step, environment)
                 })
             })
         }
@@ -130,7 +129,7 @@ pub(super) fn evaluate(expression: BodyExpr, environment: Environment) -> Evalua
                 let Value::List(values) = list else {
                     return internal("validated sort received a non-list value");
                 };
-                evaluate_sort_keys(values.into_vec().into_iter(), *key, environment, Vec::new())
+                evaluate_sort_keys(values.into_iter(), *key, environment, Vec::new())
             })
         }
         BodyExpr::If {
@@ -211,26 +210,21 @@ pub(super) fn evaluate(expression: BodyExpr, environment: Environment) -> Evalua
             let Value::List(values) = source else {
                 return internal("validated dynamic batch received a non-list source");
             };
-            evaluate_each_request(
-                values.into_vec().into_iter(),
-                request,
-                environment.clone(),
-                Vec::new(),
-            )
-            .and_then(move |requests| {
-                if requests.is_empty() {
-                    return evaluate(*resume, environment.with(Value::List(Box::new([]))));
-                }
-                Evaluation::Yield {
-                    step: PureStep::NeedAll(requests.into_boxed_slice()),
-                    resume: Box::new(move |resumption| match resumption {
-                        Resumption::Many(values) => {
-                            evaluate(*resume, environment.with(Value::List(values)))
-                        }
-                        Resumption::One(_) => internal("dynamic batch resumed with one value"),
-                    }),
-                }
-            })
+            evaluate_each_request(values.into_iter(), request, environment.clone(), Vec::new())
+                .and_then(move |requests| {
+                    if requests.is_empty() {
+                        return evaluate(*resume, environment.with(Value::List(Box::new([]))));
+                    }
+                    Evaluation::Yield {
+                        step: PureStep::NeedAll(requests.into_boxed_slice()),
+                        resume: Box::new(move |resumption| match resumption {
+                            Resumption::Many(values) => {
+                                evaluate(*resume, environment.with(Value::List(values)))
+                            }
+                            Resumption::One(_) => internal("dynamic batch resumed with one value"),
+                        }),
+                    }
+                })
         }),
         BodyExpr::NeedBlob { content, resume } => {
             evaluate(*content, environment.clone()).and_then(move |content| {
@@ -258,7 +252,6 @@ fn evaluate_record(
     environment: Environment,
 ) -> Evaluation<Value> {
     let (names, expressions): (Vec<_>, Vec<_>) = fields
-        .into_vec()
         .into_iter()
         .map(|field| (field.name, field.payload))
         .unzip();
@@ -285,11 +278,7 @@ fn evaluate_match(
     else {
         return internal("validated match received a non-sum value");
     };
-    let Some(arm) = arms
-        .into_vec()
-        .into_iter()
-        .find(|arm| arm.constructor == constructor)
-    else {
+    let Some(arm) = arms.into_iter().find(|arm| arm.constructor == constructor) else {
         return internal("validated match could not find its constructor arm");
     };
     match payload {

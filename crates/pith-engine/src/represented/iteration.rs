@@ -7,7 +7,7 @@ pub(super) fn evaluate_expressions(
     expressions: Box<[BodyExpr]>,
     environment: Environment,
 ) -> Evaluation<Vec<Value>> {
-    continue_expressions(expressions.into_vec().into_iter(), environment, Vec::new())
+    continue_expressions(expressions.into_iter(), environment, Vec::new())
 }
 
 fn continue_expressions(

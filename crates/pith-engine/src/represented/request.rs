@@ -31,7 +31,7 @@ pub(super) fn evaluate_requests<K>(
 where
     K: EffectCategory + Send + 'static,
 {
-    continue_requests(requests.into_vec().into_iter(), environment, Vec::new())
+    continue_requests(requests.into_iter(), environment, Vec::new())
 }
 
 fn continue_requests<K>(
@@ -114,10 +114,9 @@ pub(super) fn yield_many(
     Evaluation::Yield {
         step,
         resume: Box::new(move |resumption| match resumption {
-            Resumption::Many(values) => evaluate(
-                resume,
-                environment.with_all(values.into_vec().into_iter().rev()),
-            ),
+            Resumption::Many(values) => {
+                evaluate(resume, environment.with_all(values.into_iter().rev()))
+            }
             Resumption::One(_) => internal("static batch resumed with one value"),
         }),
     }

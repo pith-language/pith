@@ -103,6 +103,10 @@ the corpus test also carries the round's honest residues as comments: the typed 
 
 ## unresolved
 
+> the two evaluator sentences below aged within the hour: the interpreter landed as the round's
+> follow-on engine commit, and its stability test pins `SortBy`'s committed order — the price is one
+> `Vec::sort_by`, which is stable by contract. the `pith:body-ir` domain stays at v1.
+
 the text-splitting constructor: its semantics (empty fields, adjacency, unclosed delimiters) need a record before either waiting body can spell its parse, and the two bodies that wait for it are the argument for designing it soon.
 
 `SortBy` commits the evaluator to a stable sort algorithm as part of the domain's v1 meaning; the commitment is recorded here and priced by nobody yet, because no evaluator exists. M-12 prices it.

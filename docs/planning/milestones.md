@@ -136,9 +136,12 @@ that cannot.
 
 it follows M-9 so the step vocabulary is closed before the encoding fixes it.
 
-what it still owes is the record's unresolved half: no evaluator ships with it, so M-12 prices `SortBy`'s
-stable-sort commitment, and the text-splitting constructor both waiting bodies need is designed by the
-record that lands it.
+what it still owes is the record's unresolved half: the text-splitting constructor both waiting bodies
+need is designed by the record that lands it. the interpreter was not owed here and arrived anyway, as
+the round's follow-on engine commit — the step machine evaluates represented bodies through the existing
+frame protocol, `E-1218` carries declared failures, and `evaluate_with_content` gives `NeedBlob` the
+synchronous entry point the frontend architecture named, so `SortBy`'s stable-sort commitment is priced
+by test and the domain stays at v1.
 
 ## M-12: the elaborator and the three graph rules
 
