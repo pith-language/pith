@@ -251,6 +251,20 @@ pub enum CanonicalDecodeError {
     UnknownBodyTag {
         tag: u8,
     },
+    UnknownDeclarationKind {
+        kind: u8,
+    },
+    InvalidDeclarationName {
+        name: Box<str>,
+    },
+    DeclarationModuleMismatch {
+        table: Box<str>,
+        declaration: Box<str>,
+    },
+    RecursiveAlias {
+        module: Box<str>,
+        name: Box<str>,
+    },
     /// A type payload arrived in a body position reserved for one kind, such
     /// as a non-sum where `MakeSum` writes its declaration.
     TypeInBodyPosition,
@@ -269,6 +283,9 @@ pub enum CanonicalDecodeError {
     NamesOutOfOrder {
         earlier: Box<str>,
         later: Box<str>,
+    },
+    NonCanonicalOrder {
+        sequence: &'static str,
     },
     NonCanonicalInteger,
 }
@@ -290,6 +307,22 @@ impl std::fmt::Display for CanonicalDecodeError {
             }
             Self::UnknownBodyTag { tag } => {
                 write!(formatter, "unknown canonical body tag {tag}")
+            }
+            Self::UnknownDeclarationKind { kind } => {
+                write!(formatter, "unknown canonical declaration kind {kind}")
+            }
+            Self::InvalidDeclarationName { name } => {
+                write!(formatter, "invalid canonical declaration name `{name}`")
+            }
+            Self::DeclarationModuleMismatch { table, declaration } => write!(
+                formatter,
+                "canonical declaration module `{declaration}` does not match table module `{table}`"
+            ),
+            Self::RecursiveAlias { module, name } => {
+                write!(
+                    formatter,
+                    "canonical alias `{module}.{name}` refers to itself"
+                )
             }
             Self::TypeInBodyPosition => formatter.write_str(
                 "a canonical body holds a type where a specific kind is \
@@ -313,6 +346,9 @@ impl std::fmt::Display for CanonicalDecodeError {
                 formatter,
                 "canonical names are not in strictly ascending order: `{earlier}` then `{later}`"
             ),
+            Self::NonCanonicalOrder { sequence } => {
+                write!(formatter, "canonical {sequence} are not in strict order")
+            }
             Self::NonCanonicalInteger => formatter.write_str(
                 "canonical integer magnitude has a leading zero byte, or is a negative zero",
             ),
