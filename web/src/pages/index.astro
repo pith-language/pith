@@ -163,10 +163,12 @@ const code = `impl ExampleEngine for Engine {
             <h2 class="display sec-title">what runs today</h2>
             <div class="prose">
                 <p>
-                    A working prototype, not a tool for general use. There is no
-                    source language yet, and the command line covers an
-                    evaluation stub and content materialization. What exists is
-                    one vertical slice, deep enough that the parts push back:
+                    A working prototype, not a tool for general use.
+                    Declarations and rule signatures are written as typed
+                    <code>.pi</code> text; rule bodies are still rust, and the
+                    command line covers an evaluation stub and content
+                    materialization. What exists is one vertical slice, deep
+                    enough that the parts push back:
                 </p>
             </div>
             <ul class="runs">
@@ -197,12 +199,19 @@ const code = `impl ExampleEngine for Engine {
                     immutable Linux tree composed from files, users, units, and
                     boot configuration
                 </li>
+                <li>
+                    module surfaces as typed <code>.pi</code> text, one per
+                    domain, whose elaborated declarations agree
+                    digest-for-digest with the rust tables — and whose ABI
+                    digest holds importers' keys still across a comment edit
+                    while a representation change reaches every importer
+                </li>
             </ul>
             <div class="prose">
                 <p>
-                    The declaration artifact is next: the first frontend round,
-                    making the kernel and its domain libraries reachable from
-                    typed <code>.pi</code> declarations.
+                    The IR constructor set is next: the second frontend round,
+                    fixing the vocabulary represented rule bodies will encode
+                    before the encoding freezes it.
                 </p>
             </div>
         </div>

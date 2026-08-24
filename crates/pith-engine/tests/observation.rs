@@ -241,7 +241,13 @@ fn interface(inputs: impl Into<Box<[Type]>>, output: Type) -> Interface {
 fn rule<E: EffectCategory>(label: &str, interface: Interface) -> Rule<E> {
     let identity = RuleIdentity::of_module_declaration("observation-tests", label);
     let revision = RuleRevision::of_manifest(identity, b"observation-tests-v1");
-    Rule::new(revision, label, interface, Span::none())
+    Rule::new(
+        "observation-tests",
+        revision,
+        label,
+        interface,
+        Span::none(),
+    )
 }
 
 fn runtime() -> TokioRuntime {

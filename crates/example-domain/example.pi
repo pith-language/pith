@@ -1,0 +1,8 @@
+nominal Renderer = Blob
+nominal Template = Blob
+nominal Bindings = List<{name: Text, value: Text}>
+nominal Document = Blob
+
+action rule render(Renderer, Template, Bindings) -> Document = host
+
+pure rule "render-entry"(Renderer, Template, Bindings) -> Document = host

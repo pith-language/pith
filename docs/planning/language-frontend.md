@@ -6,7 +6,7 @@ summary: why the frontend is three separable projects, what each is gated on, an
 kind: planning
 status: draft
 created: 2026-08-17
-updated: 2026-08-21
+updated: 2026-08-24
 tags:
   - planning
   - language
@@ -183,8 +183,8 @@ round six, and round five M-14. round seven, migration, stays distributed the wa
 step one inside round one, and the two body migrations as their own rounds after the notation exists.
 
 1. the declaration artifact and [the module surface](module-surface.md). `Declaration::encode_canonical`, a
-   table encoder, the ABI and revision digests, the `.pi` declaration grammar (three forms plus rule
-   signatures plus `= host`), the loader crate, the two-phase intra-module pass. *measured claim:* the four
+   table encoder, the ABI and revision digests, the `.pi` declaration grammar (three forms plus effect-typed
+   rule signatures and `= host`), the loader crate, the two-phase intra-module pass. *measured claim:* the four
    crates' live tables and their `.pi` counterparts agree digest-for-digest, and xylem's nine rule revisions
    are bit-identical before and after. this round also has to fix phloem's lazy declaration table, which
    registers on first use and whose own doc says `registered()` returns "the set the crate has reached, not

@@ -449,6 +449,7 @@ dependencies = [
  "pith-diag",
  "pith-engine",
  "pith-ids",
+ "pith-loader",
  "pith-state-sqlite",
  "pith-store",
  "tempfile",
@@ -902,6 +903,21 @@ dependencies = [
  "blake3",
  "pith-arena",
  "proptest",
+]
+
+[[package]]
+name = "pith-loader"
+version = "0.1.0"
+dependencies = [
+ "phloem",
+ "pith-arena",
+ "pith-core",
+ "pith-diag",
+ "pith-engine",
+ "pith-ids",
+ "proptest",
+ "stele",
+ "xylem",
 ]
 
 [[package]]

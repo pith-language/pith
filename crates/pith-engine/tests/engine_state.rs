@@ -23,6 +23,7 @@ fn pure_computation(declaration: &str, input: i64) -> PureComputationKey {
     let identity = RuleIdentity::of_module_declaration("engine-state-tests", declaration);
     let revision = RuleRevision::of_manifest(identity, b"engine-state-tests-v1");
     let rule = Rule::new(
+        "engine-state-tests",
         revision,
         declaration,
         Interface {

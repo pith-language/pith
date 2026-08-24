@@ -20,7 +20,8 @@ const BUILD: &str = "build";
 /// The digest domain for a description's content identity. NUL-terminated so
 /// it is self-delimiting against the canonical bytes that follow, mirroring
 /// the domain separation `pith-ids` applies to every digest kind it owns.
-const DESCRIPTION_DOMAIN: &[u8] = b"phloem.description-v2\0";
+const DESCRIPTION_DOMAIN: pith_ids::DigestDomain =
+    pith_ids::DigestDomain::new("phloem-description", 2);
 
 /// The declared description type: a closed record over the source-binding
 /// sum and the declared package build.

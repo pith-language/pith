@@ -483,7 +483,13 @@ fn interface(inputs: &[Type], output: Type) -> Interface {
 fn pure_rule(label: &str, interface: Interface) -> Rule<Pure> {
     let identity = RuleIdentity::of_module_declaration("action-and-blob-tests", label);
     let revision = RuleRevision::of_manifest(identity, b"action-and-blob-tests-v1");
-    Rule::<Pure>::new(revision, label, interface, Span::none())
+    Rule::<Pure>::new(
+        "action-and-blob-tests",
+        revision,
+        label,
+        interface,
+        Span::none(),
+    )
 }
 
 fn pure_request(
@@ -497,7 +503,13 @@ fn pure_request(
 fn action_rule(label: &str, interface: Interface) -> Rule<Action> {
     let identity = RuleIdentity::of_module_declaration("action-and-blob-tests", label);
     let revision = RuleRevision::of_manifest(identity, b"action-and-blob-tests-v1");
-    Rule::<Action>::new(revision, label, interface, Span::none())
+    Rule::<Action>::new(
+        "action-and-blob-tests",
+        revision,
+        label,
+        interface,
+        Span::none(),
+    )
 }
 
 fn action_request(

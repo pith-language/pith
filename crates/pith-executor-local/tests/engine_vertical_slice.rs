@@ -145,7 +145,13 @@ where
 {
     let identity = RuleIdentity::of_module_declaration("local-executor-vertical-slice", label);
     let revision = RuleRevision::of_manifest(identity, b"v1");
-    Rule::new(revision, label, interface, Span::none())
+    Rule::new(
+        "local-executor-vertical-slice",
+        revision,
+        label,
+        interface,
+        Span::none(),
+    )
 }
 
 fn request<K>(label: &str, interface: Interface) -> Request<K>

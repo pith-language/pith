@@ -23,7 +23,8 @@ const ORIGIN: &str = "origin";
 const REQUIRES: &str = "requires";
 
 /// The digest domain for a candidate universe's content identity.
-const UNIVERSE_DOMAIN: &[u8] = b"phloem.candidate-universe-v1\0";
+const UNIVERSE_DOMAIN: pith_ids::DigestDomain =
+    pith_ids::DigestDomain::new("phloem-candidate-universe", 1);
 
 /// A requirement one candidate declares on another subject: a range and a
 /// feature set over that subject's coordinates. The requirement is
@@ -47,14 +48,30 @@ pub struct Candidate {
     pub requires: Box<[Requirement]>,
 }
 
-/// The requirement record type: `{domain, package, range, features}`.
-#[must_use]
-pub fn requirement_type() -> Type {
+pub(crate) fn requirement_over(range: &Type) -> Type {
     record_type([
         (FIELD_DOMAIN, Type::Text),
         (FIELD_PACKAGE, Type::Text),
-        (crate::constraint::RANGE_FIELD, range_type()),
+        (crate::constraint::RANGE_FIELD, range.clone()),
         (FIELD_FEATURES, Type::List(Box::new(Type::Text))),
+    ])
+}
+
+/// The requirement record type: `{domain, package, range, features}`.
+#[must_use]
+pub fn requirement_type() -> Type {
+    requirement_over(&range_type())
+}
+
+pub(crate) fn candidate_over(source: &Type, origin: &Type, requirement: &Type) -> Type {
+    record_type([
+        (FIELD_DOMAIN, Type::Text),
+        (FIELD_PACKAGE, Type::Text),
+        (FIELD_VERSION, Type::Text),
+        (FIELD_FEATURES, Type::List(Box::new(Type::Text))),
+        (PROVENANCE, source.clone()),
+        (ORIGIN, origin.clone()),
+        (REQUIRES, Type::List(Box::new(requirement.clone()))),
     ])
 }
 
@@ -62,15 +79,7 @@ pub fn requirement_type() -> Type {
 /// provenance, origin, requires}`.
 #[must_use]
 pub fn candidate_type() -> Type {
-    record_type([
-        (FIELD_DOMAIN, Type::Text),
-        (FIELD_PACKAGE, Type::Text),
-        (FIELD_VERSION, Type::Text),
-        (FIELD_FEATURES, Type::List(Box::new(Type::Text))),
-        (PROVENANCE, source_type()),
-        (ORIGIN, origin_type()),
-        (REQUIRES, Type::List(Box::new(requirement_type()))),
-    ])
+    candidate_over(&source_type(), &origin_type(), &requirement_type())
 }
 
 /// The candidate-universe type: a canonically sorted list of candidates.

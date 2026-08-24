@@ -1,4 +1,4 @@
-use pith_core::{Type, Value};
+use pith_core::{DeclarationTable, Type, Value};
 use pith_diag::PithResult;
 use pith_engine::ExecutionPlatform;
 use pith_ids::ContentId;
@@ -123,10 +123,13 @@ const BUILT_FROM: &str = "built-from";
 const BINARY: &str = "binary";
 const AUTHORIZED_BY: &str = "authorized-by";
 
-/// Returns the declared substitution record type.
 #[must_use]
 pub fn substitution_type() -> Type {
-    record_type([
+    crate::declarations::declared_type(SUBSTITUTION)
+}
+
+pub(crate) fn declare(table: &mut DeclarationTable, origin: &Type) -> Type {
+    let substitution = record_type([
         (FIELD_DOMAIN, Type::Text),
         (FIELD_PACKAGE, Type::Text),
         (FIELD_VERSION, Type::Text),
@@ -136,8 +139,15 @@ pub fn substitution_type() -> Type {
         (FIELD_ARCHITECTURE, Type::Text),
         (FIELD_TOOLCHAIN, xylem::types::toolchain_type()),
         (BINARY, Type::Blob),
-        (AUTHORIZED_BY, crate::lock::origin_type()),
-    ])
+        (AUTHORIZED_BY, origin.clone()),
+    ]);
+    match table.alias(
+        &crate::declarations::declared_name(SUBSTITUTION),
+        substitution,
+    ) {
+        Ok(declared) => declared,
+        Err(error) => unreachable!("phloem declares `{SUBSTITUTION}` once: {error}"),
+    }
 }
 
 impl Admitted {

@@ -6,7 +6,7 @@ summary: three layers from a bare name to bytes, sources as routes rather than i
 kind: planning
 status: draft
 created: 2026-08-17
-updated: 2026-08-17
+updated: 2026-08-24
 tags:
   - planning
   - language
@@ -47,7 +47,7 @@ use xylem = pith/xylem >=1.4,<2.0
 ```
 import xylem
 nominal Greeting = Text
-rule build(tc: xylem.Toolchain, src: xylem.CSource) -> xylem.Executable = host
+pure rule build(tc: xylem.Toolchain, src: xylem.CSource) -> xylem.Executable = host
 ```
 
 `nominal X = Text` is 0026's own spelling; the `rule` line is `design/rules-and-graph.md:27`'s, treated as

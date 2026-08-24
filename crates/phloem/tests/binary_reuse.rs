@@ -111,6 +111,7 @@ fn fixture_link_rule() -> Rule<Pure> {
 fn fixture_rule(name: &str, interface: pith_core::Interface) -> Rule<Pure> {
     let identity = RuleIdentity::of_module_declaration("phloem-fixture", name);
     Rule::<Pure>::new(
+        "phloem-fixture",
         RuleRevision::of_manifest(identity, b"phloem-fixture-v1"),
         name,
         interface,

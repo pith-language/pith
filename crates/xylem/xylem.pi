@@ -1,0 +1,26 @@
+nominal Toolchain = Text
+nominal CSource = Blob
+nominal Object = Blob
+nominal Executable = Blob
+nominal Depfile = Blob
+nominal TestReport = Bool
+
+-- Discovers source dependencies within the provided header universe.
+action rule discover(Toolchain, CSource, List<{path: Text, content: Blob}>) -> Depfile = host
+
+action rule compile(Toolchain, CSource, List<Text>, List<{path: Text, content: Blob}>) -> Object = host
+
+action rule link(Toolchain, List<Object>) -> Executable = host
+
+action rule generate(Toolchain, Executable) -> CSource = host
+
+-- Runs a built executable with its toolchain closure and reports its verdict.
+action rule test(Toolchain, Executable) -> TestReport = host
+
+pure rule "compile-entry"(Toolchain, CSource, List<{path: Text, content: Blob}>) -> Object = host
+
+pure rule "link-entry"(Toolchain, List<Object>) -> Executable = host
+
+pure rule "generate-entry"(Toolchain, Executable) -> CSource = host
+
+pure rule "test-entry"(Toolchain, Executable) -> TestReport = host

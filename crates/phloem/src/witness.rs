@@ -6,18 +6,13 @@
 //! path. Checkpoint signature verification is outside this module.
 
 use pith_diag::PithResult;
-use pith_ids::ContentDigest;
+use pith_ids::{ContentDigest, DigestDomain};
 
 use crate::codec::digest_from_hex;
 use crate::diag;
 
-/// The digest domain for one leaf: a binding line. NUL-terminated so it is
-/// self-delimiting against the record that follows, on the pattern
-/// `pith-ids` applies to every digest kind it owns.
-const LEAF_DOMAIN: &[u8] = b"phloem.log-leaf-v1\0";
-
-/// The digest domain for one interior node over exactly two children.
-const NODE_DOMAIN: &[u8] = b"phloem.log-node-v1\0";
+const LEAF_DOMAIN: DigestDomain = DigestDomain::new("phloem-log-leaf", 1);
+const NODE_DOMAIN: DigestDomain = DigestDomain::new("phloem-log-node", 1);
 
 /// A log's signed-tree-head shape: which log this is, how many records it
 /// holds, and the root hash committing to them. The name follows Go's
@@ -81,16 +76,14 @@ pub struct Inclusion {
 /// One leaf's hash: the record's bytes under the leaf domain.
 #[must_use]
 pub fn leaf_hash(record: &[u8]) -> ContentDigest {
-    let mut leaf = LEAF_DOMAIN.to_vec();
-    leaf.extend_from_slice(record);
-    ContentDigest::of_bytes(&leaf)
+    LEAF_DOMAIN.digest(record)
 }
 
 fn node_hash(left: &ContentDigest, right: &ContentDigest) -> ContentDigest {
-    let mut node = NODE_DOMAIN.to_vec();
+    let mut node = Vec::with_capacity(pith_ids::DIGEST_LEN.saturating_mul(2));
     node.extend_from_slice(left.as_bytes());
     node.extend_from_slice(right.as_bytes());
-    ContentDigest::of_bytes(&node)
+    NODE_DOMAIN.digest(&node)
 }
 
 fn digest_of(text: &str) -> Option<ContentDigest> {

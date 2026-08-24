@@ -29,6 +29,10 @@ fn bounded_string(max: usize) -> impl Strategy<Value = String> {
     proptest::collection::vec(any::<char>(), 0..max).prop_map(|cs| cs.into_iter().collect())
 }
 
+fn declaration_name() -> impl Strategy<Value = String> {
+    bounded_string(15).prop_map(|name| format!("n{}", name.replace('.', "_")))
+}
+
 /// Ascending, duplicate-free field names, so generated records satisfy the
 /// closed-record shape without a filter that would skew generation.
 const FIELD_NAMES: [&str; 3] = ["alpha", "beta", "gamma"];
@@ -52,7 +56,7 @@ fn type_strategy() -> impl Strategy<Value = Type> {
         Just(Type::Text),
         Just(Type::Bytes),
         Just(Type::Blob),
-        bounded_string(16).prop_map(|name| declared_nominal(&name, Type::Blob)),
+        declaration_name().prop_map(|name| declared_nominal(&name, Type::Blob)),
         leaf_type_strategy().prop_map(|element| Type::List(Box::new(element))),
         // Field names come from the fixed ascending alphabet above, so the
         // slice already satisfies the closed-record shape and goes straight
@@ -60,7 +64,7 @@ fn type_strategy() -> impl Strategy<Value = Type> {
         proptest::collection::vec(leaf_type_strategy(), 0..3)
             .prop_map(|payloads| Type::Record(record_fields(payloads).into())),
         (
-            bounded_string(16),
+            declaration_name(),
             proptest::option::of(leaf_type_strategy())
         )
             .prop_map(|(name, payload)| declared_sum(
@@ -84,17 +88,17 @@ fn leaf_type_strategy() -> impl Strategy<Value = Type> {
         Just(Type::Text),
         Just(Type::Bytes),
         Just(Type::Blob),
-        bounded_string(16).prop_map(|name| declared_nominal(&name, Type::Blob)),
+        declaration_name().prop_map(|name| declared_nominal(&name, Type::Blob)),
         // The recursion cut, so the generated population reaches the tag rather
         // than only the hand-written fixtures (decision 0047).
         Just(Type::Cut),
         // A nominal over something other than `Blob`, so the declared
         // representation varies and the codec has to carry it rather than
         // guessing.
-        bounded_string(16)
+        declaration_name()
             .prop_map(|name| declared_nominal(&name, Type::List(Box::new(Type::Text)))),
         // A recursive nominal, whose body reaches its own cut.
-        bounded_string(16)
+        declaration_name()
             .prop_map(|name| declared_nominal(&name, Type::List(Box::new(Type::Cut)))),
     ]
 }

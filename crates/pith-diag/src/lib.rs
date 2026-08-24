@@ -174,6 +174,19 @@ impl StableCode {
     pub const fn compose(code: u32) -> Self {
         Self(2000 + code)
     }
+
+    /// Reserve a code in the stable 3000-based frontend namespace, which the
+    /// language surface's lexer, parser, and elaborator occupy. Codes are
+    /// allocated by the frontend crates that own the diagnostics, never
+    /// renumbered, only appended, on the same terms as the engine namespace.
+    #[doc(hidden)]
+    #[allow(
+        clippy::arithmetic_side_effects,
+        reason = "frontend diagnostic codes occupy the stable 3000-based namespace"
+    )]
+    pub const fn frontend(code: u32) -> Self {
+        Self(3000 + code)
+    }
 }
 
 /// Named engine diagnostic codes. The discriminant is the stable `n` in

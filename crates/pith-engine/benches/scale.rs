@@ -365,7 +365,13 @@ fn root_interface() -> Interface {
 fn rule(label: &str, signature: Interface) -> Rule<Pure> {
     let identity = RuleIdentity::of_module_declaration("pith-engine.scale-bench", label);
     let revision = RuleRevision::of_manifest(identity, b"scale-bench-v1");
-    Rule::<Pure>::new(revision, label, signature, Span::none())
+    Rule::<Pure>::new(
+        "pith-engine.scale-bench",
+        revision,
+        label,
+        signature,
+        Span::none(),
+    )
 }
 
 fn request(label: &str, signature: Interface, inputs: impl Into<Box<[Value]>>) -> Request<Pure> {

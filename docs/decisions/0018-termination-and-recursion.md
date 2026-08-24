@@ -6,7 +6,7 @@ summary: the pure language fragment has no general recursion; repetition goes th
 kind: decision
 status: proposed
 created: 2026-04-22
-updated: 2026-08-21
+updated: 2026-08-24
 tags:
   - language
   - evaluation
@@ -22,6 +22,8 @@ relations:
 ---
 
 # total pure evaluation by construction, with cycle detection and a backstop limit
+
+> amended by [0061](0061-the-declaration-artifact.md): the host escape hatch is visible at the rule declaration, not at each call site.
 
 ## context
 
@@ -39,7 +41,7 @@ this makes the empty-cache equivalence hold by construction for the pure fragmen
 
 a recursion or step limit exists only as a backstop on the impure paths, the bounded actions, observations, and mutations where work cannot be statically bounded. it is generous, it points at the runaway when it triggers, and it is never the primary defense against non-termination in pure code.
 
-the escape hatch for cases that genuinely cannot be expressed is a visibly distinct construct, not a hidden flag that relaxes totality elsewhere. it stays marked at the call site, and its presence in provenance is obvious.
+the escape hatch for cases that genuinely cannot be expressed is a visibly distinct construct, not a hidden flag that relaxes totality elsewhere. it is marked by `= host` at the rule declaration. calls retain the rule coordinate and revision, so provenance identifies the boundary without repeating its tier at every call site.
 
 ## alternatives considered
 

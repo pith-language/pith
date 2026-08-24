@@ -36,6 +36,7 @@ fn rule<K: pith_core::EffectCategory>(label: &str, output: Type) -> Rule<K> {
     let identity = RuleIdentity::of_module_declaration("run-bound-tests", label);
     let revision = RuleRevision::of_manifest(identity, b"run-bound-tests-v1");
     Rule::new(
+        "run-bound-tests",
         revision,
         label,
         Interface {

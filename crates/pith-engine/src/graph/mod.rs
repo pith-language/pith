@@ -490,6 +490,7 @@ mod tests {
         let identity = RuleIdentity::of_module_declaration("engine-graph-tests", label);
         let revision = RuleRevision::of_manifest(identity, b"engine-graph-tests-v1");
         Rule::new(
+            "engine-graph-tests",
             revision,
             label,
             Interface {

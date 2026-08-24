@@ -6,7 +6,7 @@ summary: a module publishes its declarations and rule signatures as pi text, the
 kind: planning
 status: draft
 created: 2026-08-18
-updated: 2026-08-18
+updated: 2026-08-24
 tags:
   - planning
   - language
@@ -98,8 +98,9 @@ from the IR, full stop, and this table is the only place it can come from.
 
 ## the host tier, and how a rule migrates
 
-a rule declaration carries a tier. `= host` marks a rust body; a represented body replaces it on the same
-declaration.
+a rule declaration prefixes its effect category. its body position carries the implementation tier:
+`= host` marks a rust body, and a represented body replaces it on the same declaration. [0061](../decisions/0061-the-declaration-artifact.md)
+records the exact grammar and artifact boundary.
 
 the temptation here is lean's `@[extern]`, where the surface body is "the logical model" and the native
 symbol is an override, so migration is deleting the override with no identity change and no revision

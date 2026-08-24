@@ -29,7 +29,8 @@ pub use self::file::{lock_path, record_path, render};
 pub use self::resolve::{Offer, Realized, Refused};
 
 /// Digest domain for environment document values.
-const ENVIRONMENT_DOMAIN: &[u8] = b"phloem.environment-v1\0";
+const ENVIRONMENT_DOMAIN: pith_ids::DigestDomain =
+    pith_ids::DigestDomain::new("phloem-environment", 1);
 
 /// The environment whose lock is the repository's default written lock.
 pub const DEFAULT_ENVIRONMENT: &str = "default";

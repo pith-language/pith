@@ -1,0 +1,47 @@
+-- The body of one file entry: stored content with a mode, or a symlink to a
+-- target the tree records verbatim.
+sum FileBody = file({content: Blob, executable: Bool}) | symlink({target: Text})
+
+-- A path-sorted set of file and symlink entries, 0040's keyed spelling.
+nominal FileSet = List<{path: Text, body: FileBody}>
+
+-- A name-sorted table of user accounts.
+nominal UserTable = List<{name: Text, uid: Int, gid: Int, home: Text, shell: Text}>
+
+-- One service unit, composed from the fragments that declare pieces of it.
+nominal "Unit" = {name: Text, description: Text, exec: Text, after: List<Text>, wants: List<Text>}
+
+-- The closed set of merge behaviors a policy can name for a field.
+sum FieldBehavior = agree | concat
+
+-- The declared merge policy for a unit's fields.
+nominal UnitPolicy = List<{field: Text, behavior: FieldBehavior}>
+
+-- The host programs an assembly runs, as declared inputs on 0030's terms.
+nominal Tools = {shell: Text, mkdir: Text, cat: Text, chmod: Text, ln: Text, closure: List<Text>}
+
+-- The machine a boot entry describes.
+nominal Boot = {machine: Text, kernel: Text, initrd: Text}
+
+-- The three rendered texts and the composed artifact.
+nominal UnitText = Text
+nominal PasswdText = Text
+nominal BootText = Text
+nominal SystemTree = Blob
+
+pure rule "compose-etc"(List<{owner: Text, files: FileSet}>) -> FileSet = host
+
+pure rule "compose-users"(List<{owner: Text, users: UserTable}>) -> UserTable = host
+
+-- Merges unit contributions under an explicit field policy and replacement set.
+pure rule "compose-unit"(UnitPolicy, List<{owner: Text, unit: "Unit"}>, List<{field: Text, "expected-owner": Text, value: Text}>) -> "Unit" = host
+
+pure rule "render-unit"("Unit") -> UnitText = host
+
+pure rule "render-passwd"(UserTable) -> PasswdText = host
+
+pure rule "render-boot"(Boot) -> BootText = host
+
+action rule assemble(Tools, Text, Text, FileSet, UnitText, PasswdText, BootText) -> SystemTree = host
+
+pure rule "compose-system"(Tools, Boot, List<{owner: Text, files: FileSet}>, List<{owner: Text, users: UserTable}>, UnitPolicy, List<{owner: Text, unit: "Unit"}>, List<{field: Text, "expected-owner": Text, value: Text}>) -> SystemTree = host

@@ -11,7 +11,7 @@ use smallvec::SmallVec;
 use std::marker::PhantomData;
 
 use crate::{
-    Action, EffectCategory, Observation, Pure, Type, Value,
+    Action, Coordinate, EffectCategory, Observation, Pure, Type, Value,
     manifest::encode_length,
     value_codec::{encode_type_payload, encode_value_payload},
 };
@@ -51,12 +51,19 @@ pub struct Request<K: EffectCategory = Pure> {
 
 #[derive(Clone, Debug)]
 pub struct Rule<K: EffectCategory = Pure> {
+    pub coordinate: Coordinate,
+    pub tier: RuleTier,
     pub identity: RuleIdentity,
     pub revision: RuleRevision,
     pub label: Box<str>,
     pub interface: Interface,
     pub span: Span,
     effect: PhantomData<fn() -> K>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum RuleTier {
+    Host,
 }
 
 /// Persistent identity for a pure rule application over the current semantic
@@ -279,43 +286,26 @@ impl<K: EffectCategory> Request<K> {
 
 impl<K: EffectCategory> Rule<K> {
     pub fn new(
+        module: impl Into<Box<str>>,
         revision: RuleRevision,
         label: impl Into<Box<str>>,
         interface: Interface,
         span: Span,
     ) -> Self {
+        let label = label.into();
         Self {
+            coordinate: Coordinate::new(module, label.clone()),
+            tier: RuleTier::Host,
             identity: revision.rule_identity(),
             revision,
-            label: label.into(),
+            label,
             interface,
             span,
             effect: PhantomData,
         }
     }
 
-    /// A rule declared at `module`.`label`, with its revision derived from the
-    /// declarations `interface` names (decision 0047).
-    ///
-    /// This is the constructor a library should use. It replaces a hand-bumped
-    /// revision manifest — the "manual semantic version only" alternative 0023
-    /// rejected and every domain library nonetheless shipped — with a derivation
-    /// over the interface. Changing a nominal type's representation moves the
-    /// revision of every rule whose interface names it, with no author edit;
-    /// changing an unrelated declaration moves nothing.
-    ///
-    /// The interface cannot see a host-tier rule *body* that changes while it and
-    /// every declaration in it stay fixed, which is why `body` is the second
-    /// input and not a convenience: decision 0023 asks for both halves, and says
-    /// an implementation-local version "can be one revision-manifest input, but
-    /// it is not the only input for rust-hosted code."
-    ///
-    /// So the two halves cover the two ways a rule's meaning moves. An interface
-    /// or declaration change is automatic. A body change is an explicit bump of
-    /// `body`, per rule — which is what the retired per-library constants got
-    /// wrong in the other direction: one edit moved every rule in the library.
-    /// The bump stops being the author's job when 0038's represented tier lands
-    /// and a body's revision derives from canonical ir.
+    /// Construct a host rule whose revision covers its body revision and interface.
     pub fn declared(
         module: &str,
         label: &str,
@@ -323,9 +313,12 @@ impl<K: EffectCategory> Rule<K> {
         interface: Interface,
         span: Span,
     ) -> Self {
+        let coordinate = Coordinate::new(module, label);
         let identity = RuleIdentity::of_module_declaration(module, label);
         let revision = RuleRevision::of_manifest(identity, &revision_manifest(body, &interface));
         Self {
+            coordinate,
+            tier: RuleTier::Host,
             identity,
             revision,
             label: label.into(),
@@ -336,33 +329,10 @@ impl<K: EffectCategory> Rule<K> {
     }
 }
 
-/// The author-maintained half of a rule's revision: a number the author bumps
-/// when the rule's body changes in a way that could change a result
-/// (decision 0023).
-///
-/// Per rule rather than per library. The declaration half of the revision is
-/// derived and needs no bump, so this moves only for what the derivation cannot
-/// see, and moving it invalidates one rule instead of every rule beside it.
+/// The author-maintained revision of a host rule body.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct BodyRevision(pub u32);
 
-/// The revision manifest for a rule declared over `interface` at `body`.
-///
-/// Two inputs: the author's body revision, and the canonical interface encoding.
-///
-/// Decision 0047 specifies this as the interface encoding *plus* the sorted
-/// digests of every declaration that encoding reaches. The second half is
-/// redundant under the first half of the same record: because a nominal or sum
-/// type carries its declaration rather than a bare coordinate, the encoding
-/// already contains every declaration body the interface reaches, so no
-/// declaration change can move a digest without moving the encoding, and no
-/// encoding is reachable from two different declaration sets. Adding the digests
-/// would be a second mechanism for one concern, which the principles forbid.
-///
-/// If a later record moves to ambient table resolution — the alternative 0047
-/// considered and rejected, where a type carries a bare coordinate — the digest
-/// half becomes load-bearing and this manifest has to grow it. Under 0048 that is
-/// a digest-domain bump rather than a silent basis change.
 fn revision_manifest(body: BodyRevision, interface: &Interface) -> Vec<u8> {
     let mut manifest = body.0.to_le_bytes().to_vec();
     encode_interface(&mut manifest, interface);
@@ -612,7 +582,13 @@ mod tests {
     fn rule(label: &str, interface: Interface) -> Rule {
         let identity = RuleIdentity::of_module_declaration("pith-core.rule-tests", label);
         let revision = RuleRevision::of_manifest(identity, b"rule-tests-provider-v1");
-        Rule::new(revision, label, interface, Span::none())
+        Rule::new(
+            "pith-core.rule-tests",
+            revision,
+            label,
+            interface,
+            Span::none(),
+        )
     }
 
     fn request(label: &str, interface: Interface, inputs: impl Into<Box<[Value]>>) -> Request {
@@ -629,12 +605,14 @@ mod tests {
         let identity = RuleIdentity::of_module_declaration("example.module", "provider");
         let revision = RuleRevision::of_manifest(identity, b"provider-v1");
         let first_rule = Rule::new(
+            "example.module",
             revision,
             "first diagnostic label",
             signature.clone(),
             Span::none(),
         );
         let second_rule = Rule::new(
+            "example.module",
             revision,
             "second diagnostic label",
             signature.clone(),
@@ -677,12 +655,14 @@ mod tests {
         let signature = interface([], Type::Int);
         let identity = RuleIdentity::of_module_declaration("example.module", "provider");
         let first = Rule::new(
+            "example.module",
             RuleRevision::of_manifest(identity, b"provider-v1"),
             "provider",
             signature.clone(),
             Span::none(),
         );
         let second = Rule::new(
+            "example.module",
             RuleRevision::of_manifest(identity, b"provider-v2"),
             "provider",
             signature.clone(),
@@ -700,7 +680,13 @@ mod tests {
     fn action_rule(label: &str, interface: Interface) -> Rule<Action> {
         let identity = RuleIdentity::of_module_declaration("pith-core.rule-tests", label);
         let revision = RuleRevision::of_manifest(identity, b"rule-tests-provider-v1");
-        Rule::new(revision, label, interface, Span::none())
+        Rule::new(
+            "pith-core.rule-tests",
+            revision,
+            label,
+            interface,
+            Span::none(),
+        )
     }
 
     fn action_request(
@@ -718,7 +704,13 @@ mod tests {
     fn observation_rule(label: &str, interface: Interface) -> Rule<Observation> {
         let identity = RuleIdentity::of_module_declaration("pith-core.rule-tests", label);
         let revision = RuleRevision::of_manifest(identity, b"rule-tests-observation-v1");
-        Rule::new(revision, label, interface, Span::none())
+        Rule::new(
+            "pith-core.rule-tests",
+            revision,
+            label,
+            interface,
+            Span::none(),
+        )
     }
 
     #[test]
@@ -727,12 +719,14 @@ mod tests {
         let identity = RuleIdentity::of_module_declaration("example.module", "compile");
         let revision = RuleRevision::of_manifest(identity, b"compile-v1");
         let first_rule = Rule::new(
+            "example.module",
             revision,
             "first diagnostic label",
             signature.clone(),
             Span::none(),
         );
         let second_rule = Rule::new(
+            "example.module",
             revision,
             "second diagnostic label",
             signature.clone(),
@@ -785,10 +779,20 @@ mod tests {
         let signature = interface([Type::Int], Type::Text);
         let identity = RuleIdentity::of_module_declaration("example.module", "provider");
         let revision = RuleRevision::of_manifest(identity, b"provider-v1");
-        let pure_rule: Rule<Pure> =
-            Rule::new(revision, "provider", signature.clone(), Span::none());
-        let action_rule: Rule<Action> =
-            Rule::new(revision, "provider", signature.clone(), Span::none());
+        let pure_rule: Rule<Pure> = Rule::new(
+            "example.module",
+            revision,
+            "provider",
+            signature.clone(),
+            Span::none(),
+        );
+        let action_rule: Rule<Action> = Rule::new(
+            "example.module",
+            revision,
+            "provider",
+            signature.clone(),
+            Span::none(),
+        );
         let pure_request = request("value", signature.clone(), [Value::int(7)]);
         let action_request = action_request("value", signature, [Value::int(7)]);
 

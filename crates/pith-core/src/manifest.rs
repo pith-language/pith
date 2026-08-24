@@ -4,7 +4,6 @@
 //! fields are encoded as a little-endian `u64` length followed by the raw bytes,
 //! so two manifests that differ only by field boundaries cannot collide. This
 //! is the single implementation of that primitive for `pith-core`; both
-//! [`crate::rule`] and [`crate::action`] manifests are built from it.
 
 /// Append a little-endian `u64` length to `manifest`.
 pub fn encode_length(manifest: &mut Vec<u8>, length: usize) {
@@ -42,7 +41,6 @@ mod tests {
 
     #[test]
     fn distinct_lengths_keep_distinct_boundaries() {
-        // The whole point of length-prefixing: (b"ab", b"c") != (b"a", b"bc").
         let mut left = Vec::new();
         encode_bytes(&mut left, b"ab");
         encode_bytes(&mut left, b"c");

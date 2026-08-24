@@ -6,7 +6,7 @@ summary: the smallest shared substrate needed by every domain library
 kind: design
 status: proposed
 created: 2026-04-03
-updated: 2026-04-03
+updated: 2026-08-24
 tags:
   - architecture
   - kernel
@@ -40,7 +40,7 @@ putting less in the kernel would force libraries to build incompatible dependenc
 ## kernel responsibilities
 
 - typed immutable values and their canonical boundary representation
-- module and interface linkage
+- canonical declared types and typed rule interfaces
 - typed requests and deterministic rule resolution
 - dynamic dependency tracking
 - incremental evaluation, concurrency, cancellation, and caching
@@ -59,11 +59,10 @@ the kernel can provide protocols these libraries use. it should not choose one p
 
 libraries define types, rules, effects, capabilities, planners, and adapters through public interfaces. first-party libraries use the same interfaces.
 
-there is no global mutable plugin registry. imports and typed provider selection determine which implementations are available. ambiguity is an error with an explanation.
+there is no global mutable plugin registry. the loader resolves explicit imports before the kernel receives declarations and rules. typed provider selection determines which registered implementation answers a request; ambiguity is an error with an explanation.
 
 ## design test
 
 a new domain such as an FPGA toolchain, scientific workflow, firmware manager, or documentation system should be implementable without a core patch.
 
 if it needs new universal effect semantics or a correctness invariant shared by every domain, a kernel change may be justified. if it only needs a new domain noun, the library interface is the right place.
-
