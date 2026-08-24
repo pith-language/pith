@@ -262,10 +262,8 @@ impl BodyExpr {
     ) -> Result<Self, crate::DuplicateNameError> {
         let mut fields = fields.into();
         fields.sort_by(|left, right| left.name.cmp(&right.name));
-        for pair in fields.windows(2) {
-            if let [earlier, later] = pair
-                && earlier.name == later.name
-            {
+        for [earlier, later] in fields.array_windows::<2>() {
+            if earlier.name == later.name {
                 return Err(crate::DuplicateNameError {
                     name: earlier.name.clone(),
                 });
@@ -768,10 +766,8 @@ fn infer_record(
     binders: &mut Vec<Inferred>,
     depth: u32,
 ) -> Result<Inferred, BodyError> {
-    for pair in fields.windows(2) {
-        if let [earlier, later] = pair
-            && earlier.name.as_ref() >= later.name.as_ref()
-        {
+    for [earlier, later] in fields.array_windows::<2>() {
+        if earlier.name.as_ref() >= later.name.as_ref() {
             return Err(BodyError::FieldsOutOfOrder {
                 earlier: earlier.name.clone(),
                 later: later.name.clone(),
@@ -801,10 +797,8 @@ fn infer_match(
     depth: u32,
 ) -> Result<Inferred, BodyError> {
     let spelling = sum.coordinate.spelling();
-    for pair in arms.windows(2) {
-        if let [earlier, later] = pair
-            && earlier.constructor.as_ref() >= later.constructor.as_ref()
-        {
+    for [earlier, later] in arms.array_windows::<2>() {
+        if earlier.constructor.as_ref() >= later.constructor.as_ref() {
             return Err(BodyError::ArmsOutOfOrder {
                 earlier: earlier.constructor.clone(),
                 later: later.constructor.clone(),

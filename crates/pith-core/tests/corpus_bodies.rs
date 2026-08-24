@@ -46,26 +46,54 @@ const NAMED: &[(&str, &str)] = &[
 // ---------------------------------------------------------------------------
 
 mod xylem {
+    use std::sync::OnceLock;
+
     use super::*;
 
-    pub fn toolchain() -> Type {
-        nominal("Toolchain", Type::Text)
-    }
-    pub fn c_source() -> Type {
-        nominal("CSource", Type::Blob)
-    }
-    pub fn object() -> Type {
-        nominal("Object", Type::Blob)
-    }
-    pub fn executable() -> Type {
-        nominal("Executable", Type::Blob)
-    }
-    pub fn test_report() -> Type {
-        nominal("TestReport", Type::Bool)
+    /// The domain's own shape: one table behind a `OnceLock`, each type named
+    /// once and derived from it.
+    struct Declarations {
+        toolchain: Type,
+        c_source: Type,
+        object: Type,
+        executable: Type,
+        test_report: Type,
     }
 
-    fn nominal(name: &str, representation: Type) -> Type {
-        declared("xylem", name, representation)
+    fn declarations() -> &'static Declarations {
+        static DECLARATIONS: OnceLock<Declarations> = OnceLock::new();
+        DECLARATIONS.get_or_init(|| {
+            let mut table = DeclarationTable::new("xylem");
+            fn nominal(table: &mut DeclarationTable, name: &str, representation: Type) -> Type {
+                match table.nominal(name, representation) {
+                    Ok(declared) => declared,
+                    Err(error) => unreachable!("xylem declares each name once: {error}"),
+                }
+            }
+            Declarations {
+                toolchain: nominal(&mut table, "Toolchain", Type::Text),
+                c_source: nominal(&mut table, "CSource", Type::Blob),
+                object: nominal(&mut table, "Object", Type::Blob),
+                executable: nominal(&mut table, "Executable", Type::Blob),
+                test_report: nominal(&mut table, "TestReport", Type::Bool),
+            }
+        })
+    }
+
+    pub fn toolchain() -> Type {
+        declarations().toolchain.clone()
+    }
+    pub fn c_source() -> Type {
+        declarations().c_source.clone()
+    }
+    pub fn object() -> Type {
+        declarations().object.clone()
+    }
+    pub fn executable() -> Type {
+        declarations().executable.clone()
+    }
+    pub fn test_report() -> Type {
+        declarations().test_report.clone()
     }
 
     /// `{path: Text, content: Blob}`, the header shape a compile request
@@ -104,29 +132,149 @@ mod xylem {
 }
 
 mod stele {
+    use std::sync::OnceLock;
+
     use super::*;
 
+    /// The domain's own shape, as in the xylem mirror above.
+    struct Declarations {
+        file_body: Type,
+        file_set: Type,
+        user_table: Type,
+        unit: Type,
+        field_behavior: Type,
+        unit_policy: Type,
+        tools: Type,
+        boot: Type,
+        unit_text: Type,
+        passwd_text: Type,
+        boot_text: Type,
+        system_tree: Type,
+    }
+
+    fn declarations() -> &'static Declarations {
+        static DECLARATIONS: OnceLock<Declarations> = OnceLock::new();
+        DECLARATIONS.get_or_init(|| {
+            let mut table = DeclarationTable::new("stele");
+            fn nominal(table: &mut DeclarationTable, name: &str, representation: Type) -> Type {
+                match table.nominal(name, representation) {
+                    Ok(declared) => declared,
+                    Err(error) => unreachable!("stele declares each name once: {error}"),
+                }
+            }
+            fn sum(
+                table: &mut DeclarationTable,
+                name: &str,
+                constructors: &[(&str, Option<Type>)],
+            ) -> Type {
+                let constructors: Box<[SumConstructor]> = constructors
+                    .iter()
+                    .map(|(constructor, payload)| SumConstructor {
+                        name: (*constructor).into(),
+                        payload: payload.clone(),
+                    })
+                    .collect();
+                match table.sum(name, constructors) {
+                    Ok(declared) => declared,
+                    Err(error) => unreachable!("stele declares each name once: {error}"),
+                }
+            }
+            let file_record = record_type(&[("content", Type::Blob), ("executable", Type::Bool)]);
+            let link_record = record_type(&[("target", Type::Text)]);
+            let file_body = sum(
+                &mut table,
+                "FileBody",
+                &[("file", Some(file_record)), ("symlink", Some(link_record))],
+            );
+            let file_set = nominal(
+                &mut table,
+                "FileSet",
+                list(record_type(&[
+                    ("body", file_body.clone()),
+                    ("path", Type::Text),
+                ])),
+            );
+            let user_table = nominal(
+                &mut table,
+                "UserTable",
+                list(record_type(&[
+                    ("gid", Type::Int),
+                    ("home", Type::Text),
+                    ("name", Type::Text),
+                    ("shell", Type::Text),
+                    ("uid", Type::Int),
+                ])),
+            );
+            let unit = nominal(
+                &mut table,
+                "Unit",
+                record_type(&[
+                    ("after", list(Type::Text)),
+                    ("description", Type::Text),
+                    ("exec", Type::Text),
+                    ("name", Type::Text),
+                    ("wants", list(Type::Text)),
+                ]),
+            );
+            let field_behavior = sum(
+                &mut table,
+                "FieldBehavior",
+                &[("agree", None), ("concat", None)],
+            );
+            let unit_policy = nominal(
+                &mut table,
+                "UnitPolicy",
+                list(record_type(&[
+                    ("behavior", field_behavior.clone()),
+                    ("field", Type::Text),
+                ])),
+            );
+            let tools = nominal(
+                &mut table,
+                "Tools",
+                record_type(&[
+                    ("cat", Type::Text),
+                    ("chmod", Type::Text),
+                    ("closure", list(Type::Text)),
+                    ("ln", Type::Text),
+                    ("mkdir", Type::Text),
+                    ("shell", Type::Text),
+                ]),
+            );
+            let boot = nominal(
+                &mut table,
+                "Boot",
+                record_type(&[
+                    ("initrd", Type::Text),
+                    ("kernel", Type::Text),
+                    ("machine", Type::Text),
+                ]),
+            );
+            Declarations {
+                file_set,
+                user_table,
+                unit,
+                unit_policy,
+                tools,
+                boot,
+                unit_text: nominal(&mut table, "UnitText", Type::Text),
+                passwd_text: nominal(&mut table, "PasswdText", Type::Text),
+                boot_text: nominal(&mut table, "BootText", Type::Text),
+                system_tree: nominal(&mut table, "SystemTree", Type::Blob),
+                file_body,
+                field_behavior,
+            }
+        })
+    }
+
     pub fn file_body() -> Type {
-        declared_sum(
-            "stele",
-            "FileBody",
-            &[
-                (
-                    "file",
-                    Some(record_type(&[
-                        ("content", Type::Blob),
-                        ("executable", Type::Bool),
-                    ])),
-                ),
-                ("symlink", Some(record_type(&[("target", Type::Text)]))),
-            ],
-        )
+        declarations().file_body.clone()
     }
     pub fn file_entry() -> Type {
         record_type(&[("body", file_body()), ("path", Type::Text)])
     }
     pub fn file_set() -> Type {
-        nominal("FileSet", list(file_entry()))
+        declarations().file_set.clone()
     }
     pub fn user_record() -> Type {
         record_type(&[
@@ -138,71 +286,34 @@ mod stele {
         ])
     }
     pub fn user_table() -> Type {
-        nominal("UserTable", list(user_record()))
-    }
-    pub fn unit_record() -> Type {
-        record_type(&[
-            ("after", list(Type::Text)),
-            ("description", Type::Text),
-            ("exec", Type::Text),
-            ("name", Type::Text),
-            ("wants", list(Type::Text)),
-        ])
+        declarations().user_table.clone()
     }
     pub fn unit() -> Type {
-        nominal("Unit", unit_record())
+        declarations().unit.clone()
     }
     pub fn field_behavior() -> Type {
-        declared_sum(
-            "stele",
-            "FieldBehavior",
-            &[("agree", None), ("concat", None)],
-        )
-    }
-    pub fn policy_entry() -> Type {
-        record_type(&[("behavior", field_behavior()), ("field", Type::Text)])
+        declarations().field_behavior.clone()
     }
     pub fn unit_policy() -> Type {
-        nominal("UnitPolicy", list(policy_entry()))
+        declarations().unit_policy.clone()
     }
     pub fn tools() -> Type {
-        nominal("Tools", tools_record())
-    }
-    fn tools_record() -> Type {
-        record_type(&[
-            ("cat", Type::Text),
-            ("chmod", Type::Text),
-            ("closure", list(Type::Text)),
-            ("ln", Type::Text),
-            ("mkdir", Type::Text),
-            ("shell", Type::Text),
-        ])
+        declarations().tools.clone()
     }
     pub fn boot() -> Type {
-        nominal(
-            "Boot",
-            record_type(&[
-                ("initrd", Type::Text),
-                ("kernel", Type::Text),
-                ("machine", Type::Text),
-            ]),
-        )
+        declarations().boot.clone()
     }
     pub fn unit_text() -> Type {
-        nominal("UnitText", Type::Text)
+        declarations().unit_text.clone()
     }
     pub fn passwd_text() -> Type {
-        nominal("PasswdText", Type::Text)
+        declarations().passwd_text.clone()
     }
     pub fn boot_text() -> Type {
-        nominal("BootText", Type::Text)
+        declarations().boot_text.clone()
     }
     pub fn system_tree() -> Type {
-        nominal("SystemTree", Type::Blob)
-    }
-
-    fn nominal(name: &str, representation: Type) -> Type {
-        declared("stele", name, representation)
+        declarations().system_tree.clone()
     }
 
     pub fn contribution(payload_name: &str, payload: Type) -> Type {
@@ -332,29 +443,6 @@ mod phloem {
 // ---------------------------------------------------------------------------
 // Shared construction
 // ---------------------------------------------------------------------------
-
-fn declared(module: &str, name: &str, representation: Type) -> Type {
-    let mut table = DeclarationTable::new(module);
-    match table.nominal(name, representation) {
-        Ok(declared) => declared,
-        Err(error) => unreachable!("{module} declares {name} once: {error}"),
-    }
-}
-
-fn declared_sum(module: &str, name: &str, constructors: &[(&str, Option<Type>)]) -> Type {
-    let constructors: Box<[SumConstructor]> = constructors
-        .iter()
-        .map(|(constructor, payload)| SumConstructor {
-            name: (*constructor).into(),
-            payload: payload.clone(),
-        })
-        .collect();
-    let mut table = DeclarationTable::new(module);
-    match table.sum(name, constructors) {
-        Ok(declared) => declared,
-        Err(error) => unreachable!("{module} declares {name} once: {error}"),
-    }
-}
 
 fn record_type(fields: &[(&str, Type)]) -> Type {
     let fields: Box<[RecordField<Type>]> = fields
