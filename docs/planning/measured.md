@@ -204,3 +204,38 @@ Its position sidecar resolves local aliases and imported definitions and retains
 Arbitrary UTF-8 property input terminates without panic and produces stable diagnostic positions. The
 complete `just ci` target passes, including 811 workspace tests, Clippy, rustdoc, the document graph,
 repository checks and dependency policy.
+
+## M-11: the IR constructor set
+
+status: complete.
+
+evidence: [0062](../decisions/0062-the-ir-constructor-set.md) enumerates the set, and
+`crates/pith-core/tests/corpus_bodies.rs` is the measurement. twelve of the fifteen corpus rule bodies —
+xylem's three action wrappers, stele's three merges, its entry, and its three renders, phloem's
+package-library and package-build — are hand-built as `RuleBody` trees against interfaces and
+declarations mirrored coordinate-for-coordinate from the live tables, and each one validates against its
+interface, survives its canonical encoding, and derives a `RuleTier::Represented` rule whose revision is
+a function of those bytes. the three that cannot be expressed are named in the same file with what each
+waits for: xylem's compile-entry and example-domain's render-entry on one undecided text-splitting
+semantics, and phloem's resolver on host dispatch and general recursion.
+
+the round's design finding is `MatchList`, and the corpus forced it: the first pass at the merges was
+fold-only and could not extract a grouped value or look up a tree path, because a fold's init is
+evaluated whatever the list holds and a data-dependent start has no value to start from. structural
+case on the two list constructors is the eliminator the corpus needed and the a-priori set lacked; with
+it, stele's keyed merges become the direct translation of the host's peekable grouping loop.
+
+the validator holds the constructor set's own rules from both sides: unbound binders, type mismatches
+against the interface, unknown fields and constructors, non-exhaustive and out-of-order match arms,
+request arity, the empty batch, and the depth bound are each refused with a test; the codec pins golden
+bytes for a literal body and a request body, round-trips every constructor, and refuses foreign
+versions, unknown tags, trailing bytes, and bodies nested past the bound. `pith:body-ir:v1` joins the
+digest domains with a separation test, and the domain-prefix suite's pinning at v1 covers it.
+
+the honest divergences are recorded where they live, in the corpus file's comments: the typed body
+refuses a replacement naming a list field and a concat-named text field at the body, where the untyped
+host body lands the value and fails later at a decode gate; and render-passwd renders arbitrary-precision
+ids where the host body narrows to a machine integer, accepting what the host refuses — a formatter
+boundary, not a designed contract, until a domain needs integer comparison for its own sake. the
+complete suite passes: 182 pith-core tests including the 13 corpus tests, clippy and rustdoc clean, and
+the workspace compiles with the new `RuleTier::Represented` variant and the two decode-error variants.
