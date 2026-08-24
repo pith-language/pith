@@ -354,6 +354,39 @@ impl std::fmt::Debug for DeclarationDigest {
     }
 }
 
+/// Stable digest of a represented rule body's canonical encoding (decision
+/// 0062).
+///
+/// This is the revision half of a represented rule: the digest that moves when
+/// the elaborated body moves. The domain's version segment is the body-encoding
+/// version 0038's unresolved section asks for — a change to evaluator semantics
+/// is a domain bump, never a silent basis change.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct BodyIrDigest(ContentDigest);
+
+impl BodyIrDigest {
+    pub fn of_manifest(manifest: &[u8]) -> Self {
+        Self(ContentId::with_domain(domain::BODY_IR, manifest))
+    }
+
+    /// Restore a digest read back from a persistence adapter. See
+    /// [`ActionSpecDigest::from_digest`] for why restoration is distinct from
+    /// derivation.
+    pub const fn from_digest(digest: ContentDigest) -> Self {
+        Self(digest)
+    }
+
+    pub fn digest(self) -> ContentDigest {
+        self.0
+    }
+}
+
+impl std::fmt::Debug for BodyIrDigest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "BodyIrDigest({:?})", self.0)
+    }
+}
+
 /// Stable digest of the semantic module interface consumed by elaboration.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ModuleAbiDigest(ContentDigest);
@@ -461,6 +494,7 @@ mod domain {
     pub const OBSERVATION_COMPUTATION: &[u8] = b"pith:observation-computation:v1\0";
     pub const DECLARATION: &[u8] = b"pith:declaration:v1\0";
     pub const MODULE_ABI: &[u8] = b"pith:module-abi:v1\0";
+    pub const BODY_IR: &[u8] = b"pith:body-ir:v1\0";
 
     /// Every prefix in this module. Distinctness and a shared version
     /// segment are checked over this one slice, so a new digest kind is
@@ -477,6 +511,7 @@ mod domain {
         OBSERVATION_COMPUTATION,
         DECLARATION,
         MODULE_ABI,
+        BODY_IR,
     ];
 }
 
@@ -604,6 +639,28 @@ mod tests {
         assert_ne!(
             observation.digest(),
             ActionComputationDigest::of_manifest(b"same").digest()
+        );
+    }
+
+    #[test]
+    fn body_ir_digest_is_domain_separated() {
+        // A body's canonical encoding is a byte string like any manifest; only
+        // the domain keeps it from colliding with a module ABI or a pure
+        // computation digested over the same bytes.
+        let body = BodyIrDigest::of_manifest(b"same");
+
+        assert_eq!(body, BodyIrDigest::of_manifest(b"same"));
+        assert_ne!(
+            body.digest(),
+            ModuleAbiDigest::of_manifest(b"same").digest()
+        );
+        assert_ne!(
+            body.digest(),
+            PureComputationDigest::of_manifest(b"same").digest()
+        );
+        assert_ne!(
+            body.digest(),
+            DeclarationDigest::of_manifest(b"same").digest()
         );
     }
 
