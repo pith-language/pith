@@ -145,6 +145,9 @@ by test and the domain stays at v1.
 
 ## M-12: the elaborator and the three graph rules
 
+status: underway. [0063](../decisions/0063-the-frontend-graph-tier.md) records the implemented graph
+boundary and the represented-body source edit still required to close the measurement.
+
 round three, designed in [the frontend architecture](frontend-architecture.md). the syntax, HIR and
 elaborator crates; `interface-of`, `bodies-of` and `index-of`; the derived elaborator revision; the
 `NeedBlob` entry-point question.

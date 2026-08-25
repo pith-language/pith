@@ -12,14 +12,21 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-pith-arena.workspace = true
 pith-core.workspace = true
 pith-diag.workspace = true
+pith-elaborator.workspace = true
+pith-hir.workspace = true
 pith-ids.workspace = true
 pith-engine.workspace = true
+pith-syntax.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+pith-core.workspace = true
+pith-diag.workspace = true
+pith-engine.workspace = true
+pith-ids.workspace = true
+pith-store.workspace = true
 xylem.workspace = true
 phloem.workspace = true
 stele.workspace = true

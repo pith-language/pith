@@ -2,15 +2,14 @@ use core::range::Range;
 use std::sync::Arc;
 
 use pith_diag::{Diag, SourceFile, Span};
+use pith_hir::{
+    FrontendCode, ParsedSurface, RuleCategory, SurfaceBody, SurfaceConstructor, SurfaceDeclaration,
+    SurfaceField, SurfaceImport, SurfaceRule, SurfaceTypeArena, SurfaceTypeId, SurfaceTypeNode,
+};
 
 use crate::lex::{Token, TokenKind, error, lex};
-use crate::surface::{
-    ParsedSurface, SurfaceBody, SurfaceConstructor, SurfaceDeclaration, SurfaceField,
-    SurfaceImport, SurfaceRule, SurfaceTypeArena, SurfaceTypeId, SurfaceTypeNode,
-};
-use crate::{FrontendCode, RuleCategory};
 
-pub(crate) fn parse(source: &Arc<SourceFile>) -> (ParsedSurface, Vec<Diag>) {
+pub fn parse(source: &Arc<SourceFile>) -> (ParsedSurface, Vec<Diag>) {
     let (tokens, mut diagnostics) = lex(source);
     let mut parser = Parser {
         tokens: &tokens,
