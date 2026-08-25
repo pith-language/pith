@@ -10,6 +10,8 @@ pub struct ImportedModule {
     pub(crate) abi_digest: ModuleAbiDigest,
     pub(crate) table: DeclarationTable,
     definitions: Box<[DefinitionLocation]>,
+
+    declaration_index: BTreeMap<Box<str>, usize>,
 }
 
 impl ImportedModule {
@@ -24,11 +26,25 @@ impl ImportedModule {
     }
 
     pub(crate) fn declaration_definition(&self, name: &str) -> Option<&DefinitionLocation> {
-        self.definitions.iter().find(|definition| {
-            definition.coordinate().name.as_ref() == name
-                && !matches!(definition.kind(), DefinitionKind::HostRule(_))
-        })
+        let &position = self.declaration_index.get(name)?;
+        self.definitions.get(position)
     }
+}
+
+fn declaration_index(definitions: &[DefinitionLocation]) -> BTreeMap<Box<str>, usize> {
+    let mut index = BTreeMap::new();
+    for (position, definition) in definitions.iter().enumerate() {
+        if !matches!(
+            definition.kind(),
+            DefinitionKind::Nominal | DefinitionKind::Sum | DefinitionKind::Alias
+        ) {
+            continue;
+        }
+        index
+            .entry(definition.coordinate().name.clone())
+            .or_insert(position);
+    }
+    index
 }
 
 #[derive(Default)]
@@ -49,12 +65,15 @@ impl ImportEnv {
         table: DeclarationTable,
         definitions: impl Into<Box<[DefinitionLocation]>>,
     ) {
+        let definitions = definitions.into();
+        let index = declaration_index(&definitions);
         self.modules.insert(
             binding.into(),
             ImportedModule {
                 abi_digest,
                 table,
-                definitions: definitions.into(),
+                declaration_index: index,
+                definitions,
             },
         );
     }

@@ -140,6 +140,7 @@ impl FrontendFrame {
             elaborated
                 .rules
                 .iter()
+                .filter(|rule| !rule.local)
                 .map(|rule| (rule.category, rule.interface.clone())),
         );
         let mut diagnostics = self.content_diagnostics.clone();
@@ -178,6 +179,7 @@ impl FrontendFrame {
                 let mut entries = elaborated
                     .rules
                     .iter()
+                    .filter(|rule| !rule.local)
                     .map(|rule| (rule.category, rule.interface.clone(), rule.label.clone()))
                     .collect::<Vec<_>>();
                 entries.sort_by(|left, right| {

@@ -11,6 +11,9 @@ pub enum DefinitionKind {
     Sum,
     Alias,
     HostRule(RuleCategory),
+    RepresentedRule(RuleCategory),
+    Local,
+    Entry,
 }
 
 #[derive(Clone, Debug)]
@@ -138,6 +141,10 @@ impl PositionSidecar {
     }
 
     pub fn new(definitions: Vec<DefinitionLocation>, references: Vec<ReferenceSite>) -> Self {
+        let mut definitions = definitions;
+        let mut references = references;
+        definitions.sort_by_key(|definition| definition.span.start);
+        references.sort_by_key(|reference| reference.span.start);
         Self {
             definitions: definitions.into(),
             references: references.into(),

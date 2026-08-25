@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_ARENA_OWNER: AtomicU64 = AtomicU64::new(1);
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct ArenaOwner(u64);
 
 fn fresh_owner() -> ArenaOwner {
@@ -39,7 +39,7 @@ pub trait Brand:
 ///
 /// let _ = Id::<ExampleBrand>::from_raw(0);
 /// ```
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Id<B: Brand> {
     owner: ArenaOwner,
     raw: u32,
@@ -177,14 +177,14 @@ impl<B: Brand, T: std::hash::Hash + Eq + Clone> Default for Interner<B, T> {
 #[macro_export]
 macro_rules! define_arena {
     ($id:ident, $arena:ident, $brand:ident) => {
-        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
         pub struct $brand;
         impl $crate::Brand for $brand {}
         pub type $id = $crate::Id<$brand>;
         pub type $arena<T> = $crate::Arena<$brand, T>;
     };
     ($id:ident, $arena:ident, $brand:ident, $doc:literal) => {
-        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
         pub struct $brand;
         impl $crate::Brand for $brand {}
         #[doc = $doc]
