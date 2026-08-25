@@ -2,31 +2,17 @@ use pith_core::{
     DeclarationTable, Interface,
     manifest::{encode_bytes, encode_length, encode_str},
 };
+use pith_hir::RuleCategory;
 use pith_ids::ModuleAbiDigest;
 
 pub const GRAMMAR_VERSION: u8 = 1;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum RuleCategory {
-    Pure,
-    Action,
-}
-
-impl RuleCategory {
-    const fn abi_tag(self) -> u8 {
-        match self {
-            Self::Pure => 0,
-            Self::Action => 1,
-        }
-    }
-}
-
-pub(crate) struct RuleSignature {
+pub struct RuleSignature {
     pub category: RuleCategory,
     pub interface: Interface,
 }
 
-pub(crate) fn abi_digest(
+pub fn abi_digest(
     module: &str,
     table: &DeclarationTable,
     imports: &[(Box<str>, ModuleAbiDigest)],

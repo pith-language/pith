@@ -58,7 +58,7 @@ impl DefinitionLocation {
             .join("\n")
     }
 
-    pub(crate) fn new(
+    pub fn new(
         coordinate: Coordinate,
         kind: DefinitionKind,
         source: Arc<SourceFile>,
@@ -98,11 +98,7 @@ impl ReferenceSite {
         &self.definition
     }
 
-    pub(crate) fn new(
-        written_coordinate: Coordinate,
-        span: Span,
-        definition: DefinitionLocation,
-    ) -> Self {
+    pub fn new(written_coordinate: Coordinate, span: Span, definition: DefinitionLocation) -> Self {
         Self {
             written_coordinate,
             span,
@@ -141,10 +137,7 @@ impl PositionSidecar {
             })
     }
 
-    pub(crate) fn new(
-        definitions: Vec<DefinitionLocation>,
-        references: Vec<ReferenceSite>,
-    ) -> Self {
+    pub fn new(definitions: Vec<DefinitionLocation>, references: Vec<ReferenceSite>) -> Self {
         Self {
             definitions: definitions.into(),
             references: references.into(),

@@ -14,9 +14,10 @@
 
 use pith_ids::DeclarationDigest;
 
+use crate::codec::{CanonicalDecodeError, CanonicalReader};
 use crate::manifest::{encode_bytes, encode_length, encode_str};
 use crate::value::{SumConstructor, Type};
-use crate::value_codec::encode_type_payload as encode_type_manifest;
+use crate::value_codec::{decode_type_payload, encode_type_payload as encode_type_manifest};
 
 /// The stable coordinate of a declaration: a module identity and a declared
 /// name (decision 0047).
@@ -157,6 +158,59 @@ impl Declaration {
             DeclarationBody::Alias { target } => encode_type_manifest(&mut manifest, target),
         }
         manifest
+    }
+
+    /// Decode one declaration from its canonical encoding.
+    ///
+    /// # Errors
+    /// Returns the reader's error for truncated input, an unknown body kind,
+    /// or a representation that does not decode.
+    pub fn decode_canonical(encoded: &[u8]) -> Result<Self, CanonicalDecodeError> {
+        let mut decoder = CanonicalReader::new(encoded);
+        let module: Box<str> = decoder.read_text()?.into();
+        let name: Box<str> = decoder.read_text()?.into();
+        if name.is_empty() || name.contains('.') {
+            return Err(CanonicalDecodeError::InvalidDeclarationName { name });
+        }
+        let body = match decoder.read_byte()? {
+            0 => DeclarationBody::Nominal {
+                representation: decode_type_payload(&mut decoder)?,
+            },
+            1 => {
+                let constructors = decoder.read_sequence(|decoder| {
+                    let name: Box<str> = decoder.read_text()?.into();
+                    let payload = match decoder.read_bool()? {
+                        true => Some(decode_type_payload(decoder)?),
+                        false => None,
+                    };
+                    Ok(SumConstructor { name, payload })
+                })?;
+                for [earlier, later] in constructors.array_windows() {
+                    if earlier.name >= later.name {
+                        return Err(CanonicalDecodeError::NamesOutOfOrder {
+                            earlier: earlier.name.clone(),
+                            later: later.name.clone(),
+                        });
+                    }
+                }
+                DeclarationBody::Sum { constructors }
+            }
+            2 => {
+                let target = decode_type_payload(&mut decoder)?;
+                if target.reaches_cut() {
+                    return Err(CanonicalDecodeError::RecursiveAlias { module, name });
+                }
+                DeclarationBody::Alias { target }
+            }
+            kind => {
+                return Err(CanonicalDecodeError::UnknownDeclarationKind { kind });
+            }
+        };
+        decoder.finish()?;
+        Ok(Self {
+            coordinate: Coordinate { module, name },
+            body,
+        })
     }
 }
 
@@ -322,6 +376,41 @@ impl DeclarationTable {
             encode_bytes(&mut manifest, &entry.encode_canonical());
         }
         manifest
+    }
+
+    /// Decode one table from its canonical encoding. Entries must arrive in
+    /// the name order the table maintains, and their coordinates must carry
+    /// this table's module.
+    ///
+    /// # Errors
+    /// Returns the reader's error, plus [`CanonicalDecodeError::NamesOutOfOrder`]
+    /// for a table whose entries are not in strictly ascending name order.
+    pub fn decode_canonical(encoded: &[u8]) -> Result<Self, CanonicalDecodeError> {
+        let mut decoder = CanonicalReader::new(encoded);
+        let module: Box<str> = decoder.read_text()?.into();
+        let entries = decoder
+            .read_sequence(|decoder| Declaration::decode_canonical(decoder.read_bytes()?))?;
+        decoder.finish()?;
+        for entry in &entries {
+            if entry.coordinate.module != module {
+                return Err(CanonicalDecodeError::DeclarationModuleMismatch {
+                    table: module,
+                    declaration: entry.coordinate.module.clone(),
+                });
+            }
+        }
+        for [earlier, later] in entries.array_windows() {
+            if earlier.coordinate.name >= later.coordinate.name {
+                return Err(CanonicalDecodeError::NamesOutOfOrder {
+                    earlier: earlier.coordinate.name.clone(),
+                    later: later.coordinate.name.clone(),
+                });
+            }
+        }
+        Ok(Self {
+            module,
+            entries: entries.into(),
+        })
     }
 
     pub fn len(&self) -> usize {
@@ -653,6 +742,118 @@ mod tests {
         assert_eq!(
             declaration.digest().digest().to_string(),
             "9625090b93578f90d87b6c3f0cd6da2f1bc27fca26262d78f0c8991b298b9359"
+        );
+    }
+
+    fn populated_table() -> DeclarationTable {
+        let mut table = table();
+        table.nominal("CSource", Type::Blob).unwrap();
+        table
+            .sum(
+                "Format",
+                [
+                    SumConstructor {
+                        name: "elf".into(),
+                        payload: None,
+                    },
+                    SumConstructor {
+                        name: "about".into(),
+                        payload: Some(Type::Text),
+                    },
+                ],
+            )
+            .unwrap();
+        table
+            .alias("Sources", Type::List(Box::new(Type::Blob)))
+            .ok();
+        table
+    }
+
+    #[test]
+    fn a_table_round_trips_through_its_canonical_encoding() {
+        let table = populated_table();
+        let decoded = DeclarationTable::decode_canonical(&table.encode_canonical()).unwrap();
+        assert_eq!(decoded, table);
+        assert_eq!(decoded.module(), "test");
+    }
+
+    #[test]
+    fn a_decoded_table_refuses_entries_out_of_name_order() {
+        let table = populated_table();
+        let names = ["CSource", "Format", "Sources"];
+        let mut reversed = Vec::new();
+        encode_str(&mut reversed, "test");
+        encode_length(&mut reversed, names.len());
+        for name in names.iter().rev() {
+            encode_bytes(&mut reversed, &table.get(name).unwrap().encode_canonical());
+        }
+        assert_eq!(
+            DeclarationTable::decode_canonical(&reversed).unwrap_err(),
+            CanonicalDecodeError::NamesOutOfOrder {
+                earlier: "Sources".into(),
+                later: "Format".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn a_declaration_with_an_unknown_kind_byte_is_refused() {
+        let mut encoded = Vec::new();
+        encode_str(&mut encoded, "test");
+        encode_str(&mut encoded, "A");
+        encoded.push(9);
+        assert_eq!(
+            Declaration::decode_canonical(&encoded),
+            Err(CanonicalDecodeError::UnknownDeclarationKind { kind: 9 })
+        );
+    }
+
+    #[test]
+    fn a_decoded_table_refuses_a_declaration_from_another_module() {
+        let mut declaration_table = DeclarationTable::new("other");
+        assert!(declaration_table.nominal("A", Type::Text).is_ok());
+        let Some(declaration) = declaration_table.get("A") else {
+            unreachable!("the declaration was inserted");
+        };
+        let mut encoded = Vec::new();
+        encode_str(&mut encoded, "test");
+        encode_length(&mut encoded, 1);
+        encode_bytes(&mut encoded, &declaration.encode_canonical());
+
+        assert_eq!(
+            DeclarationTable::decode_canonical(&encoded),
+            Err(CanonicalDecodeError::DeclarationModuleMismatch {
+                table: "test".into(),
+                declaration: "other".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn a_decoded_declaration_refuses_invalid_names_and_recursive_aliases() {
+        let mut invalid_name = Vec::new();
+        encode_str(&mut invalid_name, "test");
+        encode_str(&mut invalid_name, "not.valid");
+        invalid_name.push(0);
+        encode_type_manifest(&mut invalid_name, &Type::Text);
+        assert_eq!(
+            Declaration::decode_canonical(&invalid_name),
+            Err(CanonicalDecodeError::InvalidDeclarationName {
+                name: "not.valid".into()
+            })
+        );
+
+        let mut recursive_alias = Vec::new();
+        encode_str(&mut recursive_alias, "test");
+        encode_str(&mut recursive_alias, "Loop");
+        recursive_alias.push(2);
+        encode_type_manifest(&mut recursive_alias, &Type::List(Box::new(Type::Cut)));
+        assert_eq!(
+            Declaration::decode_canonical(&recursive_alias),
+            Err(CanonicalDecodeError::RecursiveAlias {
+                module: "test".into(),
+                name: "Loop".into(),
+            })
         );
     }
 }

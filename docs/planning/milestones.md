@@ -40,8 +40,8 @@ so labels do not move and do not imply position. that is
 rule — a stable identity, and a separate thing that moves. the order is the order of this file, and it is
 stated once, here:
 
-M-1, M-2, M-3, M-4, M-5a, M-8, M-9 and M-10 are complete, and the latency spike has run. then
-M-11, M-12, M-13, M-14, M-15, and then M-5b, M-6 and M-7.
+M-1, M-2, M-3, M-4, M-5a, M-8, M-9, M-10 and M-11 are complete, and the latency spike has run. then
+M-12, M-13, M-14, M-15, and then M-5b, M-6 and M-7.
 
 ## why the order changed
 
@@ -124,6 +124,9 @@ different runs and one coordinate it names is not in the table at all.
 
 ## M-11: the IR constructor set
 
+status: complete. the evidence is in [measured](measured.md), and
+[0062](../decisions/0062-the-ir-constructor-set.md) is the record.
+
 round two. [0038](../decisions/0038-represented-rule-bodies.md)'s named first design task — the constructor
 enumeration it explicitly declined to make — plus the canonical encoding, the digest domain, and the
 validator.
@@ -133,7 +136,17 @@ that cannot.
 
 it follows M-9 so the step vocabulary is closed before the encoding fixes it.
 
+what it still owes is the record's unresolved half: the text-splitting constructor both waiting bodies
+need is designed by the record that lands it. the interpreter was not owed here and arrived anyway, as
+the round's follow-on engine commit — the step machine evaluates represented bodies through the existing
+frame protocol, `E-1218` carries declared failures, and `evaluate_with_content` gives `NeedBlob` the
+synchronous entry point the frontend architecture named, so `SortBy`'s stable-sort commitment is priced
+by test and the domain stays at v1.
+
 ## M-12: the elaborator and the three graph rules
+
+status: underway. [0063](../decisions/0063-the-frontend-graph-tier.md) records the implemented graph
+boundary and the represented-body source edit still required to close the measurement.
 
 round three, designed in [the frontend architecture](frontend-architecture.md). the syntax, HIR and
 elaborator crates; `interface-of`, `bodies-of` and `index-of`; the derived elaborator revision; the
@@ -237,8 +250,8 @@ placement, continuous reconciliation, and richer transition protocols.
 ## complete
 
 M-1 semantic prototype, M-2 action prototype, M-3 first build library, M-4 package and environment
-libraries, M-5a Linux system composition, M-8 the backstop limit, M-9 observation identity and
-M-10 the declaration artifact are complete at their own scopes.
+libraries, M-5a Linux system composition, M-8 the backstop limit, M-9 observation identity,
+M-10 the declaration artifact and M-11 the ir constructor set are complete at their own scopes.
 their evidence is in [what the completed milestones measured](measured.md).
 
 what they still owe is a claim about work, not about evidence, so it stays here:
@@ -266,7 +279,7 @@ partial cancellation, a bound and a cancel signal in one run, the rlimit half of
 whether the pure-only entry point carries a bound once represented bodies evaluate on it.
 
 M-10 owes nothing its own statement named. the kernel-change ledger's remaining items keep their
-owners: a `tier` field landed with this round, and interned coordinates, the engine accessors and the
-read-only state adapter wait on the rounds that read them (M-11, M-12, M-13). the action-host
+owners: interned coordinates, the engine accessors and the read-only state adapter wait on the rounds
+that read them (M-12, M-13), and the `tier` field 0038 owed has its second variant. the action-host
 spelling question the module surface left open was answered by the grammar this round shipped:
 the category is written before `rule`, so a represented body replaces only the `= host` clause.

@@ -1,18 +1,16 @@
 [package]
-name = "xtask"
+name = "pith-syntax"
+description = "Lexer and parser for Pith source modules"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
-description = "Workspace automation tasks (codegen runner, checks)"
 
 [lints]
 workspace = true
 
 [dependencies]
-ignore = "0.4.33"
-blake3.workspace = true
-serde.workspace = true
-serde_yaml_ng = "0.10"
+pith-diag.workspace = true
+pith-hir.workspace = true

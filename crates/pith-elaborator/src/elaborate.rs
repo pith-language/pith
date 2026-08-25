@@ -1,48 +1,51 @@
 use core::range::Range;
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
 
+use crate::ScopedImports;
 use pith_core::{
     Coordinate, DeclarationError, DeclarationTable, Interface, RecordField, SumConstructor, Type,
 };
-use pith_diag::{Diag, Severity, SourceFile, Span};
-
-use crate::lex::error;
-use crate::position::{DefinitionLocation, ReferenceSite};
-use crate::surface::{
-    ParsedSurface, SurfaceBody, SurfaceDeclaration, SurfaceTypeId, SurfaceTypeNode,
+use pith_diag::{Diag, Severity, Span};
+use pith_hir::{
+    DefinitionLocation, FrontendCode, ModuleFiles, ParsedSurface, ReferenceSite, RuleCategory,
+    SurfaceBody, SurfaceDeclaration, SurfaceRule, SurfaceTypeId, SurfaceTypeNode,
 };
-use crate::{FrontendCode, RuleCategory, ScopedImports};
 
-pub(crate) struct ElaboratedRule {
+pub struct ElaboratedRule {
     pub label: Box<str>,
     pub category: RuleCategory,
     pub interface: Interface,
     pub span: Span,
 }
 
-pub(crate) struct Elaborated {
+pub struct Elaborated {
     pub table: DeclarationTable,
     pub rules: Vec<ElaboratedRule>,
+    pub incomplete_rules: Vec<IncompleteRule>,
     pub references: Vec<ReferenceSite>,
 }
 
-pub(crate) fn elaborate(
+pub struct IncompleteRule {
+    pub label: Box<str>,
+    pub diagnostics: Box<[Diag]>,
+}
+
+pub fn elaborate(
     module: &str,
     surface: &ParsedSurface,
     imports: &ScopedImports<'_>,
     definitions: &BTreeMap<Box<str>, DefinitionLocation>,
-    source: &Arc<SourceFile>,
+    files: &ModuleFiles,
     diagnostics: &mut Vec<Diag>,
 ) -> Elaborated {
-    let declared = collect_declarations(module, surface, source, diagnostics);
-    diagnose_rule_coordinates(module, surface, source, diagnostics);
+    let declared = collect_declarations(module, surface, files, diagnostics);
+    diagnose_rule_coordinates(module, surface, files, diagnostics);
     let mut elaborator = Elaborator {
         module,
         surface,
         imports,
         definitions,
-        source,
+        files,
         declared: &declared,
         resolved: BTreeMap::new(),
         elaborating: Vec::new(),
@@ -53,10 +56,11 @@ pub(crate) fn elaborate(
     for name in declared.keys() {
         elaborator.elaborate_declaration(name);
     }
-    let rules = elaborator.elaborate_rules();
+    let (rules, incomplete_rules) = elaborator.elaborate_rules();
     Elaborated {
         table: elaborator.table,
         rules,
+        incomplete_rules,
         references: elaborator.references,
     }
 }
@@ -64,17 +68,16 @@ pub(crate) fn elaborate(
 fn collect_declarations<'a>(
     module: &str,
     surface: &'a ParsedSurface,
-    source: &Arc<SourceFile>,
+    files: &ModuleFiles,
     diagnostics: &mut Vec<Diag>,
 ) -> BTreeMap<&'a str, &'a SurfaceDeclaration> {
     let mut declarations: BTreeMap<&str, &SurfaceDeclaration> = BTreeMap::new();
     for declaration in &surface.declarations {
         if let Some(previous) = declarations.get(declaration.name.as_ref()) {
-            diagnostics.push(error(
+            diagnostics.push(files.error(
                 FrontendCode::DuplicateDeclaration,
                 declaration.name_span,
                 format!("module `{module}` declares `{}` twice", declaration.name),
-                source,
             ));
             diagnostics.push(
                 Diag::new(
@@ -83,7 +86,7 @@ fn collect_declarations<'a>(
                     previous.name_span,
                     format!("`{}` is first declared here", declaration.name),
                 )
-                .with_source(source.clone()),
+                .with_source(files.source_of(previous.name_span).clone()),
             );
         } else {
             declarations.insert(declaration.name.as_ref(), declaration);
@@ -95,23 +98,21 @@ fn collect_declarations<'a>(
 fn diagnose_rule_coordinates(
     module: &str,
     surface: &ParsedSurface,
-    source: &Arc<SourceFile>,
+    files: &ModuleFiles,
     diagnostics: &mut Vec<Diag>,
 ) {
     let mut coordinates = BTreeMap::new();
     for rule in &surface.rules {
         if let Some(previous) = coordinates.insert(rule.label.as_ref(), rule.label_span) {
-            diagnostics.push(error(
+            diagnostics.push(files.error(
                 FrontendCode::DuplicateRule,
                 rule.label_span,
                 format!("module `{module}` declares rule `{}` twice", rule.label),
-                source,
             ));
-            diagnostics.push(error(
+            diagnostics.push(files.error(
                 FrontendCode::DuplicateRule,
                 previous,
                 format!("rule `{}` is first declared here", rule.label),
-                source,
             ));
         }
     }
@@ -122,7 +123,7 @@ struct Elaborator<'a> {
     surface: &'a ParsedSurface,
     imports: &'a ScopedImports<'a>,
     definitions: &'a BTreeMap<Box<str>, DefinitionLocation>,
-    source: &'a Arc<SourceFile>,
+    files: &'a ModuleFiles,
     declared: &'a BTreeMap<&'a str, &'a SurfaceDeclaration>,
     resolved: BTreeMap<&'a str, Type>,
     elaborating: Vec<&'a str>,
@@ -132,51 +133,65 @@ struct Elaborator<'a> {
 }
 
 impl<'a> Elaborator<'a> {
-    fn elaborate_rules(&mut self) -> Vec<ElaboratedRule> {
+    fn elaborate_rules(&mut self) -> (Vec<ElaboratedRule>, Vec<IncompleteRule>) {
         let mut rules = Vec::new();
+        let mut incomplete_rules = Vec::new();
         let mut interfaces = BTreeMap::new();
         for rule in &self.surface.rules {
-            let inputs: Option<Vec<Type>> = rule
-                .inputs
-                .iter()
-                .map(|input| self.elaborate_type(*input, None))
-                .collect();
-            let Some(inputs) = inputs else {
-                continue;
-            };
-            let Some(output) = self.elaborate_type(rule.output, None) else {
-                continue;
-            };
-            let interface = Interface {
-                inputs: inputs.into(),
-                output,
-            };
-            let key = (rule.category, interface.clone());
-            if let Some(previous) = interfaces.insert(key, rule.span) {
-                self.diagnostics.push(error(
-                    FrontendCode::DuplicateInterface,
-                    rule.span,
-                    format!(
-                        "the {:?} rule `{}` provides an interface already provided in this module",
-                        rule.category, rule.label
-                    ),
-                    self.source,
-                ));
-                self.diagnostics.push(error(
-                    FrontendCode::DuplicateInterface,
-                    previous,
-                    "the first provider is declared here",
-                    self.source,
-                ));
+            let first_diagnostic = self.diagnostics.len();
+            match self.elaborate_rule(rule, &mut interfaces) {
+                Some(elaborated) => rules.push(elaborated),
+                None => incomplete_rules.push(IncompleteRule {
+                    label: rule.label.clone(),
+                    diagnostics: self
+                        .diagnostics
+                        .get(first_diagnostic..)
+                        .unwrap_or_else(|| unreachable!("elaboration only appends diagnostics"))
+                        .into(),
+                }),
             }
-            rules.push(ElaboratedRule {
-                label: rule.label.clone(),
-                category: rule.category,
-                interface,
-                span: rule.span,
-            });
         }
-        rules
+        (rules, incomplete_rules)
+    }
+
+    fn elaborate_rule(
+        &mut self,
+        rule: &SurfaceRule,
+        interfaces: &mut BTreeMap<(RuleCategory, Interface), Span>,
+    ) -> Option<ElaboratedRule> {
+        let inputs = rule
+            .inputs
+            .iter()
+            .map(|input| self.elaborate_type(*input, None))
+            .collect::<Option<Vec<_>>>()?;
+        let output = self.elaborate_type(rule.output, None)?;
+        let interface = Interface {
+            inputs: inputs.into(),
+            output,
+        };
+        let key = (rule.category, interface.clone());
+        if let Some(previous) = interfaces.insert(key, rule.span) {
+            self.diagnostics.push(self.files.error(
+                FrontendCode::DuplicateInterface,
+                rule.span,
+                format!(
+                    "the {:?} rule `{}` provides an interface already provided in this module",
+                    rule.category, rule.label
+                ),
+            ));
+            self.diagnostics.push(self.files.error(
+                FrontendCode::DuplicateInterface,
+                previous,
+                "the first provider is declared here",
+            ));
+            return None;
+        }
+        Some(ElaboratedRule {
+            label: rule.label.clone(),
+            category: rule.category,
+            interface,
+            span: rule.span,
+        })
     }
 
     fn elaborate_declaration(&mut self, name: &'a str) {
@@ -200,11 +215,10 @@ impl<'a> Elaborator<'a> {
                 .declared
                 .get(name)
                 .map_or(Span::none(), |declaration| declaration.name_span);
-            self.diagnostics.push(error(
+            self.diagnostics.push(self.files.error(
                 FrontendCode::CyclicDeclaration,
                 span,
                 format!("declarations form a mutual cycle: {path}"),
-                self.source,
             ));
             return;
         }
@@ -225,11 +239,10 @@ impl<'a> Elaborator<'a> {
                 for constructor in constructors.iter() {
                     if !names.insert(constructor.name.as_ref()) {
                         duplicate = true;
-                        self.diagnostics.push(error(
+                        self.diagnostics.push(self.files.error(
                             FrontendCode::DuplicateField,
                             constructor.span,
                             format!("the sum declares constructor `{}` twice", constructor.name),
-                            self.source,
                         ));
                     }
                 }
@@ -269,18 +282,18 @@ impl<'a> Elaborator<'a> {
             Ok(declared) => {
                 self.resolved.insert(name, declared);
             }
-            Err(DeclarationError::InvalidName { .. }) => self.diagnostics.push(error(
+            Err(DeclarationError::InvalidName { .. }) => self.diagnostics.push(self.files.error(
                 FrontendCode::UnexpectedToken,
                 declaration.name_span,
                 format!("`{name}` must be non-empty and dot-free"),
-                self.source,
             )),
-            Err(DeclarationError::RecursiveAlias { .. }) => self.diagnostics.push(error(
-                FrontendCode::RecursiveAlias,
-                declaration.name_span,
-                format!("alias `{}.{name}` refers to itself", self.module),
-                self.source,
-            )),
+            Err(DeclarationError::RecursiveAlias { .. }) => {
+                self.diagnostics.push(self.files.error(
+                    FrontendCode::RecursiveAlias,
+                    declaration.name_span,
+                    format!("alias `{}.{name}` refers to itself", self.module),
+                ))
+            }
             Err(DeclarationError::DuplicateName { .. }) => {}
         }
     }
@@ -315,11 +328,10 @@ impl<'a> Elaborator<'a> {
         for field in self.surface.fields.get(fields)? {
             if !names.insert(field.name.as_ref()) {
                 duplicate = true;
-                self.diagnostics.push(error(
+                self.diagnostics.push(self.files.error(
                     FrontendCode::DuplicateField,
                     field.span,
                     format!("the record names field `{}` twice", field.name),
-                    self.source,
                 ));
                 continue;
             }
@@ -349,11 +361,10 @@ impl<'a> Elaborator<'a> {
             self.elaborate_declaration(name);
         }
         let Some(resolved) = self.resolved.get(name).cloned() else {
-            self.diagnostics.push(error(
+            self.diagnostics.push(self.files.error(
                 FrontendCode::UnknownName,
                 span,
                 format!("module `{}` declares no `{name}`", self.module),
-                self.source,
             ));
             return None;
         };
@@ -373,20 +384,18 @@ impl<'a> Elaborator<'a> {
 
     fn resolve_import(&mut self, module: &str, name: &str, span: Span) -> Option<Type> {
         let Some(imported) = self.imports.get(module) else {
-            self.diagnostics.push(error(
+            self.diagnostics.push(self.files.error(
                 FrontendCode::UndeclaredQualifiedAccess,
                 span,
                 format!("module `{module}` is not imported by `{}`", self.module),
-                self.source,
             ));
             return None;
         };
         let Some(declaration) = imported.table.get(name) else {
-            self.diagnostics.push(error(
+            self.diagnostics.push(self.files.error(
                 FrontendCode::UnknownName,
                 span,
                 format!("module `{module}` declares no `{name}`"),
-                self.source,
             ));
             return None;
         };
