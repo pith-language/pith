@@ -111,6 +111,28 @@ pub fn parse_module(source: &ModuleSource) -> ParsedModule {
     }
 }
 
+/// The canonical spelling of `source`'s module: what `pith fmt` writes, and
+/// what the digest-stability property is measured over.
+///
+/// # Errors
+///
+/// Returns the parse diagnostics when the source does not parse. A module
+/// that does not parse has no canonical spelling, and recovering one would
+/// be a second parser with different recovery rules.
+pub fn format_module(source: &ModuleSource) -> Result<String, Box<[Diag]>> {
+    let ParsedModule {
+        surface,
+        source,
+        diagnostics,
+        ..
+    } = parse_module(source);
+    if diagnostics.is_empty() {
+        Ok(pith_syntax::print(&surface, &source))
+    } else {
+        Err(diagnostics.into())
+    }
+}
+
 #[derive(Default)]
 pub struct ImportEnv {
     inner: pith_elaborator::ImportEnv,
