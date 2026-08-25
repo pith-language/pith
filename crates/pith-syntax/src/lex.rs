@@ -14,13 +14,18 @@ pub(crate) struct Token {
 pub(crate) enum TokenKind {
     Ident,
     Str,
+    Int,
     LineComment,
     Arrow,
     Colon,
     Comma,
     Dot,
     Eq,
+    EqEq,
+    NotEq,
     Minus,
+    Plus,
+    Star,
     Pipe,
     Lt,
     Gt,
@@ -28,12 +33,15 @@ pub(crate) enum TokenKind {
     RParen,
     LBrace,
     RBrace,
+    LBracket,
+    RBracket,
     End,
 }
 
 pub(crate) const KEYWORDS: &[&str] = &[
     "import", "nominal", "sum", "type", "pure", "action", "rule", "host", "List", "Unit", "Bool",
-    "Int", "Text", "Bytes", "Blob",
+    "Int", "Text", "Bytes", "Blob", "ask", "all", "run", "of", "bytes", "let", "for", "in", "if",
+    "else", "match", "entry", "about", "true", "false", "fold", "from", "unwrap",
 ];
 
 pub(crate) fn lex(source: &Arc<SourceFile>) -> (Vec<Token>, Vec<Diag>) {
@@ -78,11 +86,43 @@ pub(crate) fn lex(source: &Arc<SourceFile>) -> (Vec<Token>, Vec<Diag>) {
                         continue;
                     }
                 },
+                b'0'..=b'9' => {
+                    let width = after_first
+                        .iter()
+                        .position(|candidate| !candidate.is_ascii_digit())
+                        .unwrap_or(after_first.len());
+                    position = start.saturating_add(1).saturating_add(width);
+                    (TokenKind::Int, None)
+                }
                 b':' => single(TokenKind::Colon, &mut position, start),
                 b',' => single(TokenKind::Comma, &mut position, start),
                 b'.' => single(TokenKind::Dot, &mut position, start),
-                b'=' => single(TokenKind::Eq, &mut position, start),
+                b'=' => match after_first.first() {
+                    Some(b'=') => {
+                        position = start.saturating_add(2);
+                        (TokenKind::EqEq, None)
+                    }
+                    _ => single(TokenKind::Eq, &mut position, start),
+                },
+                b'!' => match after_first.first() {
+                    Some(b'=') => {
+                        position = start.saturating_add(2);
+                        (TokenKind::NotEq, None)
+                    }
+                    _ => {
+                        diagnostics.push(error(
+                            FrontendCode::UnexpectedToken,
+                            span(start, start.saturating_add(1)),
+                            "`!` is not part of the grammar outside `!=`",
+                            source,
+                        ));
+                        position = start.saturating_add(1);
+                        continue;
+                    }
+                },
                 b'-' => single(TokenKind::Minus, &mut position, start),
+                b'+' => single(TokenKind::Plus, &mut position, start),
+                b'*' => single(TokenKind::Star, &mut position, start),
                 b'|' => single(TokenKind::Pipe, &mut position, start),
                 b'<' => single(TokenKind::Lt, &mut position, start),
                 b'>' => single(TokenKind::Gt, &mut position, start),
@@ -90,6 +130,8 @@ pub(crate) fn lex(source: &Arc<SourceFile>) -> (Vec<Token>, Vec<Diag>) {
                 b')' => single(TokenKind::RParen, &mut position, start),
                 b'{' => single(TokenKind::LBrace, &mut position, start),
                 b'}' => single(TokenKind::RBrace, &mut position, start),
+                b'[' => single(TokenKind::LBracket, &mut position, start),
+                b']' => single(TokenKind::RBracket, &mut position, start),
                 byte if is_ident_start(byte) => {
                     let continuation = after_first
                         .iter()

@@ -805,38 +805,58 @@ fn infer_match(
             });
         }
     }
-    let declared: Vec<&str> = sum
-        .constructors
-        .iter()
-        .map(|constructor| constructor.name.as_ref())
-        .collect();
-    let covered: Vec<&str> = arms.iter().map(|arm| arm.constructor.as_ref()).collect();
-    if let Some(constructor) = covered
-        .iter()
-        .find(|constructor| !declared.contains(constructor))
-    {
+
+    let mut unknown: Option<&str> = None;
+    let mut missing: Vec<Box<str>> = Vec::new();
+    let mut arm = arms.iter().peekable();
+    for constructor in sum.constructors.iter() {
+        loop {
+            let Some(candidate) = arm.peek() else {
+                missing.push(constructor.name.clone());
+                break;
+            };
+            match candidate
+                .constructor
+                .as_ref()
+                .cmp(constructor.name.as_ref())
+            {
+                std::cmp::Ordering::Less => {
+                    unknown = unknown.or(Some(candidate.constructor.as_ref()));
+                    let _ = arm.next();
+                }
+                std::cmp::Ordering::Equal => {
+                    let _ = arm.next();
+                    break;
+                }
+                std::cmp::Ordering::Greater => {
+                    missing.push(constructor.name.clone());
+                    break;
+                }
+            }
+        }
+    }
+    for remaining in arm {
+        unknown = unknown.or(Some(remaining.constructor.as_ref()));
+    }
+    if let Some(constructor) = unknown {
         return Err(BodyError::UnknownArm {
             sum: spelling.into(),
-            constructor: (**constructor).into(),
+            constructor: constructor.into(),
         });
     }
-    let missing: Box<[Box<str>]> = declared
-        .iter()
-        .filter(|constructor| !covered.contains(constructor))
-        .map(|constructor| (**constructor).into())
-        .collect();
     if !missing.is_empty() {
         return Err(BodyError::NonExhaustiveMatch {
             sum: spelling.into(),
-            missing,
+            missing: missing.into(),
         });
     }
     let mut result: Option<Inferred> = None;
     for arm in arms {
         let payload = sum
             .constructors
-            .iter()
-            .find(|constructor| constructor.name == arm.constructor)
+            .binary_search_by(|constructor| constructor.name.as_ref().cmp(arm.constructor.as_ref()))
+            .ok()
+            .and_then(|position| sum.constructors.get(position))
             .and_then(|constructor| constructor.payload.clone());
         let arm_type = match payload {
             Some(payload) => {

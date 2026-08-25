@@ -7,6 +7,7 @@ use pith_ids::{
     ActionComputationDigest, ActionSpecDigest, ObservationComputationDigest, PureComputationDigest,
     RuleIdentity, RuleRevision,
 };
+use pith_output::dto::{InterfaceRepr, TierRepr};
 use smallvec::SmallVec;
 use std::marker::PhantomData;
 
@@ -68,6 +69,25 @@ pub struct Rule<K: EffectCategory = Pure> {
 pub enum RuleTier {
     Host,
     Represented,
+}
+
+impl From<RuleTier> for TierRepr {
+    fn from(tier: RuleTier) -> Self {
+        match tier {
+            RuleTier::Host => Self::Host,
+            RuleTier::Represented => Self::Represented,
+        }
+    }
+}
+
+impl From<&Interface> for InterfaceRepr {
+    fn from(interface: &Interface) -> Self {
+        Self {
+            inputs: interface.inputs.iter().map(Into::into).collect(),
+            output: Box::new((&interface.output).into()),
+            rendered: interface.to_string().into(),
+        }
+    }
 }
 
 /// Persistent identity for a pure rule application over the current semantic
