@@ -956,6 +956,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "pith-query"
+version = "0.1.0"
+dependencies = [
+ "pith-core",
+ "pith-diag",
+ "pith-engine",
+ "pith-hir",
+ "pith-ids",
+ "pith-loader",
+ "pith-output",
+ "pith-state-sqlite",
+ "pith-store",
+ "tempfile",
+]
+
+[[package]]
 name = "pith-state-sqlite"
 version = "0.1.0"
 dependencies = [
