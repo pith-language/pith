@@ -41,6 +41,76 @@ pub(super) fn open_in_memory() -> Result<SqliteConnection, SqliteStateError> {
     Ok(connection)
 }
 
+/// Open the database at `path` for reading only.
+///
+/// The connection is sqlite `mode=ro`, so nothing in this process can write
+/// the database file even by mistake: no schema is built, an incompatible
+/// database is refused rather than moved aside (moving it aside is a write),
+/// and pending attempts are left pending (marking them failed is the writable
+/// open's recovery, and a reader is not the owner).
+///
+/// One caveat the WAL mode forces: reading a WAL database needs the shared
+/// memory file, which sqlite may create beside the database even for a
+/// read-only connection. The database itself is never written; the directory
+/// may gain a `-shm` side file.
+pub(super) fn open_read_only(path: &Path) -> Result<SqliteConnection, SqliteStateError> {
+    let mut connection = establish_read_only(path)?;
+    verify_readable(&mut connection, path)?;
+    Ok(connection)
+}
+
+fn establish_read_only(path: &Path) -> Result<SqliteConnection, SqliteStateError> {
+    let mut connection = SqliteConnection::establish(&read_only_url(path)?)?;
+    // Belt and braces: the connection is already `mode=ro`, and this stops a
+    // future read helper that happens to write from succeeding on a database
+    // opened through some other route.
+    connection.batch_execute("pragma query_only = true;")?;
+    Ok(connection)
+}
+
+/// The `file:` URI that opens `path` read-only. SQLite URI paths percent-
+/// decode what they are given, so a path containing `?`, `#`, or a space must
+/// arrive encoded or the URI is misread.
+fn read_only_url(path: &Path) -> Result<String, SqliteStateError> {
+    let text = path
+        .to_str()
+        .ok_or_else(|| SqliteStateError::UnusablePath {
+            path: path.to_path_buf(),
+        })?;
+    let mut url = String::from("file:");
+    url.push_str(&percent_encoded(text));
+    url.push_str("?mode=ro");
+    Ok(url)
+}
+
+fn percent_encoded(text: &str) -> String {
+    use std::fmt::Write as _;
+    let mut encoded = String::with_capacity(text.len());
+    for &byte in text.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                encoded.push(byte as char);
+            }
+            _ => {
+                let _ = write!(encoded, "%{byte:02X}");
+            }
+        }
+    }
+    encoded
+}
+
+fn verify_readable(connection: &mut SqliteConnection, path: &Path) -> Result<(), SqliteStateError> {
+    match compatibility(connection)? {
+        Compatibility::Current => Ok(()),
+        Compatibility::Fresh => Err(SqliteStateError::NothingToRead {
+            path: path.to_path_buf(),
+        }),
+        Compatibility::Incompatible => Err(SqliteStateError::IncompatibleReadOnly {
+            path: path.to_path_buf(),
+        }),
+    }
+}
+
 fn establish(path: &Path) -> Result<SqliteConnection, SqliteStateError> {
     let url = path
         .to_str()

@@ -33,7 +33,7 @@ pub use graph::{
 pub use observation::{ObservationRule, Observed, Observer, ObserverIdentity};
 pub use policy::{ActionAuthorization, ActionPolicy, AllowAllActions};
 pub use runtime::{Runtime, RuntimeError, TokioRuntime};
-pub use state::{EngineStateStore, MemoryEngineStateStore};
+pub use state::{EngineStateReader, EngineStateStore, MemoryEngineStateStore};
 
 use pith_output::{IntoOutput, OutputRecord, Payload, PhaseStatus};
 

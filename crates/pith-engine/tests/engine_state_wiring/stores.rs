@@ -59,40 +59,21 @@ impl CreateFailingStore {
     }
 }
 
-impl EngineStateStore for CreateFailingStore {
+impl EngineStateReader for CreateFailingStore {
     fn versions(&self) -> EngineStateVersions {
         self.inner.versions()
     }
 
-    fn create_pending_attempt(
-        &self,
-        _computation: DurableComputation,
-    ) -> Result<DurableAttemptId, EngineStateError> {
-        Err(Self::failure())
+    fn attempt_statistics(&self) -> Result<AttemptStatistics, EngineStateError> {
+        self.inner.attempt_statistics()
     }
 
-    fn publish_complete(
-        &self,
-        attempt: DurableAttemptId,
-        completion: CompletedAttempt,
-    ) -> Result<(), EngineStateError> {
-        self.inner.publish_complete(attempt, completion)
+    fn all_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
+        self.inner.all_attempts()
     }
 
-    fn publish_failed(
-        &self,
-        attempt: DurableAttemptId,
-        failure: StoppedAttempt,
-    ) -> Result<(), EngineStateError> {
-        self.inner.publish_failed(attempt, failure)
-    }
-
-    fn publish_cancelled(
-        &self,
-        attempt: DurableAttemptId,
-        cancellation: StoppedAttempt,
-    ) -> Result<(), EngineStateError> {
-        self.inner.publish_cancelled(attempt, cancellation)
+    fn reusable_index_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
+        self.inner.reusable_index_attempts()
     }
 
     fn attempt(
@@ -136,32 +117,12 @@ impl EngineStateStore for CreateFailingStore {
     }
 }
 
-/// A store adapter whose reusable-index read always fails. Decision 0024 treats
-/// adapter failure as an error rather than a cache miss, so a broken adapter
-/// must surface diagnostics instead of silently degrading into "recompute".
-#[derive(Default)]
-pub struct ReadFailingStore {
-    inner: MemoryEngineStateStore,
-}
-
-impl ReadFailingStore {
-    fn failure() -> EngineStateError {
-        EngineStateError::Adapter {
-            message: "fixture: reusable index unreadable".into(),
-        }
-    }
-}
-
-impl EngineStateStore for ReadFailingStore {
-    fn versions(&self) -> EngineStateVersions {
-        self.inner.versions()
-    }
-
+impl EngineStateStore for CreateFailingStore {
     fn create_pending_attempt(
         &self,
-        computation: DurableComputation,
+        _computation: DurableComputation,
     ) -> Result<DurableAttemptId, EngineStateError> {
-        self.inner.create_pending_attempt(computation)
+        Err(Self::failure())
     }
 
     fn publish_complete(
@@ -186,6 +147,40 @@ impl EngineStateStore for ReadFailingStore {
         cancellation: StoppedAttempt,
     ) -> Result<(), EngineStateError> {
         self.inner.publish_cancelled(attempt, cancellation)
+    }
+}
+
+/// A store adapter whose reusable-index read always fails. Decision 0024 treats
+/// adapter failure as an error rather than a cache miss, so a broken adapter
+/// must surface diagnostics instead of silently degrading into "recompute".
+#[derive(Default)]
+pub struct ReadFailingStore {
+    inner: MemoryEngineStateStore,
+}
+
+impl ReadFailingStore {
+    fn failure() -> EngineStateError {
+        EngineStateError::Adapter {
+            message: "fixture: reusable index unreadable".into(),
+        }
+    }
+}
+
+impl EngineStateReader for ReadFailingStore {
+    fn versions(&self) -> EngineStateVersions {
+        self.inner.versions()
+    }
+
+    fn attempt_statistics(&self) -> Result<AttemptStatistics, EngineStateError> {
+        self.inner.attempt_statistics()
+    }
+
+    fn all_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
+        self.inner.all_attempts()
+    }
+
+    fn reusable_index_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
+        self.inner.reusable_index_attempts()
     }
 
     fn attempt(
@@ -228,6 +223,39 @@ impl EngineStateStore for ReadFailingStore {
     }
 }
 
+impl EngineStateStore for ReadFailingStore {
+    fn create_pending_attempt(
+        &self,
+        computation: DurableComputation,
+    ) -> Result<DurableAttemptId, EngineStateError> {
+        self.inner.create_pending_attempt(computation)
+    }
+
+    fn publish_complete(
+        &self,
+        attempt: DurableAttemptId,
+        completion: CompletedAttempt,
+    ) -> Result<(), EngineStateError> {
+        self.inner.publish_complete(attempt, completion)
+    }
+
+    fn publish_failed(
+        &self,
+        attempt: DurableAttemptId,
+        failure: StoppedAttempt,
+    ) -> Result<(), EngineStateError> {
+        self.inner.publish_failed(attempt, failure)
+    }
+
+    fn publish_cancelled(
+        &self,
+        attempt: DurableAttemptId,
+        cancellation: StoppedAttempt,
+    ) -> Result<(), EngineStateError> {
+        self.inner.publish_cancelled(attempt, cancellation)
+    }
+}
+
 /// One durable substrate behind several [`Engine`] instances, which is how
 /// decision 0024 describes a single process owning the writable engine
 /// database. Hydration is not observable within one instance — the arena index
@@ -263,7 +291,7 @@ fn lock_poisoned() -> EngineStateError {
     }
 }
 
-impl EngineStateStore for SharedEngineStateStore {
+impl EngineStateReader for SharedEngineStateStore {
     fn versions(&self) -> EngineStateVersions {
         match self.0.lock() {
             Ok(store) => store.versions(),
@@ -271,35 +299,16 @@ impl EngineStateStore for SharedEngineStateStore {
         }
     }
 
-    fn create_pending_attempt(
-        &self,
-        computation: DurableComputation,
-    ) -> Result<DurableAttemptId, EngineStateError> {
-        self.write(|store| store.create_pending_attempt(computation))
+    fn attempt_statistics(&self) -> Result<AttemptStatistics, EngineStateError> {
+        self.read(|store| store.attempt_statistics())
     }
 
-    fn publish_complete(
-        &self,
-        attempt: DurableAttemptId,
-        completion: CompletedAttempt,
-    ) -> Result<(), EngineStateError> {
-        self.write(|store| store.publish_complete(attempt, completion))
+    fn all_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
+        self.read(|store| store.all_attempts())
     }
 
-    fn publish_failed(
-        &self,
-        attempt: DurableAttemptId,
-        failure: StoppedAttempt,
-    ) -> Result<(), EngineStateError> {
-        self.write(|store| store.publish_failed(attempt, failure))
-    }
-
-    fn publish_cancelled(
-        &self,
-        attempt: DurableAttemptId,
-        cancellation: StoppedAttempt,
-    ) -> Result<(), EngineStateError> {
-        self.write(|store| store.publish_cancelled(attempt, cancellation))
+    fn reusable_index_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
+        self.read(|store| store.reusable_index_attempts())
     }
 
     fn attempt(
@@ -339,5 +348,38 @@ impl EngineStateStore for SharedEngineStateStore {
 
     fn pending_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
         self.read(|store| store.pending_attempts())
+    }
+}
+
+impl EngineStateStore for SharedEngineStateStore {
+    fn create_pending_attempt(
+        &self,
+        computation: DurableComputation,
+    ) -> Result<DurableAttemptId, EngineStateError> {
+        self.write(|store| store.create_pending_attempt(computation))
+    }
+
+    fn publish_complete(
+        &self,
+        attempt: DurableAttemptId,
+        completion: CompletedAttempt,
+    ) -> Result<(), EngineStateError> {
+        self.write(|store| store.publish_complete(attempt, completion))
+    }
+
+    fn publish_failed(
+        &self,
+        attempt: DurableAttemptId,
+        failure: StoppedAttempt,
+    ) -> Result<(), EngineStateError> {
+        self.write(|store| store.publish_failed(attempt, failure))
+    }
+
+    fn publish_cancelled(
+        &self,
+        attempt: DurableAttemptId,
+        cancellation: StoppedAttempt,
+    ) -> Result<(), EngineStateError> {
+        self.write(|store| store.publish_cancelled(attempt, cancellation))
     }
 }

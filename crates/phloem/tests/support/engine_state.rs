@@ -2,9 +2,9 @@ use std::sync::{Arc, Mutex};
 
 use pith_core::{ActionComputationKey, PureComputationKey};
 use pith_engine::state::{
-    CompletedAttempt, DurableAttempt, DurableAttemptId, DurableComputation, EngineStateError,
-    EngineStateStore, EngineStateVersions, InvalidationExplanation, MemoryEngineStateStore,
-    StoppedAttempt,
+    AttemptStatistics, CompletedAttempt, DurableAttempt, DurableAttemptId, DurableComputation,
+    EngineStateError, EngineStateReader, EngineStateStore, EngineStateVersions,
+    InvalidationExplanation, MemoryEngineStateStore, StoppedAttempt,
 };
 
 #[derive(Clone, Default)]
@@ -38,43 +38,12 @@ fn lock_poisoned() -> EngineStateError {
     }
 }
 
-impl EngineStateStore for SharedState {
+impl EngineStateReader for SharedState {
     fn versions(&self) -> EngineStateVersions {
         match self.0.lock() {
             Ok(store) => store.versions(),
             Err(_) => unreachable!("the shared engine state lock was poisoned"),
         }
-    }
-
-    fn create_pending_attempt(
-        &self,
-        computation: DurableComputation,
-    ) -> Result<DurableAttemptId, EngineStateError> {
-        self.write(|store| store.create_pending_attempt(computation))
-    }
-
-    fn publish_complete(
-        &self,
-        attempt: DurableAttemptId,
-        completion: CompletedAttempt,
-    ) -> Result<(), EngineStateError> {
-        self.write(|store| store.publish_complete(attempt, completion))
-    }
-
-    fn publish_failed(
-        &self,
-        attempt: DurableAttemptId,
-        failure: StoppedAttempt,
-    ) -> Result<(), EngineStateError> {
-        self.write(|store| store.publish_failed(attempt, failure))
-    }
-
-    fn publish_cancelled(
-        &self,
-        attempt: DurableAttemptId,
-        cancellation: StoppedAttempt,
-    ) -> Result<(), EngineStateError> {
-        self.write(|store| store.publish_cancelled(attempt, cancellation))
     }
 
     fn attempt(
@@ -112,7 +81,52 @@ impl EngineStateStore for SharedState {
         self.read(|store| store.explain_invalidation(computation))
     }
 
+    fn attempt_statistics(&self) -> Result<AttemptStatistics, EngineStateError> {
+        self.read(|store| store.attempt_statistics())
+    }
+
+    fn all_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
+        self.read(|store| store.all_attempts())
+    }
+
+    fn reusable_index_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
+        self.read(|store| store.reusable_index_attempts())
+    }
+
     fn pending_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
         self.read(|store| store.pending_attempts())
+    }
+}
+
+impl EngineStateStore for SharedState {
+    fn create_pending_attempt(
+        &self,
+        computation: DurableComputation,
+    ) -> Result<DurableAttemptId, EngineStateError> {
+        self.write(|store| store.create_pending_attempt(computation))
+    }
+
+    fn publish_complete(
+        &self,
+        attempt: DurableAttemptId,
+        completion: CompletedAttempt,
+    ) -> Result<(), EngineStateError> {
+        self.write(|store| store.publish_complete(attempt, completion))
+    }
+
+    fn publish_failed(
+        &self,
+        attempt: DurableAttemptId,
+        failure: StoppedAttempt,
+    ) -> Result<(), EngineStateError> {
+        self.write(|store| store.publish_failed(attempt, failure))
+    }
+
+    fn publish_cancelled(
+        &self,
+        attempt: DurableAttemptId,
+        cancellation: StoppedAttempt,
+    ) -> Result<(), EngineStateError> {
+        self.write(|store| store.publish_cancelled(attempt, cancellation))
     }
 }

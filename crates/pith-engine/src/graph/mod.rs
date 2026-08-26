@@ -45,13 +45,19 @@ use crate::bound::RunBound;
 use crate::cancel::{CancelSignal, NeverCancelled};
 use crate::policy::ActionPolicy;
 use crate::runtime::{Runtime, RuntimeError};
-use crate::state::{DurableAttemptId, EngineStateStore, MemoryEngineStateStore};
+use crate::state::{DurableAttemptId, EngineStateReader, EngineStateStore, MemoryEngineStateStore};
 use crate::{ObservationRule, Observer};
 use eval::single_evaluation;
 use ir::StopReason;
 use reuse::{ActionComputationIndex, ObservationComputationIndex, PureComputationIndex};
 
-pub struct Engine {
+/// A graph engine branded by the durable-state authority it holds.
+///
+/// The default parameter preserves `Engine` as the writable engine used for
+/// evaluation. A query-only engine is `Engine<dyn EngineStateReader>`: it can
+/// register rules and inspect selection/plans, but the evaluation methods live
+/// only on the writable specialization and therefore do not exist on it.
+pub struct Engine<S: EngineStateReader + ?Sized = dyn EngineStateStore> {
     pub(crate) rules: RuleTable<Pure>,
     pub(crate) bodies: IndexMap<RuleId, Box<dyn PureRule>>,
     /// The revision each pure rule identity is registered at, indexed off
@@ -73,7 +79,7 @@ pub struct Engine {
     /// process-local `durable_attempts` side-table maps computation nodes to
     /// their durable attempt identifiers. Store calls happen only at engine
     /// scheduling boundaries (decision 0024, "adapter boundaries").
-    pub(crate) state_store: Box<dyn EngineStateStore>,
+    pub(crate) state_store: Box<S>,
     pub(crate) durable_attempts: IndexMap<ComputationId, DurableAttemptId>,
     action_concurrency: NonZeroUsize,
     action_caching: bool,
@@ -108,26 +114,7 @@ impl Engine {
         store: impl ContentStore + 'static,
         state_store: impl EngineStateStore + 'static,
     ) -> Self {
-        Self {
-            rules: RuleTable::new(),
-            bodies: IndexMap::new(),
-            pure_rule_revisions: IndexMap::new(),
-            action_rules: RuleTable::new(),
-            action_bodies: IndexMap::new(),
-            observation_rules: RuleTable::new(),
-            observation_bodies: IndexMap::new(),
-            computations: ComputationArena::new(),
-            pure_computations: IndexMap::new(),
-            action_computations: IndexMap::new(),
-            observation_computations: IndexMap::new(),
-            store: Box::new(store),
-            state_store: Box::new(state_store),
-            durable_attempts: IndexMap::new(),
-            action_concurrency: default_action_concurrency(),
-            action_caching: true,
-            minimum_access_verification: AccessVerification::Unverified,
-            observer: None,
-        }
+        Self::from_adapters(store, Box::new(state_store))
     }
 
     /// Whether a completed action may be recorded as reusable and served to a
@@ -185,15 +172,79 @@ impl Engine {
         self.action_concurrency = limit;
     }
 
-    /// The durable engine-state adapter (decision 0024). Writes take `&self`,
-    /// so this is the only accessor the adapter needs.
-    pub fn state_store(&self) -> &dyn EngineStateStore {
+    /// Insert a blob into the engine's content store and return its identity.
+    ///
+    /// # Errors
+    /// Returns the store's error if the adapter cannot store the bytes. The
+    /// in-memory adapter is infallible; filesystem/remote adapters may fail.
+    pub fn put_blob(&mut self, bytes: &[u8]) -> Result<ContentId, pith_store::StoreError> {
+        self.store.put_blob(bytes)
+    }
+}
+
+impl Engine<dyn EngineStateReader> {
+    /// Build an engine that can inspect durable state but cannot publish it.
+    ///
+    /// Evaluation methods are defined only on the writable `Engine`
+    /// specialization, so this value cannot create or complete attempts.
+    /// ```compile_fail
+    /// use pith_core::{Interface, Pure, Request, Type};
+    /// use pith_diag::Span;
+    /// use pith_engine::{Engine, EngineStateReader, MemoryEngineStateStore};
+    /// use pith_store::MemoryContentStore;
+    ///
+    /// let mut engine = Engine::<dyn EngineStateReader>::with_read_only_state_store(
+    ///     MemoryContentStore::default(),
+    ///     MemoryEngineStateStore::default(),
+    /// );
+    /// let request = Request::<Pure>::new(
+    ///     "read-only",
+    ///     Interface { inputs: Box::new([]), output: Type::Unit },
+    ///     [],
+    ///     Span::none(),
+    /// );
+    /// // Evaluation publishes a durable attempt, so the method is absent.
+    /// let _ = engine.evaluate_pure(&request);
+    /// ```
+    pub fn with_read_only_state_store(
+        store: impl ContentStore + 'static,
+        state_store: impl EngineStateReader + 'static,
+    ) -> Self {
+        Self::from_adapters(store, Box::new(state_store))
+    }
+}
+
+impl<S: EngineStateReader + ?Sized> Engine<S> {
+    fn from_adapters(store: impl ContentStore + 'static, state_store: Box<S>) -> Self {
+        Self {
+            rules: RuleTable::new(),
+            bodies: IndexMap::new(),
+            pure_rule_revisions: IndexMap::new(),
+            action_rules: RuleTable::new(),
+            action_bodies: IndexMap::new(),
+            observation_rules: RuleTable::new(),
+            observation_bodies: IndexMap::new(),
+            computations: ComputationArena::new(),
+            pure_computations: IndexMap::new(),
+            action_computations: IndexMap::new(),
+            observation_computations: IndexMap::new(),
+            store: Box::new(store),
+            state_store,
+            durable_attempts: IndexMap::new(),
+            action_concurrency: default_action_concurrency(),
+            action_caching: true,
+            minimum_access_verification: AccessVerification::Unverified,
+            observer: None,
+        }
+    }
+
+    /// The durable engine-state authority this engine was constructed with.
+    pub fn state_store(&self) -> &S {
         self.state_store.as_ref()
     }
 
-    /// The durable attempt identifier the engine published for `computation`,
-    /// if any. `None` for computations that never left `Pending` or that this
-    /// engine instance did not allocate.
+    /// The durable attempt identifier the engine observed for `computation`,
+    /// if any. `None` for computations unknown to this engine instance.
     pub fn durable_attempt_for(&self, computation: ComputationId) -> Option<DurableAttemptId> {
         self.durable_attempts.get(&computation).copied()
     }
@@ -279,16 +330,9 @@ impl Engine {
     {
         self.observer = Some(Box::new(observer));
     }
+}
 
-    /// Insert a blob into the engine's content store and return its identity.
-    ///
-    /// # Errors
-    /// Returns the store's error if the adapter cannot store the bytes. The
-    /// in-memory adapter is infallible; filesystem/remote adapters may fail.
-    pub fn put_blob(&mut self, bytes: &[u8]) -> Result<ContentId, pith_store::StoreError> {
-        self.store.put_blob(bytes)
-    }
-
+impl Engine {
     /// Evaluate a request on the synchronous pure step machine. Rejects
     /// effectful steps (`NeedBlob`, `NeedAction`) with `E-1206`: this entry
     /// point is for pure-only computations and keeps the sync core honest.

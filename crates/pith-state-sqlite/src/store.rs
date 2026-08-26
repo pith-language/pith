@@ -7,15 +7,17 @@ use diesel::sqlite::SqliteConnection;
 use pith_core::{ActionComputationKey, PureComputationKey};
 use pith_engine::state::validate::{AttemptLookup, TerminalAttemptState, validate_publication};
 use pith_engine::state::{
-    CompletedAttempt, DurableAttempt, DurableAttemptId, DurableAttemptStatus, DurableComputation,
-    EngineStateError, EngineStateStore, EngineStateVersions, InvalidationExplanation,
-    StoppedAttempt,
+    AttemptStatistics, CompletedAttempt, DurableAttempt, DurableAttemptId, DurableAttemptStatus,
+    DurableComputation, EngineStateError, EngineStateReader, EngineStateStore, EngineStateVersions,
+    InvalidationExplanation, StoppedAttempt,
 };
 
 use crate::rows::{
-    Failure, attempt_computation, attempts_for_computation, find_pure_computation,
-    insert_pending_attempt, intern_computation, load_attempt, load_attempts, pending_attempt_rows,
-    publish_reusable, reusable_action_attempt_row, reusable_attempt_row, write_terminal_state,
+    Failure, all_attempt_rows, attempt_computation, attempt_status_column,
+    attempts_for_computation, find_pure_computation, insert_pending_attempt, intern_computation,
+    load_attempt, load_attempts, pending_attempt_rows, publish_reusable,
+    reusable_action_attempt_row, reusable_attempt_row, reusable_index_attempt_rows,
+    reusable_index_size, write_terminal_state,
 };
 use crate::schema::CURRENT_VERSIONS;
 
@@ -41,6 +43,18 @@ pub enum SqliteStateError {
     },
     /// The path cannot be given to sqlite as a connection string.
     UnusablePath {
+        path: PathBuf,
+    },
+    /// The file exists but holds no engine-state schema, so there is nothing
+    /// to read. A writable open would build one; a read-only open cannot, and
+    /// an empty file is more likely a mistaken path than a cache.
+    NothingToRead {
+        path: PathBuf,
+    },
+    /// A read-only open found a database whose versions this build refuses to
+    /// read. The writable open moves such a database aside and rebuilds; a
+    /// read-only open cannot, so it refuses instead.
+    IncompatibleReadOnly {
         path: PathBuf,
     },
     /// A version number this build reports does not fit sqlite's integer type.
@@ -80,6 +94,16 @@ impl std::fmt::Display for SqliteStateError {
                 "the engine-state path {} is not valid utf-8",
                 path.display()
             ),
+            Self::NothingToRead { path } => write!(
+                formatter,
+                "the file at {} holds no engine state: nothing to read",
+                path.display()
+            ),
+            Self::IncompatibleReadOnly { path } => write!(
+                formatter,
+                "the engine-state database at {} records versions this build refuses to read",
+                path.display()
+            ),
             Self::UnrepresentableVersion { version } => write!(
                 formatter,
                 "engine-state version {version} exceeds the storable range"
@@ -115,14 +139,8 @@ impl From<diesel::ConnectionError> for SqliteStateError {
     }
 }
 
-/// Durable engine state in a sqlite database (decisions 0024 and 0025).
-///
-/// A diesel `SqliteConnection` is `Send` but not `Sync`, while
-/// [`EngineStateStore`] is both so the engine's evaluation future stays `Send`.
-/// The connection is therefore serialized behind a mutex, which is the
-/// arrangement decision 0024 describes: one process owns the writable database
-/// and metadata access is serialized through the owner rather than locked
-/// throughout the graph.
+/// Durable engine state in SQLite. The connection is serialized because Diesel
+/// connections are `Send` but not `Sync`, while [`EngineStateStore`] is both.
 pub struct SqliteEngineStateStore {
     connection: Mutex<SqliteConnection>,
 }
@@ -130,21 +148,15 @@ pub struct SqliteEngineStateStore {
 impl SqliteEngineStateStore {
     /// Open the engine-state database at `path`, creating it if absent.
     ///
-    /// An existing database whose schema or record-encoding version differs
-    /// from this build's is moved aside and rebuilt empty. Decision 0024 makes
-    /// that the pre-release policy: reinterpreting records under a different
-    /// version is forbidden, and losing a cache is cheaper than losing
-    /// correctness. Content objects survive, because their identities are
-    /// domain separated and include their own encoding version.
+    /// An incompatible pre-release database is moved aside and rebuilt rather
+    /// than interpreted under a different schema or encoding.
     ///
     /// # Errors
     /// Returns [`SqliteStateError`] when the database cannot be opened,
     /// initialized, or moved aside.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, SqliteStateError> {
         let connection = crate::database::open(path.as_ref())?;
-        Ok(Self {
-            connection: Mutex::new(connection),
-        })
+        Ok(Self::from_connection(connection))
     }
 
     /// Open a private in-memory engine-state database. Exercises the same
@@ -154,9 +166,13 @@ impl SqliteEngineStateStore {
     /// Returns [`SqliteStateError`] when the database cannot be initialized.
     pub fn open_in_memory() -> Result<Self, SqliteStateError> {
         let connection = crate::database::open_in_memory()?;
-        Ok(Self {
+        Ok(Self::from_connection(connection))
+    }
+
+    fn from_connection(connection: SqliteConnection) -> Self {
+        Self {
             connection: Mutex::new(connection),
-        })
+        }
     }
 
     /// The versions this build reads and writes.
@@ -213,6 +229,88 @@ impl SqliteEngineStateStore {
     }
 }
 
+/// A SQLite connection opened with `mode=ro` and exposing only
+/// [`EngineStateReader`] authority.
+pub struct ReadOnlySqliteEngineStateStore {
+    inner: SqliteEngineStateStore,
+}
+
+impl ReadOnlySqliteEngineStateStore {
+    /// Open the engine-state database at `path` for reading only.
+    ///
+    /// Unlike [`SqliteEngineStateStore::open`], nothing is created, moved
+    /// aside, or recovered: the database must exist and record versions this
+    /// build reads, or opening fails.
+    ///
+    /// # Errors
+    /// Returns [`SqliteStateError`] when the database is absent, holds no
+    /// engine state, or records incompatible versions.
+    pub fn open_read_only(path: impl AsRef<Path>) -> Result<Self, SqliteStateError> {
+        let connection = crate::database::open_read_only(path.as_ref())?;
+        Ok(Self {
+            inner: SqliteEngineStateStore::from_connection(connection),
+        })
+    }
+}
+
+impl EngineStateReader for ReadOnlySqliteEngineStateStore {
+    fn versions(&self) -> EngineStateVersions {
+        self.inner.versions()
+    }
+
+    fn attempt_statistics(&self) -> Result<AttemptStatistics, EngineStateError> {
+        self.inner.attempt_statistics()
+    }
+
+    fn all_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
+        self.inner.all_attempts()
+    }
+
+    fn reusable_index_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
+        self.inner.reusable_index_attempts()
+    }
+
+    fn attempt(
+        &self,
+        attempt: DurableAttemptId,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        self.inner.attempt(attempt)
+    }
+
+    fn attempt_history(
+        &self,
+        computation: PureComputationKey,
+    ) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
+        self.inner.attempt_history(computation)
+    }
+
+    fn latest_completed_reusable_attempt(
+        &self,
+        computation: PureComputationKey,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        self.inner.latest_completed_reusable_attempt(computation)
+    }
+
+    fn latest_completed_reusable_action_attempt(
+        &self,
+        computation: ActionComputationKey,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        self.inner
+            .latest_completed_reusable_action_attempt(computation)
+    }
+
+    fn explain_invalidation(
+        &self,
+        computation: PureComputationKey,
+    ) -> Result<Option<InvalidationExplanation>, EngineStateError> {
+        self.inner.explain_invalidation(computation)
+    }
+
+    fn pending_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
+        self.inner.pending_attempts()
+    }
+}
+
 /// Resolves dependency edges during validation from inside the publishing
 /// transaction, so an edge is checked against the same snapshot it is written
 /// into.
@@ -253,46 +351,39 @@ impl AttemptLookup for ConnectionLookup<'_> {
     }
 }
 
-impl EngineStateStore for SqliteEngineStateStore {
+impl EngineStateReader for SqliteEngineStateStore {
     fn versions(&self) -> EngineStateVersions {
         CURRENT_VERSIONS
     }
 
-    fn create_pending_attempt(
-        &self,
-        computation: DurableComputation,
-    ) -> Result<DurableAttemptId, EngineStateError> {
-        let mut guard = self.locked()?;
-        guard
-            .transaction::<DurableAttemptId, Failure, _>(|connection| {
-                let computation = intern_computation(connection, &computation)?;
-                insert_pending_attempt(connection, computation)
+    fn attempt_statistics(&self) -> Result<AttemptStatistics, EngineStateError> {
+        self.read(|connection| {
+            connection.transaction::<AttemptStatistics, Failure, _>(|connection| {
+                let mut statistics = AttemptStatistics::default();
+                for status in attempt_status_column(connection)? {
+                    statistics.record(status);
+                }
+                let indexed = reusable_index_size(connection)?;
+                statistics.reusable_index = u64::try_from(indexed).unwrap_or(u64::MAX);
+                Ok(statistics)
             })
-            .map_err(EngineStateError::from)
+        })
     }
 
-    fn publish_complete(
-        &self,
-        attempt: DurableAttemptId,
-        completion: CompletedAttempt,
-    ) -> Result<(), EngineStateError> {
-        self.publish(attempt, TerminalAttemptState::Complete(completion))
+    fn all_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
+        self.read(|connection| {
+            let rows = all_attempt_rows(connection)?;
+            Ok(shared(load_attempts(connection, rows)?))
+        })
     }
 
-    fn publish_failed(
-        &self,
-        attempt: DurableAttemptId,
-        failure: StoppedAttempt,
-    ) -> Result<(), EngineStateError> {
-        self.publish(attempt, TerminalAttemptState::Failed(failure))
-    }
-
-    fn publish_cancelled(
-        &self,
-        attempt: DurableAttemptId,
-        cancellation: StoppedAttempt,
-    ) -> Result<(), EngineStateError> {
-        self.publish(attempt, TerminalAttemptState::Cancelled(cancellation))
+    fn reusable_index_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
+        self.read(|connection| {
+            connection.transaction::<Box<[Arc<DurableAttempt>]>, Failure, _>(|connection| {
+                let rows = reusable_index_attempt_rows(connection)?;
+                Ok(shared(load_attempts(connection, rows)?))
+            })
+        })
     }
 
     fn attempt(
@@ -376,6 +467,45 @@ impl EngineStateStore for SqliteEngineStateStore {
             let rows = pending_attempt_rows(connection)?;
             Ok(shared(load_attempts(connection, rows)?))
         })
+    }
+}
+
+impl EngineStateStore for SqliteEngineStateStore {
+    fn create_pending_attempt(
+        &self,
+        computation: DurableComputation,
+    ) -> Result<DurableAttemptId, EngineStateError> {
+        let mut guard = self.locked()?;
+        guard
+            .transaction::<DurableAttemptId, Failure, _>(|connection| {
+                let computation = intern_computation(connection, &computation)?;
+                insert_pending_attempt(connection, computation)
+            })
+            .map_err(EngineStateError::from)
+    }
+
+    fn publish_complete(
+        &self,
+        attempt: DurableAttemptId,
+        completion: CompletedAttempt,
+    ) -> Result<(), EngineStateError> {
+        self.publish(attempt, TerminalAttemptState::Complete(completion))
+    }
+
+    fn publish_failed(
+        &self,
+        attempt: DurableAttemptId,
+        failure: StoppedAttempt,
+    ) -> Result<(), EngineStateError> {
+        self.publish(attempt, TerminalAttemptState::Failed(failure))
+    }
+
+    fn publish_cancelled(
+        &self,
+        attempt: DurableAttemptId,
+        cancellation: StoppedAttempt,
+    ) -> Result<(), EngineStateError> {
+        self.publish(attempt, TerminalAttemptState::Cancelled(cancellation))
     }
 }
 

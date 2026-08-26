@@ -16,7 +16,7 @@ use pith_engine::state::{
     CompletedAttempt, DurableActionProvenance, DurableActionRequest, DurableAttemptState,
     DurableComputation, DurableDependency, DurableDiagnostic, DurableObservationProvenance,
     DurableObservationRequest, DurableProvenance, DurableReuseDecision, DurableRule, EncodedValue,
-    EngineStateStore, StoppedAttempt,
+    EngineStateReader, EngineStateStore, StoppedAttempt,
 };
 use pith_engine::{
     AccessVerification, ActionAuthorization, Engine, EvaluationSource, ExecutionPlatform,

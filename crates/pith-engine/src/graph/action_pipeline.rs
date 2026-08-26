@@ -25,6 +25,7 @@ use crate::graph::diagnostics::{
     InternalInvariant, internal_diag, one_diag, validate_action_result, validate_execution_platform,
 };
 use crate::policy::ActionAuthorization;
+use crate::state::EngineStateReader;
 
 /// Metadata copied out of the selected action rule for the duration of one
 /// execution. Bundling these keeps [`Engine::finish_action`]'s argument list
@@ -68,7 +69,7 @@ pub(super) struct PreparedAction {
     pub(super) invocation: ActionInvocation,
 }
 
-impl Engine {
+impl<S: EngineStateReader + ?Sized> Engine<S> {
     pub(super) fn plan_action(&self, request: &Request<Action>) -> PithResult<ActionPlan> {
         request.validate_inputs().map_err(one_diag)?;
         let rule = self
@@ -89,7 +90,9 @@ impl Engine {
             spec,
         })
     }
+}
 
+impl Engine {
     /// Plan, authorize, allocate, and materialize one action, stopping at the
     /// executor call. See [`ActionStart`] for why the split is here.
     pub(super) fn begin_action(

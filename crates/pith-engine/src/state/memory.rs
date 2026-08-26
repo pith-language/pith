@@ -5,9 +5,9 @@ use pith_core::{ActionComputationKey, PureComputationKey};
 
 use super::validate::{AttemptLookup, TerminalAttemptState, validate_publication};
 use super::{
-    CURRENT_ENGINE_STATE_VERSIONS, CompletedAttempt, DurableAttempt, DurableAttemptId,
-    DurableAttemptState, DurableComputation, EngineStateError, EngineStateStore,
-    EngineStateVersions, InvalidationExplanation, StoppedAttempt,
+    AttemptStatistics, CURRENT_ENGINE_STATE_VERSIONS, CompletedAttempt, DurableAttempt,
+    DurableAttemptId, DurableAttemptState, DurableComputation, EngineStateError, EngineStateReader,
+    EngineStateStore, EngineStateVersions, InvalidationExplanation, StoppedAttempt,
 };
 
 /// Deterministic in-memory implementation of [`EngineStateStore`].
@@ -139,63 +139,42 @@ impl Default for MemoryEngineStateStore {
     }
 }
 
-impl EngineStateStore for MemoryEngineStateStore {
+impl EngineStateReader for MemoryEngineStateStore {
     fn versions(&self) -> EngineStateVersions {
         self.versions
     }
 
-    fn create_pending_attempt(
-        &self,
-        computation: DurableComputation,
-    ) -> Result<DurableAttemptId, EngineStateError> {
-        let mut records = self.locked()?;
-        let Some(next_identifier) = records.next_attempt_identifier.checked_add(1) else {
-            return Err(EngineStateError::AttemptIdentifierExhausted);
-        };
-        let attempt = DurableAttemptId::from_raw(records.next_attempt_identifier);
-        records.next_attempt_identifier = next_identifier;
-
-        if let Some(computation) = computation.pure_key() {
-            records
-                .pure_history
-                .entry(computation)
-                .or_default()
-                .push(attempt);
+    fn attempt_statistics(&self) -> Result<AttemptStatistics, EngineStateError> {
+        let records = self.locked()?;
+        let mut statistics = AttemptStatistics::default();
+        for attempt in records.attempts.values() {
+            statistics.record(attempt.state.status());
         }
-        let _ = records.pending.insert(attempt);
-        let _ = records.attempts.insert(
-            attempt,
-            Arc::new(DurableAttempt {
-                id: attempt,
-                computation,
-                state: DurableAttemptState::Pending,
-            }),
-        );
-        Ok(attempt)
+        statistics.reusable_index = u64::try_from(
+            records
+                .latest_reusable
+                .len()
+                .saturating_add(records.latest_reusable_action.len()),
+        )
+        .unwrap_or(u64::MAX);
+        Ok(statistics)
     }
 
-    fn publish_complete(
-        &self,
-        attempt: DurableAttemptId,
-        completion: CompletedAttempt,
-    ) -> Result<(), EngineStateError> {
-        self.publish(attempt, TerminalAttemptState::Complete(completion))
+    fn all_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
+        let records = self.locked()?;
+        Ok(records.attempts.values().cloned().collect())
     }
 
-    fn publish_failed(
-        &self,
-        attempt: DurableAttemptId,
-        failure: StoppedAttempt,
-    ) -> Result<(), EngineStateError> {
-        self.publish(attempt, TerminalAttemptState::Failed(failure))
-    }
-
-    fn publish_cancelled(
-        &self,
-        attempt: DurableAttemptId,
-        cancellation: StoppedAttempt,
-    ) -> Result<(), EngineStateError> {
-        self.publish(attempt, TerminalAttemptState::Cancelled(cancellation))
+    fn reusable_index_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
+        let records = self.locked()?;
+        let mut indexed: Vec<DurableAttemptId> = records
+            .latest_reusable
+            .values()
+            .chain(records.latest_reusable_action.values())
+            .copied()
+            .collect();
+        indexed.sort_unstable();
+        records.attempts_by_id(indexed)
     }
 
     fn attempt(
@@ -248,5 +227,61 @@ impl EngineStateStore for MemoryEngineStateStore {
         let records = self.locked()?;
         let pending: Vec<_> = records.pending.iter().copied().collect();
         records.attempts_by_id(pending)
+    }
+}
+
+impl EngineStateStore for MemoryEngineStateStore {
+    fn create_pending_attempt(
+        &self,
+        computation: DurableComputation,
+    ) -> Result<DurableAttemptId, EngineStateError> {
+        let mut records = self.locked()?;
+        let Some(next_identifier) = records.next_attempt_identifier.checked_add(1) else {
+            return Err(EngineStateError::AttemptIdentifierExhausted);
+        };
+        let attempt = DurableAttemptId::from_raw(records.next_attempt_identifier);
+        records.next_attempt_identifier = next_identifier;
+
+        if let Some(computation) = computation.pure_key() {
+            records
+                .pure_history
+                .entry(computation)
+                .or_default()
+                .push(attempt);
+        }
+        let _ = records.pending.insert(attempt);
+        let _ = records.attempts.insert(
+            attempt,
+            Arc::new(DurableAttempt {
+                id: attempt,
+                computation,
+                state: DurableAttemptState::Pending,
+            }),
+        );
+        Ok(attempt)
+    }
+
+    fn publish_complete(
+        &self,
+        attempt: DurableAttemptId,
+        completion: CompletedAttempt,
+    ) -> Result<(), EngineStateError> {
+        self.publish(attempt, TerminalAttemptState::Complete(completion))
+    }
+
+    fn publish_failed(
+        &self,
+        attempt: DurableAttemptId,
+        failure: StoppedAttempt,
+    ) -> Result<(), EngineStateError> {
+        self.publish(attempt, TerminalAttemptState::Failed(failure))
+    }
+
+    fn publish_cancelled(
+        &self,
+        attempt: DurableAttemptId,
+        cancellation: StoppedAttempt,
+    ) -> Result<(), EngineStateError> {
+        self.publish(attempt, TerminalAttemptState::Cancelled(cancellation))
     }
 }

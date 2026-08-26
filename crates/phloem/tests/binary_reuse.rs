@@ -28,7 +28,7 @@ use phloem::universe::{Candidate, CandidateUniverse};
 use pith_core::{Pure, PureComputationKey, Request, Rule, RuleIdentity, RuleRevision, Value};
 use pith_diag::{PithResult, Span};
 use pith_engine::{
-    Engine, EngineStateStore, EvaluationSource, ExecutionPlatform, PureRule, PureRuleFrame,
+    Engine, EngineStateReader, EvaluationSource, ExecutionPlatform, PureRule, PureRuleFrame,
     PureStep, Resumption,
 };
 use pith_ids::ContentId;
