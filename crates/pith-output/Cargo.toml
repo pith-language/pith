@@ -15,9 +15,8 @@ workspace = true
 # Decision 0021: serialization stays in pith-output.
 serde.workspace = true
 serde_json.workspace = true
-anstream.workspace = true
 anstyle.workspace = true
-owo-colors.workspace = true
+termprofile.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

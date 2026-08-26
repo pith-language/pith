@@ -21,6 +21,10 @@ impl<W: Write> Renderer for PlainRenderer<W> {
         writeln!(self.out, "{line}")
     }
 
+    fn write_raw(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.out.write_all(bytes)
+    }
+
     fn finish(&mut self) -> io::Result<()> {
         self.out.flush()
     }
@@ -49,8 +53,12 @@ fn describe_plain(record: &OutputRecord) -> String {
         } => {
             format!("hits={hits} misses={misses} reuses={reuses} errors={errors} wall={wall_ms}ms")
         }
+        Payload::Query { query, .. } => crate::describe::query_view(query).render(None),
     };
-    format!("[{tag}] {body}")
+    body.split('\n')
+        .map(|line| format!("[{tag}] {line}"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[cfg(test)]
@@ -74,8 +82,6 @@ mod tests {
 
     #[test]
     fn plain_cache_matches_serde_snake_case() {
-        // Previously this rendered "Hit" via Debug, diverging from JSON's
-        // serde-derived "hit". Both renderers must agree.
         let rec = OutputRecord::cache(CacheOutcome::Hit);
         assert_eq!(describe_plain(&rec), "[cache] hit");
     }

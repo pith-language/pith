@@ -209,6 +209,12 @@ pub trait Renderer {
     /// Returns the underlying writer error if writing fails.
     fn emit(&mut self, out: &OutputRecord) -> io::Result<()>;
 
+    /// Write bytes that must not be mixed with record framing.
+    ///
+    /// # Errors
+    /// Returns the underlying writer error if writing fails.
+    fn write_raw(&mut self, bytes: &[u8]) -> io::Result<()>;
+
     /// # Errors
     /// Returns the underlying writer error if flushing fails.
     fn finish(&mut self) -> io::Result<()>;
@@ -235,14 +241,22 @@ impl<R: Renderer> Sink<R> {
     }
 
     /// # Errors
+    /// Returns the renderer's error if writing fails.
+    pub fn write_raw(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.renderer.write_raw(bytes)
+    }
+
+    /// # Errors
     /// Returns the renderer's error if flushing fails.
     pub fn finish(mut self) -> io::Result<()> {
         self.renderer.finish()
     }
 }
 
+mod describe;
 pub mod dto;
 mod json;
+pub mod palette;
 mod plain;
 mod pretty;
 

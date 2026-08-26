@@ -20,6 +20,10 @@ impl<W: Write> Renderer for JsonRenderer<W> {
         writeln!(self.out, "{line}")
     }
 
+    fn write_raw(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.out.write_all(bytes)
+    }
+
     fn finish(&mut self) -> io::Result<()> {
         self.out.flush()
     }

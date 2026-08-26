@@ -1,25 +1,50 @@
-use std::io::{self, IsTerminal, Write};
+#![deny(dead_code_pub_in_binary)]
+
+mod command;
+mod exit;
+mod style;
+mod terminal;
+
+use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand, ValueEnum};
-use pith_core::{Interface, Request, Type};
-use pith_diag::{Diag, DiagnosticSink, EngineCode, Span};
-use pith_engine::Engine;
-use pith_ids::{ContentDigest, ContentId, DIGEST_LEN};
-use pith_output::{IntoOutput, OutputRecord, OutputShape, PhaseStatus, Sink};
-use pith_store::{FilesystemContentStore, StoreError, materialize_tree};
+use clap::{ColorChoice, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
+use pith_output::palette::Palette;
+use pith_output::{OutputRecord, OutputShape, PhaseStatus, Renderer, Sink};
+use termprofile::TermProfile;
+
+use command::{CommandOutput, Context, OutputKind, Report, Runnable};
+use exit::Failure;
 
 #[derive(Parser)]
-#[command(name = "pith", version, about = "the pith kernel")]
+#[command(
+    name = "pith",
+    version,
+    about = "the pith kernel",
+    propagate_version = true
+)]
 struct Cli {
-    /// Output shape. Defaults to pretty on a TTY, plain otherwise.
-    #[arg(long, value_enum)]
-    output: Option<ShapeArg>,
+    #[command(flatten)]
+    globals: Globals,
 
-    /// Operation to perform.
     #[command(subcommand)]
     command: Command,
+}
+
+#[derive(clap::Args)]
+struct Globals {
+    /// Output shape. Defaults to pretty on a TTY, plain otherwise.
+    #[arg(long, global = true, value_enum)]
+    output: Option<ShapeArg>,
+
+    /// Content store root. Defaults to $PITH_HOME/store.
+    #[arg(long, global = true, env = "PITH_STORE", value_name = "DIR")]
+    store: Option<PathBuf>,
+
+    /// Engine state root. Defaults to $PITH_HOME/state.db.
+    #[arg(long, global = true, env = "PITH_STATE", value_name = "FILE")]
+    state: Option<PathBuf>,
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -29,180 +54,270 @@ enum ShapeArg {
     Json,
 }
 
+impl ShapeArg {
+    const fn shape(self) -> OutputShape {
+        match self {
+            Self::Pretty => OutputShape::Pretty,
+            Self::Plain => OutputShape::Plain,
+            Self::Json => OutputShape::Json,
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum Command {
-    /// Evaluate a request by label against the (currently empty) rule set.
-    Eval { request: String },
-    /// Inspect and materialize content from a filesystem store.
+    /// Elaborate the module at PATH and report its errors and warnings.
+    Check(command::Check),
+    /// Show what a module declares: types, rules, and which tier answers.
+    Explore(command::Explore),
+    /// Write the canonical spelling of the module at PATH.
+    Fmt(command::Fmt),
+    /// Inspect and admit content.
     Store {
         #[command(subcommand)]
         command: StoreCommand,
+    },
+    /// Inspect engine state.
+    State {
+        #[command(subcommand)]
+        command: StateCommand,
+    },
+    /// Report what a collection would reclaim.
+    Gc(command::Gc),
+    /// Unstable implementation diagnostics.
+    #[command(hide = true, disable_version_flag = true)]
+    Debug {
+        #[command(subcommand)]
+        command: DebugCommand,
     },
 }
 
 #[derive(Subcommand)]
 enum StoreCommand {
-    /// Render a stored tree into a new filesystem directory.
-    Materialize {
-        /// Root containing the store's `blobs` and `trees` directories.
-        #[arg(long)]
-        store: PathBuf,
-
-        /// Digest of the root tree to render.
-        #[arg(long, value_parser = parse_content_id)]
-        tree: ContentId,
-
-        /// New directory to create from the tree.
-        #[arg(long)]
-        output: PathBuf,
-    },
+    /// Put a file or directory into the store and print its identity.
+    Add(command::StoreAdd),
+    /// Write a blob to stdout.
+    Cat(command::StoreCat),
+    /// List a tree's entries.
+    Ls(command::StoreLs),
+    /// Render a tree into a new directory.
+    Materialize(command::StoreMaterialize),
 }
 
-impl Command {
-    /// The phase label this command reports under. Single source for the
-    /// string emitted in phase records, instead of three retyped literals.
-    const fn phase_label(&self) -> &'static str {
-        match self {
-            Command::Eval { .. } => "eval",
-            Command::Store {
-                command: StoreCommand::Materialize { .. },
-            } => "store-materialize",
-        }
-    }
+#[derive(Subcommand)]
+enum StateCommand {
+    /// Schema versions, adapter, and record counts.
+    Info(command::StateInfo),
+    /// Decode every durable record the state database holds.
+    Check(command::StateCheck),
+}
+
+#[derive(Subcommand)]
+enum DebugCommand {
+    /// Show terminal capability, theme-query, and selected-palette details.
+    #[command(disable_version_flag = true)]
+    Terminal,
+}
+
+enum Action {
+    Stable(Box<dyn Runnable>),
+    Debug(DebugCommand),
 }
 
 fn main() -> ExitCode {
     init_tracing();
-    let cli = Cli::parse();
-
-    let shape = resolve_shape(cli.output);
     let stdout = io::stdout();
+    let terminal = terminal::OutputTerminal::detect(&stdout);
+    let profile = terminal.profile();
+    let palette = terminal.palette();
+    let cli = parse(palette, profile);
+    let Cli { globals, command } = cli;
+
+    let runnable = match command.into_action() {
+        Action::Debug(command) => return run_debug(command, &terminal, stdout.lock()),
+        Action::Stable(runnable) => runnable,
+    };
+
+    let shape = resolve_shape(globals.output, terminal.pretty_by_default());
     match shape {
-        OutputShape::Pretty => run(cli, pith_output::PrettyRenderer::new(stdout.lock())),
-        OutputShape::Plain => run(cli, pith_output::PlainRenderer::new(stdout.lock())),
-        OutputShape::Json => run(cli, pith_output::JsonRenderer::new(stdout.lock())),
+        OutputShape::Pretty => run(
+            globals,
+            runnable,
+            pith_output::PrettyRenderer::new(stdout.lock(), palette),
+        ),
+        OutputShape::Plain => run(
+            globals,
+            runnable,
+            pith_output::PlainRenderer::new(stdout.lock()),
+        ),
+        OutputShape::Json => run(
+            globals,
+            runnable,
+            pith_output::JsonRenderer::new(stdout.lock()),
+        ),
     }
 }
 
-fn run(cli: Cli, renderer: impl pith_output::Renderer) -> ExitCode {
-    let mut sink = Sink::new(renderer);
-    let label = cli.command.phase_label();
-    let _ = sink.emit(&OutputRecord::phase(label, PhaseStatus::Started));
+fn parse(palette: Palette, profile: TermProfile) -> Cli {
+    let color = match profile {
+        TermProfile::NoTty => ColorChoice::Never,
+        TermProfile::NoColor
+        | TermProfile::Ansi16
+        | TermProfile::Ansi256
+        | TermProfile::TrueColor => ColorChoice::Always,
+    };
+    let mut matches = Cli::command()
+        .styles(style::help(palette))
+        .color(color)
+        .get_matches();
+    Cli::from_arg_matches_mut(&mut matches).unwrap_or_else(|error| error.exit())
+}
 
-    let result = match cli.command {
-        Command::Eval { request } => eval(&mut sink, &request),
-        Command::Store {
-            command:
-                StoreCommand::Materialize {
-                    store,
-                    tree,
-                    output,
-                },
-        } => materialize(&mut sink, &store, tree, &output),
+fn run(globals: Globals, runnable: Box<dyn Runnable>, renderer: impl Renderer) -> ExitCode {
+    let mut sink = Sink::new(renderer);
+    let label = runnable.label();
+    let output_kind = runnable.output_kind();
+
+    if output_kind == OutputKind::Records
+        && let Err(error) = sink.emit(&OutputRecord::phase(label, PhaseStatus::Started))
+    {
+        return output_error(error);
+    }
+
+    let mut context = Context::new(globals.store, globals.state);
+    let Report { output, failure } = match runnable.run(&mut context) {
+        Ok(report) => report,
+        Err(failure) => Report {
+            output: CommandOutput::empty(output_kind),
+            failure: Some(failure),
+        },
     };
 
-    match result {
-        Ok(()) => {
-            let _ = sink.emit(&OutputRecord::phase(label, PhaseStatus::Finished));
-            let _ = sink.finish();
-            ExitCode::SUCCESS
-        }
-        Err(diags) => {
-            let _ = sink.emit(&OutputRecord::phase(label, PhaseStatus::Failed));
-            for diag in diags.iter() {
-                render_diag(diag);
+    if output.kind() != output_kind {
+        return fail(Failure::internal(format!(
+            "command `{label}` returned the wrong output kind"
+        )));
+    }
+
+    let write_result = match output {
+        CommandOutput::Records(records) => {
+            let mut result = Ok(());
+            for record in &records {
+                if let Err(error) = sink.emit(record) {
+                    result = Err(error);
+                    break;
+                }
             }
-            let _ = sink.finish();
+            if result.is_ok() {
+                let status = if failure.is_some() {
+                    PhaseStatus::Failed
+                } else {
+                    PhaseStatus::Finished
+                };
+                result = sink.emit(&OutputRecord::phase(label, status));
+            }
+            result
+        }
+        CommandOutput::RawBytes(bytes) => sink.write_raw(&bytes),
+    };
+
+    if let Err(error) = write_result {
+        return output_error(error);
+    }
+    if let Err(error) = sink.finish() {
+        return output_error(error);
+    }
+
+    match failure {
+        None => ExitCode::SUCCESS,
+        Some(failure) => fail(failure),
+    }
+}
+
+fn output_error(error: io::Error) -> ExitCode {
+    if error.kind() == io::ErrorKind::BrokenPipe {
+        return ExitCode::SUCCESS;
+    }
+    fail(Failure::internal(format!("cannot write output: {error}")))
+}
+
+fn fail(failure: Failure) -> ExitCode {
+    report(&failure);
+    failure.exit_code()
+}
+
+impl Command {
+    fn into_action(self) -> Action {
+        match self {
+            Self::Check(command) => Action::Stable(Box::new(command)),
+            Self::Explore(command) => Action::Stable(Box::new(command)),
+            Self::Fmt(command) => Action::Stable(Box::new(command)),
+            Self::Store { command } => Action::Stable(command.into_runnable()),
+            Self::State { command } => Action::Stable(command.into_runnable()),
+            Self::Gc(command) => Action::Stable(Box::new(command)),
+            Self::Debug { command } => Action::Debug(command),
+        }
+    }
+}
+
+impl StoreCommand {
+    fn into_runnable(self) -> Box<dyn Runnable> {
+        match self {
+            Self::Add(command) => Box::new(command),
+            Self::Cat(command) => Box::new(command),
+            Self::Ls(command) => Box::new(command),
+            Self::Materialize(command) => Box::new(command),
+        }
+    }
+}
+
+impl StateCommand {
+    fn into_runnable(self) -> Box<dyn Runnable> {
+        match self {
+            Self::Info(command) => Box::new(command),
+            Self::Check(command) => Box::new(command),
+        }
+    }
+}
+
+fn run_debug(
+    command: DebugCommand,
+    terminal: &terminal::OutputTerminal,
+    out: impl Write,
+) -> ExitCode {
+    let result = match command {
+        DebugCommand::Terminal => terminal.write_debug_report(out),
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            let _ = writeln!(
+                io::stderr(),
+                "error: cannot write terminal debug report: {error}"
+            );
             ExitCode::FAILURE
         }
     }
 }
 
-fn materialize(
-    sink: &mut Sink<impl pith_output::Renderer>,
-    store_root: &std::path::Path,
-    tree: ContentId,
-    output: &std::path::Path,
-) -> Result<(), DiagnosticSink> {
-    let store = FilesystemContentStore::open(store_root).map_err(store_diagnostic)?;
-    materialize_tree(&store, tree, output).map_err(store_diagnostic)?;
-    let _ = sink.emit(&OutputRecord::result(format!(
-        "materialized tree {} at {}",
-        tree.digest(),
-        output.display()
-    )));
-    Ok(())
-}
-
-fn parse_content_id(value: &str) -> Result<ContentId, String> {
-    if value.len() != DIGEST_LEN.saturating_mul(2) {
-        return Err("tree digest must contain exactly 64 hexadecimal characters".to_string());
+fn report(failure: &Failure) {
+    for diagnostic in failure.diagnostics() {
+        let handler = miette::GraphicalReportHandler::new();
+        let report = miette::Report::new(diagnostic.clone());
+        let mut rendered = String::new();
+        let _ = handler.render_report(&mut rendered, report.as_ref());
+        let _ = io::stderr().write_all(rendered.as_bytes());
+        let _ = io::stderr().write_all(b"\n");
     }
-    let mut bytes = [0u8; DIGEST_LEN];
-    for (slot, pair) in bytes.iter_mut().zip(value.as_bytes().chunks_exact(2)) {
-        let pair = std::str::from_utf8(pair)
-            .map_err(|_| "tree digest must contain only hexadecimal characters".to_string())?;
-        *slot = u8::from_str_radix(pair, 16)
-            .map_err(|_| "tree digest must contain only hexadecimal characters".to_string())?;
-    }
-    Ok(ContentId::from_digest(ContentDigest::from_bytes(bytes)))
+    let _ = writeln!(io::stderr(), "error: {}", failure.message());
 }
 
-fn store_diagnostic(error: StoreError) -> DiagnosticSink {
-    let mut diagnostics = DiagnosticSink::new();
-    diagnostics.push(Diag::engine(
-        EngineCode::StoreError,
-        Span::none(),
-        error.to_string(),
-    ));
-    diagnostics
-}
-
-fn eval(
-    sink: &mut Sink<impl pith_output::Renderer>,
-    request: &str,
-) -> Result<(), pith_diag::DiagnosticSink> {
-    let mut engine = Engine::new();
-    let req = Request::new(
-        request,
-        Interface {
-            inputs: Box::new([]),
-            output: Type::Unit,
-        },
-        [],
-        Span::none(),
-    );
-    match engine.evaluate_pure(&req) {
-        Ok(evaluation) => {
-            let _ = sink.emit(&evaluation.value.to_record());
-            Ok(())
-        }
-        Err(diags) => Err(diags),
-    }
-}
-
-fn resolve_shape(flag: Option<ShapeArg>) -> OutputShape {
+fn resolve_shape(flag: Option<ShapeArg>, pretty_by_default: bool) -> OutputShape {
     match flag {
-        Some(ShapeArg::Pretty) => OutputShape::Pretty,
-        Some(ShapeArg::Plain) => OutputShape::Plain,
-        Some(ShapeArg::Json) => OutputShape::Json,
-        None => {
-            if io::stdout().is_terminal() {
-                OutputShape::Pretty
-            } else {
-                OutputShape::Plain
-            }
-        }
+        Some(shape) => shape.shape(),
+        None if pretty_by_default => OutputShape::Pretty,
+        None => OutputShape::Plain,
     }
-}
-
-fn render_diag(diag: &pith_diag::Diag) {
-    let handler = miette::GraphicalReportHandler::new();
-    let report = miette::Report::new(diag.clone());
-    let mut out = String::new();
-    let _ = handler.render_report(&mut out, report.as_ref());
-    let _ = io::stderr().write_all(out.as_bytes());
-    let _ = io::stderr().write_all(b"\n");
 }
 
 fn init_tracing() {
@@ -215,26 +330,108 @@ fn init_tracing() {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     use super::*;
+    use clap::CommandFactory;
+    use command::Execute;
 
-    #[test]
-    fn content_id_parser_accepts_a_full_hex_digest() {
-        let text = "13e68a5b642bf49fc4ed28d527abe43f3bca517f0f742af916910104019a0ce0";
+    struct MarkExecuted(Arc<AtomicBool>);
 
-        let parsed = parse_content_id(text);
+    impl Execute for MarkExecuted {
+        const LABEL: &'static str = "mark-executed";
 
-        assert_eq!(
-            parsed.map(|id| id.digest().to_string()).as_deref(),
-            Ok(text)
-        );
+        fn execute(self, _context: &mut Context) -> Result<Report, Failure> {
+            self.0.store(true, Ordering::SeqCst);
+            Ok(Report::of(Vec::new()))
+        }
+    }
+
+    struct FailingRenderer;
+
+    impl Renderer for FailingRenderer {
+        fn emit(&mut self, _out: &OutputRecord) -> io::Result<()> {
+            Err(io::Error::other("writer failed"))
+        }
+
+        fn write_raw(&mut self, _bytes: &[u8]) -> io::Result<()> {
+            Err(io::Error::other("writer failed"))
+        }
+
+        fn finish(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn empty_globals() -> Globals {
+        Globals {
+            output: None,
+            store: None,
+            state: None,
+        }
     }
 
     #[test]
-    fn content_id_parser_rejects_wrong_length_and_non_hex_text() {
-        assert!(parse_content_id("abcd").is_err());
-        assert!(
-            parse_content_id("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")
-                .is_err()
+    fn an_initial_output_failure_prevents_command_execution() {
+        let executed = Arc::new(AtomicBool::new(false));
+        let exit = run(
+            empty_globals(),
+            Box::new(MarkExecuted(Arc::clone(&executed))),
+            FailingRenderer,
         );
+
+        assert_eq!(exit, ExitCode::from(2));
+        assert!(!executed.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn the_argument_surface_is_well_formed() {
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn every_command_has_its_own_label() {
+        let labels = [
+            command::Check::LABEL,
+            command::Explore::LABEL,
+            command::Fmt::LABEL,
+            command::StoreAdd::LABEL,
+            command::StoreCat::LABEL,
+            command::StoreLs::LABEL,
+            command::StoreMaterialize::LABEL,
+            command::StateInfo::LABEL,
+            command::StateCheck::LABEL,
+            command::Gc::LABEL,
+        ];
+        let mut seen: Vec<&str> = Vec::new();
+        for label in labels {
+            assert!(!seen.contains(&label), "two commands report as `{label}`");
+            seen.push(label);
+        }
+    }
+
+    #[test]
+    fn the_output_flag_is_accepted_after_the_subcommand() {
+        let parsed = Cli::try_parse_from(["pith", "check", "a.pi", "--output", "json"]);
+
+        assert!(parsed.is_ok(), "{:?}", parsed.err());
+    }
+
+    #[test]
+    fn the_hidden_terminal_debug_command_is_parseable() {
+        let parsed = Cli::try_parse_from(["pith", "debug", "terminal"]);
+
+        assert!(parsed.is_ok(), "{:?}", parsed.err());
+    }
+
+    #[test]
+    fn terminal_presence_decides_only_the_default_shape() {
+        assert!(matches!(resolve_shape(None, false), OutputShape::Plain));
+        assert!(matches!(resolve_shape(None, true), OutputShape::Pretty));
+        assert!(matches!(
+            resolve_shape(Some(ShapeArg::Json), true),
+            OutputShape::Json
+        ));
     }
 }

@@ -1,0 +1,23 @@
+---
+source: crates/pith-cli/tests/help.rs
+expression: text
+---
+the pith kernel
+
+Usage: pith [OPTIONS] <COMMAND>
+
+Commands:
+  check    Elaborate the module at PATH and report its errors and warnings
+  explore  Show what a module declares: types, rules, and which tier answers
+  fmt      Write the canonical spelling of the module at PATH
+  store    Inspect and admit content
+  state    Inspect engine state
+  gc       Report what a collection would reclaim
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+      --output <OUTPUT>  Output shape. Defaults to pretty on a TTY, plain otherwise [possible values: pretty, plain, json]
+      --store <DIR>      Content store root. Defaults to $PITH_HOME/store [env: PITH_STORE=]
+      --state <FILE>     Engine state root. Defaults to $PITH_HOME/state.db [env: PITH_STATE=]
+  -h, --help             Print help
+  -V, --version          Print version
