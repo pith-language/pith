@@ -25,6 +25,7 @@ pub enum RecordKind {
     Explain,
     Result,
     Summary,
+    Query,
     Custom,
 }
 
@@ -40,6 +41,7 @@ impl RecordKind {
             RecordKind::Explain => "explain",
             RecordKind::Result => "result",
             RecordKind::Summary => "summary",
+            RecordKind::Query => "query",
             RecordKind::Custom => "custom",
         }
     }
@@ -70,6 +72,18 @@ pub enum Payload {
         errors: u64,
         wall_ms: u64,
     },
+    /// A typed answer from the query API. The version rides on the record
+    /// rather than being announced once per run, so a reader that consumes one
+    /// line in isolation still knows the contract it is reading.
+    ///
+    /// The view is nested rather than flattened. A DTO is free to name a field
+    /// `kind` or `code`, and flattening one into the envelope would let it
+    /// overwrite the envelope's own field of that name — silently, and
+    /// differently per view.
+    Query {
+        api_version: u32,
+        query: dto::QueryView,
+    },
 }
 
 impl Payload {
@@ -84,6 +98,7 @@ impl Payload {
             Payload::Explain { .. } => RecordKind::Explain,
             Payload::Result { .. } => RecordKind::Result,
             Payload::Summary { .. } => RecordKind::Summary,
+            Payload::Query { .. } => RecordKind::Query,
         }
     }
 }
@@ -167,6 +182,16 @@ impl OutputRecord {
         })
     }
 
+    /// Build a query record, stamping the DTO contract's current version. The
+    /// version is never passed in, so a caller cannot claim a shape it did not
+    /// produce.
+    pub fn query(view: dto::QueryView) -> Self {
+        Self::from_payload(Payload::Query {
+            api_version: dto::QUERY_API_VERSION,
+            query: view,
+        })
+    }
+
     pub fn summary(hits: u64, misses: u64, reuses: u64, errors: u64, wall_ms: u64) -> Self {
         Self::from_payload(Payload::Summary {
             hits,
@@ -178,12 +203,12 @@ impl OutputRecord {
     }
 }
 
-/// Render [`OutputRecord`]s to bytes. Adding a shape (TUI, LSP wire) is one new
-/// impl, not a cross-crate refactor.
+/// Render [`OutputRecord`]s or an explicitly raw command payload to bytes.
 pub trait Renderer {
     /// # Errors
     /// Returns the underlying writer error if writing fails.
     fn emit(&mut self, out: &OutputRecord) -> io::Result<()>;
+
     /// # Errors
     /// Returns the underlying writer error if flushing fails.
     fn finish(&mut self) -> io::Result<()>;

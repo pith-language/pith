@@ -1,0 +1,16 @@
+---
+source: crates/pith-output/tests/query_contract.rs
+expression: "serde_json::to_value(&record).unwrap()"
+---
+{
+  "api_version": 3,
+  "code": 0,
+  "detail": "query",
+  "kind": "query",
+  "query": {
+    "module": "example",
+    "path": "fixtures/example.pi",
+    "status": "would_format",
+    "view": "format"
+  }
+}

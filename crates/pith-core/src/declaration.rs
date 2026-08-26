@@ -13,6 +13,7 @@
 //! finite canonical form because expansion is its only semantics.
 
 use pith_ids::DeclarationDigest;
+use pith_output::dto::{DeclarationBodyRepr, DeclarationView, SumConstructorRepr};
 
 use crate::codec::{CanonicalDecodeError, CanonicalReader};
 use crate::manifest::{encode_bytes, encode_length, encode_str};
@@ -211,6 +212,71 @@ impl Declaration {
             coordinate: Coordinate { module, name },
             body,
         })
+    }
+}
+
+/// The declaration grammar's spelling of a body. This is the source form a
+/// person wrote, so tooling that shows a declaration back — `pith explore`,
+/// a hover — echoes the grammar instead of inventing a second notation for
+/// one shape.
+impl std::fmt::Display for DeclarationBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Nominal { representation } => write!(f, "{representation}"),
+            Self::Alias { target } => write!(f, "{target}"),
+            Self::Sum { constructors } => {
+                let mut separator = "";
+                for constructor in constructors {
+                    f.write_str(separator)?;
+                    match &constructor.payload {
+                        Some(payload) => write!(f, "{}({payload})", constructor.name)?,
+                        None => f.write_str(&constructor.name)?,
+                    }
+                    separator = " | ";
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl From<&DeclarationBody> for DeclarationBodyRepr {
+    fn from(body: &DeclarationBody) -> Self {
+        match body {
+            DeclarationBody::Nominal { representation } => Self::Nominal {
+                representation: Box::new(representation.into()),
+            },
+            DeclarationBody::Alias { target } => Self::Alias {
+                target: Box::new(target.into()),
+            },
+            DeclarationBody::Sum { constructors } => Self::Sum {
+                constructors: constructors
+                    .iter()
+                    .map(|constructor| SumConstructorRepr {
+                        name: constructor.name.clone(),
+                        payload: constructor
+                            .payload
+                            .as_ref()
+                            .map(|payload| Box::new(payload.into())),
+                    })
+                    .collect(),
+            },
+        }
+    }
+}
+
+impl From<&Declaration> for DeclarationView {
+    fn from(declaration: &Declaration) -> Self {
+        Self {
+            name: declaration.coordinate().name.clone(),
+            body: declaration.body().into(),
+            rendered: declaration.body().to_string().into(),
+            digest: declaration.digest().digest().to_string().into(),
+            // Doc text is not part of a declaration; it rides the
+            // position-carrying sidecar (decision 0061), so the driver that
+            // holds the sidecar fills this in.
+            documentation: Box::from(""),
+        }
     }
 }
 

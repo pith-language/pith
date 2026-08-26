@@ -1,0 +1,32 @@
+---
+source: crates/pith-output/tests/query_contract.rs
+expression: "serde_json::to_value(&record).unwrap()"
+---
+{
+  "api_version": 3,
+  "code": 0,
+  "detail": "query",
+  "kind": "query",
+  "query": {
+    "entries": [
+      {
+        "content": "13e68a5b642bf49fc4ed28d527abe43f3bca517f0f742af916910104019a0ce0",
+        "entry_kind": "file",
+        "executable": false,
+        "name": "main.c"
+      },
+      {
+        "entry_kind": "symlink",
+        "name": "latest",
+        "target": "../build/main"
+      },
+      {
+        "content": "13e68a5b642bf49fc4ed28d527abe43f3bca517f0f742af916910104019a0ce0",
+        "entry_kind": "tree",
+        "name": "include"
+      }
+    ],
+    "tree": "13e68a5b642bf49fc4ed28d527abe43f3bca517f0f742af916910104019a0ce0",
+    "view": "tree"
+  }
+}

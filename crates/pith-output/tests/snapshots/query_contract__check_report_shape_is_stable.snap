@@ -1,0 +1,28 @@
+---
+source: crates/pith-output/tests/query_contract.rs
+expression: "serde_json::to_value(&record).unwrap()"
+---
+{
+  "api_version": 3,
+  "code": 0,
+  "detail": "query",
+  "kind": "query",
+  "query": {
+    "abi_digest": "13e68a5b642bf49fc4ed28d527abe43f3bca517f0f742af916910104019a0ce0",
+    "diagnostics": [
+      {
+        "code": 3001,
+        "column": 3,
+        "label": "example.pi",
+        "line": 7,
+        "message": "`Bindings` is imported and never used",
+        "severity": "warning"
+      }
+    ],
+    "errors": 0,
+    "module": "example",
+    "path": "fixtures/example.pi",
+    "view": "check",
+    "warnings": 1
+  }
+}

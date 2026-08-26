@@ -1,0 +1,82 @@
+---
+source: crates/pith-output/tests/query_contract.rs
+expression: "serde_json::to_value(&record).unwrap()"
+---
+{
+  "api_version": 3,
+  "code": 0,
+  "detail": "query",
+  "kind": "query",
+  "query": {
+    "abi_digest": "13e68a5b642bf49fc4ed28d527abe43f3bca517f0f742af916910104019a0ce0",
+    "declarations": [
+      {
+        "body": {
+          "declaration_kind": "nominal",
+          "representation": {
+            "type_kind": "blob"
+          }
+        },
+        "digest": "13e68a5b642bf49fc4ed28d527abe43f3bca517f0f742af916910104019a0ce0",
+        "documentation": "the renderer a document is produced by",
+        "name": "Renderer",
+        "rendered": "Blob"
+      },
+      {
+        "body": {
+          "constructors": [
+            {
+              "name": "failed",
+              "payload": {
+                "type_kind": "text"
+              }
+            },
+            {
+              "name": "produced",
+              "payload": null
+            }
+          ],
+          "declaration_kind": "sum"
+        },
+        "digest": "13e68a5b642bf49fc4ed28d527abe43f3bca517f0f742af916910104019a0ce0",
+        "documentation": "",
+        "name": "Outcome",
+        "rendered": "failed(Text) | produced"
+      }
+    ],
+    "imports": [
+      {
+        "abi_digest": "13e68a5b642bf49fc4ed28d527abe43f3bca517f0f742af916910104019a0ce0",
+        "module": "xylem"
+      }
+    ],
+    "module": "example",
+    "path": "fixtures/example.pi",
+    "rules": [
+      {
+        "category": "action",
+        "documentation": "",
+        "interface": {
+          "inputs": [
+            {
+              "name": "example.Renderer",
+              "type_kind": "nominal"
+            },
+            {
+              "name": "example.Template",
+              "type_kind": "nominal"
+            }
+          ],
+          "output": {
+            "name": "example.Document",
+            "type_kind": "nominal"
+          },
+          "rendered": "(example.Renderer, example.Template) -> example.Document"
+        },
+        "label": "render",
+        "tier": "host"
+      }
+    ],
+    "view": "module"
+  }
+}
