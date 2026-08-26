@@ -12,6 +12,8 @@
 //! declares one name twice, and it refuses a recursive alias, which has no
 //! finite canonical form because expansion is its only semantics.
 
+use std::collections::BTreeMap;
+
 use pith_ids::DeclarationDigest;
 use pith_output::dto::{DeclarationBodyRepr, DeclarationView, SumConstructorRepr};
 
@@ -327,14 +329,14 @@ impl std::error::Error for DeclarationError {}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeclarationTable {
     module: Box<str>,
-    entries: Vec<Declaration>,
+    entries: BTreeMap<Box<str>, Declaration>,
 }
 
 impl DeclarationTable {
     pub fn new(module: impl Into<Box<str>>) -> Self {
         Self {
             module: module.into(),
-            entries: Vec::new(),
+            entries: BTreeMap::new(),
         }
     }
 
@@ -396,40 +398,31 @@ impl DeclarationTable {
                 name: name.into(),
             });
         }
-        let coordinate = Coordinate::new(self.module.clone(), name);
-        match self
-            .entries
-            .binary_search_by(|entry| entry.coordinate.name.as_ref().cmp(name))
-        {
-            Ok(_) => {
-                return Err(DeclarationError::DuplicateName {
-                    module: self.module.clone(),
-                    name: name.into(),
-                });
-            }
-            Err(position) => self.entries.insert(
-                position,
-                Declaration {
-                    coordinate: coordinate.clone(),
-                    body: body.clone(),
-                },
-            ),
+        if self.entries.contains_key(name) {
+            return Err(DeclarationError::DuplicateName {
+                module: self.module.clone(),
+                name: name.into(),
+            });
         }
-        Ok(Type::of_declaration(&Declaration { coordinate, body }))
+        let coordinate = Coordinate::new(self.module.clone(), name);
+        let stored = Declaration {
+            coordinate: coordinate.clone(),
+            body: body.clone(),
+        };
+        let declared = Type::of_declaration(&stored);
+        self.entries.insert(stored.coordinate.name.clone(), stored);
+        Ok(declared)
     }
 
     /// The declaration this module holds under `name`.
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&Declaration> {
-        self.entries
-            .binary_search_by(|entry| entry.coordinate.name.as_ref().cmp(name))
-            .ok()
-            .and_then(|position| self.entries.get(position))
+        self.entries.get(name)
     }
 
     /// Every declaration in this module, in name order.
     pub fn iter(&self) -> impl Iterator<Item = &Declaration> {
-        self.entries.iter()
+        self.entries.values()
     }
 
     /// Encode the module and declarations in name order.
@@ -438,7 +431,7 @@ impl DeclarationTable {
         let mut manifest = Vec::new();
         encode_str(&mut manifest, &self.module);
         encode_length(&mut manifest, self.entries.len());
-        for entry in &self.entries {
+        for entry in self.entries.values() {
             encode_bytes(&mut manifest, &entry.encode_canonical());
         }
         manifest
@@ -475,7 +468,10 @@ impl DeclarationTable {
         }
         Ok(Self {
             module,
-            entries: entries.into(),
+            entries: entries
+                .into_iter()
+                .map(|entry| (entry.coordinate.name.clone(), entry))
+                .collect(),
         })
     }
 

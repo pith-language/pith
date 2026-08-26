@@ -180,18 +180,21 @@ impl FrontendFrame {
                     .rules
                     .iter()
                     .filter(|rule| !rule.local)
-                    .map(|rule| (rule.category, rule.interface.clone(), rule.label.clone()))
+                    .map(|rule| {
+                        (
+                            rule.category,
+                            rule.interface.encode_canonical(),
+                            rule.interface.clone(),
+                            rule.label.clone(),
+                        )
+                    })
                     .collect::<Vec<_>>();
                 entries.sort_by(|left, right| {
-                    (left.0, left.1.encode_canonical(), &left.2).cmp(&(
-                        right.0,
-                        right.1.encode_canonical(),
-                        &right.2,
-                    ))
+                    (left.0, &left.1, &left.3).cmp(&(right.0, &right.1, &right.3))
                 });
                 let entries = entries
                     .into_iter()
-                    .map(|(category, interface, name)| {
+                    .map(|(category, _, interface, name)| {
                         (category, interface, self.source.module.clone(), name)
                     })
                     .collect::<Vec<_>>();

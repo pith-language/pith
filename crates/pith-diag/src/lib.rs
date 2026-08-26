@@ -4,7 +4,7 @@
 //! `text-size` and `line-index` are wrapped behind [`Span`] / [`SourceFile`]
 //! so they never appear in public types outside this module.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ByteOffset(pub u32);
@@ -38,6 +38,8 @@ pub struct SourceFile {
     pub id: SourceId,
     pub label: Box<str>,
     text: Box<str>,
+
+    line_index: OnceLock<line_index::LineIndex>,
 }
 
 /// One line of a [`SourceFile`]: its 1-based number, the span of its content
@@ -55,6 +57,7 @@ impl SourceFile {
             id,
             label: label.into(),
             text: text.into(),
+            line_index: OnceLock::new(),
         }
     }
 
@@ -92,7 +95,9 @@ impl SourceFile {
     }
 
     pub fn line_col(&self, offset: ByteOffset) -> (usize, usize) {
-        let index = line_index::LineIndex::new(self.source_text());
+        let index = self
+            .line_index
+            .get_or_init(|| line_index::LineIndex::new(self.source_text()));
         let pos = line_index::TextSize::new(offset.0);
         let line_col = index.line_col(pos);
         (
@@ -281,7 +286,7 @@ pub struct Diag {
     pub span: Span,
     pub source: Option<Arc<SourceFile>>,
     pub message: Text,
-    pub notes: Box<[Note]>,
+    pub notes: Vec<Note>,
 }
 
 #[derive(Clone, Debug)]
@@ -312,7 +317,7 @@ impl Diag {
             span,
             source: None,
             message: Text::new(message),
-            notes: Box::new([]),
+            notes: Vec::new(),
         }
     }
 
@@ -329,14 +334,10 @@ impl Diag {
     }
 
     pub fn with_note(mut self, span: Span, message: impl Into<Box<str>>) -> Self {
-        self.notes = {
-            let mut v = Vec::from(self.notes);
-            v.push(Note {
-                span,
-                message: Text::new(message),
-            });
-            v.into_boxed_slice()
-        };
+        self.notes.push(Note {
+            span,
+            message: Text::new(message),
+        });
         self
     }
 }

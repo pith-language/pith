@@ -55,6 +55,20 @@ fn forward_and_direct_recursive_declarations_load() {
 }
 
 #[test]
+fn deep_alias_chains_elaborate_without_recursion() {
+    let mut text = String::from("nominal Base = Text\n");
+    for index in 0..8_000 {
+        if index == 0 {
+            text.push_str("type Link0 = Base\n");
+        } else {
+            text.push_str(&format!("type Link{index} = Link{}\n", index - 1));
+        }
+    }
+    let loaded = load_ok(&text);
+    assert!(loaded.table().get("Link7999").is_some());
+}
+
+#[test]
 fn mutual_cycles_and_recursive_aliases_are_rejected() {
     let cycle = load_err("nominal A = List<B>\nnominal B = List<A>\n");
     assert!(has_code(&cycle, FrontendCode::CyclicDeclaration));

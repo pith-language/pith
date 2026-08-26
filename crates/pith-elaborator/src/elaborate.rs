@@ -49,6 +49,7 @@ pub fn elaborate(
     let declared = collect_declarations(module, surface, files, diagnostics);
     diagnose_rule_coordinates(module, surface, files, diagnostics);
     diagnose_entry_coordinates(module, surface, files, diagnostics);
+    let order = order_declarations(surface, &declared, files, diagnostics);
     let mut elaborator = Elaborator {
         module,
         surface,
@@ -57,12 +58,11 @@ pub fn elaborate(
         files,
         declared: &declared,
         resolved: BTreeMap::new(),
-        elaborating: Vec::new(),
         table: DeclarationTable::new(module),
         diagnostics,
         references: Vec::new(),
     };
-    for name in declared.keys() {
+    for name in order {
         elaborator.elaborate_declaration(name);
     }
     let (local_types, mut rules, interfaces) = elaborator.elaborate_locals();
@@ -105,6 +105,273 @@ fn collect_declarations<'a>(
         }
     }
     declarations
+}
+
+fn order_declarations<'a>(
+    surface: &ParsedSurface,
+    declared: &BTreeMap<&'a str, &'a SurfaceDeclaration>,
+    files: &ModuleFiles,
+    diagnostics: &mut Vec<Diag>,
+) -> Vec<&'a str> {
+    let count = declared.len();
+
+    let names: Vec<&'a str> = declared.keys().copied().collect();
+    let mut index_of: BTreeMap<&'a str, u32> = BTreeMap::new();
+    for (index, &name) in names.iter().enumerate() {
+        index_of.insert(name, u32::try_from(index).unwrap_or(u32::MAX));
+    }
+    let count = u32::try_from(count).unwrap_or(u32::MAX) as usize;
+
+    let mut edges: Vec<(u32, u32)> = Vec::new();
+    let mut dep_counts = vec![0_u32; count];
+    let mut last_seen = vec![u32::MAX; count];
+    for (index, (&name, &declaration)) in declared.iter().enumerate() {
+        let index = u32::try_from(index).unwrap_or(u32::MAX);
+        let mut push = |dep: u32, edges: &mut Vec<(u32, u32)>| {
+            let Some(seen) = last_seen.get_mut(dep as usize) else {
+                return;
+            };
+            if *seen != index {
+                *seen = index;
+                if let Some(slot) = dep_counts.get_mut(index as usize) {
+                    *slot = slot.saturating_add(1);
+                }
+                edges.push((dep, index));
+            }
+        };
+        collect_dependencies(surface, declaration, name, &index_of, &mut |dep| {
+            push(dep, &mut edges)
+        });
+    }
+
+    let (dep_offsets, dep_targets) = adjacency(count, &edges, |edge| edge.1, |edge| edge.0);
+    let (dependent_offsets, dependent_targets) =
+        adjacency(count, &edges, |edge| edge.0, |edge| edge.1);
+
+    let mut in_degree = dep_counts;
+    let mut queue: VecDeque<u32> = (0..count as u32)
+        .filter(|&index| in_degree.get(index as usize).copied().unwrap_or(1) == 0)
+        .collect();
+    let mut order: Vec<u32> = Vec::with_capacity(count);
+    while let Some(index) = queue.pop_front() {
+        order.push(index);
+        let start = dependent_offsets.get(index as usize).copied().unwrap_or(0);
+        let end = dependent_offsets
+            .get((index as usize).saturating_add(1))
+            .copied()
+            .unwrap_or(0);
+        let Some(dependents) = dependent_targets.get(start as usize..end as usize) else {
+            continue;
+        };
+        for &dependent in dependents {
+            let Some(degree) = in_degree.get_mut(dependent as usize) else {
+                continue;
+            };
+            *degree = degree.saturating_sub(1);
+            if *degree == 0 {
+                queue.push_back(dependent);
+            }
+        }
+    }
+
+    let mut state = vec![0_u8; count];
+    for &index in &order {
+        if let Some(slot) = state.get_mut(index as usize) {
+            *slot = 2;
+        }
+    }
+    let unordered: Vec<u32> = (0..count as u32)
+        .filter(|&index| state.get(index as usize).copied().unwrap_or(2) != 2)
+        .collect();
+    diagnose_cycles(
+        &names,
+        &dep_offsets,
+        &dep_targets,
+        &mut state,
+        declared,
+        files,
+        diagnostics,
+    );
+    order.extend(unordered);
+    order
+        .into_iter()
+        .filter_map(|index| names.get(index as usize).copied())
+        .collect()
+}
+
+fn adjacency(
+    count: usize,
+    edges: &[(u32, u32)],
+    key: fn(&(u32, u32)) -> u32,
+    value: fn(&(u32, u32)) -> u32,
+) -> (Vec<u32>, Vec<u32>) {
+    let mut counts = vec![0_u32; count];
+    for edge in edges {
+        if let Some(slot) = counts.get_mut(key(edge) as usize) {
+            *slot = slot.saturating_add(1);
+        }
+    }
+    let mut running = 0_u32;
+    let mut offsets = Vec::with_capacity(count.saturating_add(1));
+    offsets.push(0);
+    offsets.extend(counts.iter().map(|count| {
+        running = running.saturating_add(*count);
+        running
+    }));
+    let mut cursor = offsets.clone();
+    let mut targets = vec![0_u32; edges.len()];
+    for edge in edges {
+        let Some(&slot) = cursor.get(key(edge) as usize) else {
+            continue;
+        };
+        if let Some(next) = cursor.get_mut(key(edge) as usize) {
+            *next = next.saturating_add(1);
+        }
+        if let Some(target) = targets.get_mut(slot as usize) {
+            *target = value(edge);
+        }
+    }
+    (offsets, targets)
+}
+
+fn collect_dependencies(
+    surface: &ParsedSurface,
+    declaration: &SurfaceDeclaration,
+    self_name: &str,
+    index_of: &BTreeMap<&str, u32>,
+    push: &mut impl FnMut(u32),
+) {
+    match &declaration.body {
+        SurfaceBody::Nominal(body) | SurfaceBody::Alias(body) => {
+            collect_type_dependencies(surface, *body, self_name, index_of, push);
+        }
+        SurfaceBody::Sum(constructors) => {
+            for constructor in constructors.iter() {
+                if let Some(payload) = constructor.payload {
+                    collect_type_dependencies(surface, payload, self_name, index_of, push);
+                }
+            }
+        }
+    }
+}
+
+fn collect_type_dependencies(
+    surface: &ParsedSurface,
+    type_id: SurfaceTypeId,
+    self_name: &str,
+    index_of: &BTreeMap<&str, u32>,
+    push: &mut impl FnMut(u32),
+) {
+    let Some(node) = surface.types.get(type_id) else {
+        return;
+    };
+    match node {
+        SurfaceTypeNode::List(element) => {
+            collect_type_dependencies(surface, *element, self_name, index_of, push);
+        }
+        SurfaceTypeNode::Record { fields } => {
+            let (Ok(start), Ok(end)) = (usize::try_from(fields.start), usize::try_from(fields.end))
+            else {
+                return;
+            };
+            let Some(fields) = surface.fields.get(start..end) else {
+                return;
+            };
+            for field in fields {
+                collect_type_dependencies(surface, field.payload, self_name, index_of, push);
+            }
+        }
+        SurfaceTypeNode::Reference {
+            module: None, name, ..
+        } if name.as_ref() != self_name => {
+            if let Some(&dep) = index_of.get(name.as_ref()) {
+                push(dep);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn diagnose_cycles(
+    names: &[&str],
+    dep_offsets: &[u32],
+    dep_targets: &[u32],
+    state: &mut [u8],
+    declared: &BTreeMap<&str, &SurfaceDeclaration>,
+    files: &ModuleFiles,
+    diagnostics: &mut Vec<Diag>,
+) {
+    let frame_of = |node: u32| -> Option<std::ops::Range<u32>> {
+        let start = dep_offsets.get(node as usize).copied().unwrap_or(0);
+        let end = dep_offsets
+            .get((node as usize).saturating_add(1))
+            .copied()
+            .unwrap_or(0);
+        (start <= end).then_some(start..end)
+    };
+    let mut path: Vec<u32> = Vec::new();
+    for root in 0..state.len() {
+        if state.get(root).copied().unwrap_or(2) != 0 {
+            continue;
+        }
+        let root = u32::try_from(root).unwrap_or(u32::MAX);
+        let mut stack = vec![frame_of(root).unwrap_or(0..0)];
+        if let Some(slot) = state.get_mut(root as usize) {
+            *slot = 1;
+        }
+        path.push(root);
+        while let Some(deps) = stack.last_mut() {
+            let Some(dep) = deps
+                .next()
+                .and_then(|slot| dep_targets.get(slot as usize).copied())
+            else {
+                if stack.pop().is_none() {
+                    break;
+                }
+                if let Some(node) = path.pop()
+                    && let Some(slot) = state.get_mut(node as usize)
+                {
+                    *slot = 2;
+                }
+                continue;
+            };
+            match state.get(dep as usize).copied().unwrap_or(2) {
+                0 => {
+                    if let Some(slot) = state.get_mut(dep as usize) {
+                        *slot = 1;
+                    }
+                    path.push(dep);
+                    stack.push(frame_of(dep).unwrap_or(0..0));
+                }
+                1 => {
+                    let Some(start) = path
+                        .iter()
+                        .position(|&candidate| candidate == dep)
+                        .map(|position| path.get(position..).unwrap_or(&[]))
+                    else {
+                        continue;
+                    };
+                    let cycle = start
+                        .iter()
+                        .copied()
+                        .chain(std::iter::once(dep))
+                        .filter_map(|index| names.get(index as usize).copied())
+                        .map(|part| format!("`{part}`"))
+                        .collect::<Vec<_>>()
+                        .join(" -> ");
+                    let span = declared
+                        .get(names.get(dep as usize).copied().unwrap_or(""))
+                        .map_or(Span::none(), |declaration| declaration.name_span);
+                    diagnostics.push(files.error(
+                        FrontendCode::CyclicDeclaration,
+                        span,
+                        format!("declarations form a mutual cycle: {cycle}"),
+                    ));
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 fn diagnose_rule_coordinates(
@@ -161,7 +428,6 @@ struct Elaborator<'a> {
     files: &'a ModuleFiles,
     declared: &'a BTreeMap<&'a str, &'a SurfaceDeclaration>,
     resolved: BTreeMap<&'a str, Type>,
-    elaborating: Vec<&'a str>,
     table: DeclarationTable,
     diagnostics: &'a mut Vec<Diag>,
     references: Vec<ReferenceSite>,
@@ -432,34 +698,9 @@ impl<'a> Elaborator<'a> {
         if self.resolved.contains_key(name) {
             return;
         }
-        if let Some(cycle_start) = self
-            .elaborating
-            .iter()
-            .position(|candidate| *candidate == name)
-        {
-            let cycle = self.elaborating.get(cycle_start..).unwrap_or(&[]);
-            let path = cycle
-                .iter()
-                .copied()
-                .chain(std::iter::once(name))
-                .map(|part| format!("`{part}`"))
-                .collect::<Vec<_>>()
-                .join(" -> ");
-            let span = self
-                .declared
-                .get(name)
-                .map_or(Span::none(), |declaration| declaration.name_span);
-            self.diagnostics.push(self.files.error(
-                FrontendCode::CyclicDeclaration,
-                span,
-                format!("declarations form a mutual cycle: {path}"),
-            ));
-            return;
-        }
         let Some(&declaration) = self.declared.get(name) else {
             return;
         };
-        self.elaborating.push(name);
         let outcome = match &declaration.body {
             SurfaceBody::Nominal(body) => self
                 .elaborate_type(*body, Some(name))
@@ -503,7 +744,6 @@ impl<'a> Elaborator<'a> {
         if let Some(outcome) = outcome {
             self.register(name, declaration, outcome);
         }
-        self.elaborating.pop();
     }
 
     fn register(
@@ -590,9 +830,6 @@ impl<'a> Elaborator<'a> {
         if self_name == Some(name) {
             self.record_local_reference(name, span);
             return Some(Type::Cut);
-        }
-        if !self.resolved.contains_key(name) && self.declared.contains_key(name) {
-            self.elaborate_declaration(name);
         }
         let Some(resolved) = self.resolved.get(name).cloned() else {
             if !self.declared.contains_key(name) {
