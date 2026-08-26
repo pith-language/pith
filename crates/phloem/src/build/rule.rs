@@ -126,10 +126,10 @@ pub(super) fn resolve_includes(tree: &SourceTree, build: &PackageBuild) -> PithR
 /// duplicates collapse; the result is canonically sorted, so the value is a
 /// function of the header set and not of the assembly order.
 pub(super) fn merge_provided(own: HeaderSet, libraries: &[Library]) -> PithResult<Value> {
-    let mut merged: Vec<HeaderPair> = own.into();
+    let mut merged: std::collections::BTreeMap<Box<str>, ContentId> = own.into_iter().collect();
     for library in libraries {
         for (path, content) in library.headers.iter() {
-            if let Some((_, existing)) = merged.iter().find(|(offered, _)| offered == path) {
+            if let Some(existing) = merged.get(path.as_ref()) {
                 if existing != content {
                     return Err(diag(format!(
                         "the include path `{path}` resolves to two contents, `{}` and \
@@ -140,10 +140,9 @@ pub(super) fn merge_provided(own: HeaderSet, libraries: &[Library]) -> PithResul
                 }
                 continue;
             }
-            merged.push((path.clone(), *content));
+            merged.insert(path.clone(), *content);
         }
     }
-    merged.sort_by(|left, right| left.0.as_bytes().cmp(right.0.as_bytes()));
     Ok(xylem::types::provided_headers(merged))
 }
 

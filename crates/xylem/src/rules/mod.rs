@@ -154,9 +154,9 @@ pub(crate) fn effective_headers(
     provided: &[ProvidedHeader],
 ) -> PithResult<Vec<(Box<str>, ContentId)>> {
     let mut headers: Vec<(Box<str>, ContentId)> = universe.iter().cloned().collect();
+
+    let mut added: std::collections::BTreeMap<&str, ContentId> = std::collections::BTreeMap::new();
     for header in provided {
-        // A provided header naming the registered content collapses into the
-        // entry the universe already contributed.
         if let Some(registered) = universe.resolve(&header.path) {
             if registered != header.content {
                 return Err(diag(&format!(
@@ -169,8 +169,8 @@ pub(crate) fn effective_headers(
             }
             continue;
         }
-        match headers.iter().find(|(offered, _)| *offered == header.path) {
-            Some((_, existing)) if *existing != header.content => {
+        match added.get(header.path.as_ref()) {
+            Some(existing) if *existing != header.content => {
                 return Err(diag(&format!(
                     "the include path `{}` is provided twice, as content `{}` and as \
                      content `{}`: one spelling cannot name two headers",
@@ -180,7 +180,10 @@ pub(crate) fn effective_headers(
                 )));
             }
             Some(_) => {}
-            None => headers.push((header.path.clone(), header.content)),
+            None => {
+                added.insert(header.path.as_ref(), header.content);
+                headers.push((header.path.clone(), header.content));
+            }
         }
     }
     Ok(headers)

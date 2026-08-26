@@ -69,12 +69,19 @@ impl Lock {
         preferences: PreferenceList,
         entries: impl Into<Vec<LockEntry>>,
     ) -> PithResult<Self> {
-        let mut entries = entries.into();
-        entries.sort_by(|left, right| {
-            left.to_value()
-                .encode_canonical()
-                .cmp(&right.to_value().encode_canonical())
-        });
+        let mut entries = entries
+            .into()
+            .into_iter()
+            .map(|entry| {
+                let encoded = entry.to_value().encode_canonical();
+                (encoded, entry)
+            })
+            .collect::<Vec<_>>();
+        entries.sort_by(|left, right| left.0.cmp(&right.0));
+        let entries = entries
+            .into_iter()
+            .map(|(_, entry)| entry)
+            .collect::<Vec<_>>();
         for pair in entries.windows(2) {
             if let [earlier, later] = pair
                 && earlier.package.identity() == later.package.identity()

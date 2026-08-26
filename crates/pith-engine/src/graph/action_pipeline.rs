@@ -9,7 +9,11 @@
 
 mod content;
 
-use pith_core::{Action, ActionSpec, Request, RuleId, Type, Value};
+use std::collections::BTreeSet;
+
+use pith_core::{
+    Action, ActionSpec, CapabilityRequirement, OutputKind, Request, RuleId, Type, Value,
+};
 use pith_diag::{Diag, DiagnosticSink, EngineCode, PithResult, Span};
 use pith_ids::ComputationId;
 use smallvec::SmallVec;
@@ -411,8 +415,10 @@ impl Engine {
     fn validate_execution(&self, spec: &ActionSpec, execution: &ActionExecution) -> PithResult<()> {
         validate_execution_platform(spec, &execution.report.platform)?;
 
+        let declared_capabilities: BTreeSet<&CapabilityRequirement> =
+            spec.capabilities.iter().collect();
         for used in &execution.report.capabilities_used {
-            if !spec.capabilities.contains(used) {
+            if !declared_capabilities.contains(used) {
                 return Err(one_diag(Diag::engine(
                     EngineCode::UndeclaredCapabilityUse,
                     Span::none(),
@@ -424,11 +430,13 @@ impl Engine {
             }
         }
 
+        let declared_outputs: BTreeSet<(&str, OutputKind)> = spec
+            .outputs
+            .iter()
+            .map(|output| (output.path.as_ref(), output.kind))
+            .collect();
         for produced in &execution.report.outputs {
-            let declared = spec.outputs.iter().any(|output| {
-                output.path == produced.path && output.kind == produced.content.kind()
-            });
-            if !declared {
+            if !declared_outputs.contains(&(produced.path.as_ref(), produced.content.kind())) {
                 return Err(one_diag(Diag::engine(
                     EngineCode::UndeclaredOutput,
                     Span::none(),
@@ -437,11 +445,14 @@ impl Engine {
             }
         }
 
+        let produced_outputs: BTreeSet<(&str, OutputKind)> = execution
+            .report
+            .outputs
+            .iter()
+            .map(|output| (output.path.as_ref(), output.content.kind()))
+            .collect();
         for declared in &spec.outputs {
-            let produced = execution.report.outputs.iter().any(|output| {
-                output.path == declared.path && output.content.kind() == declared.kind
-            });
-            if !produced {
+            if !produced_outputs.contains(&(declared.path.as_ref(), declared.kind)) {
                 return Err(one_diag(Diag::engine(
                     EngineCode::MissingDeclaredOutput,
                     Span::none(),

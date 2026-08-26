@@ -12,7 +12,7 @@ mod validation;
 /// without yet carrying payload (a declared action output), and as the return
 /// of [`Content::kind`]. This is the single source of truth for the two
 /// top-level content variants.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum OutputKind {
     Blob,
     Tree,
@@ -80,7 +80,7 @@ pub enum PlatformRequirement {
 ///
 /// Names and scopes are semantic values so domain libraries can add
 /// capabilities without patching the kernel.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CapabilityRequirement {
     pub name: Box<str>,
     pub scope: Box<str>,
