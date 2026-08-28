@@ -236,6 +236,32 @@ pub enum BodyExpr {
     /// Decode bytes as UTF-8 text. Invalid bytes fail the body; the failure
     /// is a value, deterministic in the bytes, not a divergence.
     TextOfBytes { bytes: Box<BodyExpr> },
+    /// Split `text` on every occurrence of `separator`, keeping empty fields:
+    /// adjacent separators produce empty fields, and an empty text produces
+    /// one empty field, so appending the parts back with the separator
+    /// re-joins the text exactly. An empty separator never matches, and the
+    /// result is the whole text as one field. Every edge is decided rather
+    /// than refused, which is what totality asks of a primitive no input can
+    /// escape (decision 0064). The text-splitting constructor 0062 named as
+    /// unwritten: a delimiter walk is a split whose parts are split again,
+    /// and a prefix strip is a split whose second part is taken when there
+    /// is one.
+    TextBreak {
+        text: Box<BodyExpr>,
+        separator: Box<BodyExpr>,
+    },
+    /// Join a list of text with `separator` between adjacent fields: an empty
+    /// list joins to the empty text, a single field joins to itself, and the
+    /// separator appears neither before the first field nor after the last.
+    /// The join side of [`BodyExpr::TextBreak`]'s round trip — splitting a
+    /// text and joining its fields re-joins it exactly when the separator is
+    /// non-empty (decision 0064). A primitive rather than a fold of
+    /// concatenations, because an accumulating fold re-copies its result at
+    /// every step, and totality asks for the total cost too.
+    TextJoin {
+        list: Box<BodyExpr>,
+        separator: Box<BodyExpr>,
+    },
     /// Request one pure computation and continue under its result.
     Need {
         request: BodyRequest,
@@ -552,6 +578,19 @@ fn infer(
         }
         BodyExpr::TextOfBytes { bytes } => {
             expect(infer(bytes, binders, deeper)?, &Type::Bytes)?;
+            Ok(Inferred::Typed(Type::Text))
+        }
+        BodyExpr::TextBreak { text, separator } => {
+            expect(infer(text, binders, deeper)?, &Type::Text)?;
+            expect(infer(separator, binders, deeper)?, &Type::Text)?;
+            Ok(Inferred::Typed(Type::List(Box::new(Type::Text))))
+        }
+        BodyExpr::TextJoin { list, separator } => {
+            expect(
+                infer(list, binders, deeper)?,
+                &Type::List(Box::new(Type::Text)),
+            )?;
+            expect(infer(separator, binders, deeper)?, &Type::Text)?;
             Ok(Inferred::Typed(Type::Text))
         }
         BodyExpr::Need { .. }
@@ -1494,6 +1533,60 @@ mod tests {
             body.validate(&interface),
             Err(BodyError::DepthExceeded {
                 limit: MAX_BODY_DEPTH
+            })
+        );
+    }
+
+    #[test]
+    fn a_text_break_produces_a_list_of_text() {
+        let interface = Interface {
+            inputs: Box::new([Type::Text]),
+            output: Type::List(Box::new(Type::Text)),
+        };
+        let body = RuleBody::new(BodyExpr::TextBreak {
+            text: Box::new(BodyExpr::Bound(0)),
+            separator: Box::new(BodyExpr::Literal(Value::Text(",".into()))),
+        });
+        assert_eq!(body.validate(&interface), Ok(()));
+
+        let mistyped_separator = RuleBody::new(BodyExpr::TextBreak {
+            text: Box::new(BodyExpr::Bound(0)),
+            separator: Box::new(BodyExpr::Literal(Value::int(0))),
+        });
+        assert_eq!(
+            mistyped_separator.validate(&interface),
+            Err(BodyError::TypeMismatch {
+                expected: Type::Text,
+                found: Type::Int,
+            })
+        );
+    }
+
+    #[test]
+    fn a_text_join_produces_text_from_a_text_list() {
+        let interface = Interface {
+            inputs: Box::new([Type::List(Box::new(Type::Text))]),
+            output: Type::Text,
+        };
+        let body = RuleBody::new(BodyExpr::TextJoin {
+            list: Box::new(BodyExpr::Bound(0)),
+            separator: Box::new(BodyExpr::Literal(Value::Text(",".into()))),
+        });
+        assert_eq!(body.validate(&interface), Ok(()));
+
+        let mistyped_list = RuleBody::new(BodyExpr::TextJoin {
+            list: Box::new(BodyExpr::Bound(0)),
+            separator: Box::new(BodyExpr::Literal(Value::Text(",".into()))),
+        });
+        let ints_interface = Interface {
+            inputs: Box::new([Type::List(Box::new(Type::Int))]),
+            output: Type::Text,
+        };
+        assert_eq!(
+            mistyped_list.validate(&ints_interface),
+            Err(BodyError::TypeMismatch {
+                expected: Type::List(Box::new(Type::Text)),
+                found: Type::List(Box::new(Type::Int)),
             })
         );
     }

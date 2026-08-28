@@ -189,6 +189,40 @@ pub(super) fn evaluate(expression: BodyExpr, environment: Environment) -> Evalua
                 ))),
             }
         }),
+        BodyExpr::TextBreak { text, separator } => {
+            evaluate_binary(*text, *separator, environment, |text, separator| {
+                let (Ok(text), Ok(separator)) = (expect_text(text), expect_text(separator)) else {
+                    return internal("validated text break received a non-text value");
+                };
+                // An empty separator never matches (decision 0064), and
+                // Rust's `str::split` panics on one, so the decree and the
+                // guard coincide.
+                let parts: Vec<Value> = if separator.is_empty() {
+                    vec![Value::Text(text)]
+                } else {
+                    text.split(separator.as_ref())
+                        .map(|part| Value::Text(part.into()))
+                        .collect()
+                };
+                Evaluation::Complete(Value::List(parts.into_boxed_slice()))
+            })
+        }
+        BodyExpr::TextJoin { list, separator } => {
+            evaluate_binary(*list, *separator, environment, |list, separator| {
+                let (Ok(list), Ok(separator)) = (expect_text_list(list), expect_text(separator))
+                else {
+                    return internal("validated text join received a non-list or non-text value");
+                };
+                let mut joined = String::new();
+                for (index, field) in list.iter().enumerate() {
+                    if index > 0 {
+                        joined.push_str(&separator);
+                    }
+                    joined.push_str(field);
+                }
+                Evaluation::Complete(Value::Text(joined.into_boxed_str()))
+            })
+        }
         BodyExpr::Need { request, resume } => {
             evaluate_request::<Pure>(request, environment.clone())
                 .and_then(move |request| yield_one(PureStep::Need(request), *resume, environment))
@@ -317,6 +351,21 @@ fn expect_text(value: Value) -> Result<Box<str>, DiagnosticSink> {
         Value::Text(text) => Ok(text),
         _ => Err(internal_failure(
             "validated text expression produced a non-text value",
+        )),
+    }
+}
+
+fn expect_text_list(value: Value) -> Result<Box<[Box<str>]>, DiagnosticSink> {
+    match value {
+        Value::List(fields) => {
+            let mut texts = Vec::with_capacity(fields.len());
+            for field in fields {
+                texts.push(expect_text(field)?);
+            }
+            Ok(texts.into_boxed_slice())
+        }
+        _ => Err(internal_failure(
+            "validated text join produced a non-list value",
         )),
     }
 }

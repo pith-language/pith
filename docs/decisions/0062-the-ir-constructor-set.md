@@ -2,11 +2,11 @@
 schema: design-doc/v1
 id: decision-0062-the-ir-constructor-set
 title: the represented-body constructor set is enumerated, typed, and de Bruijn, with structural case on lists and the step protocol as its yield constructs
-summary: thirty constructors over the 0026 calculus — pure expressions between yields, one request per shape of fan-out, and MatchList as the eliminator folds cannot replace — encoded in its own versioned grammar under the pith:body-ir digest domain, validated by typecheck against the rule's interface, and total by the absence of any recursion constructor
+summary: thirty-two constructors over the 0026 calculus — pure expressions between yields, total text breaking and joining, one request per shape of fan-out, and MatchList as the eliminator folds cannot replace — encoded in its own versioned grammar under the pith:body-ir digest domain, validated by typecheck against the rule's interface, and total by the absence of any recursion constructor
 kind: decision
 status: proposed
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-08-28
 tags:
   - language
   - ir
@@ -33,6 +33,12 @@ relations:
 
 > amends [0038: rule bodies are data in one kernel-facing core ir](0038-represented-rule-bodies.md): its unresolved section's first item — "the constructor set of the expression language between yields is not enumerated here ... that enumeration is the first design task this record gates" — is this record. the other three unresolved items are answered below: the evaluator-abi version is the `pith:body-ir` digest domain's version segment, the fan-out question splits into `NeedAll` and `NeedEach`, and binders are de Bruijn indices in the ir itself, so there are no binder names to normalize.
 
+> amendment, [0064](0064-text-breaking.md): `TextBreak` is the thirty-first constructor, with total empty
+> semantics fixed there, and `TextJoin` the thirty-second — the join side of the same round trip, a
+> primitive because the fold-of-concats spelling it replaces re-copies its accumulator every step and
+> is quadratic in the field count. It removes the two text-splitting bodies from the unexpressible list
+> without a new value type or a body-domain version move.
+
 ## context
 
 0038 settled that a rule body is data and left the data unenumerated, gating surface syntax and its own acceptance on the enumeration. M-9 closed the vocabulary it depends on — `NeedObservation` is in `PureStep` — so the step half of the set is closed and can be encoded without an amendment arriving a record later. the corpus that measures the set exists and is small enough to read in an afternoon: fifteen pure rule bodies across xylem, stele, phloem and example-domain, whose between-yield computation is the whole demand signal the pure expression language has.
@@ -49,7 +55,7 @@ the set is first-order. there are no function values, no closures, no lambda: th
 
 ### the constructor set
 
-the pure expressions: `Literal` (an embedded value), `Bound`, `Let`, `Fail` (a `Text` message; the construct inhabits every type, the way a value-level failure must), `Record`, `Field`, `MakeSum`, `Match`, `Wrap`, `Unwrap`, `List` (with its element type — an empty list cannot recover one), `Cons`, `Append`, `Fold` (left to right; the step sees the element at `Bound(0)` and the accumulator at `Bound(1)`), `MatchList`, `SortBy` (stable, comparing the canonical encoding of each element's key), `If`, `Equal`, `IntAdd`/`IntSubtract`/`IntMultiply` (0055's three; division keeps its absence), `Describe` (the diagnostic rendering — decimal integers, digest-named blobs — which is how a body names what it refuses), `TextConcat`, and `TextOfBytes` (UTF-8 decode; invalid bytes fail the body).
+the pure expressions: `Literal` (an embedded value), `Bound`, `Let`, `Fail` (a `Text` message; the construct inhabits every type, the way a value-level failure must), `Record`, `Field`, `MakeSum`, `Match`, `Wrap`, `Unwrap`, `List` (with its element type — an empty list cannot recover one), `Cons`, `Append`, `Fold` (left to right; the step sees the element at `Bound(0)` and the accumulator at `Bound(1)`), `MatchList`, `SortBy` (stable, comparing the canonical encoding of each element's key), `If`, `Equal`, `IntAdd`/`IntSubtract`/`IntMultiply` (0055's three; division keeps its absence), `Describe` (the diagnostic rendering — decimal integers, digest-named blobs — which is how a body names what it refuses), `TextConcat`, `TextOfBytes` (UTF-8 decode; invalid bytes fail the body), and 0064's `TextBreak` and `TextJoin`.
 
 the yield constructs, one per shape the corpus actually requests: `Need` (one pure computation), `NeedAll` (a static batch that may mix interfaces — the shape compose-system's three merges and three renders have), `NeedEach` (one interface, one request per element of a runtime list, with the declared independence of a batch on 0029's terms — the shape a package build's per-source compiles have, which no static batch can spell), `NeedBlob`, `NeedAction`, and `NeedObservation`. each request carries its full `Interface` in the body, on the ground 0047 fixed for types: no ambient rule table resolves a request, so a body is self-describing data a decoded copy can check as well as a constructed one.
 
@@ -67,11 +73,11 @@ folds alone cannot express grouping, first-match, or head-extraction, and the re
 
 `Rule::represented` derives the revision 0038 promised: a manifest of the body's digest under `pith:body-ir:v1` followed by the interface encoding, hashed under `RuleRevision`'s domain — the same two-halves shape a host rule's `BodyRevision ‖ interface` manifest has, with the author's counter replaced by the derived digest. the body's types carry their declarations (0047), so the encoding already contains every declaration body the body reaches and no second digest list is needed — the same redundancy 0047's derived revision refused. the coordinate stays the identity, and a compatible refactor is unexpressible: there are no binder names, so two elaborations of one body are one tree.
 
-the encoding is a grammar beside `Value` and `Type`, not a rider on `RECORD_ENCODING_VERSION`, exactly as 0038's serialization section requires: tag-numbered in its own namespace (thirty tags), length-prefixed, depth-bounded at 128 on both the decode and the validate side so a file-delivered body cannot overflow the stack, version byte 1 pinned under 0048, digests domain-separated the way `pith:action-computation:v1` is. embedded values and types ride as length-prefixed payloads of the existing encodings, which is the same seam the declaration table embeds declarations through. the domain's version segment *is* the evaluator-abi version 0038's unresolved section asks for: a change to evaluator semantics — anything that would move what a body means without moving its bytes, such as the sort algorithm behind `SortBy` — is a domain bump, never a silent basis change.
+the encoding is a grammar beside `Value` and `Type`, not a rider on `RECORD_ENCODING_VERSION`, exactly as 0038's serialization section requires: tag-numbered in its own namespace (thirty-two tags), length-prefixed, depth-bounded at 128 on both the decode and the validate side so a file-delivered body cannot overflow the stack, version byte 1 pinned under 0048, digests domain-separated the way `pith:action-computation:v1` is. embedded values and types ride as length-prefixed payloads of the existing encodings, which is the same seam the declaration table embeds declarations through. the domain's version segment *is* the evaluator-abi version 0038's unresolved section asks for: a change to evaluator semantics — anything that would move what a body means without moving its bytes, such as the sort algorithm behind `SortBy` — is a domain bump, never a silent basis change.
 
 ### what the round names as unexpressible
 
-three corpus bodies cannot be spelled, each with its reason. `xylem.compile-entry` and `example.render-entry` wait on the same constructor: text splitting. the depfile parse splits bytes on whitespace, joins continuation lines, and strips prefixes; the template scan walks `{{`..`}}` delimiters by index. splitting has no agreed total semantics to encode — empty fields, adjacent delimiters, and unclosed delimiters each need a decided answer before a constructor exists — so both bodies stay host-tier until a record decides one. `phloem.resolve` is out on two grounds at once: version ordering is a host trait object selected by a request-visible name, which is dispatch the ir cannot see, and the search itself is backtracking with an undo stack — general recursion, the thing 0018 excludes by construction and this set excludes by absence. both halves stay host-side, which is 0038's permanent tier doing what it exists for.
+one corpus body cannot be spelled. `phloem.resolve` is out on two grounds at once: version ordering is a host trait object selected by a request-visible name, which is dispatch the ir cannot see, and the search itself is backtracking with an undo stack — general recursion, the thing 0018 excludes by construction and this set excludes by absence. it stays host-side, which is 0038's permanent tier doing what it exists for. 0064 decided text breaking and moved `xylem.compile-entry` and `example.render-entry` into the represented set.
 
 one expressed body carries a named divergence: `stele.render-passwd` narrows uid and gid to a machine integer because its formatter takes one, refusing ids outside that range; the represented body renders the arbitrary-precision decimal through `Describe` and accepts what the host body refuses. the narrowing is a formatter boundary, not a designed contract, and integer comparison — the constructor that would restore the refusal — stays out until a domain needs it for its own sake, on 0055's rule that a partial operation arrives with the consumer that can answer its edge.
 
@@ -97,7 +103,7 @@ binding `Many`'s values as a single `List` binder is closer to the protocol's sh
 
 the kernel gains a second body tier's data half: `RuleTier::Represented`, a `Rule::represented` constructor whose revision derives from the body digest, the validator that checks a body against its interface, and the canonical codec. no evaluator lands with it — M-12's interpreter and M-13's notation are the readers this set was enumerated for, and 0038's own migration rounds follow the notation.
 
-the measured claim is the corpus: twelve of the fifteen bodies are expressed, validated, and round-tripped in `crates/pith-core/tests/corpus_bodies.rs`, against interfaces and declarations mirrored coordinate-for-coordinate from the live tables; the three that cannot be are named there with the constructors they wait for. the two text-splitting waits share one future record; the resolve case is permanent host tier unless a record amends this one with a bounded-search constructor, which 0018's open list still holds a place for.
+the measured claim is the corpus: fourteen of the fifteen bodies are expressed, validated, and round-tripped in `crates/pith-core/tests/corpus_bodies.rs`, against interfaces and declarations mirrored coordinate-for-coordinate from the live tables; the one that cannot be is named there with the host dispatch and recursion it waits for. the resolve case is permanent host tier unless a record amends this one with a bounded-search constructor, which 0018's open list still holds a place for.
 
 the corpus test also carries the round's honest residues as comments: the typed body refuses a replacement naming a list field, where the untyped host body lands the text and fails later at a decode gate; and it refuses a `concat`-named text field at the body, where the host fails it at the same discovery. both refusals happen strictly earlier and name the same fact.
 
@@ -107,7 +113,7 @@ the corpus test also carries the round's honest residues as comments: the typed 
 > follow-on engine commit, and its stability test pins `SortBy`'s committed order — the price is one
 > `Vec::sort_by`, which is stable by contract. the `pith:body-ir` domain stays at v1.
 
-the text-splitting constructor: its semantics (empty fields, adjacency, unclosed delimiters) need a record before either waiting body can spell its parse, and the two bodies that wait for it are the argument for designing it soon.
+the text-splitting item is closed by 0064.
 
 `SortBy` commits the evaluator to a stable sort algorithm as part of the domain's v1 meaning; the commitment is recorded here and priced by nobody yet, because no evaluator exists. M-12 prices it.
 
