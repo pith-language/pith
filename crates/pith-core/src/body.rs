@@ -13,6 +13,9 @@
 //! finite list, and every primitive is total. A body can fail — `Fail` and
 //! `TextOfBytes` are deterministic value failures — but it cannot diverge.
 
+use std::hash::{Hash, Hasher};
+use std::sync::{Arc, OnceLock};
+
 use pith_ids::BodyIrDigest;
 
 use crate::rule::Interface;
@@ -26,15 +29,37 @@ pub const MAX_BODY_DEPTH: u32 = 128;
 /// A pure rule's body. The expression is checked against a rule's interface by
 /// [`Self::validate`]; the inputs are the deepest binders and the expression's
 /// type must be the interface's output.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+///
+/// The canonical digest is computed once and shared by every clone of the
+/// body: registration digests the same body its declaration already digested,
+/// and the expression is immutable, so the memo cannot go stale.
+#[derive(Clone, Debug)]
 pub struct RuleBody {
     expression: BodyExpr,
+    digest: Arc<OnceLock<BodyIrDigest>>,
+}
+
+impl PartialEq for RuleBody {
+    fn eq(&self, other: &Self) -> bool {
+        self.expression == other.expression
+    }
+}
+
+impl Eq for RuleBody {}
+
+impl Hash for RuleBody {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.expression.hash(state);
+    }
 }
 
 impl RuleBody {
     #[must_use]
     pub fn new(expression: BodyExpr) -> Self {
-        Self { expression }
+        Self {
+            expression,
+            digest: Arc::new(OnceLock::new()),
+        }
     }
 
     #[must_use]
@@ -47,7 +72,9 @@ impl RuleBody {
     /// version (decisions 0038, 0062).
     #[must_use]
     pub fn digest(&self) -> BodyIrDigest {
-        BodyIrDigest::of_manifest(&self.encode_canonical())
+        *self
+            .digest
+            .get_or_init(|| BodyIrDigest::of_manifest(&self.encode_canonical()))
     }
 
     /// Check the body against `interface`: every binder is resolved, every
