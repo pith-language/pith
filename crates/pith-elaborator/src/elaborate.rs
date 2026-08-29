@@ -15,6 +15,15 @@ use pith_hir::{
 
 use crate::body::{BUILTIN_NAMES, Bodies};
 
+/// Whether a rule is exported to importers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Visibility {
+    /// A module-private definition, elaborated to a rule no importer names.
+    Local,
+    /// Part of the module's interface surface, nameable through an import.
+    Public,
+}
+
 pub struct ElaboratedRule {
     pub label: Box<str>,
     pub category: RuleCategory,
@@ -22,13 +31,20 @@ pub struct ElaboratedRule {
     pub span: Span,
     /// `None` identifies a host implementation; represented rules carry a body.
     pub body: Option<RuleBody>,
-    /// A module-private definition elaborated to a rule no importer names.
-    pub local: bool,
+    pub visibility: Visibility,
+}
+
+pub struct ElaboratedEntry {
+    pub name: Box<str>,
+    pub interface: Interface,
+    pub span: Span,
+    pub body: RuleBody,
 }
 
 pub struct Elaborated {
     pub table: DeclarationTable,
     pub rules: Vec<ElaboratedRule>,
+    pub entries: Vec<ElaboratedEntry>,
     pub incomplete_rules: Vec<IncompleteRule>,
     pub references: Vec<ReferenceSite>,
 }
@@ -36,6 +52,16 @@ pub struct Elaborated {
 pub struct IncompleteRule {
     pub label: Box<str>,
     pub diagnostics: Box<[Diag]>,
+}
+
+/// Whether the body being elaborated may request its own interface. Entries
+/// may: planning an action whose contract shares the entry's inputs is the
+/// wrapper pattern. Rules may not: a request of their own pure interface
+/// would wait on itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SelfRequests {
+    Allowed,
+    Forbidden,
 }
 
 pub fn elaborate(
@@ -68,10 +94,11 @@ pub fn elaborate(
     let (local_types, mut rules, interfaces) = elaborator.elaborate_locals();
     let (written_rules, incomplete_rules) = elaborator.elaborate_rules(&local_types, interfaces);
     rules.extend(written_rules);
-    elaborator.elaborate_entries(&local_types);
+    let entries = elaborator.elaborate_entries(&local_types);
     Elaborated {
         table: elaborator.table,
         rules,
+        entries,
         incomplete_rules,
         references: elaborator.references,
     }
@@ -107,6 +134,16 @@ fn collect_declarations<'a>(
     declarations
 }
 
+/// The DFS color a declaration carries while the topological order and the
+/// cycle diagnosis share one pass's state: `Done` marks a node provably
+/// outside any cycle, `InStack` marks the current DFS path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VisitState {
+    Unvisited,
+    InStack,
+    Done,
+}
+
 fn order_declarations<'a>(
     surface: &ParsedSurface,
     declared: &BTreeMap<&'a str, &'a SurfaceDeclaration>,
@@ -116,24 +153,22 @@ fn order_declarations<'a>(
     let count = declared.len();
 
     let names: Vec<&'a str> = declared.keys().copied().collect();
-    let mut index_of: BTreeMap<&'a str, u32> = BTreeMap::new();
-    for (index, &name) in names.iter().enumerate() {
-        index_of.insert(name, u32::try_from(index).unwrap_or(u32::MAX));
-    }
-    let count = u32::try_from(count).unwrap_or(u32::MAX) as usize;
+    let index_of: BTreeMap<&'a str, usize> = names
+        .iter()
+        .enumerate()
+        .map(|(index, &name)| (name, index))
+        .collect();
 
-    let mut edges: Vec<(u32, u32)> = Vec::new();
-    let mut dep_counts = vec![0_u32; count];
-    let mut last_seen = vec![u32::MAX; count];
+    let mut edges: Vec<(usize, usize)> = Vec::new();
+    let mut dep_counts = vec![0_usize; count];
+    let mut last_seen = vec![usize::MAX; count];
     for (index, (&name, &declaration)) in declared.iter().enumerate() {
-        let index = u32::try_from(index).unwrap_or(u32::MAX);
-        let mut push = |dep: u32, edges: &mut Vec<(u32, u32)>| {
-            let Some(seen) = last_seen.get_mut(dep as usize) else {
-                return;
-            };
-            if *seen != index {
+        let mut push = |dep: usize, edges: &mut Vec<(usize, usize)>| {
+            if let Some(seen) = last_seen.get_mut(dep)
+                && *seen != index
+            {
                 *seen = index;
-                if let Some(slot) = dep_counts.get_mut(index as usize) {
+                if let Some(slot) = dep_counts.get_mut(index) {
                     *slot = slot.saturating_add(1);
                 }
                 edges.push((dep, index));
@@ -149,22 +184,22 @@ fn order_declarations<'a>(
         adjacency(count, &edges, |edge| edge.0, |edge| edge.1);
 
     let mut in_degree = dep_counts;
-    let mut queue: VecDeque<u32> = (0..count as u32)
-        .filter(|&index| in_degree.get(index as usize).copied().unwrap_or(1) == 0)
+    let mut queue: VecDeque<usize> = (0..count)
+        .filter(|&index| in_degree.get(index).copied().unwrap_or(1) == 0)
         .collect();
-    let mut order: Vec<u32> = Vec::with_capacity(count);
+    let mut order: Vec<usize> = Vec::with_capacity(count);
     while let Some(index) = queue.pop_front() {
         order.push(index);
-        let start = dependent_offsets.get(index as usize).copied().unwrap_or(0);
+        let start = dependent_offsets.get(index).copied().unwrap_or(0);
         let end = dependent_offsets
-            .get((index as usize).saturating_add(1))
+            .get(index.saturating_add(1))
             .copied()
             .unwrap_or(0);
-        let Some(dependents) = dependent_targets.get(start as usize..end as usize) else {
+        let Some(dependents) = dependent_targets.get(start..end) else {
             continue;
         };
         for &dependent in dependents {
-            let Some(degree) = in_degree.get_mut(dependent as usize) else {
+            let Some(degree) = in_degree.get_mut(dependent) else {
                 continue;
             };
             *degree = degree.saturating_sub(1);
@@ -174,14 +209,14 @@ fn order_declarations<'a>(
         }
     }
 
-    let mut state = vec![0_u8; count];
+    let mut state = vec![VisitState::Unvisited; count];
     for &index in &order {
-        if let Some(slot) = state.get_mut(index as usize) {
-            *slot = 2;
+        if let Some(slot) = state.get_mut(index) {
+            *slot = VisitState::Done;
         }
     }
-    let unordered: Vec<u32> = (0..count as u32)
-        .filter(|&index| state.get(index as usize).copied().unwrap_or(2) != 2)
+    let unordered: Vec<usize> = (0..count)
+        .filter(|&index| state.get(index).copied().unwrap_or(VisitState::Done) != VisitState::Done)
         .collect();
     diagnose_cycles(
         &names,
@@ -195,23 +230,23 @@ fn order_declarations<'a>(
     order.extend(unordered);
     order
         .into_iter()
-        .filter_map(|index| names.get(index as usize).copied())
+        .filter_map(|index| names.get(index).copied())
         .collect()
 }
 
 fn adjacency(
     count: usize,
-    edges: &[(u32, u32)],
-    key: fn(&(u32, u32)) -> u32,
-    value: fn(&(u32, u32)) -> u32,
-) -> (Vec<u32>, Vec<u32>) {
-    let mut counts = vec![0_u32; count];
+    edges: &[(usize, usize)],
+    key: fn(&(usize, usize)) -> usize,
+    value: fn(&(usize, usize)) -> usize,
+) -> (Vec<usize>, Vec<usize>) {
+    let mut counts = vec![0_usize; count];
     for edge in edges {
-        if let Some(slot) = counts.get_mut(key(edge) as usize) {
+        if let Some(slot) = counts.get_mut(key(edge)) {
             *slot = slot.saturating_add(1);
         }
     }
-    let mut running = 0_u32;
+    let mut running = 0_usize;
     let mut offsets = Vec::with_capacity(count.saturating_add(1));
     offsets.push(0);
     offsets.extend(counts.iter().map(|count| {
@@ -219,15 +254,15 @@ fn adjacency(
         running
     }));
     let mut cursor = offsets.clone();
-    let mut targets = vec![0_u32; edges.len()];
+    let mut targets = vec![0_usize; edges.len()];
     for edge in edges {
-        let Some(&slot) = cursor.get(key(edge) as usize) else {
+        let Some(&slot) = cursor.get(key(edge)) else {
             continue;
         };
-        if let Some(next) = cursor.get_mut(key(edge) as usize) {
+        if let Some(next) = cursor.get_mut(key(edge)) {
             *next = next.saturating_add(1);
         }
-        if let Some(target) = targets.get_mut(slot as usize) {
+        if let Some(target) = targets.get_mut(slot) {
             *target = value(edge);
         }
     }
@@ -238,8 +273,8 @@ fn collect_dependencies(
     surface: &ParsedSurface,
     declaration: &SurfaceDeclaration,
     self_name: &str,
-    index_of: &BTreeMap<&str, u32>,
-    push: &mut impl FnMut(u32),
+    index_of: &BTreeMap<&str, usize>,
+    push: &mut impl FnMut(usize),
 ) {
     match &declaration.body {
         SurfaceBody::Nominal(body) | SurfaceBody::Alias(body) => {
@@ -259,8 +294,8 @@ fn collect_type_dependencies(
     surface: &ParsedSurface,
     type_id: SurfaceTypeId,
     self_name: &str,
-    index_of: &BTreeMap<&str, u32>,
-    push: &mut impl FnMut(u32),
+    index_of: &BTreeMap<&str, usize>,
+    push: &mut impl FnMut(usize),
 ) {
     let Some(node) = surface.types.get(type_id) else {
         return;
@@ -288,79 +323,74 @@ fn collect_type_dependencies(
                 push(dep);
             }
         }
+        // Scalars and qualified references declare no in-module dependency; a
+        // new composite type must add its dependency walk here.
         _ => {}
     }
 }
 
 fn diagnose_cycles(
     names: &[&str],
-    dep_offsets: &[u32],
-    dep_targets: &[u32],
-    state: &mut [u8],
+    dep_offsets: &[usize],
+    dep_targets: &[usize],
+    state: &mut [VisitState],
     declared: &BTreeMap<&str, &SurfaceDeclaration>,
     files: &ModuleFiles,
     diagnostics: &mut Vec<Diag>,
 ) {
-    let frame_of = |node: u32| -> Option<std::ops::Range<u32>> {
-        let start = dep_offsets.get(node as usize).copied().unwrap_or(0);
+    let frame_of = |node: usize| -> Option<std::ops::Range<usize>> {
+        let start = dep_offsets.get(node).copied().unwrap_or(0);
         let end = dep_offsets
-            .get((node as usize).saturating_add(1))
+            .get(node.saturating_add(1))
             .copied()
             .unwrap_or(0);
         (start <= end).then_some(start..end)
     };
-    let mut path: Vec<u32> = Vec::new();
+    let mut path: Vec<usize> = Vec::new();
     for root in 0..state.len() {
-        if state.get(root).copied().unwrap_or(2) != 0 {
+        if state.get(root).copied().unwrap_or(VisitState::Done) != VisitState::Unvisited {
             continue;
         }
-        let root = u32::try_from(root).unwrap_or(u32::MAX);
         let mut stack = vec![frame_of(root).unwrap_or(0..0)];
-        if let Some(slot) = state.get_mut(root as usize) {
-            *slot = 1;
+        if let Some(slot) = state.get_mut(root) {
+            *slot = VisitState::InStack;
         }
         path.push(root);
         while let Some(deps) = stack.last_mut() {
-            let Some(dep) = deps
-                .next()
-                .and_then(|slot| dep_targets.get(slot as usize).copied())
-            else {
-                if stack.pop().is_none() {
-                    break;
-                }
+            let Some(dep) = deps.next().and_then(|slot| dep_targets.get(slot).copied()) else {
+                stack.pop();
                 if let Some(node) = path.pop()
-                    && let Some(slot) = state.get_mut(node as usize)
+                    && let Some(slot) = state.get_mut(node)
                 {
-                    *slot = 2;
+                    *slot = VisitState::Done;
                 }
                 continue;
             };
-            match state.get(dep as usize).copied().unwrap_or(2) {
-                0 => {
-                    if let Some(slot) = state.get_mut(dep as usize) {
-                        *slot = 1;
+            match state.get(dep).copied().unwrap_or(VisitState::Done) {
+                VisitState::Unvisited => {
+                    if let Some(slot) = state.get_mut(dep) {
+                        *slot = VisitState::InStack;
                     }
                     path.push(dep);
                     stack.push(frame_of(dep).unwrap_or(0..0));
                 }
-                1 => {
-                    let Some(start) = path
-                        .iter()
-                        .position(|&candidate| candidate == dep)
-                        .map(|position| path.get(position..).unwrap_or(&[]))
-                    else {
+                VisitState::InStack => {
+                    let Some(start) = path.iter().position(|&candidate| candidate == dep) else {
                         continue;
                     };
-                    let cycle = start
+                    let Some(cycle_path) = path.get(start..) else {
+                        continue;
+                    };
+                    let cycle = cycle_path
                         .iter()
                         .copied()
                         .chain(std::iter::once(dep))
-                        .filter_map(|index| names.get(index as usize).copied())
+                        .filter_map(|index| names.get(index).copied())
                         .map(|part| format!("`{part}`"))
                         .collect::<Vec<_>>()
                         .join(" -> ");
                     let span = declared
-                        .get(names.get(dep as usize).copied().unwrap_or(""))
+                        .get(names.get(dep).copied().unwrap_or(""))
                         .map_or(Span::none(), |declaration| declaration.name_span);
                     diagnostics.push(files.error(
                         FrontendCode::CyclicDeclaration,
@@ -368,7 +398,7 @@ fn diagnose_cycles(
                         format!("declarations form a mutual cycle: {cycle}"),
                     ));
                 }
-                _ => {}
+                VisitState::Done => {}
             }
         }
     }
@@ -485,7 +515,13 @@ impl<'a> Elaborator<'a> {
                 ));
                 continue;
             }
-            let body = self.value_body(&local.value, &interface, &types, local.span, false);
+            let body = self.value_body(
+                &local.value,
+                &interface,
+                &types,
+                local.span,
+                SelfRequests::Forbidden,
+            );
             types.push((local.name.as_ref(), annotation));
             let Some(body) = body else {
                 continue;
@@ -496,7 +532,7 @@ impl<'a> Elaborator<'a> {
                 interface,
                 span: local.span,
                 body: Some(body),
-                local: true,
+                visibility: Visibility::Local,
             });
         }
         (types, rules, interfaces)
@@ -607,11 +643,12 @@ impl<'a> Elaborator<'a> {
             interface,
             span: rule.span,
             body,
-            local: false,
+            visibility: Visibility::Public,
         })
     }
 
-    fn elaborate_entries(&mut self, visible: &[(&'a str, Type)]) {
+    fn elaborate_entries(&mut self, visible: &[(&'a str, Type)]) -> Vec<ElaboratedEntry> {
+        let mut entries = Vec::new();
         for entry in &self.surface.entries {
             let Some(output) = self.elaborate_type(entry.output, None) else {
                 continue;
@@ -621,8 +658,23 @@ impl<'a> Elaborator<'a> {
                 output,
             };
             let value = SurfaceValue::Request(entry.request.clone());
-            let _ = self.value_body(&value, &interface, visible, entry.span, true);
+            let Some(body) = self.value_body(
+                &value,
+                &interface,
+                visible,
+                entry.span,
+                SelfRequests::Allowed,
+            ) else {
+                continue;
+            };
+            entries.push(ElaboratedEntry {
+                name: entry.name.clone(),
+                interface,
+                span: entry.span,
+                body,
+            });
         }
+        entries
     }
 
     fn value_body(
@@ -631,7 +683,7 @@ impl<'a> Elaborator<'a> {
         interface: &Interface,
         visible: &[(&'a str, Type)],
         span: Span,
-        allow_self_requests: bool,
+        self_requests: SelfRequests,
     ) -> Option<RuleBody> {
         let empty = BTreeMap::new();
         let types = match value {
@@ -660,7 +712,7 @@ impl<'a> Elaborator<'a> {
             .map(|local| local.name.as_ref())
             .collect::<Vec<_>>();
         let mut bodies = Bodies::new(&site, visible, &deferred, types, interface, diagnostics);
-        if allow_self_requests {
+        if self_requests == SelfRequests::Allowed {
             bodies.allow_self_requests();
         }
         bodies.local_body(value, &interface.output, span)

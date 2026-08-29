@@ -12,9 +12,9 @@ use pith_core::{
 };
 use pith_diag::{Diag, Span};
 use pith_hir::{
-    FrontendCode, ModuleFiles, ParsedSurface, SurfaceArm, SurfaceBatchMember, SurfaceBinder,
-    SurfaceClause, SurfaceExpr, SurfaceExprId, SurfaceOperator, SurfaceRequest, SurfaceStatement,
-    SurfaceTypeId, SurfaceValue, SurfaceValueField, SurfaceWrittenBody,
+    FrontendCode, ModuleFiles, ParsedSurface, RuleCategory, SurfaceArm, SurfaceBatchMember,
+    SurfaceBinder, SurfaceClause, SurfaceExpr, SurfaceExprId, SurfaceOperator, SurfaceRequest,
+    SurfaceStatement, SurfaceTypeId, SurfaceValue, SurfaceValueField, SurfaceWrittenBody,
 };
 
 /// Names resolved without a module declaration. The text builtins (decision
@@ -389,7 +389,8 @@ impl<'a> Bodies<'a> {
             SurfaceRequest::Ask {
                 head, arguments, ..
             } => {
-                let (interface, inputs) = self.request_parts(head, arguments, request.span())?;
+                let (interface, inputs) =
+                    self.request_parts(head, arguments, request.span(), RuleCategory::Pure)?;
                 Some(BodyExpr::Need {
                     request: BodyRequest {
                         interface,
@@ -401,7 +402,8 @@ impl<'a> Bodies<'a> {
             SurfaceRequest::Run {
                 head, arguments, ..
             } => {
-                let (interface, inputs) = self.request_parts(head, arguments, request.span())?;
+                let (interface, inputs) =
+                    self.request_parts(head, arguments, request.span(), RuleCategory::Action)?;
                 Some(BodyExpr::NeedAction {
                     request: BodyRequest {
                         interface,
@@ -448,14 +450,16 @@ impl<'a> Bodies<'a> {
             SurfaceRequest::Ask {
                 head, arguments, ..
             } => {
-                let (interface, inputs) = self.request_parts(head, arguments, request.span())?;
-                self.need(false, interface, inputs, binder, resume)
+                let (interface, inputs) =
+                    self.request_parts(head, arguments, request.span(), RuleCategory::Pure)?;
+                self.need(RuleCategory::Pure, interface, inputs, binder, resume)
             }
             SurfaceRequest::Run {
                 head, arguments, ..
             } => {
-                let (interface, inputs) = self.request_parts(head, arguments, request.span())?;
-                self.need(true, interface, inputs, binder, resume)
+                let (interface, inputs) =
+                    self.request_parts(head, arguments, request.span(), RuleCategory::Action)?;
+                self.need(RuleCategory::Action, interface, inputs, binder, resume)
             }
             SurfaceRequest::BytesOf { content, .. } => {
                 let content_span = self.span_of(*content);
@@ -492,7 +496,7 @@ impl<'a> Bodies<'a> {
 
     fn need(
         &mut self,
-        action: bool,
+        category: RuleCategory,
         interface: Interface,
         inputs: Vec<BodyExpr>,
         binder: &SurfaceBinder,
@@ -510,10 +514,9 @@ impl<'a> Bodies<'a> {
             inputs: inputs.into(),
         };
         let resume = Box::new(resumed?);
-        Some(if action {
-            BodyExpr::NeedAction { request, resume }
-        } else {
-            BodyExpr::Need { request, resume }
+        Some(match category {
+            RuleCategory::Action => BodyExpr::NeedAction { request, resume },
+            RuleCategory::Pure => BodyExpr::Need { request, resume },
         })
     }
 
@@ -522,6 +525,7 @@ impl<'a> Bodies<'a> {
         head: &Option<SurfaceTypeId>,
         arguments: &[SurfaceExprId],
         span: Span,
+        category: RuleCategory,
     ) -> Option<(Interface, Vec<BodyExpr>)> {
         let output = self.head_type(head, span)?;
         let mut inputs = Vec::with_capacity(arguments.len());
@@ -535,7 +539,15 @@ impl<'a> Bodies<'a> {
             inputs: payloads.into(),
             output,
         };
-        if self.forbid_self_request && &interface == self.own_interface {
+        // The refusal is a pure-cycle refusal: a pure rule requesting its own
+        // interface would wait on itself. The same interface over the action
+        // table is the wrapper pattern — an entry planning an action whose
+        // contract shares its inputs — and the two tables are what keep it
+        // from waiting on itself.
+        if category == RuleCategory::Pure
+            && self.forbid_self_request
+            && &interface == self.own_interface
+        {
             self.diagnostics.push(self.site.files.error(
                 FrontendCode::SelfRequest,
                 span,
@@ -575,8 +587,12 @@ impl<'a> Bodies<'a> {
         let mut built = Vec::with_capacity(requests.len());
         let mut outputs = Vec::with_capacity(requests.len());
         for member in requests {
-            let (interface, inputs) =
-                self.request_parts(&member.head, &member.arguments, member.span)?;
+            let (interface, inputs) = self.request_parts(
+                &member.head,
+                &member.arguments,
+                member.span,
+                RuleCategory::Pure,
+            )?;
             outputs.push(interface.output.clone());
             built.push(BodyRequest {
                 interface,
@@ -657,7 +673,7 @@ impl<'a> Bodies<'a> {
         let (iterated, built) = if bindings.is_empty() {
             self.binders
                 .push(Binder::named(Some(element.clone()), element_type.clone()));
-            let built = self.request_parts(head, arguments, *span);
+            let built = self.request_parts(head, arguments, *span, RuleCategory::Pure);
             self.binders.pop();
             (source_expr, built?)
         } else {
@@ -674,7 +690,7 @@ impl<'a> Bodies<'a> {
                 environment.record,
                 environment.projections,
             ));
-            let built = self.request_parts(head, arguments, *span);
+            let built = self.request_parts(head, arguments, *span, RuleCategory::Pure);
             self.binders.pop();
             (iterated, built?)
         };

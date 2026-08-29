@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use pith_core::Value;
 use pith_diag::{Diag, DiagnosticSink, Severity, SourceFile, SourceId, Span};
-use pith_elaborator::{elaborate, scope_imports};
+use pith_elaborator::{Visibility, elaborate, scope_imports};
 use pith_engine::{PureRule, PureRuleFrame, PureStep, Resumption};
 use pith_hir::{ParsedSurface, merge_module_files};
 use pith_ids::{ContentId, ModuleAbiDigest};
@@ -140,7 +140,7 @@ impl FrontendFrame {
             elaborated
                 .rules
                 .iter()
-                .filter(|rule| !rule.local)
+                .filter(|rule| rule.visibility == Visibility::Public)
                 .map(|rule| (rule.category, rule.interface.clone())),
         );
         let mut diagnostics = self.content_diagnostics.clone();
@@ -179,7 +179,7 @@ impl FrontendFrame {
                 let mut entries = elaborated
                     .rules
                     .iter()
-                    .filter(|rule| !rule.local)
+                    .filter(|rule| rule.visibility == Visibility::Public)
                     .map(|rule| {
                         (
                             rule.category,
