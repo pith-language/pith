@@ -63,7 +63,7 @@ impl Bodies<'_> {
                 ))
             }
             SurfaceExpr::Record { fields, .. } => {
-                let (expr, payload) = self.record(fields)?;
+                let (expr, payload) = self.record(fields, expected)?;
                 Some((expr, Type::Record(payload)))
             }
             SurfaceExpr::List { items, .. } => self.list(items, expected, self.span_of(id)),
@@ -71,7 +71,7 @@ impl Bodies<'_> {
                 name,
                 arguments,
                 span,
-            } => self.construct(name, arguments, *span),
+            } => self.construct(name, arguments, *span, expected),
             SurfaceExpr::Unwrap { value, .. } => {
                 let value_span = self.span_of(*value);
                 let (value, found) = self.expression(*value, None)?;
@@ -144,7 +144,11 @@ impl Bodies<'_> {
                         return None;
                     }
                 };
-                let (init, accumulator_type) = self.expression(*init, None)?;
+                // The annotation that types the fold reaches the init, for
+                // the same reason it reaches a `let`'s binding: an empty
+                // list in the accumulator's first value cannot recover its
+                // element type alone.
+                let (init, accumulator_type) = self.expression(*init, expected)?;
                 self.binders.push(Binder::named(
                     Some(accumulator.clone()),
                     accumulator_type.clone(),
@@ -240,10 +244,22 @@ impl Bodies<'_> {
     fn record(
         &mut self,
         fields: &[SurfaceValueField],
+        expected: Option<&Type>,
     ) -> Option<(BodyExpr, Box<[RecordField<Type>]>)> {
+        let expected_field = |name: &str| match expected {
+            Some(Type::Record(expected)) => expected
+                .iter()
+                .find(|field| field.name.as_ref() == name)
+                .map(|field| &field.payload),
+            _ => None,
+        };
         let mut elaborated = Vec::with_capacity(fields.len());
         for field in fields {
-            let (value, payload) = self.expression(field.value, None)?;
+            // An expected record type reaches its fields, so an empty list
+            // literal takes its element type from the annotation that names
+            // the record it sits in.
+            let (value, payload) =
+                self.expression(field.value, expected_field(field.name.as_ref()))?;
             elaborated.push(RecordField {
                 name: field.name.clone(),
                 payload: (value, payload, field.span),
@@ -330,9 +346,10 @@ impl Bodies<'_> {
         name: &str,
         arguments: &[SurfaceExprId],
         span: Span,
+        expected: Option<&Type>,
     ) -> Option<(BodyExpr, Type)> {
         if BUILTIN_NAMES.contains(&name) && name != MODULE_BUILTIN {
-            return self.builtin(name, arguments, span);
+            return self.builtin(name, arguments, span, expected);
         }
         let elaborated = arguments
             .iter()
@@ -676,6 +693,7 @@ impl Bodies<'_> {
         name: &str,
         arguments: &[SurfaceExprId],
         span: Span,
+        expected: Option<&Type>,
     ) -> Option<(BodyExpr, Type)> {
         let elaborated = arguments
             .iter()
@@ -688,6 +706,73 @@ impl Bodies<'_> {
                 },
                 Type::Text,
             )),
+            ("fail", [(message, found)]) => {
+                // A failing expression inhabits whatever the checking
+                // position expects; with no expectation threaded the unit
+                // type stands in, and the validator's bottom accepts the
+                // body anyway.
+                self.expect_type(found.clone(), Type::Text, span);
+                Some((
+                    BodyExpr::Fail {
+                        message: Box::new(message.clone()),
+                    },
+                    expected.cloned().unwrap_or(Type::Unit),
+                ))
+            }
+            ("before", [(source, source_type), (separator, separator_type)]) => {
+                self.expect_type(source_type.clone(), Type::Text, span);
+                self.expect_type(separator_type.clone(), Type::Text, span);
+                Some((text_before(source.clone(), separator.clone()), Type::Text))
+            }
+            ("contains", [(source, source_type), (separator, separator_type)]) => {
+                self.expect_type(source_type.clone(), Type::Text, span);
+                self.expect_type(separator_type.clone(), Type::Text, span);
+                Some((
+                    BodyExpr::If {
+                        condition: Box::new(BodyExpr::Equal {
+                            left: Box::new(text_before(source.clone(), separator.clone())),
+                            right: Box::new(source.clone()),
+                        }),
+                        then: Box::new(BodyExpr::Literal(Value::Bool(false))),
+                        otherwise: Box::new(BodyExpr::Literal(Value::Bool(true))),
+                    },
+                    Type::Bool,
+                ))
+            }
+            ("strip_prefix", [(source, source_type), (prefix, prefix_type)]) => {
+                self.expect_type(source_type.clone(), Type::Text, span);
+                self.expect_type(prefix_type.clone(), Type::Text, span);
+                Some((strip_prefix(source.clone(), prefix.clone()), Type::Text))
+            }
+            ("holds", [(list, list_type), (value, value_type)]) => {
+                let Type::List(element) = list_type else {
+                    self.diagnostics.push(self.site.files.error(
+                        FrontendCode::TypeMismatch,
+                        span,
+                        format!("`holds` searches a list, found {list_type}"),
+                    ));
+                    return None;
+                };
+                self.expect_type(value_type.clone(), (**element).clone(), span);
+                Some((list_holds(list.clone(), value.clone()), Type::Bool))
+            }
+            ("sort", [(list, list_type)]) => {
+                let Type::List(_) = list_type else {
+                    self.diagnostics.push(self.site.files.error(
+                        FrontendCode::TypeMismatch,
+                        span,
+                        format!("`sort` orders a list, found {list_type}"),
+                    ));
+                    return None;
+                };
+                Some((
+                    BodyExpr::SortBy {
+                        list: Box::new(list.clone()),
+                        key: Box::new(BodyExpr::Bound(0)),
+                    },
+                    list_type.clone(),
+                ))
+            }
             ("concat", [(left, left_type), (right, right_type)]) => {
                 self.expect_type(left_type.clone(), Type::Text, span);
                 self.expect_type(right_type.clone(), Type::Text, span);
@@ -706,6 +791,17 @@ impl Bodies<'_> {
                         bytes: Box::new(bytes.clone()),
                     },
                     Type::Text,
+                ))
+            }
+            ("split", [(text, text_type), (separator, separator_type)]) => {
+                self.expect_type(text_type.clone(), Type::Text, span);
+                self.expect_type(separator_type.clone(), Type::Text, span);
+                Some((
+                    BodyExpr::TextBreak {
+                        text: Box::new(text.clone()),
+                        separator: Box::new(separator.clone()),
+                    },
+                    Type::List(Box::new(Type::Text)),
                 ))
             }
             ("append", [(left, left_type), (right, right_type)]) => {
@@ -766,5 +862,129 @@ fn expression_span(expr: &SurfaceExpr) -> Span {
         | SurfaceExpr::Match { span, .. }
         | SurfaceExpr::Fold { span, .. }
         | SurfaceExpr::Binary { span, .. } => *span,
+    }
+}
+
+/// The text up to the first occurrence of `separator`, the whole text when it
+/// never occurs: the head of the split, whose first field is exactly that.
+/// The case's empty arm never runs — a split yields at least one field — and
+/// carries the empty text the result type demands.
+fn text_before(source: BodyExpr, separator: BodyExpr) -> BodyExpr {
+    BodyExpr::MatchList {
+        list: Box::new(BodyExpr::TextBreak {
+            text: Box::new(source),
+            separator: Box::new(separator),
+        }),
+        empty: Box::new(BodyExpr::Literal(Value::Text("".into()))),
+        cons: Box::new(BodyExpr::Bound(0)),
+    }
+}
+
+/// A `{found, value}` record, the accumulator that carries a captured
+/// expression through a fold so a builtin composite needs no binder shift.
+fn carried(found: BodyExpr, value: BodyExpr) -> BodyExpr {
+    BodyExpr::record([
+        RecordField {
+            name: "found".into(),
+            payload: found,
+        },
+        RecordField {
+            name: "value".into(),
+            payload: value,
+        },
+    ])
+    .unwrap_or_else(|error| unreachable!("the carry record names its fields once: {error}"))
+}
+
+fn field_of(record: BodyExpr, name: &str) -> BodyExpr {
+    BodyExpr::Field {
+        record: Box::new(record),
+        name: name.into(),
+    }
+}
+
+/// Whether `list` holds `value`. The searched value rides the accumulator as
+/// a record field, so the capture needs no binder shift: everything the fold
+/// step reads is its own element and accumulator.
+fn list_holds(list: BodyExpr, value: BodyExpr) -> BodyExpr {
+    BodyExpr::Field {
+        record: Box::new(BodyExpr::Fold {
+            source: Box::new(list),
+            init: Box::new(carried(BodyExpr::Literal(Value::Bool(false)), value)),
+            step: Box::new(BodyExpr::Let {
+                bound: Box::new(field_of(BodyExpr::Bound(1), "value")),
+                // Under the let: the carried value at Bound(0), the element
+                // at Bound(1), the accumulator at Bound(2).
+                rest: Box::new(BodyExpr::If {
+                    condition: Box::new(field_of(BodyExpr::Bound(2), "found")),
+                    then: Box::new(BodyExpr::Bound(2)),
+                    otherwise: Box::new(BodyExpr::If {
+                        condition: Box::new(BodyExpr::Equal {
+                            left: Box::new(BodyExpr::Bound(1)),
+                            right: Box::new(BodyExpr::Bound(0)),
+                        }),
+                        then: Box::new(carried(
+                            BodyExpr::Literal(Value::Bool(true)),
+                            BodyExpr::Bound(0),
+                        )),
+                        otherwise: Box::new(BodyExpr::Bound(2)),
+                    }),
+                }),
+            }),
+        }),
+        name: "found".into(),
+    }
+}
+
+/// The fields of a split joined back with their separator. The join is the
+/// kernel's `TextJoin` primitive rather than a fold of concatenations: a fold
+/// re-copies its accumulator at every step, which is quadratic in the number
+/// of fields, and the strip must stay linear in the text it cuts.
+fn join_fields(fields: BodyExpr, separator: BodyExpr) -> BodyExpr {
+    BodyExpr::TextJoin {
+        list: Box::new(fields),
+        separator: Box::new(separator),
+    }
+}
+
+/// `source` without its first `prefix` occurrence, `source` unchanged when it
+/// does not start with one. The first field of the split is empty exactly
+/// when the text began with the prefix; the remaining fields joined are the
+/// remainder. One strip, not a repeated one.
+fn strip_prefix(source: BodyExpr, prefix: BodyExpr) -> BodyExpr {
+    let pair = BodyExpr::record([
+        RecordField {
+            name: "cut".into(),
+            payload: BodyExpr::TextBreak {
+                text: Box::new(source.clone()),
+                separator: Box::new(prefix.clone()),
+            },
+        },
+        RecordField {
+            name: "source".into(),
+            payload: source,
+        },
+    ])
+    .unwrap_or_else(|error| unreachable!("the cut record names its fields once: {error}"));
+    BodyExpr::Let {
+        bound: Box::new(pair),
+        rest: Box::new(BodyExpr::MatchList {
+            list: Box::new(field_of(BodyExpr::Bound(0), "cut")),
+            empty: Box::new(BodyExpr::Literal(Value::Text("".into()))),
+            cons: Box::new(BodyExpr::If {
+                condition: Box::new(BodyExpr::Equal {
+                    left: Box::new(BodyExpr::Bound(0)),
+                    right: Box::new(BodyExpr::Literal(Value::Text("".into()))),
+                }),
+                // head(0) tail(1) pair(2): the tail rejoins with the
+                // separator carried out of the pair, read at the fold's own
+                // scope.
+                then: Box::new(join_fields(
+                    BodyExpr::Bound(1),
+                    field_of(BodyExpr::Bound(2), "separator"),
+                )),
+                otherwise: Box::new(field_of(BodyExpr::Bound(2), "source")),
+            }),
+        }),
     }
 }

@@ -17,8 +17,23 @@ use pith_hir::{
     SurfaceTypeId, SurfaceValue, SurfaceValueField, SurfaceWrittenBody,
 };
 
-/// Names resolved without a module declaration.
-pub const BUILTIN_NAMES: &[&str] = &["module", "describe", "append", "concat", "decode"];
+/// Names resolved without a module declaration. The text builtins (decision
+/// 0064) and the list helpers are total composites over the represented
+/// constructors; `fail` is the refusing body's only spelling.
+pub const BUILTIN_NAMES: &[&str] = &[
+    "module",
+    "describe",
+    "append",
+    "concat",
+    "decode",
+    "split",
+    "before",
+    "contains",
+    "holds",
+    "sort",
+    "strip_prefix",
+    "fail",
+];
 
 const MODULE_BUILTIN: &str = "module";
 
@@ -72,6 +87,11 @@ pub(crate) struct Bodies<'a> {
     forbid_self_request: bool,
     diagnostics: &'a mut Vec<Diag>,
     binders: Vec<Binder>,
+    /// What the body's tail must inhabit when it is an expression: the rule's
+    /// output or the definition's annotation. `fail` needs it — a refusal
+    /// inhabits the checking position's type, and the tail is checked with no
+    /// expectation flowing in.
+    tail_expected: Option<Type>,
 }
 
 impl Binder {
@@ -120,6 +140,7 @@ impl<'a> Bodies<'a> {
             forbid_self_request: true,
             diagnostics,
             binders: Vec::new(),
+            tail_expected: None,
         }
     }
 
@@ -136,6 +157,7 @@ impl<'a> Bodies<'a> {
         annotation: &Type,
         span: Span,
     ) -> Option<RuleBody> {
+        self.tail_expected = Some(annotation.clone());
         let (expression, found) = self.value_typed(value)?;
         if &found != annotation {
             self.diagnostics.push(self.site.files.error(
@@ -161,8 +183,9 @@ impl<'a> Bodies<'a> {
     }
 
     fn value_typed(&mut self, value: &SurfaceValue) -> Option<(BodyExpr, Type)> {
+        let expected = self.tail_expected.clone();
         match value {
-            SurfaceValue::Expression(id) => self.expression(*id, None),
+            SurfaceValue::Expression(id) => self.expression(*id, expected.as_ref()),
             SurfaceValue::Request(request) => {
                 let payload = self.request_output(request)?;
                 let expr = self.tail_request(request)?;
@@ -254,6 +277,7 @@ impl<'a> Bodies<'a> {
             self.binders
                 .push(Binder::named(name.clone(), input.clone()));
         }
+        self.tail_expected = Some(self.own_interface.output.clone());
         let expression =
             self.continuation(&mut written.statements.iter(), written.tail.as_ref())?;
         let body = RuleBody::new(expression);
@@ -288,7 +312,7 @@ impl<'a> Bodies<'a> {
     ) -> Option<BodyExpr> {
         let Some(statement) = statements.next() else {
             return match tail {
-                Some(value) => self.value(value),
+                Some(value) => self.value_at(value, self.tail_expected.clone()),
                 None => None,
             };
         };
@@ -349,9 +373,11 @@ impl<'a> Bodies<'a> {
         }
     }
 
-    fn value(&mut self, value: &SurfaceValue) -> Option<BodyExpr> {
+    fn value_at(&mut self, value: &SurfaceValue, expected: Option<Type>) -> Option<BodyExpr> {
         match value {
-            SurfaceValue::Expression(id) => self.expression(*id, None).map(|(expr, _)| expr),
+            SurfaceValue::Expression(id) => self
+                .expression(*id, expected.as_ref())
+                .map(|(expr, _)| expr),
             SurfaceValue::Request(request) => self.tail_request(request),
         }
     }
