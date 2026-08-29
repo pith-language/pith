@@ -607,33 +607,31 @@ impl Bodies<'_> {
     ) -> Option<(BodyExpr, Type)> {
         let (left_expr, left_type) = self.expression(left, None)?;
         let (right_expr, right_type) = self.expression(right, None)?;
-        if left_type != right_type {
-            self.diagnostics.push(self.site.files.error(
-                FrontendCode::TypeMismatch,
-                span,
-                format!("`==` compares one type, found {left_type} and {right_type}"),
-            ));
-            return None;
-        }
         match operator {
-            SurfaceOperator::Equal => Some((
-                BodyExpr::Equal {
-                    left: Box::new(left_expr),
-                    right: Box::new(right_expr),
-                },
-                Type::Bool,
-            )),
-            SurfaceOperator::NotEqual => Some((
-                BodyExpr::If {
-                    condition: Box::new(BodyExpr::Equal {
+            SurfaceOperator::Equal => {
+                self.expect_shared_operand_type(left_type, right_type, span)?;
+                Some((
+                    BodyExpr::Equal {
                         left: Box::new(left_expr),
                         right: Box::new(right_expr),
-                    }),
-                    then: Box::new(BodyExpr::Literal(Value::Bool(false))),
-                    otherwise: Box::new(BodyExpr::Literal(Value::Bool(true))),
-                },
-                Type::Bool,
-            )),
+                    },
+                    Type::Bool,
+                ))
+            }
+            SurfaceOperator::NotEqual => {
+                self.expect_shared_operand_type(left_type, right_type, span)?;
+                Some((
+                    BodyExpr::If {
+                        condition: Box::new(BodyExpr::Equal {
+                            left: Box::new(left_expr),
+                            right: Box::new(right_expr),
+                        }),
+                        then: Box::new(BodyExpr::Literal(Value::Bool(false))),
+                        otherwise: Box::new(BodyExpr::Literal(Value::Bool(true))),
+                    },
+                    Type::Bool,
+                ))
+            }
             SurfaceOperator::IntAdd
             | SurfaceOperator::IntSubtract
             | SurfaceOperator::IntMultiply => {
@@ -659,6 +657,18 @@ impl Bodies<'_> {
                 Some((expr, Type::Int))
             }
         }
+    }
+
+    fn expect_shared_operand_type(&mut self, left: Type, right: Type, span: Span) -> Option<()> {
+        if left == right {
+            return Some(());
+        }
+        self.diagnostics.push(self.site.files.error(
+            FrontendCode::TypeMismatch,
+            span,
+            format!("`==` compares one type, found {left} and {right}"),
+        ));
+        None
     }
 
     fn builtin(

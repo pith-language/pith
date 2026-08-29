@@ -494,6 +494,29 @@ fn annotation_and_body_mismatches_are_spanned_refusals() {
 }
 
 #[test]
+fn binary_operator_mismatches_name_their_operator() {
+    let arithmetic = load_err("pure rule f(ns: List<Int>) -> Int = { 1 + ns }\n");
+    assert!(has_code(&arithmetic, FrontendCode::TypeMismatch));
+    assert!(
+        arithmetic
+            .iter()
+            .any(|diagnostic| diagnostic.message.0.contains("expected"))
+    );
+    assert!(
+        !arithmetic
+            .iter()
+            .any(|diagnostic| diagnostic.message.0.contains("`==`"))
+    );
+
+    let equality = load_err("pure rule f(ns: List<Int>) -> Int = { 1 == ns }\n");
+    assert!(
+        equality
+            .iter()
+            .any(|diagnostic| diagnostic.message.0.contains("compares one type"))
+    );
+}
+
+#[test]
 fn body_digests_agree_under_qualified_and_unqualified_spelling() {
     let dependency = load_ok("nominal In = Text\n\nnominal Out = Text\n");
     let mut imports = ImportEnv::new();
