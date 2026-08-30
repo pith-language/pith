@@ -1,22 +1,31 @@
 //! Command implementations and their shared execution context.
 
 mod check;
+mod entry;
+mod exec;
+mod explain;
 mod explore;
 mod fmt;
 mod gc;
+mod graph;
+mod run;
 mod state;
 mod store;
 
 pub use check::Check;
+pub use exec::Exec;
+pub use explain::Explain;
 pub use explore::Explore;
 pub use fmt::Fmt;
 pub use gc::Gc;
+pub use graph::{GraphDeps, GraphPlan, GraphSelect};
+pub use run::Run;
 pub use state::{StateCheck, StateInfo};
 pub use store::{StoreAdd, StoreCat, StoreLs, StoreMaterialize};
 
 use std::path::PathBuf;
 
-use pith_query::{Environment, ReadOnly, Roots, Session, Writable};
+use pith_query::{Environment, QueryError, ReadOnly, Roots, Session, Writable};
 
 use crate::exit::Failure;
 
@@ -46,6 +55,22 @@ impl Context {
 
     fn writable(&self) -> Result<Session<Writable>, Failure> {
         Ok(Session::open_writable(self.roots()?)?)
+    }
+
+    /// Open a read-only session and run one query against it.
+    fn query_read_only<T>(
+        &self,
+        query: impl FnOnce(Session<ReadOnly>) -> Result<T, QueryError>,
+    ) -> Result<T, Failure> {
+        query(self.read_only()?).map_err(Failure::from)
+    }
+
+    /// Open a writable session and run one query against it.
+    fn query_writable<T>(
+        &self,
+        query: impl FnOnce(Session<Writable>) -> Result<T, QueryError>,
+    ) -> Result<T, Failure> {
+        query(self.writable()?).map_err(Failure::from)
     }
 }
 

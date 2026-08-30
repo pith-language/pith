@@ -26,9 +26,9 @@ pub use bound::RunBound;
 pub use cancel::{CancelSignal, NeverCancelled};
 pub use graph::{
     ActionPlan, ActionRecord, AttemptState, ComputationKind, ComputationNode, DependencyEdge,
-    Engine, EngineQuery, Evaluation, EvaluationSource, LiveInvalidationExplanation,
-    LiveInvalidationReason, PureRule, PureRuleFrame, PureStep, Resumption, ReuseContext,
-    ReuseDecision, ReuseReason, RuleSelection,
+    Engine, EngineQuery, EntryActionPlan, Evaluation, EvaluationSource,
+    LiveInvalidationExplanation, LiveInvalidationReason, PureRule, PureRuleFrame, PureStep,
+    Resumption, ReuseContext, ReuseDecision, ReuseReason, RuleSelection,
 };
 pub use observation::{ObservationRule, Observed, Observer, ObserverIdentity};
 pub use policy::{ActionAuthorization, ActionPolicy, AllowAllActions};

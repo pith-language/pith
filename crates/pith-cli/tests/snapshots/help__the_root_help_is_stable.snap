@@ -8,11 +8,18 @@ Usage: pith [OPTIONS] <COMMAND>
 
 Commands:
   check    Elaborate the module at PATH and report its errors and warnings
-  explore  Show what a module declares: types, rules, and which tier answers
+  explore  Show types, rules, entries, interfaces, metadata, and implementation tiers
   fmt      Write the canonical spelling of the module at PATH
+  run      Evaluate a named entry and render its value
+  explain  Evaluate a named entry and explain its last invalidation
+  graph    Inspect entry selection, action plans, and recorded dependencies
+  exec     Evaluate an entry to pith.Exec and replace this process with it
   store    Inspect and admit content
   state    Inspect engine state
   gc       Report what a collection would reclaim
+  diff     Compare the workspace declaration with its lock; requires a workspace
+  update   Resolve and write the workspace lock; requires a workspace
+  add      Add a dependency to the workspace; requires a workspace
   help     Print this message or the help of the given subcommand(s)
 
 Options:
@@ -21,3 +28,5 @@ Options:
       --state <FILE>     Engine state root. Defaults to $PITH_HOME/state.db [env: PITH_STATE=]
   -h, --help             Print help
   -V, --version          Print version
+
+Workspace commands require a workspace; diff, update, and add are visible here but arrive with M-14.

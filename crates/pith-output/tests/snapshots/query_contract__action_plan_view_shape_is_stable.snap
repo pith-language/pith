@@ -1,0 +1,42 @@
+---
+source: crates/pith-output/tests/query_contract.rs
+expression: "serde_json::to_value(&record).unwrap()"
+---
+{
+  "api_version": 4,
+  "code": 0,
+  "detail": "query",
+  "kind": "query",
+  "query": {
+    "contract": {
+      "arguments": [
+        "-c",
+        "main.c"
+      ],
+      "capabilities": [],
+      "environment": [],
+      "executable": {
+        "path": "/usr/bin/cc",
+        "program_kind": "host_path"
+      },
+      "exit_status": "success_required",
+      "inputs": [],
+      "network": {
+        "network_kind": "deny"
+      },
+      "outputs": [],
+      "platform": {
+        "architecture": "x86_64",
+        "operating_system": "linux",
+        "platform_kind": "exact"
+      },
+      "toolchain": [
+        "13e68a5b642bf49fc4ed28d527abe43f3bca517f0f742af916910104019a0ce0"
+      ]
+    },
+    "entry": "build",
+    "rule": "example.compile",
+    "spec_digest": "13e68a5b642bf49fc4ed28d527abe43f3bca517f0f742af916910104019a0ce0",
+    "view": "action_plan"
+  }
+}

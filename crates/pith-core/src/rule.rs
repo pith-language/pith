@@ -376,6 +376,30 @@ impl Rule<Pure> {
     }
 }
 
+impl Rule<Action> {
+    /// Construct metadata for a represented action declaration. Action bodies
+    /// are still supplied through the engine's action-rule boundary; the body digest
+    /// fixes the declaration's tier and revision for tooling and selection.
+    pub fn represented_action(
+        module: &str,
+        label: &str,
+        body: &crate::body::RuleBody,
+        interface: Interface,
+        span: Span,
+    ) -> Self {
+        let mut manifest = body.digest().digest().as_bytes().to_vec();
+        encode_interface(&mut manifest, &interface);
+        Self::of_tier(
+            coordinate_of(module, label),
+            RuleTier::Represented,
+            manifest,
+            label,
+            interface,
+            span,
+        )
+    }
+}
+
 fn coordinate_of(module: &str, label: &str) -> Coordinate {
     Coordinate::new(module, label)
 }

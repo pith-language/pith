@@ -15,6 +15,7 @@ workspace = true
 pith-core.workspace = true
 pith-diag.workspace = true
 pith-engine.workspace = true
+pith-executor-local.workspace = true
 pith-hir.workspace = true
 pith-ids.workspace = true
 pith-loader.workspace = true

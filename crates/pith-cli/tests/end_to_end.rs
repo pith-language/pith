@@ -210,6 +210,174 @@ fn explore_reports_the_tier_that_answers_each_rule() -> TestResult {
     Ok(())
 }
 
+#[test]
+fn entry_commands_share_the_versioned_evaluation_and_recorded_graph() -> TestResult {
+    let home = scratch()?;
+    let source = scratch()?;
+    let module = write(
+        source.path(),
+        "root.pi",
+        "pure rule echo(value: Text) -> Text = { value }\n\nentry main : Text = ask (\"hello\")\n",
+    )?;
+    let path = module.display().to_string();
+
+    let selected = pith(
+        home.path(),
+        &[
+            "--output", "json", "graph", "select", "main", "--module", &path,
+        ],
+    )?;
+    assert_eq!(selected.code(), 0, "{}", selected.stderr());
+    assert_eq!(
+        selected
+            .query()?
+            .and_then(|query| query.get("rule").cloned()),
+        Some(serde_json::Value::from("root::entry.main"))
+    );
+    assert!(
+        !home.path().join("state.db").exists(),
+        "read-only selection created durable state"
+    );
+
+    let first = pith(
+        home.path(),
+        &["--output", "json", "run", "main", "--module", &path],
+    )?;
+    let second = pith(
+        home.path(),
+        &["--output", "json", "run", "main", "--module", &path],
+    )?;
+    assert_eq!(first.code(), 0, "{}", first.stderr());
+    assert_eq!(second.code(), 0, "{}", second.stderr());
+    assert_eq!(
+        first
+            .query()?
+            .and_then(|query| query.get("source").cloned()),
+        Some(serde_json::Value::from("computed"))
+    );
+    let second_query = second.query()?.ok_or_else(|| test_error("no run query"))?;
+    assert_eq!(
+        second_query
+            .get("source")
+            .and_then(serde_json::Value::as_str),
+        Some("hydrated")
+    );
+    assert_eq!(
+        second_query
+            .pointer("/value/s")
+            .and_then(serde_json::Value::as_str),
+        Some("hello")
+    );
+
+    let dependencies = pith(
+        home.path(),
+        &[
+            "--output", "json", "graph", "deps", "main", "--module", &path,
+        ],
+    )?;
+    assert_eq!(dependencies.code(), 0, "{}", dependencies.stderr());
+    let dependency_query = dependencies
+        .query()?
+        .ok_or_else(|| test_error("no dependency query"))?;
+    assert_eq!(
+        dependency_query
+            .pointer("/root/status")
+            .and_then(serde_json::Value::as_str),
+        Some("complete")
+    );
+    assert!(
+        dependency_query
+            .pointer("/root/children")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|children| !children.is_empty()),
+        "the recorded dependency subtree was empty: {dependency_query}"
+    );
+
+    let explained = pith(
+        home.path(),
+        &["--output", "json", "explain", "main", "--module", &path],
+    )?;
+    assert_eq!(explained.code(), 0, "{}", explained.stderr());
+    assert!(explained.records()?.iter().any(|record| {
+        record.get("kind").and_then(serde_json::Value::as_str) == Some("explain")
+            && record
+                .get("steps")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|steps| !steps.is_empty())
+    }));
+    Ok(())
+}
+
+#[test]
+fn graph_plan_refuses_an_unbound_domain_action_by_coordinate() -> TestResult {
+    let home = scratch()?;
+    let source = scratch()?;
+    let module = write(
+        source.path(),
+        "root.pi",
+        "action rule compile(Text) -> Text = host\n\npure rule build(name: Text) -> Text = {\n  run Text (name)\n}\n\nentry main : Text = ask (\"input\")\n",
+    )?;
+
+    let run = pith(
+        home.path(),
+        &[
+            "graph",
+            "plan",
+            "main",
+            "--module",
+            &module.display().to_string(),
+        ],
+    )?;
+
+    assert_eq!(run.code(), 1, "{}", run.stderr());
+    assert!(run.stderr().contains("root.compile"), "{}", run.stderr());
+    assert!(
+        run.stderr().contains("links no domain crate"),
+        "{}",
+        run.stderr()
+    );
+    Ok(())
+}
+
+#[test]
+fn exec_reports_the_only_return_from_process_replacement() -> TestResult {
+    let home = scratch()?;
+    let source = scratch()?;
+    let module = write(
+        source.path(),
+        "root.pi",
+        "import pith\n\npure rule command(program: Text) -> pith.Exec = {\n  Exec({arguments: [\"fixture\"], program: program})\n}\n\nentry main : pith.Exec = ask (\"/path/that/does/not/exist\")\n",
+    )?;
+
+    let run = pith(
+        home.path(),
+        &["exec", "main", "--module", &module.display().to_string()],
+    )?;
+
+    assert_eq!(run.code(), 1, "{}", run.stderr());
+    assert!(
+        run.stderr().contains("cannot exec the derived program"),
+        "{}",
+        run.stderr()
+    );
+    Ok(())
+}
+
+#[test]
+fn m14_workspace_commands_are_visible_refusals() -> TestResult {
+    let home = scratch()?;
+    for command in ["diff", "update", "add"] {
+        let run = pith(home.path(), &[command])?;
+        assert_eq!(run.code(), 1, "{}", run.stderr());
+        assert!(
+            run.stderr().contains("requires a workspace"),
+            "{}",
+            run.stderr()
+        );
+    }
+    Ok(())
+}
+
 /// A tree `pith store add` produced and a tree an action captured are the same
 /// kind of thing, so the walk has to agree with the executor's capture path:
 /// a symlink is an entry in its own right, and the executable bit is part of

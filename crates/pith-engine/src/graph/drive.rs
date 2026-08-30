@@ -18,13 +18,13 @@ use std::pin::Pin;
 use std::task::Poll;
 
 use pith_core::{Action, ActionSpec, Request, Value};
-use pith_diag::PithResult;
+use pith_diag::{Diag, DiagnosticSink, EngineCode, PithResult, Span};
 use pith_ids::ComputationId;
 
 use super::action_pipeline::{ActionRuleMeta, ActionStart, PreparedAction};
 use super::diagnostics::{cancelled_diag, effectful_in_pure_diag, is_bound_stop, wall_bound_diag};
 use super::eval::ChainPause;
-use super::ir::{Resumption, StopReason};
+use super::ir::{EntryActionPlan, Resumption, StopReason};
 use super::reuse::ReuseContext;
 use super::scheduler::{ChainId, Scheduler};
 use super::{DependencyEdge, Engine};
@@ -119,6 +119,107 @@ struct Serving<'a> {
 }
 
 impl Engine {
+    /// Evaluate an entry's pure prefix, admitting blobs, and stop at the first
+    /// action request with its selected contract. No action is executed. Live
+    /// frames are recorded cancelled because the caller deliberately paused
+    /// them at the effect boundary.
+    ///
+    /// # Errors
+    /// Returns pure-evaluation, content, action-selection, or planner
+    /// diagnostics, and `E-1219` when the entry completes without an action.
+    pub fn plan_entry(
+        &mut self,
+        request: &Request<pith_core::Pure>,
+    ) -> PithResult<EntryActionPlan> {
+        let mut roots = self.open_roots(std::slice::from_ref(request), &ReuseContext::PureOnly)?;
+        let mut budget = StepBudget::unbounded();
+        while let Some(chain) = roots.scheduler.next_ready() {
+            let pause = self.advance_chain(
+                &mut roots.scheduler,
+                chain,
+                &ReuseContext::PureOnly,
+                &mut budget,
+            );
+            let pause = match pause {
+                Ok(pause) => pause,
+                Err(diagnostics) => {
+                    self.stop_live_frames(&roots.scheduler, &diagnostics, StopReason::Failed);
+                    return Err(diagnostics);
+                }
+            };
+            match pause {
+                ChainPause::Settled => {}
+                ChainPause::Blob(id) => {
+                    let bytes = match self.fetch_blob(id) {
+                        Ok(bytes) => bytes,
+                        Err(diagnostics) => {
+                            self.stop_live_frames(
+                                &roots.scheduler,
+                                &diagnostics,
+                                StopReason::Failed,
+                            );
+                            return Err(diagnostics);
+                        }
+                    };
+                    let admitted = (|| {
+                        let parent = roots.scheduler.top(chain)?.computation;
+                        self.record_edge(parent, DependencyEdge::Blob { id })?;
+                        roots
+                            .scheduler
+                            .resume(chain, Resumption::One(Value::Bytes(bytes)))
+                    })();
+                    if let Err(diagnostics) = admitted {
+                        self.stop_live_frames(&roots.scheduler, &diagnostics, StopReason::Failed);
+                        return Err(diagnostics);
+                    }
+                }
+                ChainPause::Action(action_request) => {
+                    let action = match self.plan_action(&action_request) {
+                        Ok(action) => action,
+                        Err(diagnostics) => {
+                            self.stop_live_frames(
+                                &roots.scheduler,
+                                &diagnostics,
+                                StopReason::Failed,
+                            );
+                            return Err(diagnostics);
+                        }
+                    };
+                    self.stop_live_frames(
+                        &roots.scheduler,
+                        &DiagnosticSink::new(),
+                        StopReason::Cancelled,
+                    );
+                    return Ok(EntryActionPlan {
+                        request: action_request,
+                        action,
+                    });
+                }
+                ChainPause::Observation(_) => {
+                    let mut diagnostics = DiagnosticSink::new();
+                    diagnostics.push(Diag::engine(
+                        EngineCode::EffectfulStepInPure,
+                        Span::none(),
+                        "entry planning reached an observation before an action",
+                    ));
+                    self.stop_live_frames(&roots.scheduler, &diagnostics, StopReason::Failed);
+                    return Err(diagnostics);
+                }
+            }
+        }
+        let _ = roots.into_evaluations()?;
+        let mut diagnostics = DiagnosticSink::new();
+        diagnostics.push(Diag::engine(
+            EngineCode::EntryHasNoAction,
+            request.span,
+            format!(
+                "entry `{}` completed without requesting an action",
+                request.label
+            ),
+        ));
+        Err(diagnostics)
+    }
+
     /// Drive every chain to completion without leaving the synchronous core.
     pub(super) fn drive_pure(&mut self, scheduler: &mut Scheduler) -> PithResult<()> {
         let mut budget = StepBudget::unbounded();

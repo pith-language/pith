@@ -3,12 +3,36 @@ source: crates/pith-output/tests/query_contract.rs
 expression: "serde_json::to_value(&record).unwrap()"
 ---
 {
-  "api_version": 3,
+  "api_version": 4,
   "code": 0,
   "detail": "query",
   "kind": "query",
   "query": {
     "abi_digest": "13e68a5b642bf49fc4ed28d527abe43f3bca517f0f742af916910104019a0ce0",
+    "about": [
+      {
+        "documentation": "module metadata",
+        "fields": [
+          [
+            "owners",
+            {
+              "about_value_kind": "list",
+              "elements": [
+                "docs",
+                "release"
+              ]
+            }
+          ],
+          [
+            "purpose",
+            {
+              "about_value_kind": "text",
+              "text": "contract fixture"
+            }
+          ]
+        ]
+      }
+    ],
     "declarations": [
       {
         "body": {
@@ -42,6 +66,22 @@ expression: "serde_json::to_value(&record).unwrap()"
         "documentation": "",
         "name": "Outcome",
         "rendered": "failed(Text) | produced"
+      }
+    ],
+    "entries": [
+      {
+        "coordinate": "example::entry.build",
+        "documentation": "produce the default document",
+        "interface": {
+          "inputs": [],
+          "output": {
+            "name": "example.Document",
+            "type_kind": "nominal"
+          },
+          "rendered": "() -> example.Document"
+        },
+        "name": "build",
+        "tier": "represented"
       }
     ],
     "imports": [

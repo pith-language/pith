@@ -1,126 +1,29 @@
 #![deny(dead_code_pub_in_binary)]
 
+mod cli;
 mod command;
 mod exit;
 mod style;
 mod terminal;
 
 use std::io::{self, Write};
-use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{ColorChoice, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
+use clap::{ColorChoice, CommandFactory, FromArgMatches};
 use pith_output::palette::Palette;
 use pith_output::{OutputRecord, OutputShape, PhaseStatus, Renderer, Sink};
 use termprofile::TermProfile;
 
+use cli::{
+    Cli, Command, DebugCommand, Globals, GraphCommand, ShapeArg, StateCommand, StoreCommand,
+};
 use command::{CommandOutput, Context, OutputKind, Report, Runnable};
 use exit::Failure;
 
-#[derive(Parser)]
-#[command(
-    name = "pith",
-    version,
-    about = "the pith kernel",
-    propagate_version = true
-)]
-struct Cli {
-    #[command(flatten)]
-    globals: Globals,
-
-    #[command(subcommand)]
-    command: Command,
-}
-
-#[derive(clap::Args)]
-struct Globals {
-    /// Output shape. Defaults to pretty on a TTY, plain otherwise.
-    #[arg(long, global = true, value_enum)]
-    output: Option<ShapeArg>,
-
-    /// Content store root. Defaults to $PITH_HOME/store.
-    #[arg(long, global = true, env = "PITH_STORE", value_name = "DIR")]
-    store: Option<PathBuf>,
-
-    /// Engine state root. Defaults to $PITH_HOME/state.db.
-    #[arg(long, global = true, env = "PITH_STATE", value_name = "FILE")]
-    state: Option<PathBuf>,
-}
-
-#[derive(Copy, Clone, ValueEnum)]
-enum ShapeArg {
-    Pretty,
-    Plain,
-    Json,
-}
-
-impl ShapeArg {
-    const fn shape(self) -> OutputShape {
-        match self {
-            Self::Pretty => OutputShape::Pretty,
-            Self::Plain => OutputShape::Plain,
-            Self::Json => OutputShape::Json,
-        }
-    }
-}
-
-#[derive(Subcommand)]
-enum Command {
-    /// Elaborate the module at PATH and report its errors and warnings.
-    Check(command::Check),
-    /// Show what a module declares: types, rules, and which tier answers.
-    Explore(command::Explore),
-    /// Write the canonical spelling of the module at PATH.
-    Fmt(command::Fmt),
-    /// Inspect and admit content.
-    Store {
-        #[command(subcommand)]
-        command: StoreCommand,
-    },
-    /// Inspect engine state.
-    State {
-        #[command(subcommand)]
-        command: StateCommand,
-    },
-    /// Report what a collection would reclaim.
-    Gc(command::Gc),
-    /// Unstable implementation diagnostics.
-    #[command(hide = true, disable_version_flag = true)]
-    Debug {
-        #[command(subcommand)]
-        command: DebugCommand,
-    },
-}
-
-#[derive(Subcommand)]
-enum StoreCommand {
-    /// Put a file or directory into the store and print its identity.
-    Add(command::StoreAdd),
-    /// Write a blob to stdout.
-    Cat(command::StoreCat),
-    /// List a tree's entries.
-    Ls(command::StoreLs),
-    /// Render a tree into a new directory.
-    Materialize(command::StoreMaterialize),
-}
-
-#[derive(Subcommand)]
-enum StateCommand {
-    /// Schema versions, adapter, and record counts.
-    Info(command::StateInfo),
-    /// Decode every durable record the state database holds.
-    Check(command::StateCheck),
-}
-
-#[derive(Subcommand)]
-enum DebugCommand {
-    /// Show terminal capability, theme-query, and selected-palette details.
-    #[command(disable_version_flag = true)]
-    Terminal,
-}
-
 enum Action {
     Stable(Box<dyn Runnable>),
+    Exec(command::Exec),
+    Workspace(&'static str),
     Debug(DebugCommand),
 }
 
@@ -135,6 +38,12 @@ fn main() -> ExitCode {
 
     let runnable = match command.into_action() {
         Action::Debug(command) => return run_debug(command, &terminal, stdout.lock()),
+        Action::Exec(command) => return run_exec(globals, command),
+        Action::Workspace(command) => {
+            return fail(Failure::user(format!(
+                "`pith {command}` requires a workspace"
+            )));
+        }
         Action::Stable(runnable) => runnable,
     };
 
@@ -252,10 +161,27 @@ impl Command {
             Self::Check(command) => Action::Stable(Box::new(command)),
             Self::Explore(command) => Action::Stable(Box::new(command)),
             Self::Fmt(command) => Action::Stable(Box::new(command)),
+            Self::Run(command) => Action::Stable(Box::new(command)),
+            Self::Explain(command) => Action::Stable(Box::new(command)),
+            Self::Graph { command } => Action::Stable(command.into_runnable()),
+            Self::Exec(command) => Action::Exec(command),
             Self::Store { command } => Action::Stable(command.into_runnable()),
             Self::State { command } => Action::Stable(command.into_runnable()),
             Self::Gc(command) => Action::Stable(Box::new(command)),
+            Self::Diff => Action::Workspace("diff"),
+            Self::Update => Action::Workspace("update"),
+            Self::Add => Action::Workspace("add"),
             Self::Debug { command } => Action::Debug(command),
+        }
+    }
+}
+
+impl GraphCommand {
+    fn into_runnable(self) -> Box<dyn Runnable> {
+        match self {
+            Self::Select(command) => Box::new(command),
+            Self::Plan(command) => Box::new(command),
+            Self::Deps(command) => Box::new(command),
         }
     }
 }
@@ -300,6 +226,11 @@ fn run_debug(
     }
 }
 
+fn run_exec(globals: Globals, command: command::Exec) -> ExitCode {
+    let mut context = Context::new(globals.store, globals.state);
+    fail(command.replace(&mut context))
+}
+
 fn report(failure: &Failure) {
     for diagnostic in failure.diagnostics() {
         let handler = miette::GraphicalReportHandler::new();
@@ -334,7 +265,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use super::*;
-    use clap::CommandFactory;
+    use clap::{CommandFactory, Parser};
     use command::Execute;
 
     struct MarkExecuted(Arc<AtomicBool>);
@@ -396,6 +327,11 @@ mod tests {
             command::Check::LABEL,
             command::Explore::LABEL,
             command::Fmt::LABEL,
+            command::Run::LABEL,
+            command::Explain::LABEL,
+            command::GraphSelect::LABEL,
+            command::GraphPlan::LABEL,
+            command::GraphDeps::LABEL,
             command::StoreAdd::LABEL,
             command::StoreCat::LABEL,
             command::StoreLs::LABEL,

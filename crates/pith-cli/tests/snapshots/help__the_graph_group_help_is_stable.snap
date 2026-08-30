@@ -1,0 +1,20 @@
+---
+source: crates/pith-cli/tests/help.rs
+expression: "help(&[\"graph\"])?"
+---
+Inspect entry selection, action plans, and recorded dependencies
+
+Usage: pith graph [OPTIONS] <COMMAND>
+
+Commands:
+  select  Show which rule serves the entry's request
+  plan    Derive the first action contract without executing it
+  deps    Show the last attempt's recorded dependency subtree
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+      --output <OUTPUT>  Output shape. Defaults to pretty on a TTY, plain otherwise [possible values: pretty, plain, json]
+      --store <DIR>      Content store root. Defaults to $PITH_HOME/store [env: PITH_STORE=]
+      --state <FILE>     Engine state root. Defaults to $PITH_HOME/state.db [env: PITH_STATE=]
+  -h, --help             Print help
+  -V, --version          Print version

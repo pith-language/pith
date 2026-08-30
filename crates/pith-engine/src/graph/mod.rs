@@ -22,9 +22,9 @@ mod state_publish;
 pub(crate) use capabilities::canonical_capabilities;
 pub use ir::{
     ActionPlan, ActionRecord, AttemptState, ComputationKind, ComputationNode, DependencyEdge,
-    Evaluation, EvaluationSource, LiveInvalidationExplanation, LiveInvalidationReason,
-    ObservationRecord, PureRule, PureRuleFrame, PureStep, Resumption, ReuseDecision, ReuseReason,
-    RuleSelection,
+    EntryActionPlan, Evaluation, EvaluationSource, LiveInvalidationExplanation,
+    LiveInvalidationReason, ObservationRecord, PureRule, PureRuleFrame, PureStep, Resumption,
+    ReuseDecision, ReuseReason, RuleSelection,
 };
 pub use query::EngineQuery;
 pub use reuse::ReuseContext;
@@ -183,6 +183,16 @@ impl Engine {
 }
 
 impl Engine<dyn EngineStateReader> {
+    /// Build an in-memory engine carrying read-only authority for selection and
+    /// contract queries that need no durable database.
+    #[must_use]
+    pub fn query_only() -> Self {
+        Self::with_read_only_state_store(
+            MemoryContentStore::default(),
+            MemoryEngineStateStore::default(),
+        )
+    }
+
     /// Build an engine that can inspect durable state but cannot publish it.
     ///
     /// Evaluation methods are defined only on the writable `Engine`

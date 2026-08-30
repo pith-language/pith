@@ -6,10 +6,12 @@
 //! about one view.
 
 use crate::dto::{
-    CheckReport, DeclarationBodyRepr, DeclarationView, DiagnosticRepr, FmtReport, FmtStatus,
-    GcPreview, ModuleView, QueryView, RuleCategoryRepr, RuleView, SeverityRepr, StateCheck,
-    StateInfo, StoredContent, StoredContentKind, SumConstructorRepr, TierRepr, TreeEntryRepr,
-    TreeListing, TypeRepr,
+    AboutValueRepr, ActionPlanView, ActionProgramRepr, AttemptStatusRepr, CheckReport,
+    DeclarationBodyRepr, DeclarationView, DependenciesView, DependencyKindRepr, DependencyNodeRepr,
+    DiagnosticRepr, EntryView, EvaluationSourceRepr, FmtReport, FmtStatus, GcPreview, ModuleView,
+    QueryView, RuleCategoryRepr, RuleView, RunView, SelectionView, SeverityRepr, StateCheck,
+    StateInfo, StoredContent, StoredContentKind, SumConstructorRepr, TreeEntryRepr, TreeListing,
+    TypeRepr, ValueRepr,
 };
 use crate::palette::{self, Palette, Role};
 
@@ -91,8 +93,187 @@ pub(crate) fn query_view(view: &QueryView) -> Lines {
         QueryView::State(info) => state(&mut lines, info),
         QueryView::StateCheck(check) => state_check(&mut lines, check),
         QueryView::Gc(preview) => gc(&mut lines, preview),
+        QueryView::Run(run) => run_view(&mut lines, run),
+        QueryView::Selection(selection) => selection_view(&mut lines, selection),
+        QueryView::ActionPlan(plan) => action_plan(&mut lines, plan),
+        QueryView::Dependencies(dependencies) => dependencies_view(&mut lines, dependencies),
     }
     lines
+}
+
+fn run_view(lines: &mut Lines, run: &RunView) {
+    let source = match run.source {
+        EvaluationSourceRepr::Computed => "computed",
+        EvaluationSourceRepr::Reused => "reused",
+        EvaluationSourceRepr::Hydrated => "hydrated",
+    };
+    lines
+        .line(0)
+        .styled(palette::HEADING, run.entry.as_ref())
+        .plain(" ")
+        .styled(palette::MUTED, source);
+    lines.line(1).plain(value_text(&run.value));
+}
+
+fn selection_view(lines: &mut Lines, selection: &SelectionView) {
+    let tier = selection.tier.as_str();
+    lines
+        .line(0)
+        .styled(palette::HEADING, selection.entry.as_ref())
+        .plain(" -> ")
+        .styled(palette::LITERAL, selection.rule.as_ref());
+    lines
+        .line(1)
+        .styled(palette::REUSE, tier)
+        .plain(" ")
+        .plain(selection.interface.rendered.as_ref());
+}
+
+fn action_plan(lines: &mut Lines, plan: &ActionPlanView) {
+    lines
+        .line(0)
+        .styled(palette::HEADING, plan.entry.as_ref())
+        .plain(" -> ")
+        .styled(palette::LITERAL, plan.rule.as_ref());
+    lines
+        .line(1)
+        .plain("contract ")
+        .styled(palette::MUTED, short_digest(&plan.spec_digest));
+    let executable = match &plan.contract.executable {
+        ActionProgramRepr::HostPath { path } => path.as_ref(),
+        ActionProgramRepr::Content { digest } => digest.as_ref(),
+    };
+    lines
+        .line(1)
+        .plain("exec ")
+        .styled(palette::LITERAL, executable);
+    for argument in &plan.contract.arguments {
+        lines.line(2).plain(argument.as_ref());
+    }
+    for input in &plan.contract.inputs {
+        lines
+            .line(1)
+            .plain("input ")
+            .styled(palette::LITERAL, input.path.as_ref());
+    }
+    for output in &plan.contract.outputs {
+        lines
+            .line(1)
+            .plain("output ")
+            .styled(palette::LITERAL, output.path.as_ref());
+    }
+}
+
+fn dependencies_view(lines: &mut Lines, dependencies: &DependenciesView) {
+    lines
+        .line(0)
+        .styled(palette::HEADING, dependencies.entry.as_ref());
+    let Some(root) = dependencies.root.as_deref() else {
+        lines.line(1).styled(palette::MUTED, "no recorded attempt");
+        return;
+    };
+    dependency_node(lines, root, 1);
+}
+
+fn dependency_node(lines: &mut Lines, node: &DependencyNodeRepr, indent: usize) {
+    let kind = match &node.dependency {
+        DependencyKindRepr::Pure { .. } => "pure",
+        DependencyKindRepr::Action => "action",
+        DependencyKindRepr::Observation => "observation",
+        DependencyKindRepr::Blob { .. } => "blob",
+        DependencyKindRepr::Capability { .. } => "capability",
+    };
+    let line = lines
+        .line(indent)
+        .styled(palette::LITERAL, kind)
+        .plain(" ")
+        .plain(node.label.as_ref());
+    if let Some(status) = node.status {
+        let status = match status {
+            AttemptStatusRepr::Pending => "pending",
+            AttemptStatusRepr::Complete => "complete",
+            AttemptStatusRepr::Failed => "failed",
+            AttemptStatusRepr::Cancelled => "cancelled",
+        };
+        line.plain(" ").styled(palette::MUTED, status);
+    }
+    for child in &node.children {
+        dependency_node(lines, child, indent.saturating_add(1));
+    }
+}
+
+fn value_text(value: &ValueRepr) -> String {
+    let mut out = String::new();
+    write_value(&mut out, value);
+    out
+}
+
+/// One pass over the value, writing into a single buffer: a nested rendering
+/// that formats and joins per level re-copies every subtree at each depth.
+fn write_value(out: &mut String, value: &ValueRepr) {
+    match value {
+        ValueRepr::Unit => out.push_str("()"),
+        ValueRepr::Bool { b } => {
+            out.push_str(if *b { "true" } else { "false" });
+        }
+        ValueRepr::Int { decimal } => out.push_str(decimal),
+        ValueRepr::Text { s } => out.push_str(s),
+        ValueRepr::Bytes { len } => {
+            out.push_str("bytes(");
+            out.push_str(&len.to_string());
+            out.push(')');
+        }
+        ValueRepr::Blob { digest } => {
+            out.push_str("blob(");
+            out.push_str(digest);
+            out.push(')');
+        }
+        ValueRepr::Nominal {
+            name,
+            representation,
+        } => {
+            out.push_str(name);
+            out.push('(');
+            write_value(out, representation);
+            out.push(')');
+        }
+        ValueRepr::List { elements } => {
+            out.push('[');
+            for (index, element) in elements.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(", ");
+                }
+                write_value(out, element);
+            }
+            out.push(']');
+        }
+        ValueRepr::Record { fields } => {
+            out.push('{');
+            for (index, (name, field_value)) in fields.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(", ");
+                }
+                out.push_str(name);
+                out.push_str(": ");
+                write_value(out, field_value);
+            }
+            out.push('}');
+        }
+        ValueRepr::Sum {
+            name,
+            constructor,
+            payload,
+        } => {
+            out.push_str(name);
+            out.push_str("::");
+            out.push_str(constructor);
+            if let Some(payload) = payload {
+                out.push('(');
+                write_value(out, payload);
+                out.push(')');
+            }
+        }
+    }
 }
 
 fn check(lines: &mut Lines, report: &CheckReport) {
@@ -189,6 +370,53 @@ fn module(lines: &mut Lines, view: &ModuleView) {
             rule_line(lines, rule);
         }
     }
+    if !view.entries.is_empty() {
+        lines.line(0).styled(palette::HEADING, "entries");
+        for entry in &view.entries {
+            entry_line(lines, entry);
+        }
+    }
+    for about in &view.about {
+        lines.line(0).styled(palette::HEADING, "about");
+        for (name, value) in &about.fields {
+            let rendered = match value {
+                AboutValueRepr::Text { text } => format!("\"{text}\""),
+                AboutValueRepr::List { elements } => format!(
+                    "[{}]",
+                    elements
+                        .iter()
+                        .map(|element| format!("\"{element}\""))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            };
+            lines
+                .line(1)
+                .styled(palette::LITERAL, name.as_ref())
+                .plain(": ")
+                .plain(rendered);
+        }
+        if !about.documentation.is_empty() {
+            documentation(lines, &about.documentation);
+        }
+    }
+}
+
+fn entry_line(lines: &mut Lines, entry: &EntryView) {
+    lines
+        .line(1)
+        .styled(palette::LITERAL, "entry")
+        .plain(" ")
+        .styled(palette::HEADING, entry.name.as_ref())
+        .plain(" = ")
+        .styled(palette::REUSE, entry.tier.as_str());
+    lines
+        .line(2)
+        .plain("-> ")
+        .plain(type_text(&entry.interface.output));
+    if !entry.documentation.is_empty() {
+        documentation(lines, &entry.documentation);
+    }
 }
 
 fn declaration_line(lines: &mut Lines, declaration: &DeclarationView) {
@@ -238,10 +466,7 @@ fn rule_line(lines: &mut Lines, rule: &RuleView) {
         RuleCategoryRepr::Action => "action",
     };
 
-    let tier = match rule.tier {
-        TierRepr::Host => "host",
-        TierRepr::Represented => "represented",
-    };
+    let tier = rule.tier.as_str();
     lines
         .line(1)
         .styled(palette::LITERAL, format!("{category} rule"))

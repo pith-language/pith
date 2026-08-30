@@ -75,7 +75,7 @@ pub struct SumConstructorRepr {
 /// binary: bump this when a DTO's shape changes, and never for a change that
 /// only adds a command. The `query_view_shape_is_stable` snapshots are what
 /// make the number mean something.
-pub const QUERY_API_VERSION: u32 = 3;
+pub const QUERY_API_VERSION: u32 = 4;
 
 /// A DTO projection of `pith_diag::Severity`. Mirrored here rather than
 /// imported for the reason `ValueRepr` is: this crate holds serde and depends
@@ -156,6 +156,16 @@ pub enum TierRepr {
     Represented,
 }
 
+impl TierRepr {
+    /// The snake_case spelling the JSON contract and the human renderer share.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TierRepr::Host => "host",
+            TierRepr::Represented => "represented",
+        }
+    }
+}
+
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct InterfaceRepr {
     pub inputs: Box<[TypeRepr]>,
@@ -210,6 +220,28 @@ pub struct ImportView {
     pub abi_digest: Box<str>,
 }
 
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct EntryView {
+    pub name: Box<str>,
+    pub coordinate: Box<str>,
+    pub tier: TierRepr,
+    pub interface: InterfaceRepr,
+    pub documentation: Box<str>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(tag = "about_value_kind", rename_all = "snake_case")]
+pub enum AboutValueRepr {
+    Text { text: Box<str> },
+    List { elements: Box<[Box<str>]> },
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct AboutView {
+    pub fields: Box<[(Box<str>, AboutValueRepr)]>,
+    pub documentation: Box<str>,
+}
+
 /// What `pith explore` shows: everything a module declares, and which tier
 /// answers each rule.
 #[derive(Clone, Debug, serde::Serialize)]
@@ -220,6 +252,159 @@ pub struct ModuleView {
     pub imports: Box<[ImportView]>,
     pub declarations: Box<[DeclarationView]>,
     pub rules: Box<[RuleView]>,
+    pub entries: Box<[EntryView]>,
+    pub about: Box<[AboutView]>,
+}
+
+#[derive(Copy, Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvaluationSourceRepr {
+    Computed,
+    Reused,
+    Hydrated,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct RunView {
+    pub entry: Box<str>,
+    pub coordinate: Box<str>,
+    pub interface: InterfaceRepr,
+    pub source: EvaluationSourceRepr,
+    pub value: ValueRepr,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct SelectionView {
+    pub entry: Box<str>,
+    pub rule: Box<str>,
+    pub tier: TierRepr,
+    pub interface: InterfaceRepr,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(tag = "program_kind", rename_all = "snake_case")]
+pub enum ActionProgramRepr {
+    HostPath { path: Box<str> },
+    Content { digest: Box<str> },
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(tag = "content_kind", rename_all = "snake_case")]
+pub enum ActionInputContentRepr {
+    Blob { digest: Box<str> },
+    Tree { digest: Box<str> },
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct ActionInputRepr {
+    pub path: Box<str>,
+    pub content: ActionInputContentRepr,
+}
+
+#[derive(Copy, Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputKindRepr {
+    Blob,
+    Tree,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct ActionOutputRepr {
+    pub path: Box<str>,
+    pub kind: OutputKindRepr,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct EnvironmentVariableRepr {
+    pub name: Box<str>,
+    pub value: Box<str>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(tag = "platform_kind", rename_all = "snake_case")]
+pub enum PlatformRequirementRepr {
+    Any,
+    Exact {
+        operating_system: Box<str>,
+        architecture: Box<str>,
+    },
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct CapabilityRequirementRepr {
+    pub name: Box<str>,
+    pub scope: Box<str>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(tag = "network_kind", rename_all = "snake_case")]
+pub enum NetworkPolicyRepr {
+    Deny,
+    AllowHosts { hosts: Box<[Box<str>]> },
+    AllowAll,
+}
+
+#[derive(Copy, Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExitStatusContractRepr {
+    SuccessRequired,
+    Reported,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct ActionContractRepr {
+    pub executable: ActionProgramRepr,
+    pub toolchain: Box<[Box<str>]>,
+    pub arguments: Box<[Box<str>]>,
+    pub inputs: Box<[ActionInputRepr]>,
+    pub outputs: Box<[ActionOutputRepr]>,
+    pub environment: Box<[EnvironmentVariableRepr]>,
+    pub platform: PlatformRequirementRepr,
+    pub capabilities: Box<[CapabilityRequirementRepr]>,
+    pub network: NetworkPolicyRepr,
+    pub exit_status: ExitStatusContractRepr,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct ActionPlanView {
+    pub entry: Box<str>,
+    pub rule: Box<str>,
+    pub spec_digest: Box<str>,
+    pub contract: ActionContractRepr,
+}
+
+#[derive(Copy, Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttemptStatusRepr {
+    Pending,
+    Complete,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(tag = "dependency_kind", rename_all = "snake_case")]
+pub enum DependencyKindRepr {
+    Pure { digest: Box<str> },
+    Action,
+    Observation,
+    Blob { digest: Box<str> },
+    Capability { name: Box<str>, scope: Box<str> },
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct DependencyNodeRepr {
+    pub label: Box<str>,
+    pub attempt: Option<u64>,
+    pub status: Option<AttemptStatusRepr>,
+    pub dependency: DependencyKindRepr,
+    pub children: Box<[DependencyNodeRepr]>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct DependenciesView {
+    pub entry: Box<str>,
+    pub root: Option<Box<DependencyNodeRepr>>,
 }
 
 /// One entry of a stored tree. Symlinks are stored rather than followed.
@@ -339,4 +524,8 @@ pub enum QueryView {
     State(StateInfo),
     StateCheck(StateCheck),
     Gc(GcPreview),
+    Run(RunView),
+    Selection(SelectionView),
+    ActionPlan(ActionPlanView),
+    Dependencies(DependenciesView),
 }

@@ -193,6 +193,8 @@ mod tests {
                 documentation: String::new().into(),
             }]),
             rules: Box::new([]),
+            entries: Box::new([]),
+            about: Box::new([]),
         });
         let described = describe_pretty(
             &OutputRecord::query(view),

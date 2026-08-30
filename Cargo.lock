@@ -948,6 +948,7 @@ dependencies = [
  "pith-core",
  "pith-diag",
  "pith-engine",
+ "pith-executor-local",
  "pith-hir",
  "pith-ids",
  "pith-loader",

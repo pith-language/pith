@@ -545,5 +545,7 @@ mod action_publication;
 mod dependency_hydration;
 #[path = "engine_state_wiring/durable_reuse.rs"]
 mod durable_reuse;
+#[path = "engine_state_wiring/entry_planning.rs"]
+mod entry_planning;
 #[path = "engine_state_wiring/pure_publication.rs"]
 mod pure_publication;

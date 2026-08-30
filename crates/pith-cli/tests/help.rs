@@ -61,6 +61,18 @@ fn the_fmt_help_is_stable() -> TestResult {
     Ok(())
 }
 
+#[test]
+fn the_graph_group_help_is_stable() -> TestResult {
+    insta::assert_snapshot!(help(&["graph"])?);
+    Ok(())
+}
+
+#[test]
+fn the_run_help_is_stable() -> TestResult {
+    insta::assert_snapshot!(help(&["run"])?);
+    Ok(())
+}
+
 /// The globals are `global = true`, which is what puts them after the
 /// subcommand, where people type them. A flag that stopped propagating would
 /// vanish from a subcommand's help without any other test noticing.
@@ -70,6 +82,12 @@ fn every_global_reaches_every_command() -> TestResult {
         "check",
         "explore",
         "fmt",
+        "run",
+        "explain",
+        "graph select",
+        "graph plan",
+        "graph deps",
+        "exec",
         "store add",
         "store cat",
         "state info",

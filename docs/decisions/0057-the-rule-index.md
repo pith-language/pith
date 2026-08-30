@@ -6,7 +6,7 @@ summary: the rule arena and an index from interface to candidates become one str
 kind: decision
 status: proposed
 created: 2026-08-17
-updated: 2026-08-17
+updated: 2026-08-28
 tags:
   - rules
   - engine
@@ -25,6 +25,13 @@ relations:
 # selection is a lookup on the interface, not a scan of the arena
 
 > closes the item 0050 left in its unresolved section — "the predicate is now cheap and rule selection is not" — and takes it on the benchmark 0050 built for exactly this. 0015 stands and is unchanged; what this record shows is that 0015's refusal to rank is what makes an exact index possible, which is an argument for 0015 that 0015 did not make.
+
+> amendment, [0065](0065-entry-evaluation-and-the-cli-query-surface.md): the CLI constructs the index in
+> two engines. `graph select` binds the transitive program into an in-memory engine with read-only state
+> authority and no publication path; evaluation and planning bind the same program into a writable engine
+> over the content and SQLite adapters. `Program::bind` is the one registration path and `RuleTable` is the
+> one selection mechanism, so the two answers converge by construction. The query-only engine is not a
+> second selection model and the writable engine does not grant write authority to selection.
 
 ## context
 

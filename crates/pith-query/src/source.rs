@@ -1,20 +1,20 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use pith_diag::{Diag, Severity, SourceId};
 use pith_loader::{
-    DefinitionLocation, ImportEnv, LoadedModule, ModuleSource, format_module, load_module,
-    parse_module,
+    DefinitionKind, DefinitionLocation, LoadedModule, ModuleSource, elaborate_module, format_module,
 };
 use pith_output::dto::{
-    CheckReport, DeclarationView, DiagnosticRepr, FmtReport, FmtStatus, ImportView, ModuleView,
-    RuleCategoryRepr, RuleView, SeverityRepr, TierRepr,
+    AboutValueRepr, AboutView, CheckReport, DeclarationView, DiagnosticRepr, EntryView, FmtReport,
+    FmtStatus, ImportView, ModuleView, RuleCategoryRepr, RuleView, SeverityRepr, TierRepr,
 };
 
 use crate::error::QueryError;
+use crate::program::prepared_imports;
 
 /// Whether `format` writes the canonical spelling back or only verifies it.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -67,8 +67,8 @@ pub fn format(path: &Path, mode: FormatMode) -> Result<FmtReport, QueryError> {
 /// [`QueryError`] when the file cannot be read or is not named as a module.
 pub fn check(path: &Path) -> Result<CheckReport, QueryError> {
     let source = read_module(path)?;
-    let imports = import_environment(path, &source)?;
-    let (diagnostics, abi_digest) = match load_module(&source, &imports) {
+    let (imports, parsed) = prepared_imports(path, &source)?;
+    let (diagnostics, abi_digest) = match elaborate_module(parsed, &imports) {
         Ok(loaded) => (
             loaded.diagnostics().to_vec(),
             Some(loaded.abi_digest().digest().to_string().into()),
@@ -96,8 +96,8 @@ pub fn check(path: &Path) -> Result<CheckReport, QueryError> {
 /// there is nothing to explore about a module with no declarations.
 pub fn explore(path: &Path) -> Result<ModuleView, QueryError> {
     let source = read_module(path)?;
-    let imports = import_environment(path, &source)?;
-    let loaded = load_module(&source, &imports).map_err(|diagnostics| {
+    let (imports, parsed) = prepared_imports(path, &source)?;
+    let loaded = elaborate_module(parsed, &imports).map_err(|diagnostics| {
         QueryError::user(format!(
             "`{}` does not elaborate, so there is nothing to explore",
             path.display()
@@ -109,6 +109,7 @@ pub fn explore(path: &Path) -> Result<ModuleView, QueryError> {
 
 fn module_view(path: &Path, loaded: &LoadedModule) -> ModuleView {
     let definitions = definition_index(loaded);
+    let entry_definitions = entry_definition_index(loaded);
     ModuleView {
         module: loaded.module().into(),
         path: path.display().to_string().into(),
@@ -131,6 +132,39 @@ fn module_view(path: &Path, loaded: &LoadedModule) -> ModuleView {
             })
             .collect(),
         rules: rule_views(loaded, &definitions),
+        entries: loaded
+            .entries()
+            .iter()
+            .map(|entry| EntryView {
+                name: entry.name().into(),
+                coordinate: format!("{}::{}", loaded.module(), entry.rule_label()).into(),
+                tier: TierRepr::Represented,
+                interface: entry.interface().into(),
+                documentation: documentation(&entry_definitions, entry.name()).into(),
+            })
+            .collect(),
+        about: loaded
+            .about()
+            .iter()
+            .map(|about| AboutView {
+                fields: about
+                    .fields
+                    .iter()
+                    .map(|(name, value)| {
+                        let value = match value {
+                            pith_hir::SurfaceAboutValue::Text(text) => {
+                                AboutValueRepr::Text { text: text.clone() }
+                            }
+                            pith_hir::SurfaceAboutValue::List(elements) => AboutValueRepr::List {
+                                elements: elements.clone(),
+                            },
+                        };
+                        (name.clone(), value)
+                    })
+                    .collect(),
+                documentation: span_documentation(loaded, &about.documentation).into(),
+            })
+            .collect(),
     }
 }
 
@@ -179,71 +213,37 @@ fn definition_index(loaded: &LoadedModule) -> BTreeMap<&str, &DefinitionLocation
     definitions
 }
 
+fn entry_definition_index(loaded: &LoadedModule) -> BTreeMap<&str, &DefinitionLocation> {
+    loaded
+        .positions()
+        .definitions()
+        .iter()
+        .filter(|definition| matches!(definition.kind(), DefinitionKind::Entry))
+        .map(|definition| (definition.coordinate().name.as_ref(), definition))
+        .collect()
+}
+
 fn documentation(definitions: &BTreeMap<&str, &DefinitionLocation>, name: &str) -> String {
     definitions
         .get(name)
         .map_or_else(String::new, |definition| definition.documentation())
 }
 
-fn import_environment(path: &Path, source: &ModuleSource) -> Result<ImportEnv, QueryError> {
-    let mut imports = ImportEnv::new();
-    let mut loading = BTreeSet::new();
-    populate_imports(path, source, &mut imports, &mut loading)?;
-    Ok(imports)
+fn span_documentation(loaded: &LoadedModule, spans: &[pith_diag::Span]) -> String {
+    let source = loaded.source().source_text();
+    spans
+        .iter()
+        .filter_map(|span| {
+            let start = usize::try_from(span.start.0).ok()?;
+            let end = usize::try_from(span.end.0).ok()?;
+            source.get(start..end)
+        })
+        .map(|line| line.strip_prefix("--").unwrap_or(line).trim())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
-fn populate_imports(
-    path: &Path,
-    source: &ModuleSource,
-    imports: &mut ImportEnv,
-    loading: &mut BTreeSet<PathBuf>,
-) -> Result<(), QueryError> {
-    let parsed = parse_module(source);
-    for module in parsed.imports() {
-        if imports.get(module).is_some() {
-            continue;
-        }
-        let Some(import_path) = resolve_import(path, module)? else {
-            continue;
-        };
-        if !loading.insert(import_path.clone()) {
-            continue;
-        }
-        let imported_source = read_module(&import_path)?;
-        populate_imports(&import_path, &imported_source, imports, loading)?;
-        let loaded = load_module(&imported_source, imports).map_err(|diagnostics| {
-            QueryError::user(format!("imported module `{module}` does not elaborate"))
-                .with_diagnostics(diagnostics)
-        })?;
-        imports.insert_loaded(&loaded);
-        let _ = loading.remove(&import_path);
-    }
-    Ok(())
-}
-
-fn resolve_import(path: &Path, module: &str) -> Result<Option<PathBuf>, QueryError> {
-    let directory = path.parent().unwrap_or_else(|| Path::new("."));
-    let filename = format!("{module}.pi");
-    let mut candidates = vec![directory.join(&filename)];
-    if let Some(parent) = directory.parent() {
-        candidates.push(parent.join(module).join(&filename));
-    }
-    for candidate in candidates {
-        match candidate.try_exists() {
-            Ok(true) if candidate != path => return Ok(Some(candidate)),
-            Ok(_) => {}
-            Err(error) => {
-                return Err(QueryError::user(format!(
-                    "cannot inspect import path `{}`: {error}",
-                    candidate.display()
-                )));
-            }
-        }
-    }
-    Ok(None)
-}
-
-fn read_module(path: &Path) -> Result<ModuleSource, QueryError> {
+pub(crate) fn read_module(path: &Path) -> Result<ModuleSource, QueryError> {
     let module = path
         .file_stem()
         .and_then(|stem| stem.to_str())

@@ -3,10 +3,14 @@ use pith_ids::{ActionSpecDigest, ContentId};
 
 use super::{
     ActionInputContent, ActionProgram, ActionSpec, Content, ExitStatusContract, NetworkPolicy,
-    OutputKind, PlatformRequirement,
+    PlatformRequirement,
 };
+use crate::codec::{encode_content, output_kind_tag};
 use crate::manifest::{encode_length, encode_str};
 
+// These tags spell the manifest, not the action codec; the equality with
+// `action_codec`'s tag values is incidental, and the two encodings change
+// independently.
 const TAG_PROGRAM_HOST_PATH: u8 = 0;
 const TAG_PROGRAM_CONTENT: u8 = 1;
 const TAG_EXIT_SUCCESS_REQUIRED: u8 = 0;
@@ -91,8 +95,7 @@ fn encode_inputs(manifest: &mut Vec<u8>, inputs: &[super::ActionInput]) {
     encode_length(manifest, inputs.len());
     for input in inputs {
         encode_str(manifest, &input.path);
-        manifest.push(output_kind_tag(input.content.kind()));
-        manifest.extend_from_slice(content_id(&input.content).digest().as_bytes());
+        encode_content(manifest, &input.content);
     }
 }
 
@@ -165,13 +168,6 @@ fn encode_network(manifest: &mut Vec<u8>, network: &NetworkPolicy) {
             }
         }
         NetworkPolicy::AllowAll => manifest.push(TAG_NETWORK_ALLOW_ALL),
-    }
-}
-
-fn output_kind_tag(kind: OutputKind) -> u8 {
-    match kind {
-        OutputKind::Blob => 0,
-        OutputKind::Tree => 1,
     }
 }
 

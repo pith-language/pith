@@ -5,11 +5,14 @@
 //! wave through.
 
 use pith_output::dto::{
-    AttemptCounts, CheckReport, ContentPreview, DeclarationBodyRepr, DeclarationView,
-    DiagnosticRepr, FmtReport, FmtStatus, GcPreview, ImportView, InterfaceRepr, ModuleView,
-    QUERY_API_VERSION, QueryView, RuleCategoryRepr, RuleView, SeverityRepr, StateCheck, StateInfo,
-    StoredContent, StoredContentKind, SumConstructorRepr, TierRepr, TreeEntryRepr, TreeListing,
-    TypeRepr,
+    AboutValueRepr, AboutView, ActionContractRepr, ActionPlanView, ActionProgramRepr,
+    AttemptCounts, AttemptStatusRepr, CheckReport, ContentPreview, DeclarationBodyRepr,
+    DeclarationView, DependenciesView, DependencyKindRepr, DependencyNodeRepr, DiagnosticRepr,
+    EntryView, EvaluationSourceRepr, ExitStatusContractRepr, FmtReport, FmtStatus, GcPreview,
+    ImportView, InterfaceRepr, ModuleView, NetworkPolicyRepr, PlatformRequirementRepr,
+    QUERY_API_VERSION, QueryView, RuleCategoryRepr, RuleView, RunView, SelectionView, SeverityRepr,
+    StateCheck, StateInfo, StoredContent, StoredContentKind, SumConstructorRepr, TierRepr,
+    TreeEntryRepr, TreeListing, TypeRepr, ValueRepr,
 };
 use pith_output::{OutputRecord, PlainRenderer, Renderer};
 
@@ -99,6 +102,109 @@ fn module_view() -> ModuleView {
             },
             documentation: String::new().into(),
         }]),
+        entries: Box::new([EntryView {
+            name: "build".into(),
+            coordinate: "example::entry.build".into(),
+            tier: TierRepr::Represented,
+            interface: InterfaceRepr {
+                inputs: Box::new([]),
+                output: Box::new(TypeRepr::Nominal {
+                    name: "example.Document".into(),
+                }),
+                rendered: "() -> example.Document".into(),
+            },
+            documentation: "produce the default document".into(),
+        }]),
+        about: Box::new([AboutView {
+            fields: Box::new([
+                (
+                    "owners".into(),
+                    AboutValueRepr::List {
+                        elements: Box::new(["docs".into(), "release".into()]),
+                    },
+                ),
+                (
+                    "purpose".into(),
+                    AboutValueRepr::Text {
+                        text: "contract fixture".into(),
+                    },
+                ),
+            ]),
+            documentation: "module metadata".into(),
+        }]),
+    }
+}
+
+fn entry_interface() -> InterfaceRepr {
+    InterfaceRepr {
+        inputs: Box::new([]),
+        output: Box::new(TypeRepr::Text),
+        rendered: "() -> Text".into(),
+    }
+}
+
+fn run_view() -> RunView {
+    RunView {
+        entry: "build".into(),
+        coordinate: "example::entry.build".into(),
+        interface: entry_interface(),
+        source: EvaluationSourceRepr::Hydrated,
+        value: ValueRepr::Text { s: "ready".into() },
+    }
+}
+
+fn selection_view() -> SelectionView {
+    SelectionView {
+        entry: "build".into(),
+        rule: "example::entry.build".into(),
+        tier: TierRepr::Represented,
+        interface: entry_interface(),
+    }
+}
+
+fn action_plan_view() -> ActionPlanView {
+    ActionPlanView {
+        entry: "build".into(),
+        rule: "example.compile".into(),
+        spec_digest: DIGEST.into(),
+        contract: ActionContractRepr {
+            executable: ActionProgramRepr::HostPath {
+                path: "/usr/bin/cc".into(),
+            },
+            toolchain: Box::new([DIGEST.into()]),
+            arguments: Box::new(["-c".into(), "main.c".into()]),
+            inputs: Box::new([]),
+            outputs: Box::new([]),
+            environment: Box::new([]),
+            platform: PlatformRequirementRepr::Exact {
+                operating_system: "linux".into(),
+                architecture: "x86_64".into(),
+            },
+            capabilities: Box::new([]),
+            network: NetworkPolicyRepr::Deny,
+            exit_status: ExitStatusContractRepr::SuccessRequired,
+        },
+    }
+}
+
+fn dependencies_view() -> DependenciesView {
+    DependenciesView {
+        entry: "build".into(),
+        root: Some(Box::new(DependencyNodeRepr {
+            label: "example::entry.build".into(),
+            attempt: Some(7),
+            status: Some(AttemptStatusRepr::Complete),
+            dependency: DependencyKindRepr::Pure {
+                digest: DIGEST.into(),
+            },
+            children: Box::new([DependencyNodeRepr {
+                label: "example.render".into(),
+                attempt: Some(8),
+                status: Some(AttemptStatusRepr::Complete),
+                dependency: DependencyKindRepr::Action,
+                children: Box::new([]),
+            }]),
+        })),
     }
 }
 
@@ -172,6 +278,10 @@ fn every_view() -> Vec<QueryView> {
         QueryView::State(state_info()),
         QueryView::StateCheck(StateCheck { records: 7 }),
         QueryView::Gc(gc_preview()),
+        QueryView::Run(run_view()),
+        QueryView::Selection(selection_view()),
+        QueryView::ActionPlan(action_plan_view()),
+        QueryView::Dependencies(dependencies_view()),
     ]
 }
 
@@ -224,6 +334,30 @@ fn state_check_shape_is_stable() {
 #[test]
 fn gc_preview_shape_is_stable() {
     let record = OutputRecord::query(QueryView::Gc(gc_preview()));
+    insta::assert_json_snapshot!(serde_json::to_value(&record).unwrap());
+}
+
+#[test]
+fn run_view_shape_is_stable() {
+    let record = OutputRecord::query(QueryView::Run(run_view()));
+    insta::assert_json_snapshot!(serde_json::to_value(&record).unwrap());
+}
+
+#[test]
+fn selection_view_shape_is_stable() {
+    let record = OutputRecord::query(QueryView::Selection(selection_view()));
+    insta::assert_json_snapshot!(serde_json::to_value(&record).unwrap());
+}
+
+#[test]
+fn action_plan_view_shape_is_stable() {
+    let record = OutputRecord::query(QueryView::ActionPlan(action_plan_view()));
+    insta::assert_json_snapshot!(serde_json::to_value(&record).unwrap());
+}
+
+#[test]
+fn dependencies_view_shape_is_stable() {
+    let record = OutputRecord::query(QueryView::Dependencies(dependencies_view()));
     insta::assert_json_snapshot!(serde_json::to_value(&record).unwrap());
 }
 
@@ -290,7 +424,7 @@ fn every_view_has_its_own_tag() {
         );
         seen.push(tag);
     }
-    assert_eq!(seen.len(), 8, "a view was added without a snapshot");
+    assert_eq!(seen.len(), 12, "a view was added without a snapshot");
 }
 
 /// The plain renderer is the default when stdout is not a TTY, so every view
