@@ -10,14 +10,15 @@
 //!
 //! It renders a text template: a pure entry checks that every placeholder the
 //! template spells is bound, and an action runs a renderer program over the
-//! template with the bindings as arguments. Its declarations are its own
-//! (decision 0047), its rules register through
-//! [`Engine::register_rule`](pith_engine::Engine::register_rule) and
-//! [`register_action_rule`](pith_engine::Engine::register_action_rule), and it
-//! depends on neither xylem nor phloem. What it demonstrates is that the two
-//! things a domain needs — declared types and registered rules — are ordinary
-//! public API, and that reuse, hydration, and contract inspection follow from
-//! those two calls. Membership in the first-party set adds nothing.
+//! template with the bindings as arguments. Since M-13 the whole module is
+//! authored in `example.pi` — declarations, the action rule's signature, and
+//! the entry's represented body — and the crate binds its one host body to a
+//! coordinate it does not own: the loader elaborates the file, the entry
+//! registers as represented data, and the action binds through
+//! [`pith_loader::HostRuleDeclaration::bind`]. What the crate demonstrates is that
+//! declared types, represented bodies, and one bound host body are ordinary
+//! public API, and that reuse, hydration, and contract inspection follow.
+//! Membership in the first-party set adds nothing.
 //!
 //! ```no_run
 //! use example_domain::{ExampleEngine, types};
@@ -38,24 +39,48 @@
 pub mod rules;
 pub mod types;
 
+use pith_diag::SourceId;
 use pith_engine::Engine;
+use pith_loader::{ImportEnv, ModuleSource, load_module};
 
-pub use rules::{RenderAction, RenderRule};
+pub use rules::RenderAction;
 
-/// Registration of this domain's rules onto an [`Engine`].
+/// Registration of this domain onto an [`Engine`].
 ///
 /// An extension trait over the engine, which is how a domain that the engine
 /// does not depend on adds a method to it. xylem's `BuildEngine` is the same
 /// shape, and that it is available to a crate outside the first-party set is
-/// part of what this domain is here to show.
+/// part of what this domain is here to show. The rules themselves come from
+/// `example.pi`: the entry's body is represented data, and the action is this
+/// crate's host body bound to the coordinate the file declares.
 pub trait ExampleEngine {
-    /// Register the render action and the pure entry that requests it.
+    /// Load the module and register its rules.
     fn register_example_domain(&mut self);
 }
 
 impl ExampleEngine for Engine {
     fn register_example_domain(&mut self) {
-        self.register_action_rule(RenderAction::rule(), RenderAction);
-        self.register_rule(RenderRule::rule(), RenderRule);
+        let source = ModuleSource::new(
+            types::MODULE,
+            SourceId::from_raw(0),
+            "example.pi",
+            include_str!("../example.pi"),
+        );
+        let loaded = match load_module(&source, &ImportEnv::new()) {
+            Ok(loaded) => loaded,
+            Err(diagnostics) => unreachable!("example.pi does not elaborate: {diagnostics:?}"),
+        };
+        let action = loaded
+            .action_rule(types::RENDER)
+            .unwrap_or_else(|| unreachable!("example.pi declares no action rule `render`"));
+        action.bind(self, pith_core::BodyRevision(1), RenderAction);
+        for rule in loaded.represented_pure_rules() {
+            match rule.register(self) {
+                Ok(_) => {}
+                Err(error) => {
+                    unreachable!("example.pi's represented bodies do not register: {error}")
+                }
+            }
+        }
     }
 }

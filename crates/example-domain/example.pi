@@ -1,8 +1,54 @@
+-- The example domain as surface text (M-13): the declarations and the entry
+-- rule the crate's Rust half binds its host body to. The render action stays
+-- `= host` — a renderer is a program, and running one is an action whose
+-- contract the host body plans — while the entry's check is a represented
+-- body, so what it refuses is data the engine can read.
+
 nominal Renderer = Blob
 nominal Template = Blob
 nominal Bindings = List<{name: Text, value: Text}>
 nominal Document = Blob
 
+-- The gate below refuses before anything is requested; the request itself is
+-- the body's tail, where the grammar puts it.
 action rule render(Renderer, Template, Bindings) -> Document = host
 
-pure rule "render-entry"(Renderer, Template, Bindings) -> Document = host
+pure rule "render-entry"(renderer: Renderer, template: Template, bound: Bindings) -> Document = {
+  let raw = bytes of unwrap(template)
+  let text : Text = decode(raw)
+  let offered : List<Text> = fold unwrap(bound) from [] {
+    (binding, names) -> append([binding.name], names)
+  }
+  let scan : {seen: Bool, values: List<Text>} = fold split(text, "{{") from {seen: false, values: []} {
+    (piece, scan) -> if scan.seen {
+      {seen: true, values: append([if contains(piece, "}}") { before(piece, "}}") } else { piece }], scan.values)}
+    } else {
+      {seen: true, values: scan.values}
+    }
+  }
+  let names : List<Text> = scan.values
+  let misses : List<Text> = fold names from [] {
+    (name, misses) -> if holds(offered, name) { misses } else { append([name], misses) }
+  }
+  let twice_scan : {offender: Text, previous: Text} = fold unwrap(bound) from {offender: "", previous: ""} {
+    (binding, state) -> if state.offender != "" {
+      state
+    } else if state.previous == binding.name {
+      {offender: binding.name, previous: binding.name}
+    } else {
+      {offender: state.offender, previous: binding.name}
+    }
+  }
+  let twice : Text = twice_scan.offender
+  let miss : Text = fold misses from "" {
+    (candidate, miss) -> if miss == "" { candidate } else { miss }
+  }
+  let refused : Unit = if twice != "" {
+    fail(concat(concat("`", twice), "` is bound twice, so a render of this template has two answers"))
+  } else if miss == "" {
+    ()
+  } else {
+    fail(concat(concat("the template spells `", miss), "`, which the request does not bind"))
+  }
+  run Document(renderer, template, bound)
+}
