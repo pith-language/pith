@@ -6,7 +6,7 @@ summary: unresolved questions that can still change the architecture
 kind: planning
 status: active
 created: 2026-03-23
-updated: 2026-08-21
+updated: 2026-08-28
 tags:
   - questions
   - research
@@ -32,16 +32,24 @@ several questions block milestones rather than sitting alongside the implementat
 - milestone M-6 is additionally gated on a foundation contradiction rather than a decision: it needs an ordered, reversible plan, and scope.md says the project is not an ordered task runner. the record that settles that is named in the milestone, and [milestones](milestones.md) now says it depends on nothing else in the sequence and can run in parallel from any point
 - the time and resource bound five callers were each deferring to the next milestone was milestone M-8 and is no longer a gate held by whichever milestone needed it last: [0059](../decisions/0059-a-caller-declared-run-bound.md) landed it as a caller-declared run bound, and what it left beside it — partial cancellation, a bound and a cancel signal in one run, the rlimit half — is named in that record's unresolved section
 - the reproducibility story in milestone M-3 (first build library) is gated by decision 0014
-- surface language syntax is gated by the 0026 calculus landing in the core, not by a milestone. the older gate has been discharged: [0028](../decisions/0028-sandboxed-local-executor.md) deferred all surface syntax to the M-3 build library on the same grounds as [0026](../decisions/0026-generic-typed-calculus.md), and M-3 is complete — it discharged the deferral by building xylem as a rust library API, so no surface syntax exists yet. what stands in the way now is the calculus itself, and less of it than before: `pith-core`'s `Type` carries the six scalars, `List`, `Record`, a `Nominal` and a `Sum` that each carry their declaration, and the recursion cut. [0047](../decisions/0047-the-declaration-table.md) built the declaration site 0026 kept deferring, so a nominal type's representation is checked rather than trusted and a rule's revision derives from the declarations its interface names. what is still unbuilt is the parametric generics and the uncertainty constructors, which 0047 keeps in the set and gates each on the subsystem that would read it. arbitrary-precision `Int` stood in this list too and [0055](../decisions/0055-arbitrary-precision-int.md) landed it, so that clause is discharged. what a surface syntax would still have nothing to express is the larger gap: pattern matching over a declared sum, the merge operator, and type parameters on a declaration are all absent, and none is a calculus constructor. [0038](../decisions/0038-represented-rule-bodies.md) settles what the kernel consumes instead of syntax — rule bodies as data in one core ir — and sits behind the same calculus gate, but not behind surface syntax: the first frontend is the rust registration API over hand-built ir. [the language frontend](language-frontend.md) proposes the decomposition and argues the gate is correctly sized for the notation and oversized for the two things under it — a published declaration surface, which needs no unbuilt constructor, and the ir expression set, which 0038 names as the first design task it gates. [the reordering](reordering.md) took that argument and gave all three milestones: the declaration surface is M-10, the ir expression set M-11, the notation M-13. so surface work is no longer gated on the calculus in the undifferentiated way this bullet stated it, and what remains genuinely gated is the notation's own missing vocabulary — pattern matching over a declared sum, the merge operator, and type parameters on a declaration
+- the surface-language gate is discharged by M-13. The notation covers the built 0026 calculus, exhaustive
+  sum matching, represented bodies and entries. [0026](../decisions/0026-generic-typed-calculus.md) is accepted
+  after withdrawing user-defined rank-1 generics: M-13 has no type-variable, type-parameter, or polymorphic
+  rule spelling, while concrete builtin applications such as `List<Text>` remain. The unbuilt uncertainty
+  constructors stay gated by 0047 on the first subsystem that reads each one. The next language gate is
+  M-14's module identity, workspaces, source adapters and domain authority, not missing local notation
 
 milestone M-1 used decisions 0015 and 0019 as prototype hypotheses. 0015 is now `accepted`: four domains and the frontend design have exercised interface selection, and each `E-1102` collision it predicted has been met by a nominal type rather than by a ranking rule. 0019 remains proposed, and narrowly so — `Pure`, `Action` and `Observation` are operational; `Mutation` and `Opaque` stay marker types until M-5b and M-15 exercise them.
 
 ## language and types
 
-- should the language use structural or nominal types at module boundaries? (decision 0017 proposed structural default with opt-in nominal; superseded by [0026](../decisions/0026-generic-typed-calculus.md), now accepted, which carries that mechanism into a full closed calculus with records, declared sums, generics, effect types, and uncertainty types. of that calculus `Nominal`, `List`, `Record` and `Sum` are built in `pith-core` and M-5a measured them convergent; the parametric and uncertainty halves are not — see gating)
+- should the language use structural or nominal types at module boundaries? (settled by [0026](../decisions/0026-generic-typed-calculus.md): structural records and concrete builtin applications, with nominal identity by declaration. M-13 deliberately declined user-defined generics; `Nominal`, `List`, `Record` and `Sum` are built and M-5a measured them convergent. uncertainty constructors remain reserved until a subsystem reads them)
 - how much refinement typing can stay fast enough for editors? (settled by [0026](../decisions/0026-generic-typed-calculus.md): no predicate types in the language; validation is pure rules; the `Unchecked<T>`/`T` distinction is structural)
 - should evaluation be total by construction, or can termination be checked with an explicit unsafe boundary? (decision 0018 proposes total by construction with cycle detection and a backstop limit)
-- what is the smallest effect syntax that keeps capability use visible? ([0038](../decisions/0038-represented-rule-bodies.md) fixes the kernel-side half: the `PureStep` protocol — `Need`, `NeedAll`, `NeedBlob`, `NeedAction`, `NeedObservation` — is the effect vocabulary of the core ir, as explicit constructs with binders for resumption values. [0060](../decisions/0060-observation-identity-and-freshness.md) adds the observation constructor before M-11 fixes the encoding. what stays open is the surface spelling above it)
+- what is the smallest effect syntax that keeps capability use visible? (the pure-body spelling is settled:
+  `ask`, `ask all`, `ask each`, `bytes of`, and `run` elaborate to 0038's explicit step constructors. Host
+  authority remains visible as `= host`. A represented action planner's `requires / plan / complete`
+  surface remains open, because 0062's body IR requests actions but does not construct `ActionSpec`)
 - how do typed values cross repository and version boundaries without freezing the type system too early?
 
 ## rule engine
@@ -82,7 +90,7 @@ milestone M-1 used decisions 0015 and 0019 as prototype hypotheses. 0015 is now 
 - when is an external object adopted, replaced, or treated as unrelated? (decision 0013)
 - where does the binding between semantic and external identity live? (decision 0013)
 - how are ownership transfers made safe? (decision 0013 names the primitive; transfer safety is open)
-- what is the retention and migration model for historical observations and plans? ([decision 0027](../decisions/0027-retention-and-gc.md) frames the problem: roots, policy axes, cross-store ordering. the default numeric parameters wait on workload evidence, and [0051](../decisions/0051-transitive-revalidation.md) puts a floor under them: revalidation walks a reusable attempt's recorded subtree, so the cache tier is that subtree's closure rather than the reusable index alone, and results are needed throughout it)
+- what is the retention and migration model for historical observations and plans? ([decision 0027](../decisions/0027-retention-and-gc.md) frames the problem: roots, policy axes, cross-store ordering. the default numeric parameters wait on workload evidence, and [0051](../decisions/0051-transitive-revalidation.md) puts a floor under them: revalidation walks a reusable attempt's recorded subtree, so the cache tier is that subtree's closure rather than the reusable index alone, and results are needed throughout it. M-13 makes the pressure concrete — body edits and editor saves mint entry keys — but the existing GC dry run supplies counts, not a save-frequency workload. The retention-axis amendment therefore stays with the editor half; this round flags it and does not invent a default)
 
 ## first-party domains
 

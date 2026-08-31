@@ -6,7 +6,7 @@ summary: the order the work runs in, what each milestone owes, and why the seque
 kind: planning
 status: draft
 created: 2026-03-23
-updated: 2026-08-24
+updated: 2026-08-28
 tags:
   - planning
   - milestones
@@ -40,8 +40,8 @@ so labels do not move and do not imply position. that is
 rule — a stable identity, and a separate thing that moves. the order is the order of this file, and it is
 stated once, here:
 
-M-1, M-2, M-3, M-4, M-5a, M-8, M-9, M-10 and M-11 are complete, and the latency spike has run. then
-M-12, M-13, M-14, M-15, and then M-5b, M-6 and M-7.
+M-1, M-2, M-3, M-4, M-5a, M-8, M-9, M-10, M-11, M-12 and M-13 are complete, and the latency spike has
+run. then M-14, M-15, and then M-5b, M-6 and M-7.
 
 ## why the order changed
 
@@ -145,8 +145,8 @@ by test and the domain stays at v1.
 
 ## M-12: the elaborator and the three graph rules
 
-status: underway. [0063](../decisions/0063-the-frontend-graph-tier.md) records the implemented graph
-boundary and the represented-body source edit still required to close the measurement.
+status: complete. [0063](../decisions/0063-the-frontend-graph-tier.md) records the graph boundary; the
+body-edit cutoff evidence is in [measured](measured.md).
 
 round three, designed in [the frontend architecture](frontend-architecture.md). the syntax, HIR and
 elaborator crates; `interface-of`, `bodies-of` and `index-of`; the derived elaborator revision; the
@@ -155,11 +155,16 @@ elaborator crates; `interface-of`, `bodies-of` and `index-of`; the derived elabo
 *measured claim:* the ABI cutoff — edit a body in A, assert `bodies-of(B)`'s key is byte-identical and the
 reusable lookup hits.
 
-that measurement decides whether the graph tier exists at all. the architecture says so itself: if it
-fails, "the graph tier collapses into a single host rule that the CLI and the server both call, with the
-local layer untouched."
+that measurement decides whether the graph tier exists at all. it passes: a written represented-body edit
+moves `bodies-of(A)` while the imported interface surface, ABI, `interface-of(A)`, and `bodies-of(B)` stay
+reusable.
 
 ## M-13: the surface notation and the CLI
+
+status: complete. [0064](../decisions/0064-text-breaking.md),
+[0065](../decisions/0065-entry-evaluation-and-the-cli-query-surface.md), and
+[0066](../decisions/0066-frontend-diagnostics-carry-source-identity.md) are the round's records; the
+evidence is in [measured](measured.md).
 
 round four and the CLI half of round six, folded, because a notation nobody can invoke is not testable by a
 person.
@@ -167,11 +172,10 @@ person.
 *measured claim:* `example-domain` as one `.pi` file producing byte-identical interface encodings and an
 identical contract-test result, plus equal body digests under qualified and unqualified spelling.
 
-this is where `pith check` and a real `pith build` first exist and where `explain_invalidation`,
-`plan_action` and `select` — three query surfaces no other language server has, all built and all
-unreachable — become something a person can see. it needs the read-only sqlite adapter path that
-[the language frontend](language-frontend.md) names in one line and no milestone owned: "an editor and a
-CLI at one store root, against a sqlite state store with one lock and `synchronous=full`".
+this is where `pith check` and the entry construct first become a person-facing evaluation path, and where
+`explain_invalidation`, drive-to-pause action planning and selection — three graph surfaces no other
+language server has, all previously built and unreachable — become commands. The read-only selection path
+and writable SQLite evaluation path share one program binding construction.
 
 ## M-14: the module system
 
@@ -251,7 +255,8 @@ placement, continuous reconciliation, and richer transition protocols.
 
 M-1 semantic prototype, M-2 action prototype, M-3 first build library, M-4 package and environment
 libraries, M-5a Linux system composition, M-8 the backstop limit, M-9 observation identity,
-M-10 the declaration artifact and M-11 the ir constructor set are complete at their own scopes.
+M-10 the declaration artifact, M-11 the ir constructor set, M-12 the frontend graph tier and M-13 the
+surface notation and CLI are complete at their own scopes.
 their evidence is in [what the completed milestones measured](measured.md).
 
 what they still owe is a claim about work, not about evidence, so it stays here:

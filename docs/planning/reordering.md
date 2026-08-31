@@ -6,7 +6,7 @@ summary: why the milestone sequence should stop adding domain libraries and put 
 kind: planning
 status: draft
 created: 2026-08-21
-updated: 2026-08-21
+updated: 2026-08-28
 tags:
   - planning
   - milestones
@@ -141,17 +141,16 @@ was answered the way the record says it should be — by making the types distin
 rule that picks. two items stay open there and neither blocks acceptance: both are call-site spellings
 that wait on the notation M-13 delivers.
 
-[0026](../decisions/0026-generic-typed-calculus.md) is not promoted, and the distinction matters more than
-the promotion would have. what M-5a measured is that the *built* constructor set converged. the record
-mandates rank-1 prenex polymorphism, the kernel cannot hold it — `Interface` is two concrete `Type`s and
-selection is exact equality — and the uncertainty constructors are unbuilt. so a mandated feature has no
-implementation and no spelling, and accepting the record would claim the parametric half on evidence that
-covers only the part every domain has used. the measurement is recorded in the record; acceptance waits on
-the amendment [the language frontend](language-frontend.md) already names, that generics have no surface.
+[0026](../decisions/0026-generic-typed-calculus.md) was not promoted at this point, and the distinction
+matters more than the promotion would have. what M-5a measured was that the *built* constructor set
+converged, while the record still mandated rank-1 prenex polymorphism the kernel could not hold and no
+notation could spell. M-13 has now supplied the evidence this paragraph waited for: the notation declines
+user-defined generics and the record withdraws them, while concrete builtin application remains. 0026 is
+therefore accepted on the converged surface rather than on an unimplemented parametric promise.
 
-an earlier draft of this proposal said both should be promoted. that was wrong about 0026 for the reason
-above, and the correction stays here instead of being quietly dropped, because "the calculus converged" and "the
-calculus is accepted" are exactly the two sentences this notebook is built to keep apart.
+an earlier draft of this proposal said both should be promoted before the amendment existed. that was wrong
+then for the reason above, and the correction stays here instead of being quietly dropped. M-13 later made
+“the calculus is accepted” true by changing the mandate, not by pretending the missing evidence existed.
 
 one correction went alongside. [open questions](open-questions.md) listed "arbitrary-precision `Int`,
 deferred to the record that lands arithmetic" among what stands between the calculus and a surface syntax.
@@ -216,8 +215,8 @@ express an ordering. so a label is an identity and the file states the order, wh
 5. M-12, the elaborator and the three graph rules. frontend round three. the ABI cutoff is measured here,
    and it decides whether the graph tier exists at all.
 6. M-13, the surface notation and the CLI. frontend round four and the CLI half of round six. `pith check`
-   and a real `pith build` first exist here, `explain_invalidation` becomes something a person can see, and
-   the read-only state adapter is needed.
+   and the entry construct's first evaluation command exist here, `explain_invalidation` becomes something
+   a person can see, and the read-only state adapter is needed.
 7. M-14, [the module system](module-system.md). frontend round five.
 8. M-15, the generic builder. the `stdenv.mkDerivation`-shaped peer, authored in `.pi`, which is what makes
    packaging a real program tractable. `Opaque`'s step protocol lands here, because a foreign build is the

@@ -6,7 +6,7 @@ summary: evidence recorded when completed milestones close
 kind: planning
 status: active
 created: 2026-08-21
-updated: 2026-08-24
+updated: 2026-08-28
 tags:
   - planning
   - milestones
@@ -239,3 +239,49 @@ ids where the host body narrows to a machine integer, accepting what the host re
 boundary, not a designed contract, until a domain needs integer comparison for its own sake. the
 complete suite passes: 182 pith-core tests including the 13 corpus tests, clippy and rustdoc clean, and
 the workspace compiles with the new `RuleTier::Represented` variant and the two decode-error variants.
+
+## M-12: the elaborator and the three graph rules
+
+status: complete.
+
+evidence: [0063](../decisions/0063-the-frontend-graph-tier.md) records the graph boundary, and
+`a_body_edit_moves_bodies_and_leaves_the_interface_surface_byte_identical` is the exact cutoff witness its
+unresolved section deferred to notation. `alpha.pi` contains a represented rule body; editing that written
+body changes the source blob and recomputes `bodies-of(alpha)`, while the published interface surface and
+ABI remain byte-identical. `interface-of(alpha)` is served as `Reused`, and `bodies-of(beta)` — whose import
+names alpha's semantic surface rather than its bodies — is also `Reused`. A representation edit is the
+control: it moves the surface and invalidates the dependent.
+
+The three frontend rules share canonical `FrontendSource` and `FrontendImportEnv` inputs and derived
+revisions. A fresh engine hydrates the cutoff attempt from durable state. Multi-file modules elaborate as
+one source set, duplicate source paths and import bindings are refused at construction, and invalid source
+completes as reusable data carrying diagnostics instead of failing the attempt. [0066](../decisions/0066-frontend-diagnostics-carry-source-identity.md)
+records the diagnostic correction this exposed: each diagnostic value names the source blob whose offsets
+it carries.
+
+## M-13: the surface notation and the CLI
+
+status: complete.
+
+evidence: the one-file `example-domain/example.pi` now owns its declarations, action signature, and
+represented render-entry body. The Rust crate binds only the declared host action and registers the
+represented body. Its declaration encodings remain byte-identical to the live table, and the peerhood
+contract tests still prove cold execution, reuse, cross-process hydration, canonical inputs, failure before
+planning, and inspectable action contracts. The notation suite proves qualified and imported-unqualified
+spellings elaborate to equal body digests. [0064](../decisions/0064-text-breaking.md) supplies the single
+sum-returning text primitive that moved xylem's compile entry and example's render entry into the corpus,
+leaving only the deliberately recursive host resolver outside it.
+
+[0065](../decisions/0065-entry-evaluation-and-the-cli-query-surface.md) records the entry path. A synthetic
+`module::entry.name` represented rule derives its revision from the entry body and evaluates through the
+ordinary durable engine. Tests prove a first run is computed and a second process hydrates it, E-1102
+refuses an entry/module-rule collision with the entry lesson, and an `= host` rule names the coordinate the
+domain-free CLI cannot bind. `graph select` creates no state database; `graph deps` returns the recorded
+0051 subtree; `explain` uses the existing explain payload; the kernel drive-to-pause test returns the first
+action plan without an action computation or executor; and `exec` validates `pith.Exec` before the caller
+effect. `explore` includes entries and about metadata.
+
+The JSON contract moves from query API 3 to 4 and snapshots all twelve exhaustive `QueryView` variants.
+Root, run, and graph help snapshots pin the new clap surface, including the visible M-14 `diff`, `update`,
+and `add` workspace refusals. The formatter property runs across every written corpus body: body digests and
+module ABIs are byte-identical before and after formatting, and `fmt(fmt(x)) == fmt(x)`.

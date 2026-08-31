@@ -6,7 +6,7 @@ summary: one binary whose commands are thin clients of one query api, a grouping
 kind: planning
 status: draft
 created: 2026-08-25
-updated: 2026-08-26
+updated: 2026-08-28
 tags:
   - planning
   - tooling
@@ -24,8 +24,9 @@ relations:
 # the cli surface
 
 this is the cli half of round six of [the language frontend](language-frontend.md), folded into M-13
-because a notation nobody can invoke is not testable by a person. `pith-cli` today is 240 lines: an
-evaluation stub against an empty rule set, and a content materializer written to test the store.
+because a notation nobody can invoke is not testable by a person. M-13 implements this surface through
+the versioned `pith-query` API; [0065](../decisions/0065-entry-evaluation-and-the-cli-query-surface.md)
+records the entry and engine boundaries it added.
 
 ## two rules generate the surface
 
@@ -82,9 +83,9 @@ entry construct, and the milestone is what should be corrected.
 | `pith graph plan <entry>` | the action contract, without running it |
 | `pith graph deps <entry>` | the recorded dependency subtree of the last attempt |
 
-`select` and `plan_action` are built and reachable from no command, which is one of the four findings
-[the reordering](reordering.md) opened with. `deps` reads the subtree
-[0051](../decisions/0051-transitive-revalidation.md)'s walk already produces.
+`select` is the read-only command, drive-to-pause entry planning reaches the current first action without
+executing it, and `deps` reads the subtree [0051](../decisions/0051-transitive-revalidation.md)'s walk
+already records.
 
 all three take an entry name, which falls out of the design. an entry *is* a named request, so it is
 already the call-site spelling these three were missing, and no request-literal syntax appears on the
@@ -132,7 +133,9 @@ is per-key, each save mints a key, and a permanent root per save is a growth rat
 
 [the frontend architecture](frontend-architecture.md) names the gap. `PithResult<T> = Result<T,
 DiagnosticSink>` carries no sink on the `Ok` arm, so a successful parse cannot return warnings, and an
-editor with no warnings is not an editor. M-13 owes that path for the editor whatever the cli does.
+editor with no warnings is not an editor. The CLI half does not invent a second diagnostic path: successful
+frontend results already carry their warning list. Wiring incremental publication into the language-server
+half remains editor work, not an M-13 command debt.
 
 once warnings ride the `Ok` arm, `check` emits them, and a separate `lint` verb would be a second
 diagnostic path drifting from the first. severity lives in `check`, with `--deny warnings` for ci.
