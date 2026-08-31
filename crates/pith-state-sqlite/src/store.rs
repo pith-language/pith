@@ -15,7 +15,7 @@ use pith_engine::state::{
 use crate::rows::{
     Failure, all_attempt_rows, attempt_computation, attempt_status_column,
     attempts_for_computation, find_pure_computation, insert_pending_attempt, intern_computation,
-    load_attempt, load_attempts, pending_attempt_rows, publish_reusable,
+    latest_attempt_row, load_attempt, load_attempts, pending_attempt_rows, publish_reusable,
     reusable_action_attempt_row, reusable_attempt_row, reusable_index_attempt_rows,
     reusable_index_size, write_terminal_state,
 };
@@ -284,6 +284,13 @@ impl EngineStateReader for ReadOnlySqliteEngineStateStore {
         self.inner.attempt_history(computation)
     }
 
+    fn latest_attempt(
+        &self,
+        computation: PureComputationKey,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        self.inner.latest_attempt(computation)
+    }
+
     fn latest_completed_reusable_attempt(
         &self,
         computation: PureComputationKey,
@@ -403,6 +410,24 @@ impl EngineStateReader for SqliteEngineStateStore {
             };
             let rows = attempts_for_computation(connection, computation)?;
             Ok(shared(load_attempts(connection, rows)?))
+        })
+    }
+
+    fn latest_attempt(
+        &self,
+        computation: PureComputationKey,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        self.read(|connection| {
+            let Some(computation) = find_pure_computation(connection, computation)? else {
+                return Ok(None);
+            };
+            let Some(row) = latest_attempt_row(connection, computation)? else {
+                return Ok(None);
+            };
+            Ok(load_attempts(connection, vec![row])?
+                .into_iter()
+                .next()
+                .map(Arc::new))
         })
     }
 

@@ -195,6 +195,20 @@ impl EngineStateReader for MemoryEngineStateStore {
         records.attempts_by_id(attempts.iter().copied())
     }
 
+    fn latest_attempt(
+        &self,
+        computation: PureComputationKey,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        let records = self.locked()?;
+        let Some(attempts) = records.pure_history.get(&computation) else {
+            return Ok(None);
+        };
+        let Some(id) = attempts.last().copied() else {
+            return Ok(None);
+        };
+        Ok(records.attempts.get(&id).cloned())
+    }
+
     fn latest_completed_reusable_attempt(
         &self,
         computation: PureComputationKey,

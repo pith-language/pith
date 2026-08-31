@@ -240,6 +240,21 @@ pub fn attempts_for_computation(
         .load(connection)?)
 }
 
+/// The newest attempt row under one computation, whatever its status. The
+/// read the whole history would answer with its last record, served from one
+/// indexed row instead.
+pub fn latest_attempt_row(
+    connection: &mut SqliteConnection,
+    computation: i64,
+) -> Result<Option<AttemptRow>, Failure> {
+    Ok(attempts::table
+        .filter(attempts::computation.eq(computation))
+        .order(attempts::id.desc())
+        .select(AttemptRow::as_select())
+        .first(connection)
+        .optional()?)
+}
+
 pub fn pending_attempt_rows(connection: &mut SqliteConnection) -> Result<Vec<AttemptRow>, Failure> {
     Ok(attempts::table
         .filter(attempts::status.eq(StoredStatus(DurableAttemptStatus::Pending)))

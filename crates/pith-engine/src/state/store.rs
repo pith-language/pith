@@ -271,6 +271,22 @@ pub trait EngineStateReader: Send + Sync {
         computation: PureComputationKey,
     ) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError>;
 
+    /// Return the newest attempt for one pure computation, whatever its
+    /// terminal state, without reading the history that precedes it.
+    ///
+    /// The default answers from [`Self::attempt_history`], which reads every
+    /// record under the key; an adapter whose history is stored out of line
+    /// overrides this with an indexed read instead.
+    ///
+    /// # Errors
+    /// Returns an adapter error when the attempt cannot be read.
+    fn latest_attempt(
+        &self,
+        computation: PureComputationKey,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        Ok(self.attempt_history(computation)?.into_iter().last())
+    }
+
     /// Return the newest completed attempt marked reusable for the exact key.
     /// Dependency revalidation remains the engine's responsibility.
     ///
