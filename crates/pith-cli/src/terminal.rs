@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use pith_output::palette::{Palette, Role, TerminalTheme};
 use terminal_colorsaurus::{ColorPalette, QueryOptions, ThemeMode, color_palette};
-use termprofile::{DetectorSettings, TermProfile};
+use termprofile::{DetectorSettings, SpecialVars, TermProfile, TermVars};
 
 /// Maximum theme-query latency before the balanced palette takes over.
 ///
@@ -29,7 +29,7 @@ impl OutputTerminal {
     pub fn detect(stdout: &Stdout) -> Self {
         // termprofile detection is passive: environment, terminfo, and tmux
         // metadata. The separate OSC theme query below is tightly gated.
-        let profile = TermProfile::detect(stdout, DetectorSettings::default());
+        let profile = detect_profile(TermVars::from_env(stdout, DetectorSettings::default()));
         let stdout_is_terminal = stdout.is_terminal();
         let pretty_by_default = stdout_is_terminal && profile != TermProfile::NoTty;
         let theme_probe = if pretty_by_default && profile_supports_color(profile) {
@@ -137,6 +137,20 @@ const fn profile_supports_color(profile: TermProfile) -> bool {
     )
 }
 
+/// Detect the profile for the given terminal variables, keeping a pipe
+/// unstyled.
+///
+/// CI markers such as `GITHUB_ACTIONS` describe the log viewer around the
+/// process, not what stdout is attached to, and termprofile lets them upgrade
+/// even a `NoTty` base. They are dropped when nothing is attached; the force
+/// overrides survive because the crate applies them before the special cases.
+fn detect_profile(mut vars: TermVars) -> TermProfile {
+    if !vars.meta.is_terminal {
+        vars.special = SpecialVars::default();
+    }
+    TermProfile::detect_with_vars(vars)
+}
+
 #[derive(Clone, Debug)]
 enum ThemeProbe {
     NotAttempted,
@@ -237,7 +251,10 @@ fn one_line(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
+    use termprofile::NoTerminal;
 
     #[test]
     fn theme_queries_are_only_useful_for_color_profiles() {
@@ -246,6 +263,47 @@ mod tests {
         assert!(profile_supports_color(TermProfile::Ansi16));
         assert!(profile_supports_color(TermProfile::Ansi256));
         assert!(profile_supports_color(TermProfile::TrueColor));
+    }
+
+    /// Forgejo runners set `GITHUB_ACTIONS` for GitHub compatibility, and
+    /// termprofile answers it with truecolor even behind a pipe. The forced
+    /// profiles the end-to-end tests rely on must survive the same masking.
+    #[test]
+    fn ci_markers_cannot_style_a_pipe_but_forced_color_can()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let vars_for = |extra: &[(&str, &str)]| {
+            let source: HashMap<&str, &str> = [("TERM", "xterm-256color")]
+                .into_iter()
+                .chain(extra.iter().copied())
+                .collect();
+            TermVars::from_source(&source, &NoTerminal, DetectorSettings::default())
+        };
+
+        assert_eq!(
+            TermProfile::detect_with_vars(vars_for(&[("GITHUB_ACTIONS", "true")])),
+            TermProfile::TrueColor,
+            "precondition: termprofile styles CI pipes on its own"
+        );
+        assert_eq!(
+            detect_profile(vars_for(&[("GITHUB_ACTIONS", "true")])),
+            TermProfile::NoTty
+        );
+        assert_eq!(detect_profile(vars_for(&[("CI", "1")])), TermProfile::NoTty);
+
+        assert_eq!(
+            detect_profile(vars_for(&[("FORCE_COLOR", "truecolor")])),
+            TermProfile::TrueColor
+        );
+        assert_eq!(
+            detect_profile(vars_for(&[("FORCE_COLOR", "ansi256")])),
+            TermProfile::Ansi256
+        );
+        assert_eq!(
+            detect_profile(vars_for(&[("FORCE_COLOR", "ansi16")])),
+            TermProfile::Ansi16
+        );
+
+        Ok(())
     }
 
     #[test]
