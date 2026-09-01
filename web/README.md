@@ -68,3 +68,8 @@ arrives through `@fontsource/geist-mono`; the rest are woff2 files in
 | Gambetta | text (400–600) | [Fontshare](https://www.fontshare.com/fonts/gambetta) |
 | Geist Mono | labels | [Geist by Vercel](https://github.com/vercel/geist-font), via fontsource |
 | Departure Mono | machine labels only | [departuremono.com](https://departuremono.com/), © Helena Zhang |
+
+
+## funding.json
+
+The `funding.json` is emmited by the internal `pith/funding` repository, and should not be edited manually
