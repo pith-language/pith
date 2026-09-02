@@ -91,7 +91,7 @@
         "channels": [
           "bank"
         ],
-        "description": "Re-executes recorded actions to localise non-determinism to the exact computation that caused it, finishes run bounds and partial cancellation in the confined executor, and extends CI to aarch64 so the sandbox paths are exercised on a second architecture. Covers WP6, WP7, WP8: 210 hours over 12 months."
+        "description": "Re-executes recorded actions to localize non-determinism to the exact computation that caused it, finishes run bounds and partial cancellation in the confined executor, and extends CI to aarch64 so the sandbox paths are exercised on a second architecture. Covers WP6, WP7, WP8: 210 hours over 12 months."
       },
       {
         "guid": "sustaining",

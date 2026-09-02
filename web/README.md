@@ -72,4 +72,4 @@ arrives through `@fontsource/geist-mono`; the rest are woff2 files in
 
 ## funding.json
 
-The `funding.json` is emmited by the internal `pith/funding` repository, and should not be edited manually
+The `funding.json` is emitted by the internal `pith/funding` repository, and should not be edited manually
