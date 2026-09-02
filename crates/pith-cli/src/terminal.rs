@@ -251,7 +251,7 @@ fn one_line(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     use super::*;
     use termprofile::NoTerminal;
@@ -272,7 +272,7 @@ mod tests {
     fn ci_markers_cannot_style_a_pipe_but_forced_color_can()
     -> Result<(), Box<dyn std::error::Error>> {
         let vars_for = |extra: &[(&str, &str)]| {
-            let source: HashMap<&str, &str> = [("TERM", "xterm-256color")]
+            let source: BTreeMap<&str, &str> = [("TERM", "xterm-256color")]
                 .into_iter()
                 .chain(extra.iter().copied())
                 .collect();
