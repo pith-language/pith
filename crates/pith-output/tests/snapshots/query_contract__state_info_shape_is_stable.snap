@@ -1,0 +1,24 @@
+---
+source: crates/pith-output/tests/query_contract.rs
+expression: "serde_json::to_value(&record).unwrap()"
+---
+{
+  "api_version": 4,
+  "code": 0,
+  "detail": "query",
+  "kind": "query",
+  "query": {
+    "adapter": "sqlite",
+    "attempts": {
+      "cancelled": 1,
+      "complete": 5,
+      "failed": 1,
+      "pending": 0,
+      "total": 7
+    },
+    "reusable_index": 3,
+    "schema_version": 1,
+    "semantic_encoding_version": 1,
+    "view": "state"
+  }
+}

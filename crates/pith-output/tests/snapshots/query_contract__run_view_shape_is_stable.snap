@@ -1,0 +1,27 @@
+---
+source: crates/pith-output/tests/query_contract.rs
+expression: "serde_json::to_value(&record).unwrap()"
+---
+{
+  "api_version": 4,
+  "code": 0,
+  "detail": "query",
+  "kind": "query",
+  "query": {
+    "coordinate": "example::entry.build",
+    "entry": "build",
+    "interface": {
+      "inputs": [],
+      "output": {
+        "type_kind": "text"
+      },
+      "rendered": "() -> Text"
+    },
+    "source": "hydrated",
+    "value": {
+      "s": "ready",
+      "value_kind": "text"
+    },
+    "view": "run"
+  }
+}

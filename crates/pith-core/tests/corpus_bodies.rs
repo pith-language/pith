@@ -16,30 +16,17 @@ use pith_core::{
 };
 
 // ---------------------------------------------------------------------------
-// The three unexpressible bodies, named with what each waits for.
+// The one unexpressible body, named with what it waits for.
 // ---------------------------------------------------------------------------
 
 /// The corpus rule bodies the constructor set cannot express, each with the
 /// reason. A body leaves this list only by amendment to 0062.
-const NAMED: &[(&str, &str)] = &[
-    (
-        "xylem.compile-entry",
-        "the depfile parse splits bytes on whitespace, joins continuations, \
-         and strips prefixes; the set has no text-splitting constructor with an \
-         agreed total semantics",
-    ),
-    (
-        "example.render-entry",
-        "the template scan walks `{{`..`}}` delimiters by index; the same \
-         missing text-splitting constructor",
-    ),
-    (
-        "phloem.resolve",
-        "version ordering is a host trait object selected by a request-visible \
+const NAMED: &[(&str, &str)] = &[(
+    "phloem.resolve",
+    "version ordering is a host trait object selected by a request-visible \
          name, and the search is backtracking with an undo stack — host \
          dispatch and general recursion, both outside the set by construction",
-    ),
-];
+)];
 
 // ---------------------------------------------------------------------------
 // Declaration mirrors
@@ -58,6 +45,7 @@ mod xylem {
         object: Type,
         executable: Type,
         test_report: Type,
+        depfile: Type,
     }
 
     fn declarations() -> &'static Declarations {
@@ -76,6 +64,7 @@ mod xylem {
                 object: nominal(&mut table, "Object", Type::Blob),
                 executable: nominal(&mut table, "Executable", Type::Blob),
                 test_report: nominal(&mut table, "TestReport", Type::Bool),
+                depfile: nominal(&mut table, "Depfile", Type::Blob),
             }
         })
     }
@@ -95,6 +84,9 @@ mod xylem {
     pub fn test_report() -> Type {
         declarations().test_report.clone()
     }
+    pub fn depfile() -> Type {
+        declarations().depfile.clone()
+    }
 
     /// `{path: Text, content: Blob}`, the header shape a compile request
     /// declares beside its source.
@@ -105,9 +97,27 @@ mod xylem {
         Type::List(Box::new(provided_header_record()))
     }
 
+    /// The discovered header set is a bare `List<Text>`, not a nominal: the
+    /// parser's canonical order is the type's whole discipline.
+    pub fn headers() -> Type {
+        list(Type::Text)
+    }
+
     pub fn compile_interface() -> Interface {
         Interface {
             inputs: Box::new([toolchain(), c_source(), provided_headers()]),
+            output: object(),
+        }
+    }
+    pub fn discovery_interface() -> Interface {
+        Interface {
+            inputs: Box::new([toolchain(), c_source(), provided_headers()]),
+            output: depfile(),
+        }
+    }
+    pub fn compile_action_interface() -> Interface {
+        Interface {
+            inputs: Box::new([toolchain(), c_source(), headers(), provided_headers()]),
             output: object(),
         }
     }
@@ -440,6 +450,62 @@ mod phloem {
     }
 }
 
+mod example {
+    use std::sync::OnceLock;
+
+    use super::*;
+
+    struct Declarations {
+        renderer: Type,
+        template: Type,
+        bindings: Type,
+        document: Type,
+    }
+
+    fn declarations() -> &'static Declarations {
+        static DECLARATIONS: OnceLock<Declarations> = OnceLock::new();
+        DECLARATIONS.get_or_init(|| {
+            let mut table = DeclarationTable::new("example");
+            fn nominal(table: &mut DeclarationTable, name: &str, representation: Type) -> Type {
+                match table.nominal(name, representation) {
+                    Ok(declared) => declared,
+                    Err(error) => unreachable!("example declares each name once: {error}"),
+                }
+            }
+            Declarations {
+                renderer: nominal(&mut table, "Renderer", Type::Blob),
+                template: nominal(&mut table, "Template", Type::Blob),
+                bindings: nominal(
+                    &mut table,
+                    "Bindings",
+                    list(record_type(&[("name", Type::Text), ("value", Type::Text)])),
+                ),
+                document: nominal(&mut table, "Document", Type::Blob),
+            }
+        })
+    }
+
+    pub fn renderer() -> Type {
+        declarations().renderer.clone()
+    }
+    pub fn template() -> Type {
+        declarations().template.clone()
+    }
+    pub fn bindings() -> Type {
+        declarations().bindings.clone()
+    }
+    pub fn document() -> Type {
+        declarations().document.clone()
+    }
+
+    pub fn render_interface() -> Interface {
+        Interface {
+            inputs: Box::new([renderer(), template(), bindings()]),
+            output: document(),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Shared construction
 // ---------------------------------------------------------------------------
@@ -694,6 +760,14 @@ fn deepen(expression: &BodyExpr, extra: usize, cutoff: usize) -> BodyExpr {
         BodyExpr::TextOfBytes { bytes } => BodyExpr::TextOfBytes {
             bytes: deeper(bytes, 0),
         },
+        BodyExpr::TextBreak { text, separator } => BodyExpr::TextBreak {
+            text: deeper(text, 0),
+            separator: deeper(separator, 0),
+        },
+        BodyExpr::TextJoin { list, separator } => BodyExpr::TextJoin {
+            list: deeper(list, 0),
+            separator: deeper(separator, 0),
+        },
         BodyExpr::Need { request, resume } => BodyExpr::Need {
             request: shift_request(request, extra, cutoff),
             resume: deeper(resume, 1),
@@ -802,6 +876,124 @@ fn first_matching(
     }
 }
 
+/// Split `text` on every occurrence of `separator` (decision 0064): empty
+/// fields kept, an empty text one empty field, an empty separator never
+/// matching.
+fn break_on(source: BodyExpr, separator: &str) -> BodyExpr {
+    BodyExpr::TextBreak {
+        text: Box::new(source),
+        separator: Box::new(lit(text(separator))),
+    }
+}
+
+/// Join a list of texts with `separator` between neighbors; the empty list is
+/// the empty text.
+fn join(parts: BodyExpr, separator: &str) -> BodyExpr {
+    fold(
+        parts,
+        lit(text("")),
+        if_(
+            equal(bound(1), lit(text(""))),
+            bound(0),
+            concat(&[bound(1), lit(text(separator)), bound(0)]),
+        ),
+    )
+}
+
+/// `strip_prefix`: when `source` starts with `prefix`, the remainder after the
+/// first occurrence; otherwise `source` unchanged. The first field of a split
+/// is empty exactly when the text began with the separator, and the remaining
+/// fields joined are the remainder. One strip, not the host body's repeated
+/// one — `././a.h` keeps its second prefix, the narrowing a comment at the
+/// test names.
+fn strip_prefix(source: BodyExpr, prefix: &str) -> BodyExpr {
+    BodyExpr::MatchList {
+        list: Box::new(break_on(source.clone(), prefix)),
+        // A split yields at least one field, so this arm never runs; the case
+        // construct demands an arm of the result type regardless.
+        empty: Box::new(source.clone()),
+        cons: Box::new(if_(
+            equal(bound(0), lit(text(""))),
+            join(bound(1), prefix),
+            shift(&source, 2),
+        )),
+    }
+}
+
+/// The space-separated fields of `source` that are not empty, in reverse
+/// source order. One separator, not the host parse's whitespace class —
+/// make's joined prerequisite list separates on single spaces, and the
+/// narrowing is named at the test.
+fn nonempty_fields(source: BodyExpr) -> BodyExpr {
+    fold(
+        break_on(source, " "),
+        empty_list(Type::Text),
+        if_(
+            equal(bound(0), lit(text(""))),
+            bound(1),
+            BodyExpr::Cons {
+                head: Box::new(bound(0)),
+                tail: Box::new(bound(1)),
+            },
+        ),
+    )
+}
+
+/// Drop a sorted list's adjacent duplicates, keeping first occurrences in
+/// order.
+fn dedup_sorted(sorted: BodyExpr, element: Type) -> BodyExpr {
+    reverse(
+        element.clone(),
+        fold(
+            sorted,
+            empty_list(element),
+            BodyExpr::MatchList {
+                list: Box::new(bound(1)),
+                empty: Box::new(BodyExpr::Cons {
+                    head: Box::new(bound(0)),
+                    tail: Box::new(bound(1)),
+                }),
+                cons: Box::new(if_(
+                    equal(bound(0), bound(2)),
+                    bound(3),
+                    BodyExpr::Cons {
+                        head: Box::new(bound(2)),
+                        tail: Box::new(bound(3)),
+                    },
+                )),
+            },
+        ),
+    )
+}
+
+/// Everything after a list's first element: the depfile's tokens without the
+/// make target, or a template scan's pieces without the text before the first
+/// delimiter. The empty arm is the unreachable no-first-element case a case
+/// construct demands anyway.
+fn tail_of(source: BodyExpr, element: Type) -> BodyExpr {
+    BodyExpr::MatchList {
+        list: Box::new(source),
+        empty: Box::new(empty_list(element)),
+        cons: Box::new(bound(1)),
+    }
+}
+
+/// Whether a bindings list `{name: Text, value: Text}` holds `name`. Both
+/// arguments are correct at the caller's scope; the name moves two binders
+/// deeper to reach the fold's step, and the bindings themselves are the fold's
+/// source, read at the scope the fold runs at.
+fn name_is_bound(name: &BodyExpr, bindings: &BodyExpr) -> BodyExpr {
+    fold(
+        bindings.clone(),
+        lit(Value::Bool(false)),
+        if_(
+            equal(field("name")(bound(0)), shift(name, 2)),
+            lit(Value::Bool(true)),
+            bound(1),
+        ),
+    )
+}
+
 /// Assert the corpus claim for one body: it validates against the mirrored
 /// interface, survives its own canonical encoding, and derives a represented
 /// rule whose revision is a function of those bytes.
@@ -878,6 +1070,104 @@ fn xylem_test_entry_is_expressed() {
         &xylem::test_interface(),
         &action_passthrough(&xylem::test_interface()),
     );
+}
+
+/// The depfile parse the host body runs between its two actions: decode the
+/// captured bytes, join backslash-newline continuations, split the fields,
+/// drop the make target, canonicalize `./` spellings, sort and deduplicate,
+/// and drop the source's own prerequisite — then request the compile. Two
+/// narrowings against the host parse, both formatter-shaped rather than
+/// contractual: fields split on the single space make emits (the host's
+/// `split_whitespace` admits every whitespace), and `./` strips once (the
+/// host loops). UTF-8 refusal keeps its constructor's own message.
+#[test]
+fn xylem_compile_entry_is_expressed() {
+    let interface = xylem::compile_interface();
+    // Inputs: toolchain(2) source(1) provided(0).
+    let body = RuleBody::new(BodyExpr::NeedAction {
+        request: request(
+            xylem::discovery_interface(),
+            &[bound(2), bound(1), bound(0)],
+        ),
+        resume: Box::new(BodyExpr::NeedBlob {
+            // The discovery pass completed with a depfile; its blob identity
+            // is what the entry materializes.
+            content: Box::new(BodyExpr::Unwrap {
+                nominal: Box::new(bound(0)),
+            }),
+            resume: Box::new(BodyExpr::Let {
+                // T: the depfile as text. bytes(0).
+                bound: Box::new(BodyExpr::TextOfBytes {
+                    bytes: Box::new(bound(0)),
+                }),
+                rest: Box::new(BodyExpr::Let {
+                    // J: continuations joined. T(0).
+                    bound: Box::new(join(break_on(bound(0), "\\\n"), " ")),
+                    rest: Box::new(BodyExpr::Let {
+                        // F: the nonempty fields, in order. J(0).
+                        bound: Box::new(reverse(Type::Text, nonempty_fields(bound(0)))),
+                        rest: Box::new(BodyExpr::Let {
+                            // K: the tokens without the make target. F(0).
+                            bound: Box::new(tail_of(bound(0), Type::Text)),
+                            rest: Box::new(BodyExpr::Let {
+                                // P: `./` prefixes stripped. K(0).
+                                bound: Box::new(reverse(
+                                    Type::Text,
+                                    map_prepend(bound(0), Type::Text, |path| {
+                                        strip_prefix(path, "./")
+                                    }),
+                                )),
+                                rest: Box::new(BodyExpr::Let {
+                                    // S: sorted. P(0).
+                                    bound: Box::new(BodyExpr::SortBy {
+                                        list: Box::new(bound(0)),
+                                        key: Box::new(bound(0)),
+                                    }),
+                                    rest: Box::new(BodyExpr::Let {
+                                        // D: adjacent duplicates collapsed.
+                                        // S(0).
+                                        bound: Box::new(dedup_sorted(bound(0), Type::Text)),
+                                        rest: Box::new(BodyExpr::Let {
+                                            // H: the discovered set, the
+                                            // source's own prerequisite
+                                            // dropped. D(0).
+                                            bound: Box::new(reverse(
+                                                Type::Text,
+                                                fold(
+                                                    bound(0),
+                                                    empty_list(Type::Text),
+                                                    if_(
+                                                        equal(bound(0), lit(text("source.c"))),
+                                                        bound(1),
+                                                        BodyExpr::Cons {
+                                                            head: Box::new(bound(0)),
+                                                            tail: Box::new(bound(1)),
+                                                        },
+                                                    ),
+                                                ),
+                                            )),
+                                            rest: Box::new(BodyExpr::NeedAction {
+                                                // Under [H(0) D(1) S(2) P(3)
+                                                // K(4) F(5) J(6) T(7) bytes(8)
+                                                // depfile(9) provided(10)
+                                                // source(11) toolchain(12)].
+                                                request: request(
+                                                    xylem::compile_action_interface(),
+                                                    &[bound(12), bound(11), bound(0), bound(10)],
+                                                ),
+                                                resume: Box::new(bound(0)),
+                                            }),
+                                        }),
+                                    }),
+                                }),
+                            }),
+                        }),
+                    }),
+                }),
+            }),
+        }),
+    });
+    assert_expressed("xylem", "compile-entry", &interface, &body);
 }
 
 // ---------------------------------------------------------------------------
@@ -1768,6 +2058,113 @@ fn phloem_package_build_is_expressed() {
 }
 
 // ---------------------------------------------------------------------------
+// example: render-entry
+// ---------------------------------------------------------------------------
+
+/// The placeholder `piece` (the text after one `{{`) names: the text up to the
+/// next `}}`, or the refusal when the template opens a placeholder it never
+/// closes. A split yields at least one field, so the outer empty arm — a
+/// piece that cannot even be split — never runs; the inner empty arm is the
+/// unclosed case itself.
+fn placeholder_of(piece: BodyExpr) -> BodyExpr {
+    let unclosed = || {
+        fail(&[lit(text(
+            "a placeholder is opened and never closed, so the template has no rendering",
+        ))])
+    };
+    BodyExpr::MatchList {
+        list: Box::new(break_on(piece, "}}")),
+        empty: Box::new(unclosed()),
+        cons: Box::new(BodyExpr::MatchList {
+            list: Box::new(bound(1)),
+            empty: Box::new(unclosed()),
+            cons: Box::new(bound(2)),
+        }),
+    }
+}
+
+/// The template scan the host body runs between its blob read and its render
+/// request: decode the template, walk the `{{`..`}}` pieces in order, and
+/// refuse naming the first placeholder the bindings do not bind — then request
+/// the render with the entry's own inputs forwarded. The host checks each
+/// placeholder as it scans; the body collects the names and finds the first
+/// unbound one, which names the same placeholder the host's first failure
+/// would. UTF-8 refusal keeps its constructor's own message.
+#[test]
+fn example_render_entry_is_expressed() {
+    let interface = example::render_interface();
+    // Inputs: renderer(2) template(1) bindings(0).
+    let body = RuleBody::new(BodyExpr::NeedBlob {
+        content: Box::new(BodyExpr::Unwrap {
+            nominal: Box::new(bound(1)),
+        }),
+        resume: Box::new(BodyExpr::Let {
+            // T: the template as text. bytes(0).
+            bound: Box::new(BodyExpr::TextOfBytes {
+                bytes: Box::new(bound(0)),
+            }),
+            rest: Box::new(BodyExpr::Let {
+                // N: the placeholder names, in scan order — the pieces after
+                // the first `{{`, each cut at its `}}`. T(0).
+                bound: Box::new(reverse(
+                    Type::Text,
+                    map_prepend(
+                        tail_of(break_on(bound(0), "{{"), Type::Text),
+                        Type::Text,
+                        placeholder_of,
+                    ),
+                )),
+                rest: Box::new(BodyExpr::Let {
+                    // U: the first unbound placeholder, the empty text when
+                    // every placeholder is bound. N(0).
+                    bound: Box::new(fold(
+                        bound(0),
+                        lit(text("")),
+                        // Step scope: element(0) accumulator(1) N(2) T(3)
+                        // bytes(4) bindings(5) template(6) renderer(7). The
+                        // bindings nominal unwraps to the list its fold walks;
+                        // the render request forwards the nominal itself.
+                        if_(
+                            equal(bound(1), lit(text(""))),
+                            if_(
+                                name_is_bound(
+                                    &bound(0),
+                                    &BodyExpr::Unwrap {
+                                        nominal: Box::new(bound(5)),
+                                    },
+                                ),
+                                lit(text("")),
+                                bound(0),
+                            ),
+                            bound(1),
+                        ),
+                    )),
+                    rest: Box::new(if_(
+                        equal(bound(0), lit(text(""))),
+                        BodyExpr::NeedAction {
+                            // Under [U(0) N(1) T(2) bytes(3) bindings(4)
+                            // template(5) renderer(6)]: the entry's own inputs
+                            // forwarded, the render's declared independence.
+                            request: request(
+                                example::render_interface(),
+                                &[bound(6), bound(5), bound(4)],
+                            ),
+                            resume: Box::new(bound(0)),
+                        },
+                        fail(&[
+                            lit(text("the template spells `")),
+                            bound(0),
+                            lit(text("`, which the request does not bind")),
+                        ]),
+                    )),
+                }),
+            }),
+        }),
+    });
+    assert_expressed("example", "render-entry", &interface, &body);
+}
+
+// ---------------------------------------------------------------------------
 // The inventory
 // ---------------------------------------------------------------------------
 
@@ -1776,6 +2173,7 @@ const EXPRESSED: &[&str] = &[
     "xylem.link-entry",
     "xylem.generate-entry",
     "xylem.test-entry",
+    "xylem.compile-entry",
     "stele.compose-etc",
     "stele.compose-users",
     "stele.compose-unit",
@@ -1785,10 +2183,11 @@ const EXPRESSED: &[&str] = &[
     "stele.render-boot",
     "phloem.package-library",
     "phloem.package-build",
+    "example.render-entry",
 ];
 
 /// The corpus is the fifteen pure rule bodies the four first-party domains
-/// register: twelve expressed above, three named with what each waits for.
+/// register: fourteen expressed above, one named with what it waits for.
 #[test]
 fn the_corpus_is_fifteen_bodies() {
     assert_eq!(EXPRESSED.len() + NAMED.len(), 15);

@@ -1,0 +1,27 @@
+[package]
+name = "pith-query"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "The versioned query API both pith drivers call: the CLI and the language server"
+
+[lints]
+workspace = true
+
+[dependencies]
+pith-core.workspace = true
+pith-diag.workspace = true
+pith-engine.workspace = true
+pith-executor-local.workspace = true
+pith-hir.workspace = true
+pith-ids.workspace = true
+pith-loader.workspace = true
+pith-output.workspace = true
+pith-state-sqlite.workspace = true
+pith-store.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

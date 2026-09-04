@@ -249,6 +249,42 @@ fn sort_by_is_stable_for_equal_keys() {
     assert_eq!(values, ["first", "second", "third"]);
 }
 
+#[test]
+fn text_join_rejoins_the_fields_a_split_produced() {
+    let list_of_text = Type::List(Box::new(Type::Text));
+    let join = |separator: &str| {
+        RuleBody::new(BodyExpr::TextJoin {
+            list: Box::new(BodyExpr::Bound(0)),
+            separator: Box::new(BodyExpr::Literal(Value::Text(separator.into()))),
+        })
+    };
+    let signature = interface([list_of_text.clone()], Type::Text);
+
+    // Adjacent empty fields stay observable, and the separator never
+    // surrounds the join (decision 0064's round trip).
+    let fields = Value::List(Box::new([
+        Value::Text("a".into()),
+        Value::Text("".into()),
+        Value::Text("b".into()),
+    ]));
+    assert_eq!(
+        evaluate(join(","), signature.clone(), [fields]),
+        Value::Text("a,,b".into())
+    );
+
+    let empty = Value::List(Box::new([]));
+    assert_eq!(
+        evaluate(join(","), signature.clone(), [empty]),
+        Value::Text("".into())
+    );
+
+    let single = Value::List(Box::new([Value::Text("only".into())]));
+    assert_eq!(
+        evaluate(join(","), signature, [single]),
+        Value::Text("only".into())
+    );
+}
+
 struct Echo;
 
 impl PureRule for Echo {

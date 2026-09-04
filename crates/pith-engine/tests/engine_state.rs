@@ -10,7 +10,7 @@ use pith_engine::state::{
     DurableActionRequest, DurableAttemptId, DurableAttemptState, DurableAttemptStatus,
     DurableCapturedExecutionReport, DurableCapturedOutput, DurableComputation, DurableDependency,
     DurableDiagnostic, DurableProvenance, DurableReuseDecision, DurableReuseReason, DurableRule,
-    EncodedValue, EngineStateError, EngineStateStore, ExpectedReuseDecision,
+    EncodedValue, EngineStateError, EngineStateReader, EngineStateStore, ExpectedReuseDecision,
     InvalidActionLifecycleReason, InvalidDependencyReason, MemoryEngineStateStore, StoppedAttempt,
 };
 use pith_engine::{

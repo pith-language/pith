@@ -6,7 +6,7 @@ summary: three pure frontend rules share canonical source and import inputs, fet
 kind: decision
 status: proposed
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-08-28
 tags:
   - language
   - graph
@@ -142,12 +142,15 @@ The same suite covers multi-file cross-reference elaboration, source and import 
 duplicate-key refusal, interface-surface round trips, and a broken rule completed with its source-bound
 diagnostic and `incomplete` entry.
 
-## unresolved
+## amendment after M-13
 
-The milestone text names a represented-body edit as the cutoff witness. M-12 has no represented-body
-source spelling — 0062 deliberately landed hand-built IR and M-13 owns notation — so the current witness
-uses a rule-label edit that changes `bodies-of(alpha)` but not its interface. The exact body-text case must
-be added when M-13 makes that edit expressible; M-12 remains underway until then.
+The represented-body cutoff witness now exists.
+`a_body_edit_moves_bodies_and_leaves_the_interface_surface_byte_identical` edits a written body in A,
+recomputes `bodies-of(A)`, serves `interface-of(A)` as `Reused`, and serves the dependent `bodies-of(B)` as
+`Reused`; A's interface surface and ABI are byte-identical across the edit. The representation edit beside
+it is the invalidating control. M-12 is complete.
+
+## unresolved
 
 `ModuleInterface` temporarily carries the surface bytes. If a later kernel mechanism can publish derived
 content without widening the represented step vocabulary, the value can return to the architecture's

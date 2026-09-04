@@ -4,7 +4,7 @@
 //! `text-size` and `line-index` are wrapped behind [`Span`] / [`SourceFile`]
 //! so they never appear in public types outside this module.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ByteOffset(pub u32);
@@ -38,6 +38,8 @@ pub struct SourceFile {
     pub id: SourceId,
     pub label: Box<str>,
     text: Box<str>,
+
+    line_index: OnceLock<line_index::LineIndex>,
 }
 
 /// One line of a [`SourceFile`]: its 1-based number, the span of its content
@@ -55,6 +57,7 @@ impl SourceFile {
             id,
             label: label.into(),
             text: text.into(),
+            line_index: OnceLock::new(),
         }
     }
 
@@ -92,7 +95,9 @@ impl SourceFile {
     }
 
     pub fn line_col(&self, offset: ByteOffset) -> (usize, usize) {
-        let index = line_index::LineIndex::new(self.source_text());
+        let index = self
+            .line_index
+            .get_or_init(|| line_index::LineIndex::new(self.source_text()));
         let pos = line_index::TextSize::new(offset.0);
         let line_col = index.line_col(pos);
         (
@@ -250,6 +255,9 @@ pub enum EngineCode {
     ObserverMissing = 217,
     /// `E-1218` — a represented rule body produced a declared value failure.
     RepresentedBodyFailed = 218,
+    /// `E-1219` — action planning was requested for an entry whose pure
+    /// evaluation completed without reaching an action.
+    EntryHasNoAction = 219,
 }
 
 impl From<EngineCode> for StableCode {
@@ -281,7 +289,7 @@ pub struct Diag {
     pub span: Span,
     pub source: Option<Arc<SourceFile>>,
     pub message: Text,
-    pub notes: Box<[Note]>,
+    pub notes: Vec<Note>,
 }
 
 #[derive(Clone, Debug)]
@@ -312,7 +320,7 @@ impl Diag {
             span,
             source: None,
             message: Text::new(message),
-            notes: Box::new([]),
+            notes: Vec::new(),
         }
     }
 
@@ -329,14 +337,10 @@ impl Diag {
     }
 
     pub fn with_note(mut self, span: Span, message: impl Into<Box<str>>) -> Self {
-        self.notes = {
-            let mut v = Vec::from(self.notes);
-            v.push(Note {
-                span,
-                message: Text::new(message),
-            });
-            v.into_boxed_slice()
-        };
+        self.notes.push(Note {
+            span,
+            message: Text::new(message),
+        });
         self
     }
 }
@@ -482,27 +486,57 @@ mod tests {
 
     #[test]
     fn engine_code_discriminants_are_stable() {
-        // K-11 stability: these numbers are the public contract.
-        assert_eq!(StableCode::from(EngineCode::NoRuleForInterface).0, 1101);
-        assert_eq!(StableCode::from(EngineCode::AmbiguousRule).0, 1102);
-        assert_eq!(StableCode::from(EngineCode::RequestInputsMismatch).0, 1103);
-        assert_eq!(StableCode::from(EngineCode::ResultTypeMismatch).0, 1104);
-        assert_eq!(StableCode::from(EngineCode::InvalidActionSpec).0, 1105);
-        assert_eq!(StableCode::from(EngineCode::DependencyCycle).0, 1203);
-        assert_eq!(StableCode::from(EngineCode::InternalInvariant).0, 1204);
-        assert_eq!(StableCode::from(EngineCode::ContentUnavailable).0, 1205);
-        assert_eq!(StableCode::from(EngineCode::EffectfulStepInPure).0, 1206);
-        assert_eq!(StableCode::from(EngineCode::StoreError).0, 1207);
-        assert_eq!(
-            StableCode::from(EngineCode::UndeclaredCapabilityUse).0,
-            1208
-        );
-        assert_eq!(StableCode::from(EngineCode::UndeclaredOutput).0, 1209);
-        assert_eq!(StableCode::from(EngineCode::MissingDeclaredOutput).0, 1210);
-        assert_eq!(StableCode::from(EngineCode::PlatformMismatch).0, 1212);
-        assert_eq!(StableCode::from(EngineCode::PolicyDenied).0, 1213);
-        assert_eq!(StableCode::from(EngineCode::InterruptedAttempt).0, 1214);
-        assert_eq!(StableCode::from(EngineCode::RepresentedBodyFailed).0, 1218);
+        // K-11 stability: these numbers are the public contract. The match
+        // names every variant with no wildcard, so a new variant fails to
+        // compile until its number is pinned here.
+        for code in [
+            EngineCode::NoRuleForInterface,
+            EngineCode::AmbiguousRule,
+            EngineCode::RequestInputsMismatch,
+            EngineCode::ResultTypeMismatch,
+            EngineCode::InvalidActionSpec,
+            EngineCode::DependencyCycle,
+            EngineCode::InternalInvariant,
+            EngineCode::ContentUnavailable,
+            EngineCode::EffectfulStepInPure,
+            EngineCode::StoreError,
+            EngineCode::UndeclaredCapabilityUse,
+            EngineCode::UndeclaredOutput,
+            EngineCode::MissingDeclaredOutput,
+            EngineCode::PlatformMismatch,
+            EngineCode::PolicyDenied,
+            EngineCode::InterruptedAttempt,
+            EngineCode::RunCancelled,
+            EngineCode::RunBoundExceeded,
+            EngineCode::ObserverMissing,
+            EngineCode::RepresentedBodyFailed,
+            EngineCode::EntryHasNoAction,
+        ] {
+            let pinned = match code {
+                EngineCode::NoRuleForInterface => 1101,
+                EngineCode::AmbiguousRule => 1102,
+                EngineCode::RequestInputsMismatch => 1103,
+                EngineCode::ResultTypeMismatch => 1104,
+                EngineCode::InvalidActionSpec => 1105,
+                EngineCode::DependencyCycle => 1203,
+                EngineCode::InternalInvariant => 1204,
+                EngineCode::ContentUnavailable => 1205,
+                EngineCode::EffectfulStepInPure => 1206,
+                EngineCode::StoreError => 1207,
+                EngineCode::UndeclaredCapabilityUse => 1208,
+                EngineCode::UndeclaredOutput => 1209,
+                EngineCode::MissingDeclaredOutput => 1210,
+                EngineCode::PlatformMismatch => 1212,
+                EngineCode::PolicyDenied => 1213,
+                EngineCode::InterruptedAttempt => 1214,
+                EngineCode::RunCancelled => 1215,
+                EngineCode::RunBoundExceeded => 1216,
+                EngineCode::ObserverMissing => 1217,
+                EngineCode::RepresentedBodyFailed => 1218,
+                EngineCode::EntryHasNoAction => 1219,
+            };
+            assert_eq!(StableCode::from(code).0, pinned);
+        }
     }
 
     #[test]

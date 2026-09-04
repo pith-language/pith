@@ -67,4 +67,5 @@ the repository separates current design from the evidence and decisions that pro
 - [the module system](planning/module-system.md)
 - [the frontend architecture](planning/frontend-architecture.md)
 - [the surface notation](planning/surface-notation.md)
+- [the cli surface](planning/cli-surface.md)
 

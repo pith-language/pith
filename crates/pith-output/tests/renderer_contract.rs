@@ -2,10 +2,12 @@
 
 use std::io::{self, Write};
 
+use pith_output::palette::Palette;
 use pith_output::{
     CacheOutcome, ExplainStep, JsonRenderer, OutputRecord, Payload, PhaseStatus, PlainRenderer,
     PrettyRenderer, RecordKind, Renderer, Sink,
 };
+use termprofile::TermProfile;
 
 #[derive(Default)]
 struct FailingWriter {
@@ -158,10 +160,13 @@ fn json_renderer_propagates_write_failure() {
 
 #[test]
 fn pretty_renderer_propagates_write_failure() {
-    let mut renderer = PrettyRenderer::new(FailingWriter {
-        fail_write: true,
-        fail_flush: false,
-    });
+    let mut renderer = PrettyRenderer::new(
+        FailingWriter {
+            fail_write: true,
+            fail_flush: false,
+        },
+        Palette::for_profile(TermProfile::TrueColor),
+    );
 
     assert_eq!(
         renderer
@@ -195,4 +200,15 @@ fn sink_emit_propagates_renderer_failure() {
     let mut sink = Sink::new(JsonRenderer::new(writer));
 
     assert!(sink.emit(&OutputRecord::cache(CacheOutcome::Hit)).is_err());
+}
+
+#[test]
+fn sink_raw_write_propagates_renderer_failure() {
+    let writer = FailingWriter {
+        fail_write: true,
+        fail_flush: false,
+    };
+    let mut sink = Sink::new(PlainRenderer::new(writer));
+
+    assert!(sink.write_raw(b"payload").is_err());
 }

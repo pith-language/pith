@@ -11,6 +11,9 @@ pub enum DefinitionKind {
     Sum,
     Alias,
     HostRule(RuleCategory),
+    RepresentedRule(RuleCategory),
+    Local,
+    Entry,
 }
 
 #[derive(Clone, Debug)]
@@ -111,6 +114,9 @@ impl ReferenceSite {
 pub struct PositionSidecar {
     definitions: Box<[DefinitionLocation]>,
     references: Box<[ReferenceSite]>,
+
+    reference_reach: Box<[(ByteOffset, usize)]>,
+    definition_reach: Box<[(ByteOffset, usize)]>,
 }
 
 impl PositionSidecar {
@@ -126,27 +132,61 @@ impl PositionSidecar {
 
     #[must_use]
     pub fn definition_at(&self, offset: ByteOffset) -> Option<&DefinitionLocation> {
-        self.references
-            .iter()
-            .find(|reference| contains(reference.span, offset))
-            .map(ReferenceSite::definition)
-            .or_else(|| {
-                self.definitions
-                    .iter()
-                    .find(|definition| contains(definition.span, offset))
-            })
+        if let Some(index) = self.reference_index_at(offset)
+            && let Some(reference) = self.references.get(index)
+        {
+            return Some(reference.definition());
+        }
+        self.definition_index_at(offset)
+            .and_then(|index| self.definitions.get(index))
+    }
+
+    fn reference_index_at(&self, offset: ByteOffset) -> Option<usize> {
+        let cut = self
+            .references
+            .partition_point(|reference| reference.span.start <= offset);
+        let &(end, position) = self.reference_reach.get(cut.checked_sub(1)?)?;
+        (end > offset).then_some(position)
+    }
+
+    fn definition_index_at(&self, offset: ByteOffset) -> Option<usize> {
+        let cut = self
+            .definitions
+            .partition_point(|definition| definition.span.start <= offset);
+        let &(end, position) = self.definition_reach.get(cut.checked_sub(1)?)?;
+        (end > offset).then_some(position)
     }
 
     pub fn new(definitions: Vec<DefinitionLocation>, references: Vec<ReferenceSite>) -> Self {
+        let mut definitions = definitions;
+        let mut references = references;
+        definitions.sort_by_key(|definition| definition.span.start);
+        references.sort_by_key(|reference| reference.span.start);
+        let reference_reach = prefix_reach(references.iter().map(|reference| reference.span.end));
+        let definition_reach =
+            prefix_reach(definitions.iter().map(|definition| definition.span.end));
         Self {
             definitions: definitions.into(),
             references: references.into(),
+            reference_reach,
+            definition_reach,
         }
     }
 }
 
-fn contains(span: Span, offset: ByteOffset) -> bool {
-    span.start <= offset && offset < span.end
+fn prefix_reach(ends: impl Iterator<Item = ByteOffset>) -> Box<[(ByteOffset, usize)]> {
+    let mut reach = Vec::new();
+    let mut best: Option<(ByteOffset, usize)> = None;
+    for (position, end) in ends.enumerate() {
+        best = match best {
+            Some((current, at)) if current >= end => Some((current, at)),
+            _ => Some((end, position)),
+        };
+        if let Some(best) = best {
+            reach.push(best);
+        }
+    }
+    reach.into()
 }
 
 fn source_slice(source: &SourceFile, span: Span) -> Option<&str> {

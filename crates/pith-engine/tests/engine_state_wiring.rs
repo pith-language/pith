@@ -11,10 +11,10 @@ use pith_core::{
 };
 use pith_diag::{PithResult, Span};
 use pith_engine::state::{
-    CompletedAttempt, DurableActionProvenance, DurableAttempt, DurableAttemptId,
+    AttemptStatistics, CompletedAttempt, DurableActionProvenance, DurableAttempt, DurableAttemptId,
     DurableAttemptState, DurableComputation, DurableDependency, DurableProvenance,
-    DurableReuseDecision, EncodedValue, EngineStateError, EngineStateStore, EngineStateVersions,
-    InvalidationExplanation, MemoryEngineStateStore, StoppedAttempt,
+    DurableReuseDecision, EncodedValue, EngineStateError, EngineStateReader, EngineStateStore,
+    EngineStateVersions, InvalidationExplanation, MemoryEngineStateStore, StoppedAttempt,
 };
 use pith_engine::{
     AccessVerification, ActionAuthorization, ActionExecution, ActionInvocation, ActionRule,
@@ -545,5 +545,7 @@ mod action_publication;
 mod dependency_hydration;
 #[path = "engine_state_wiring/durable_reuse.rs"]
 mod durable_reuse;
+#[path = "engine_state_wiring/entry_planning.rs"]
+mod entry_planning;
 #[path = "engine_state_wiring/pure_publication.rs"]
 mod pure_publication;

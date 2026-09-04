@@ -133,6 +133,14 @@ pub struct ActionPlan {
     pub spec: ActionSpec,
 }
 
+/// The first action reached while evaluating an entry's pure prefix, together
+/// with the contract selected and planned for it.
+#[derive(Clone, Debug)]
+pub struct EntryActionPlan {
+    pub request: Request<Action>,
+    pub action: ActionPlan,
+}
+
 /// Declared contract, authorization, and executor reports retained as action provenance.
 pub struct ActionRecord {
     /// The reusable index key for this rule application (decision 0031).

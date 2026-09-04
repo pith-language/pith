@@ -8,9 +8,7 @@ pub enum ValueRepr {
     Bool {
         b: bool,
     },
-    /// The decimal spelling of an arbitrary-precision integer. A JSON number is
-    /// a double to most readers, so a value beyond 2^53 would be rendered back
-    /// rounded (decision 0055).
+    /// Decimal text preserves integers that JSON number consumers would round.
     Int {
         decimal: Box<str>,
     },
@@ -62,9 +60,7 @@ pub enum TypeRepr {
         name: Box<str>,
         constructors: Box<[SumConstructorRepr]>,
     },
-    /// The recursion cut inside a declaration's body (decision 0047). Rendered
-    /// as a distinct kind rather than as the enclosing declaration repeated, so
-    /// a reader sees a finite type.
+    /// A recursion cut keeps the projected type finite.
     Cut,
 }
 
@@ -72,4 +68,464 @@ pub enum TypeRepr {
 pub struct SumConstructorRepr {
     pub name: Box<str>,
     pub payload: Option<Box<TypeRepr>>,
+}
+
+/// The version of the DTO contract below. `--output json` is a machine
+/// surface, so the shape a reader parses is versioned separately from the
+/// binary: bump this when a DTO's shape changes, and never for a change that
+/// only adds a command. The `query_view_shape_is_stable` snapshots are what
+/// make the number mean something.
+pub const QUERY_API_VERSION: u32 = 4;
+
+/// A DTO projection of `pith_diag::Severity`. Mirrored here rather than
+/// imported for the reason `ValueRepr` is: this crate holds serde and depends
+/// on nothing else in the stack. The driver converts through an exhaustive
+/// match, so a variant added upstream fails to compile rather than drifting.
+#[derive(Copy, Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SeverityRepr {
+    Error,
+    Warning,
+    Info,
+    Note,
+}
+
+/// One diagnostic, projected for a machine reader. The rendered form a person
+/// sees still goes through miette at the CLI boundary; this carries the same
+/// facts without the snippet.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct DiagnosticRepr {
+    pub severity: SeverityRepr,
+    /// The stable code (K-11). Never renumbered, only added to.
+    pub code: u32,
+    /// The source file the diagnostic points into, when it points into one.
+    pub label: Option<Box<str>>,
+    /// One-based line and column, absent for a diagnostic carrying no source.
+    pub line: Option<u64>,
+    pub column: Option<u64>,
+    pub message: Box<str>,
+}
+
+/// What `pith check` found. Reported whether or not elaboration succeeded,
+/// which is the property that keeps `check` outside the entry mechanism.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct CheckReport {
+    pub module: Box<str>,
+    pub path: Box<str>,
+    /// The module's semantic ABI digest, present only when it elaborated.
+    pub abi_digest: Option<Box<str>>,
+    pub diagnostics: Box<[DiagnosticRepr]>,
+    pub errors: u64,
+    pub warnings: u64,
+}
+
+/// What `pith fmt` did to one module. Like `check`, it works on source that
+/// does not elaborate — but not on source that does not parse, which is a
+/// refusal rather than a status.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct FmtReport {
+    pub module: Box<str>,
+    pub path: Box<str>,
+    pub status: FmtStatus,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FmtStatus {
+    /// Already canonical; nothing was written.
+    Unchanged,
+    /// Not canonical, and written back.
+    Formatted,
+    /// Not canonical, and left alone because `--check` was asked for.
+    WouldFormat,
+}
+
+/// The effect category written before a rule declaration.
+#[derive(Copy, Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleCategoryRepr {
+    Pure,
+    Action,
+}
+
+/// Whether a rule is implemented by the host or represented body IR.
+#[derive(Copy, Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TierRepr {
+    Host,
+    Represented,
+}
+
+impl TierRepr {
+    /// The snake_case spelling the JSON contract and the human renderer share.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TierRepr::Host => "host",
+            TierRepr::Represented => "represented",
+        }
+    }
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct InterfaceRepr {
+    pub inputs: Box<[TypeRepr]>,
+    pub output: Box<TypeRepr>,
+    /// The one-line spelling `Display for Interface` produces. The surface
+    /// notation renders the interface literal wherever the short call-site
+    /// form is written, so the rendered line travels with the structure.
+    pub rendered: Box<str>,
+}
+
+/// A declaration's semantic body.
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(tag = "declaration_kind", rename_all = "snake_case")]
+pub enum DeclarationBodyRepr {
+    Nominal {
+        representation: Box<TypeRepr>,
+    },
+    Sum {
+        constructors: Box<[SumConstructorRepr]>,
+    },
+    Alias {
+        target: Box<TypeRepr>,
+    },
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct DeclarationView {
+    pub name: Box<str>,
+    pub body: DeclarationBodyRepr,
+    /// The declaration grammar's own spelling of the body, from
+    /// `Display for DeclarationBody`. A reader gets the source form back
+    /// rather than a second notation invented at the renderer.
+    pub rendered: Box<str>,
+    /// The declaration's own revision digest. Doc text does not participate,
+    /// so editing a description leaves this where it was.
+    pub digest: Box<str>,
+    pub documentation: Box<str>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct RuleView {
+    pub label: Box<str>,
+    pub category: RuleCategoryRepr,
+    pub tier: TierRepr,
+    pub interface: InterfaceRepr,
+    pub documentation: Box<str>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct ImportView {
+    pub module: Box<str>,
+    pub abi_digest: Box<str>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct EntryView {
+    pub name: Box<str>,
+    pub coordinate: Box<str>,
+    pub tier: TierRepr,
+    pub interface: InterfaceRepr,
+    pub documentation: Box<str>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(tag = "about_value_kind", rename_all = "snake_case")]
+pub enum AboutValueRepr {
+    Text { text: Box<str> },
+    List { elements: Box<[Box<str>]> },
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct AboutView {
+    pub fields: Box<[(Box<str>, AboutValueRepr)]>,
+    pub documentation: Box<str>,
+}
+
+/// What `pith explore` shows: everything a module declares, and which tier
+/// answers each rule.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct ModuleView {
+    pub module: Box<str>,
+    pub path: Box<str>,
+    pub abi_digest: Box<str>,
+    pub imports: Box<[ImportView]>,
+    pub declarations: Box<[DeclarationView]>,
+    pub rules: Box<[RuleView]>,
+    pub entries: Box<[EntryView]>,
+    pub about: Box<[AboutView]>,
+}
+
+#[derive(Copy, Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvaluationSourceRepr {
+    Computed,
+    Reused,
+    Hydrated,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct RunView {
+    pub entry: Box<str>,
+    pub coordinate: Box<str>,
+    pub interface: InterfaceRepr,
+    pub source: EvaluationSourceRepr,
+    pub value: ValueRepr,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct SelectionView {
+    pub entry: Box<str>,
+    pub rule: Box<str>,
+    pub tier: TierRepr,
+    pub interface: InterfaceRepr,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(tag = "program_kind", rename_all = "snake_case")]
+pub enum ActionProgramRepr {
+    HostPath { path: Box<str> },
+    Content { digest: Box<str> },
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(tag = "content_kind", rename_all = "snake_case")]
+pub enum ActionInputContentRepr {
+    Blob { digest: Box<str> },
+    Tree { digest: Box<str> },
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct ActionInputRepr {
+    pub path: Box<str>,
+    pub content: ActionInputContentRepr,
+}
+
+#[derive(Copy, Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputKindRepr {
+    Blob,
+    Tree,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct ActionOutputRepr {
+    pub path: Box<str>,
+    pub kind: OutputKindRepr,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct EnvironmentVariableRepr {
+    pub name: Box<str>,
+    pub value: Box<str>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(tag = "platform_kind", rename_all = "snake_case")]
+pub enum PlatformRequirementRepr {
+    Any,
+    Exact {
+        operating_system: Box<str>,
+        architecture: Box<str>,
+    },
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct CapabilityRequirementRepr {
+    pub name: Box<str>,
+    pub scope: Box<str>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(tag = "network_kind", rename_all = "snake_case")]
+pub enum NetworkPolicyRepr {
+    Deny,
+    AllowHosts { hosts: Box<[Box<str>]> },
+    AllowAll,
+}
+
+#[derive(Copy, Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExitStatusContractRepr {
+    SuccessRequired,
+    Reported,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct ActionContractRepr {
+    pub executable: ActionProgramRepr,
+    pub toolchain: Box<[Box<str>]>,
+    pub arguments: Box<[Box<str>]>,
+    pub inputs: Box<[ActionInputRepr]>,
+    pub outputs: Box<[ActionOutputRepr]>,
+    pub environment: Box<[EnvironmentVariableRepr]>,
+    pub platform: PlatformRequirementRepr,
+    pub capabilities: Box<[CapabilityRequirementRepr]>,
+    pub network: NetworkPolicyRepr,
+    pub exit_status: ExitStatusContractRepr,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct ActionPlanView {
+    pub entry: Box<str>,
+    pub rule: Box<str>,
+    pub spec_digest: Box<str>,
+    pub contract: ActionContractRepr,
+}
+
+#[derive(Copy, Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttemptStatusRepr {
+    Pending,
+    Complete,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(tag = "dependency_kind", rename_all = "snake_case")]
+pub enum DependencyKindRepr {
+    Pure { digest: Box<str> },
+    Action,
+    Observation,
+    Blob { digest: Box<str> },
+    Capability { name: Box<str>, scope: Box<str> },
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct DependencyNodeRepr {
+    pub label: Box<str>,
+    pub attempt: Option<u64>,
+    pub status: Option<AttemptStatusRepr>,
+    pub dependency: DependencyKindRepr,
+    pub children: Box<[DependencyNodeRepr]>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct DependenciesView {
+    pub entry: Box<str>,
+    pub root: Option<Box<DependencyNodeRepr>>,
+}
+
+/// One entry of a stored tree. Symlinks are stored rather than followed.
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(tag = "entry_kind", rename_all = "snake_case")]
+pub enum TreeEntryRepr {
+    File {
+        name: Box<str>,
+        content: Box<str>,
+        executable: bool,
+    },
+    Tree {
+        name: Box<str>,
+        content: Box<str>,
+    },
+    Symlink {
+        name: Box<str>,
+        /// The target as the manifest stores it, lossily rendered. The bytes
+        /// are not required to be UTF-8, and the identity lives in the tree.
+        target: Box<str>,
+    },
+}
+
+/// A tree's entries, in the canonical name order the manifest fixes.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct TreeListing {
+    pub tree: Box<str>,
+    pub entries: Box<[TreeEntryRepr]>,
+}
+
+/// Content admitted to or read from the store, named by its identity.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct StoredContent {
+    pub id: Box<str>,
+    pub kind: StoredContentKind,
+    /// The path the bytes came from or were written to, when there was one.
+    pub path: Option<Box<str>>,
+}
+
+#[derive(Copy, Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StoredContentKind {
+    Blob,
+    Tree,
+}
+
+/// Attempt counts by terminal state.
+#[derive(Copy, Clone, Debug, Default, serde::Serialize)]
+pub struct AttemptCounts {
+    pub total: u64,
+    pub pending: u64,
+    pub complete: u64,
+    pub failed: u64,
+    pub cancelled: u64,
+}
+
+/// What `pith state info` reports about one engine-state database.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct StateInfo {
+    /// The adapter holding the records, which is also who a repair question
+    /// is addressed to.
+    pub adapter: Box<str>,
+    pub schema_version: u32,
+    pub semantic_encoding_version: u32,
+    pub attempts: AttemptCounts,
+    /// Entries in the reusable index: one per computation key holding a
+    /// completed reusable attempt.
+    pub reusable_index: u64,
+}
+
+/// What `pith state check` reports: every durable record read back through
+/// the decode validation an individual lookup applies.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct StateCheck {
+    pub records: u64,
+}
+
+/// What `pith gc --dry-run` would reclaim when reusable-index entries are the
+/// only roots. Reclaimable counts are upper bounds until additional retention
+/// roots are configured.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct GcPreview {
+    /// Reusable-index entries: the roots.
+    pub roots: u64,
+    /// Attempts reachable from the roots over recorded dependency edges.
+    pub retained_attempts: u64,
+    pub reclaimable_attempts: u64,
+    pub content: ContentPreview,
+}
+
+/// Content retained directly by engine state or transitively through trees.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct ContentPreview {
+    pub blobs: u64,
+    pub trees: u64,
+    pub live_blobs: u64,
+    pub live_trees: u64,
+    pub reclaimable_blobs: u64,
+    pub reclaimable_trees: u64,
+    /// On-disk sizes summed over the objects each field counts.
+    pub total_bytes: u64,
+    pub live_bytes: u64,
+    pub reclaimable_bytes: u64,
+}
+
+/// Everything a query method can answer with. One tagged enum rather than a
+/// payload variant per command, so adding a command extends this in one place
+/// and `QUERY_API_VERSION` covers the whole surface.
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(tag = "view", rename_all = "snake_case")]
+pub enum QueryView {
+    Check(CheckReport),
+    Format(FmtReport),
+    Module(ModuleView),
+    Tree(TreeListing),
+    Content(StoredContent),
+    State(StateInfo),
+    StateCheck(StateCheck),
+    Gc(GcPreview),
+    Run(RunView),
+    Selection(SelectionView),
+    ActionPlan(ActionPlanView),
+    Dependencies(DependenciesView),
 }

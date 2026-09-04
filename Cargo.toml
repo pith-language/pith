@@ -14,6 +14,7 @@ members = [
     "crates/pith-syntax",
     "crates/pith-elaborator",
     "crates/pith-loader",
+    "crates/pith-query",
     "crates/xylem",
     "crates/phloem",
     "crates/example-domain",
@@ -67,10 +68,17 @@ rustix = { version = "1", default-features = false, features = ["process"] }
 libc = "0.2.189"
 # Per-action scratch roots for the sandboxed executor (decision 0028).
 tempfile = "3"
-anstream = "0.6"
 anstyle = "1"
-owo-colors = "4"
-clap = { version = "4", features = ["derive"] }
+# Detects truecolor, ANSI-256, ANSI-16, no-color, and non-TTY outputs. The CLI
+# enables passive terminfo detection.
+termprofile = "0.2.4"
+# Reads the terminal's current default foreground and background with OSC
+# 10/11. Kept at the CLI boundary; pith-output receives a small RGB value type
+# and remains independent of terminal I/O.
+terminal-colorsaurus = "1.0.3"
+# `env` backs the PITH_STORE and PITH_STATE globals, so the fallback is not
+# hand-rolled and `--help` renders the variable name itself.
+clap = { version = "4", features = ["derive", "env"] }
 proptest = "1"
 proptest-derive = "0.5"
 arbitrary = { version = "1", features = ["derive"] }
@@ -87,6 +95,7 @@ pith-hir = { path = "crates/pith-hir", version = "0.1.0" }
 pith-syntax = { path = "crates/pith-syntax", version = "0.1.0" }
 pith-elaborator = { path = "crates/pith-elaborator", version = "0.1.0" }
 pith-loader = { path = "crates/pith-loader", version = "0.1.0" }
+pith-query = { path = "crates/pith-query", version = "0.1.0" }
 pith-executor-local = { path = "crates/pith-executor-local", version = "0.1.0" }
 xylem = { path = "crates/xylem", version = "0.1.0" }
 phloem = { path = "crates/phloem", version = "0.1.0" }

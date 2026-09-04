@@ -4,6 +4,11 @@
 //! executors in `pith-engine` are responsible for enforcing the contract.
 
 use pith_ids::ContentId;
+use pith_output::dto::{
+    ActionContractRepr, ActionInputContentRepr, ActionInputRepr, ActionOutputRepr,
+    ActionProgramRepr, CapabilityRequirementRepr, EnvironmentVariableRepr, ExitStatusContractRepr,
+    NetworkPolicyRepr, OutputKindRepr, PlatformRequirementRepr,
+};
 
 mod manifest;
 mod validation;
@@ -12,7 +17,7 @@ mod validation;
 /// without yet carrying payload (a declared action output), and as the return
 /// of [`Content::kind`]. This is the single source of truth for the two
 /// top-level content variants.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum OutputKind {
     Blob,
     Tree,
@@ -80,7 +85,7 @@ pub enum PlatformRequirement {
 ///
 /// Names and scopes are semantic values so domain libraries can add
 /// capabilities without patching the kernel.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CapabilityRequirement {
     pub name: Box<str>,
     pub scope: Box<str>,
@@ -208,6 +213,84 @@ impl ActionSpec {
             capabilities: Box::new([]),
             network: NetworkPolicy::Deny,
             exit_status: ExitStatusContract::SuccessRequired,
+        }
+    }
+}
+
+impl From<&ActionSpec> for ActionContractRepr {
+    fn from(spec: &ActionSpec) -> Self {
+        Self {
+            executable: match &spec.executable {
+                ActionProgram::HostPath(path) => ActionProgramRepr::HostPath { path: path.clone() },
+                ActionProgram::Content(content) => ActionProgramRepr::Content {
+                    digest: content.digest().to_string().into(),
+                },
+            },
+            toolchain: spec.toolchain.clone(),
+            arguments: spec.arguments.clone(),
+            inputs: spec
+                .inputs
+                .iter()
+                .map(|input| ActionInputRepr {
+                    path: input.path.clone(),
+                    content: match &input.content {
+                        Content::Blob(content) => ActionInputContentRepr::Blob {
+                            digest: content.digest().to_string().into(),
+                        },
+                        Content::Tree(content) => ActionInputContentRepr::Tree {
+                            digest: content.digest().to_string().into(),
+                        },
+                    },
+                })
+                .collect(),
+            outputs: spec
+                .outputs
+                .iter()
+                .map(|output| ActionOutputRepr {
+                    path: output.path.clone(),
+                    kind: match output.kind {
+                        OutputKind::Blob => OutputKindRepr::Blob,
+                        OutputKind::Tree => OutputKindRepr::Tree,
+                    },
+                })
+                .collect(),
+            environment: spec
+                .environment
+                .iter()
+                .map(|variable| EnvironmentVariableRepr {
+                    name: variable.name.clone(),
+                    value: variable.value.clone(),
+                })
+                .collect(),
+            platform: match &spec.platform {
+                PlatformRequirement::Any => PlatformRequirementRepr::Any,
+                PlatformRequirement::Exact {
+                    operating_system,
+                    architecture,
+                } => PlatformRequirementRepr::Exact {
+                    operating_system: operating_system.clone(),
+                    architecture: architecture.clone(),
+                },
+            },
+            capabilities: spec
+                .capabilities
+                .iter()
+                .map(|capability| CapabilityRequirementRepr {
+                    name: capability.name.clone(),
+                    scope: capability.scope.clone(),
+                })
+                .collect(),
+            network: match &spec.network {
+                NetworkPolicy::Deny => NetworkPolicyRepr::Deny,
+                NetworkPolicy::AllowHosts(hosts) => NetworkPolicyRepr::AllowHosts {
+                    hosts: hosts.clone(),
+                },
+                NetworkPolicy::AllowAll => NetworkPolicyRepr::AllowAll,
+            },
+            exit_status: match spec.exit_status {
+                ExitStatusContract::SuccessRequired => ExitStatusContractRepr::SuccessRequired,
+                ExitStatusContract::Reported => ExitStatusContractRepr::Reported,
+            },
         }
     }
 }

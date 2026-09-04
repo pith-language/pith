@@ -52,6 +52,8 @@ const TAG_NEED_EACH: u8 = 25;
 const TAG_NEED_BLOB: u8 = 26;
 const TAG_NEED_ACTION: u8 = 27;
 const TAG_NEED_OBSERVATION: u8 = 28;
+const TAG_TEXT_BREAK: u8 = 30;
+const TAG_TEXT_JOIN: u8 = 31;
 
 impl RuleBody {
     /// Encode the body in the current version of the canonical body format.
@@ -202,6 +204,12 @@ fn encode_expression(encoded: &mut Vec<u8>, expression: &BodyExpr) {
         BodyExpr::TextOfBytes { bytes } => {
             encoded.push(TAG_TEXT_OF_BYTES);
             encode_expression(encoded, bytes);
+        }
+        BodyExpr::TextBreak { text, separator } => {
+            binary(encoded, TAG_TEXT_BREAK, text, separator);
+        }
+        BodyExpr::TextJoin { list, separator } => {
+            binary(encoded, TAG_TEXT_JOIN, list, separator);
         }
         BodyExpr::Need { request, resume } => {
             encoded.push(TAG_NEED);
@@ -391,6 +399,14 @@ fn decode_expression(
         }),
         TAG_TEXT_OF_BYTES => Ok(BodyExpr::TextOfBytes {
             bytes: Box::new(decode_expression(decoder, deeper)?),
+        }),
+        TAG_TEXT_BREAK => pair(decoder, deeper, |text, separator| BodyExpr::TextBreak {
+            text,
+            separator,
+        }),
+        TAG_TEXT_JOIN => pair(decoder, deeper, |list, separator| BodyExpr::TextJoin {
+            list,
+            separator,
         }),
         TAG_NEED => decode_need(decoder, deeper),
         TAG_NEED_ALL => decode_need_all(decoder, deeper),
@@ -721,6 +737,14 @@ mod tests {
             RuleBody::new(BodyExpr::TextOfBytes {
                 bytes: Box::new(BodyExpr::Bound(0)),
             }),
+            RuleBody::new(BodyExpr::TextBreak {
+                text: Box::new(BodyExpr::Bound(0)),
+                separator: Box::new(BodyExpr::Literal(Value::Text(",".into()))),
+            }),
+            RuleBody::new(BodyExpr::TextJoin {
+                list: Box::new(BodyExpr::Bound(0)),
+                separator: Box::new(BodyExpr::Literal(Value::Text(",".into()))),
+            }),
             RuleBody::new(BodyExpr::NeedBlob {
                 content: Box::new(BodyExpr::Bound(0)),
                 resume: Box::new(BodyExpr::Bound(0)),
@@ -824,11 +848,11 @@ mod tests {
 
         let mut unknown_tag = encoded.clone();
         if let Some(tag) = unknown_tag.get_mut(1) {
-            *tag = 30;
+            *tag = 32;
         }
         assert_eq!(
             RuleBody::decode_canonical(&unknown_tag).err(),
-            Some(CanonicalDecodeError::UnknownBodyTag { tag: 30 })
+            Some(CanonicalDecodeError::UnknownBodyTag { tag: 32 })
         );
 
         let mut trailing = encoded.clone();

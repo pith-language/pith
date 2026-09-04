@@ -1,9 +1,12 @@
 //! Shape coverage for every payload variant across all three renderers.
 
+use pith_output::dto::{QueryView, StoredContent, StoredContentKind};
+use pith_output::palette::Palette;
 use pith_output::{
     CacheOutcome, ExplainStep, JsonRenderer, OutputRecord, Payload, PhaseStatus, PlainRenderer,
     PrettyRenderer, RecordKind, Renderer,
 };
+use termprofile::TermProfile;
 
 fn every_phase_status() -> [(OutputRecord, &'static str); 3] {
     [
@@ -36,7 +39,7 @@ fn render_plain(record: &OutputRecord) -> String {
 
 fn render_pretty(record: &OutputRecord) -> String {
     let mut buf = Vec::new();
-    let mut renderer = PrettyRenderer::new(&mut buf);
+    let mut renderer = PrettyRenderer::new(&mut buf, Palette::for_profile(TermProfile::TrueColor));
     assert!(renderer.emit(record).is_ok());
     String::from_utf8(buf).unwrap_or_default()
 }
@@ -275,6 +278,14 @@ fn payload_record_kind_is_exhaustive_over_the_enum() {
             reuses: 0,
             errors: 0,
             wall_ms: 0,
+        },
+        Payload::Query {
+            api_version: 0,
+            query: QueryView::Content(StoredContent {
+                id: "0".into(),
+                kind: StoredContentKind::Blob,
+                path: None,
+            }),
         },
     ]
     .into_iter()

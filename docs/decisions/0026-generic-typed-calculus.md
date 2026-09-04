@@ -1,12 +1,12 @@
 ---
 schema: design-doc/v1
 id: decision-0026-generic-typed-calculus
-title: a generic structural type calculus, with nominal identity, generic uncertainty, and no predicate types
-summary: one closed structural calculus (records, declared sums, parametric generics, effect types, uncertainty types) with nominal identity as a declaration attribute; refinements stay out of the type language and live as pure validation rules
+title: a structural type calculus, with nominal identity, structural uncertainty, and no predicate types
+summary: one closed structural calculus of scalars, records, declared sums, parameterized builtin constructors, effect types, and uncertainty types, with nominal identity as a declaration attribute; user-defined generics and refinements stay out of the surface
 kind: decision
-status: proposed
+status: accepted
 created: 2026-05-13
-updated: 2026-08-21
+updated: 2026-08-28
 tags:
   - types
   - language
@@ -26,9 +26,15 @@ relations:
     - decision-0017-structural-with-nominal
 ---
 
-# a generic structural type calculus, with nominal identity, generic uncertainty, and no predicate types
+# a structural type calculus, with nominal identity, structural uncertainty, and no predicate types
 
 > supersedes [0017: structural types by default, nominal by declaration](0017-structural-with-nominal.md), whose structural-default and nominal-by-declaration mechanism becomes one section of the calculus below. 0017 stays in the repository; its proposed direction is replaced by this record. amends [0010: use a typed, pure, terminating declaration language](0010-typed-pure-language.md), whose unresolved list names "nominal versus structural typing, termination checking, row polymorphism, refinement performance, schema evolution, and module compatibility"; this record settles the calculus questions among those and leaves termination (0018), schema evolution, and module compatibility to their own records.
+
+> amendment, 2026-08-28: M-13's notation has no type-parameter declaration, type-variable, or
+> polymorphic-rule spelling. Rank-1 user-defined generics are withdrawn rather than left as a mandated
+> feature with no surface. Parameterized builtin constructors such as `List<Text>` remain structural type
+> application over concrete arguments; there is no `forall`, inference variable, or generic declaration.
+> With the convergence evidence below and this mismatch removed, the record is accepted.
 
 ## context
 
@@ -56,17 +62,19 @@ the calculus is structural by default. nominal identity is a declaration attribu
 
 the calculus has these constructors.
 
-scalar types are `Unit`, `Bool`, `Int` (arbitrary precision), `Text`, `Bytes`, and `Blob` (content-addressed identity). bounds on `Int` are a library concern expressed via generic uncertainty or declared nominal wrappers, with no proliferation of fixed-width scalar types.
+scalar types are `Unit`, `Bool`, `Int` (arbitrary precision), `Text`, `Bytes`, and `Blob` (content-addressed identity). bounds on `Int` are a library concern expressed through validation or declared nominal wrappers, with no proliferation of fixed-width scalar types.
 
 records are products of named fields. a record is closed: its field set is fixed by its type. there are no positional tuples; a tuple is a record whose field names happen to be numeric, and the engine treats it as one.
 
 declared sums are a nominal type with a fixed set of constructors, each optionally carrying a typed payload. pattern matching is exhaustive. this is the only sum mechanism.
 
-parametric type constructors cover `List<T>`, `Map<K, V>`, `Option<T>`, `Result<T, E>`, and the effect categories `Pure<A>`, `Action<A>`, `Observation<A>`, `Mutation<A>`, `Opaque<A>`, all of kind `* -> *` or `* -> * -> *`. type application is reified: `List<Int>` and `List<Text>` are distinct types, distinct cache keys, and distinct interface participants.
+parameterized builtin constructors accept concrete type arguments. The built value calculus currently needs
+`List<T>`; 0047 removed `Map`, `Option`, `Result`, and the effect categories from this value-type set because
+no value consumer earned them. Type application is reified: `List<Int>` and `List<Text>` are distinct types,
+distinct cache keys, and distinct interface participants. This notation is not quantification: authors
+cannot declare a type constructor or a rule abstract over `T`.
 
-generic quantification is rank 1 (prenex `forall`): a rule may be polymorphic over its type parameters. higher-rank and higher-order quantification are out of scope for the surface language.
-
-nominal declarations carry a name, an optional set of type parameters, and a structural representation. `nominal MachineId = Text` is not interchangeable with `Text` even though its representation matches. this is where the five identity types (0005, 0013) land: managed-object identity, content identity, external identity, and the rest are attributes of nominal declarations, with no separate registries.
+nominal declarations carry a name and a structural representation. `nominal MachineId = Text` is not interchangeable with `Text` even though its representation matches. this is where the five identity types (0005, 0013) land: managed-object identity, content identity, external identity, and the rest are attributes of nominal declarations, with no separate registries.
 
 effect types are the five effect categories from 0019 as type constructors of kind `* -> *`. they are in the calculus because the engine already dispatches on them structurally. this is settled by 0019; the calculus represents it.
 
@@ -92,9 +100,13 @@ no polymorphic (extensible) variants. the only sum mechanism is declared nominal
 
 the decisive reason is ambiguity. polymorphic variant tags live in a flat namespace and compose by silent unification; the `` `Running `` collision (service state versus build-step state) is the textbook failure. the structural composition across boundaries that polymorphic variants would provide is already provided by structural records, which compose by field name where a missing field is locally obvious. declared sums are what every comparable build and configuration system ships, and the OCaml community, including the designer of polymorphic variants, recommends declared variants for almost all code.
 
-no higher-order polymorphism in the surface. the calculus has type constructors (`* -> *`, `* -> * -> *`) because generics and the effect categories require them. it has no abstraction over type constructors (`(* -> *) -> *`): there is no `forall f. ...` and no `Functor`-style type class.
+no polymorphic abstraction in the surface. Parameterized builtin constructors do not imply abstraction over
+types or type constructors: there is no `forall a`, no `forall f`, and no `Functor`-style type class.
 
-the decisive reason is the cost-benefit curve. higher-kinded abstraction is what Haskell and Scala ship and what OCaml, Rust, Swift, and F# all declined, on inference-predictability grounds. no build, package, or deployment domain needs it. none of Nix, Bazel, Buck2, Dhall, Nickel, or CUE has it, and none has hit a wall because of its absence. the Yallop encoding proves that if a genuine need for higher-kinded abstraction ever appears, it can be added as a library technique without a language change. the IR carries ordinary type constructors because 0019's effect categories are `* -> *` constructors; the surface does not expose abstraction over them.
+the decisive reason is the cost-benefit curve. Polymorphic abstraction requires inference, instantiation,
+canonical variable binding, and a dispatch rule beyond exact interface equality. No measured build, package,
+or deployment domain needs it, and M-13 produced no honest spelling for it. A future consumer can reopen the
+question by amendment; an uninhabited promise is not part of the accepted calculus.
 
 no positional tuples. records are named-field only. a tuple is a record whose field names are numeric, with no separate calculus construct. one mechanism for products.
 
@@ -168,11 +180,11 @@ rejected on the cost-benefit curve, with no objection on principle. the GHC/Core
 
 ## consequences
 
-the `Type` enum in `pith-core` grows from six scalars and a nominal placeholder to a closed constructor set matching the list above. `Nominal` gains its representation and type parameters; the current `Nominal { name: Box<str> }` is a placeholder that this record replaces. the canonical-type serializer that 0023's digest already requires becomes the authority for type equality; there is no separate normalization pass because the calculus has no type-level computation.
+the `Type` enum in `pith-core` grows from six scalars and a nominal placeholder to a closed constructor set matching the list above. `Nominal` gains its representation; the current `Nominal { name: Box<str> }` is a placeholder that this record replaces. the canonical-type serializer that 0023's digest already requires becomes the authority for type equality; there is no separate normalization pass because the calculus has no type-level computation.
 
 rule selection (0015) stays exact-equality on canonical interfaces. cache identity (0023) digests canonical types directly. both are cheaper than they would be under any alternative that admitted row variables or type-level computation.
 
-library authors gain a complete calculus for domain types: records for configuration, declared sums for state machines and result types, generics for containers, nominal declarations for identity-bearing types, and a structural uncertainty vocabulary the engine understands. they lose row-polymorphic function signatures (a function must name the record it accepts) and refinement types in signatures (a predicate belongs in a validation rule, with no home in a type). both losses are deliberate and recoverable: rows via a future amendment restricted to local inference, refinements via external tools that read pith types without being in the kernel.
+library authors gain a complete calculus for the measured domain types: records for configuration, declared sums for state machines and result types, concrete applications of builtin containers, nominal declarations for identity-bearing types, and a structural uncertainty vocabulary the engine understands. they lose polymorphic and row-polymorphic function signatures (a function must name the concrete type it accepts) and refinement types in signatures (a predicate belongs in a validation rule, with no home in a type). those losses are deliberate and recoverable only through a future amendment with a measured consumer.
 
 the merge operator becomes the value-level composition tool. it is library-visible, typechecked, and provenance-carrying; it is not the global magic merge the principles reject. designing its exact signature and conflict policy is part of the values-and-types design work this record enables, with no claim on the calculus itself.
 
@@ -182,7 +194,7 @@ the uncertainty types and the effect categories compose. an `Observation` of a m
 
 > two things this section states in the present tense are no longer true of the tree. [0047](0047-the-declaration-table.md) removes nine constructors from the set below — `Map`, `Option`, `Result`, and the five effect categories, which were 0019's ir types read as value types — and builds the declaration site each nominal paragraph defers. and the four `RECORD_ENCODING_VERSION` bumps recorded below were made and then unwound: the constant reached 5 and returned to 1, which [0048](0048-pre-release-version-pinning.md) generalizes into one pinning rule for every version in the tree. read the bump sentences as history.
 
-the `Value::Nominal { name, representation: Box<Value> }` constructor landed before the rest of the constructor set above. the rest of the calculus — records, declared sums, parametric generics, effect and uncertainty constructors — is not built; only the one constructor that unblocks rule dispatch (0015) is. without an inhabiting value, `Type::Nominal` was declared, canonically encoded, and digested into computation keys (0023) but never matched: `value_type` returned `false` for every value against it, so any rule declaring a nominal output failed `ResultTypeMismatch` and any request declaring a nominal input failed `RequestInputsMismatch`. every content-producing rule collapsed to `(...) -> Blob`, and any two of them collided as `E-1102` ambiguity.
+the `Value::Nominal { name, representation: Box<Value> }` constructor landed before the rest of the constructor set above. records, declared sums, and uncertainty constructors were then unbuilt; only the one constructor that unblocks rule dispatch (0015) existed. without an inhabiting value, `Type::Nominal` was declared, canonically encoded, and digested into computation keys (0023) but never matched: `value_type` returned `false` for every value against it, so any rule declaring a nominal output failed `ResultTypeMismatch` and any request declaring a nominal input failed `RequestInputsMismatch`. every content-producing rule collapsed to `(...) -> Blob`, and any two of them collided as `E-1102` ambiguity.
 
 the slice that landed carries the 0026 semantics in miniature: a nominal value matches its own name only, and is not interchangeable with its representation. `value_type` returns `Type::Nominal { name }`; `is_type` accepts the value against `Type::Nominal { name }` when the names agree and rejects the representation's own type. `Type::Nominal` still carries only a name, not its declared representation, because the declaration site that would carry one does not exist yet; checking the name is what is checkable today. when the declaration lands, the representation type it carries becomes the second thing `is_type` verifies.
 
@@ -203,19 +215,19 @@ kernel crates. the four constructors that did land each came from a named domain
 claim this record can now make is not that the kernel does not change but that it converges, one domain at
 a time, and that the convergence is measured rather than asserted.
 
-that does not promote this record, and the reason is worth stating so a later reader does not mistake the
-measurement for acceptance. the constructor set that converged is the built subset. rank-1 prenex
-polymorphism is mandated here and the kernel cannot hold it — `Interface` is two concrete `Type`s and
-selection is exact equality — so a mandated feature has no implementation and no spelling. the uncertainty
-constructors are unbuilt, with 0047 gating each on the subsystem that would read it. the merge operator
-this record reserves shipped in stele under [0052](0052-the-merge-operator.md) rather than in the value
-layer. acceptance waits on the amendment [the language frontend](../planning/language-frontend.md) names —
-that generics have no surface — and on the parametric half either landing or being withdrawn. what has
-been measured is the part that is built, and it is the part every domain has used.
+That measurement did not initially promote this record: rank-1 prenex polymorphism was mandated while the
+kernel could not hold it and the notation could not spell it. M-13 resolved the mismatch by declining
+user-defined generics, as the amendment above records. The uncertainty constructors remain gated by 0047
+on subsystems that read them; they are reserved constructor decisions rather than a claim that unused
+variants already ship. The merge operator shipped in stele under [0052](0052-the-merge-operator.md) at the
+value layer. With the unimplemented generic mandate withdrawn, the measured constructor convergence and
+the exact-equality dispatch model cover the accepted calculus.
 
 ## unresolved
 
-the exact surface syntax for declaring nominal types, records, and sums is open. the mechanism is settled by this record and by 0017; the surface is not, and belongs to the future module-and-syntax work alongside schema evolution and module compatibility (both still open from 0010).
+M-13 supplies the surface syntax for nominal declarations, structural records, and declared sums. It
+deliberately supplies no generic declaration or type-variable syntax. Schema evolution and module
+compatibility remain open from 0010 and belong to M-14.
 
 the merge operator's signature, priority system, and conflict-to-`Conflicted<T>` promotion rule need design alongside the first configuration library prototype. Nickel's merge with `default` / `force` / `optional` priorities is the strongest precedent; whether pith's merge carries the same priorities or a different set is a library design question.
 

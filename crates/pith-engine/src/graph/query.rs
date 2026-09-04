@@ -12,13 +12,13 @@ use super::ir::{
     ActionPlan, AttemptState, ComputationNode, DependencyEdge, LiveInvalidationExplanation,
     LiveInvalidationReason, ReuseDecision, ReuseReason, RuleSelection,
 };
-use crate::state::DurableAttempt;
+use crate::state::{DurableAttempt, EngineStateReader, EngineStateStore};
 
-pub struct EngineQuery<'engine> {
-    engine: &'engine Engine,
+pub struct EngineQuery<'engine, S: EngineStateReader + ?Sized = dyn EngineStateStore> {
+    engine: &'engine Engine<S>,
 }
 
-impl<'engine> EngineQuery<'engine> {
+impl<'engine, S: EngineStateReader + ?Sized> EngineQuery<'engine, S> {
     /// # Errors
     /// Returns `E-1101`, `E-1102`, or `E-1103` when the request cannot select
     /// exactly one rule.
@@ -134,15 +134,15 @@ impl<'engine> EngineQuery<'engine> {
     /// Explain why `computation` is not reusable, as a chain over the live
     /// arena graph. `None` when the computation is unknown, not complete, or
     /// reusable (there is nothing to explain). The live-graph mirror of the
-    /// durable [`EngineStateStore::explain_invalidation`], keyed on
+    /// durable [`EngineStateReader::explain_invalidation`], keyed on
     /// [`ComputationId`] rather than `DurableAttemptId`.
     ///
     /// The chain follows the single dependency the computation's own
     /// [`ReuseReason`] names, so the explanation
     /// matches the reuse decision the engine computed for the node.
     ///
-    /// [`EngineStateStore::explain_invalidation`]:
-    ///     crate::state::EngineStateStore::explain_invalidation
+    /// [`EngineStateReader::explain_invalidation`]:
+    ///     crate::state::EngineStateReader::explain_invalidation
     #[must_use]
     pub fn explain_invalidation(
         &self,
@@ -152,7 +152,7 @@ impl<'engine> EngineQuery<'engine> {
     }
 
     fn explain(
-        engine: &Engine,
+        engine: &Engine<S>,
         computation: ComputationId,
         visiting: &mut Vec<ComputationId>,
     ) -> Option<LiveInvalidationExplanation> {
@@ -218,8 +218,8 @@ fn live_named_dependency(reason: &ReuseReason) -> Option<ComputationId> {
     }
 }
 
-impl Engine {
-    pub fn query(&self) -> EngineQuery<'_> {
+impl<S: EngineStateReader + ?Sized> Engine<S> {
+    pub fn query(&self) -> EngineQuery<'_, S> {
         EngineQuery { engine: self }
     }
 }

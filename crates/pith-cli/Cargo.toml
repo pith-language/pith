@@ -17,13 +17,17 @@ workspace = true
 
 [dependencies]
 pith-diag.workspace = true
-pith-core.workspace = true
-pith-engine.workspace = true
 pith-ids.workspace = true
 pith-output.workspace = true
-pith-store.workspace = true
+pith-query.workspace = true
 clap.workspace = true
 miette.workspace = true
-anstream.workspace = true
+termprofile = { workspace = true, features = ["terminfo"] }
+terminal-colorsaurus.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true

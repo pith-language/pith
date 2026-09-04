@@ -15,7 +15,7 @@ use pith_diag::Span;
 
 use rules::Projection;
 
-pub const ELABORATOR_SEMANTIC_VERSION: u32 = 1;
+pub const ELABORATOR_SEMANTIC_VERSION: u32 = 2;
 
 pub trait RegisterFrontend {
     fn register_frontend(&mut self);

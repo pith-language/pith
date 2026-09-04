@@ -1,0 +1,34 @@
+---
+source: crates/pith-output/tests/query_contract.rs
+expression: "serde_json::to_value(&record).unwrap()"
+---
+{
+  "api_version": 4,
+  "code": 0,
+  "detail": "query",
+  "kind": "query",
+  "query": {
+    "entry": "build",
+    "root": {
+      "attempt": 7,
+      "children": [
+        {
+          "attempt": 8,
+          "children": [],
+          "dependency": {
+            "dependency_kind": "action"
+          },
+          "label": "example.render",
+          "status": "complete"
+        }
+      ],
+      "dependency": {
+        "dependency_kind": "pure",
+        "digest": "13e68a5b642bf49fc4ed28d527abe43f3bca517f0f742af916910104019a0ce0"
+      },
+      "label": "example::entry.build",
+      "status": "complete"
+    },
+    "view": "dependencies"
+  }
+}

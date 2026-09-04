@@ -12,5 +12,6 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+pith-core.workspace = true
 pith-diag.workspace = true
 pith-hir.workspace = true

@@ -8,7 +8,10 @@ use std::sync::Arc;
 use pith_core::{ActionComputationKey, PureComputationKey};
 
 use crate::MemoryEngineStateStore;
-use crate::state::{DurableAttempt, EngineStateError, EngineStateStore, InvalidationExplanation};
+use crate::state::{
+    AttemptStatistics, DurableAttempt, EngineStateError, EngineStateReader, EngineStateStore,
+    InvalidationExplanation,
+};
 
 use super::run::Tracked;
 use super::translate::{
@@ -199,7 +202,49 @@ pub(super) fn compare_reads(
         &read(step, "pending_attempts", || model.pending_attempts())?,
         &read(step, "pending_attempts", || subject.pending_attempts())?,
         &translation,
+    )?;
+
+    compare_statistics(
+        step,
+        &read(step, "attempt_statistics", || model.attempt_statistics())?,
+        &read(step, "attempt_statistics", || subject.attempt_statistics())?,
+    )?;
+    compare_sequences(
+        step,
+        "all_attempts",
+        &read(step, "all_attempts", || model.all_attempts())?,
+        &read(step, "all_attempts", || subject.all_attempts())?,
+        &translation,
+    )?;
+    compare_sequences(
+        step,
+        "reusable_index_attempts",
+        &read(step, "reusable_index_attempts", || {
+            model.reusable_index_attempts()
+        })?,
+        &read(step, "reusable_index_attempts", || {
+            subject.reusable_index_attempts()
+        })?,
+        &translation,
     )
+}
+
+pub(super) fn compare_statistics(
+    step: usize,
+    model: &AttemptStatistics,
+    subject: &AttemptStatistics,
+) -> Result<(), Divergence> {
+    if model == subject {
+        return Ok(());
+    }
+    Err(Divergence {
+        step,
+        detail: DivergenceDetail::Read {
+            query: "attempt_statistics",
+            model: format!("{model:?}"),
+            subject: format!("{subject:?}"),
+        },
+    })
 }
 
 pub(super) fn read<T>(

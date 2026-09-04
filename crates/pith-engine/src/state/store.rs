@@ -33,13 +33,11 @@ pub enum EngineStateError {
     CapabilityDependenciesMismatch {
         attempt: DurableAttemptId,
     },
-    /// The recorded capability requirements do not match what the recorded
-    /// dependencies require (decision 0033).
+    /// Recorded capability requirements disagree with the dependencies.
     CapabilityRequirementsMismatch {
         attempt: DurableAttemptId,
     },
-    /// The action computation's stored digest is not the one its retained
-    /// request, rule, and contract digest produce (decision 0033).
+    /// The retained action inputs do not reproduce the stored digest.
     ActionComputationDigestMismatch {
         attempt: DurableAttemptId,
     },
@@ -205,10 +203,147 @@ impl InvalidActionLifecycleReason {
     }
 }
 
-/// Persistence boundary for durable engine attempts and reusable pure results.
-pub trait EngineStateStore: Send + Sync {
+/// Record and reusable-index counts obtained without decoding payloads.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub struct AttemptStatistics {
+    pub attempts: u64,
+    pub pending: u64,
+    pub complete: u64,
+    pub failed: u64,
+    pub cancelled: u64,
+    /// Computation keys that currently name a completed reusable attempt.
+    pub reusable_index: u64,
+}
+
+impl AttemptStatistics {
+    /// Fold one attempt's status into the counts. Adapters share this so a
+    /// status added upstream is counted by both or fails to compile in both.
+    pub fn record(&mut self, status: DurableAttemptStatus) {
+        self.attempts = self.attempts.saturating_add(1);
+        match status {
+            DurableAttemptStatus::Pending => self.pending = self.pending.saturating_add(1),
+            DurableAttemptStatus::Complete => self.complete = self.complete.saturating_add(1),
+            DurableAttemptStatus::Failed => self.failed = self.failed.saturating_add(1),
+            DurableAttemptStatus::Cancelled => self.cancelled = self.cancelled.saturating_add(1),
+        }
+    }
+}
+
+/// Read authority over durable engine state. Read-only adapters implement this
+/// trait without exposing the methods on [`EngineStateStore`].
+pub trait EngineStateReader: Send + Sync {
     fn versions(&self) -> super::EngineStateVersions;
 
+    /// Count the records this store holds, reading no payloads.
+    ///
+    /// # Errors
+    /// Returns an adapter error when the counts cannot be read.
+    fn attempt_statistics(&self) -> Result<AttemptStatistics, EngineStateError>;
+
+    /// Every attempt in creation order, each read through the same decode
+    /// validation an individual lookup applies. This is the integrity walk:
+    /// a store that answers it has decoded every record it holds.
+    ///
+    /// # Errors
+    /// Returns an adapter error when any record cannot be read or decoded.
+    fn all_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError>;
+
+    /// Attempts named by the reusable index, in creation order.
+    ///
+    /// # Errors
+    /// Returns an adapter error when the index or the attempts it names
+    /// cannot be read.
+    fn reusable_index_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError>;
+
+    /// # Errors
+    /// Returns an adapter error when the record cannot be read.
+    fn attempt(
+        &self,
+        attempt: DurableAttemptId,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError>;
+
+    /// Return attempts for one pure computation in creation order.
+    ///
+    /// # Errors
+    /// Returns an adapter error when history cannot be read.
+    fn attempt_history(
+        &self,
+        computation: PureComputationKey,
+    ) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError>;
+
+    /// Return the newest attempt for one pure computation, whatever its
+    /// terminal state, without reading the history that precedes it.
+    ///
+    /// The default answers from [`Self::attempt_history`], which reads every
+    /// record under the key; an adapter whose history is stored out of line
+    /// overrides this with an indexed read instead.
+    ///
+    /// # Errors
+    /// Returns an adapter error when the attempt cannot be read.
+    fn latest_attempt(
+        &self,
+        computation: PureComputationKey,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        Ok(self.attempt_history(computation)?.into_iter().last())
+    }
+
+    /// Return the newest completed attempt marked reusable for the exact key.
+    /// Dependency revalidation remains the engine's responsibility.
+    ///
+    /// # Errors
+    /// Returns an adapter error when the reusable index cannot be read.
+    fn latest_completed_reusable_attempt(
+        &self,
+        computation: PureComputationKey,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError>;
+
+    /// Return the newest completed reusable attempt for an exact action key.
+    ///
+    /// Dependency revalidation remains the engine's responsibility, and so does
+    /// the admission test over the recorded execution. An adapter answers only
+    /// which reusable attempt a key has.
+    ///
+    /// # Errors
+    /// Returns an adapter error when the reusable index cannot be read.
+    fn latest_completed_reusable_action_attempt(
+        &self,
+        computation: ActionComputationKey,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError>;
+
+    /// Explain why the latest completed attempt for `computation` is not
+    /// reusable, as a chain over the recorded dependency graph. `Ok(None)` when
+    /// there is no completed attempt for the key, or when that attempt is
+    /// reusable (there is nothing to explain).
+    ///
+    /// The chain follows the single dependency the attempt's own
+    /// [`DurableReuseReason`](super::DurableReuseReason) names, so the
+    /// explanation matches the reuse decision the attempt was published with
+    /// rather than re-deriving one.
+    ///
+    /// # Errors
+    /// Returns an adapter error when the attempt, its dependencies, or the
+    /// dependencies' attempts cannot be read.
+    fn explain_invalidation(
+        &self,
+        computation: PureComputationKey,
+    ) -> Result<Option<super::InvalidationExplanation>, EngineStateError>;
+
+    /// Enumerate all unfinished attempts in creation order. After reopening a
+    /// store following interruption, callers use this operation to identify
+    /// stale `Pending` attempts; the adapter never resumes them implicitly.
+    ///
+    /// # Errors
+    /// Returns an adapter error when pending attempts cannot be read.
+    fn pending_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError>;
+}
+
+/// Persistence boundary for durable engine attempts and reusable pure results.
+///
+/// The writing half: an engine evaluating a graph holds one of these, and a
+/// read-only reader holds only the [`EngineStateReader`] half. Reads arrive
+/// through the supertrait, so read-write implies read-only as a lattice and
+/// not as a convention.
+pub trait EngineStateStore: EngineStateReader {
     /// Create a new attempt in the `Pending` state.
     ///
     /// Writes take `&self`: an adapter serializes them itself, and requiring
@@ -261,71 +396,4 @@ pub trait EngineStateStore: Send + Sync {
         attempt: DurableAttemptId,
         cancellation: StoppedAttempt,
     ) -> Result<(), EngineStateError>;
-
-    /// # Errors
-    /// Returns an adapter error when the record cannot be read.
-    fn attempt(
-        &self,
-        attempt: DurableAttemptId,
-    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError>;
-
-    /// Return attempts for one pure computation in creation order.
-    ///
-    /// # Errors
-    /// Returns an adapter error when history cannot be read.
-    fn attempt_history(
-        &self,
-        computation: PureComputationKey,
-    ) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError>;
-
-    /// Return the newest completed attempt marked reusable for the exact key.
-    /// Dependency revalidation remains the engine's responsibility.
-    ///
-    /// # Errors
-    /// Returns an adapter error when the reusable index cannot be read.
-    fn latest_completed_reusable_attempt(
-        &self,
-        computation: PureComputationKey,
-    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError>;
-
-    /// Return the newest completed attempt marked reusable for the exact action
-    /// key (decision 0031). The action mirror of
-    /// [`Self::latest_completed_reusable_attempt`].
-    ///
-    /// Dependency revalidation remains the engine's responsibility, and so does
-    /// the admission test over the recorded execution. An adapter answers only
-    /// which reusable attempt a key has.
-    ///
-    /// # Errors
-    /// Returns an adapter error when the reusable index cannot be read.
-    fn latest_completed_reusable_action_attempt(
-        &self,
-        computation: ActionComputationKey,
-    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError>;
-
-    /// Explain why the latest completed attempt for `computation` is not
-    /// reusable, as a chain over the recorded dependency graph. `Ok(None)` when
-    /// there is no completed attempt for the key, or when that attempt is
-    /// reusable (there is nothing to explain).
-    ///
-    /// The chain follows the single dependency the attempt's own
-    /// [`DurableReuseReason`](super::DurableReuseReason) names, so the
-    /// explanation matches the reuse decision the attempt was published with
-    /// rather than re-deriving one.
-    ///
-    /// # Errors
-    /// Returns an adapter error when the attempt, its dependencies, or the
-    /// dependencies' attempts cannot be read.
-    fn explain_invalidation(
-        &self,
-        computation: PureComputationKey,
-    ) -> Result<Option<super::InvalidationExplanation>, EngineStateError>;
-
-    /// Enumerate all unfinished attempts in creation order. After reopening a
-    /// store following interruption, callers use this operation to identify
-    /// stale `Pending` attempts; the adapter never resumes them implicitly.
-    ///
-    /// # Errors
-    /// Returns an adapter error when pending attempts cannot be read.
-    fn pending_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError>;
 }

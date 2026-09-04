@@ -33,6 +33,23 @@ nominal Object = Blob
 pure rule \"renamed-objects-of\"(List<Blob>) -> List<Object> = host
 ";
 
+/// The same declaration with a represented body where `host` was: a semantic
+/// edit the interface surface cannot see, because a body rides no interface
+/// and no declaration digest. This is the cutoff witness M-12 waited for —
+/// 0063's unresolved section names it, and M-13's notation is what makes the
+/// edit expressible.
+const ALPHA_BODY_EDIT: &str = "\
+-- Documents the object type a dependent elaborates against.
+nominal Object = Blob
+
+pure rule \"objects-of\"(sources: List<Blob>) -> List<Object> = {
+  let wrapped : List<Object> = fold sources from [] {
+    (source, objects) -> append([Object(source)], objects)
+  }
+  wrapped
+}
+";
+
 const ALPHA_REPRESENTATION_EDIT: &str = "\
 -- Documents the object type a dependent elaborates against.
 nominal Object = Text
@@ -220,6 +237,97 @@ fn the_surface_artifact_round_trips_and_moves_only_for_semantic_edits() {
         representation_edited.abi_digest(),
         surface.abi_digest(),
         "a representation edit left the ABI digest unchanged"
+    );
+}
+
+/// The exact case 0063's unresolved section deferred to the notation: editing
+/// a rule's body text moves `bodies-of` while the interface surface and its
+/// ABI digest stay byte-identical, the `interface-of` computation itself is
+/// reusable across the edit, and a dependent whose imports name that surface
+/// reuses its attempt.
+#[test]
+fn a_body_edit_moves_bodies_and_leaves_the_interface_surface_byte_identical() {
+    let mut driver = Driver::new(MemoryEngineStateStore::default());
+
+    let alpha_interface = driver.publish_interface("alpha", ALPHA);
+    let first = match bodies_of(
+        &mut driver.engine,
+        "alpha",
+        &[("alpha.pi".into(), alpha_interface.source)],
+        frontend_imports([]),
+    ) {
+        Ok(evaluation) => evaluation,
+        Err(diagnostics) => unreachable!("alpha did not elaborate: {diagnostics:?}"),
+    };
+    assert_eq!(first.source, EvaluationSource::Computed);
+
+    // The dependent evaluates against the original surface, so an attempt
+    // exists for the edit to be measured against.
+    let beta_blob = driver.publish(BETA.as_bytes());
+    let before = match bodies_of(
+        &mut driver.engine,
+        "beta",
+        &[("beta.pi".into(), beta_blob)],
+        frontend_imports([frontend_import(alpha_interface)]),
+    ) {
+        Ok(evaluation) => evaluation,
+        Err(_) => unreachable!("the reusable lookup re-ran and failed"),
+    };
+    assert_eq!(before.source, EvaluationSource::Computed);
+
+    let edited = driver.publish_interface("alpha", ALPHA_BODY_EDIT);
+    assert_eq!(
+        edited.surface, alpha_interface.surface,
+        "a body edit moved the interface surface"
+    );
+    assert_eq!(
+        edited.abi, alpha_interface.abi,
+        "a body edit moved the ABI digest"
+    );
+
+    let interface_of_edited = match driver.engine.evaluate_with_content(&interface_of_request(
+        frontend_source("alpha", [("alpha.pi".into(), edited.source)]),
+        frontend_imports([]),
+    )) {
+        Ok(evaluation) => evaluation,
+        Err(diagnostics) => unreachable!("interface-of failed: {diagnostics:?}"),
+    };
+    assert_eq!(
+        interface_of_edited.source,
+        EvaluationSource::Reused,
+        "a body edit moved the interface-of computation"
+    );
+
+    let edited_bodies = match bodies_of(
+        &mut driver.engine,
+        "alpha",
+        &[("alpha.pi".into(), edited.source)],
+        frontend_imports([]),
+    ) {
+        Ok(evaluation) => evaluation,
+        Err(diagnostics) => unreachable!("edited alpha did not elaborate: {diagnostics:?}"),
+    };
+    assert_eq!(
+        edited_bodies.source,
+        EvaluationSource::Computed,
+        "a body edit left bodies-of reusable"
+    );
+
+    // A dependent of alpha imports the surface, not the bodies: its key names
+    // the surface identity, which the body edit did not move.
+    let second = match bodies_of(
+        &mut driver.engine,
+        "beta",
+        &[("beta.pi".into(), beta_blob)],
+        frontend_imports([frontend_import(edited)]),
+    ) {
+        Ok(evaluation) => evaluation,
+        Err(_) => unreachable!("the reusable lookup re-ran and failed"),
+    };
+    assert_eq!(
+        second.source,
+        EvaluationSource::Reused,
+        "a body edit in an import moved the dependent's key"
     );
 }
 

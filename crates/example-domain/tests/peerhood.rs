@@ -284,10 +284,13 @@ fn an_unbound_placeholder_fails_before_the_renderer_runs() {
         &executor,
     );
 
+    // The refusal is a represented body's declared failure now, so it carries
+    // the engine's E-1218 rather than the host domain's 9005; what it names is
+    // the placeholder nothing binds, exactly as the host body named it.
     assert!(
         diagnostics
             .iter()
-            .any(|diag| diag.code == StableCode(9005) && diag.message.0.contains("elsewhere")),
+            .any(|diag| diag.code == StableCode(1218) && diag.message.0.contains("elsewhere")),
         "the diagnostic names the placeholder nothing binds: {diagnostics:?}"
     );
     assert_eq!(

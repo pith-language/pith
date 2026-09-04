@@ -1,0 +1,110 @@
+{
+  "$schema": "https://fundingjson.org/schema/v1.1.0.json",
+  "version": "v1.1.0",
+  "entity": {
+    "type": "individual",
+    "role": "maintainer",
+    "name": "Karol Broda",
+    "email": "me@karolbroda.com",
+    "description": "Solo maintainer of Pith, a computation kernel for build, package, environment, and system tooling. The project is developed part-time, about twelve hours a week, alongside employment.",
+    "webpageUrl": {
+      "url": "https://pith-lang.org"
+    }
+  },
+  "projects": [
+    {
+      "guid": "pith",
+      "name": "Pith",
+      "description": "a computation kernel for build, package, environment, and system tooling",
+      "webpageUrl": {
+        "url": "https://pith-lang.org"
+      },
+      "repositoryUrl": {
+        "url": "https://codeberg.org/pith/pith"
+      },
+      "licenses": [
+        "spdx:Apache-2.0"
+      ],
+      "tags": [
+        "build-system",
+        "package-manager",
+        "reproducible-builds",
+        "rust",
+        "sbom",
+        "software-supply-chain"
+      ]
+    }
+  ],
+  "funding": {
+    "channels": [
+      {
+        "guid": "bank",
+        "type": "bank",
+        "address": "",
+        "description": "Bank transfer; account details on request."
+      }
+    ],
+    "plans": [
+      {
+        "guid": "publishable-libraries",
+        "status": "active",
+        "name": "Publishable domain libraries",
+        "amount": 18700,
+        "currency": "EUR",
+        "frequency": "one-time",
+        "channels": [
+          "bank"
+        ],
+        "description": "A domain library can be written today but neither published nor consumed: there is no module system and no registry. This adds workspaces and a lock, the publication path over a real transport, and the documentation a third-party author needs, ending in a tagged release. Covers WP1, WP2, WP5: 340 hours over 12 months."
+      },
+      {
+        "guid": "generic-builder",
+        "status": "active",
+        "name": "A generic builder, authored in the surface notation",
+        "amount": 9900,
+        "currency": "EUR",
+        "frequency": "one-time",
+        "channels": [
+          "bank"
+        ],
+        "description": "The kernel's compile-and-link builder is authored in Rust. This re-authors it in Pith's own notation, the proof that a domain author can extend the system without touching the kernel, and adds the source-fetch path that verifies upstream sources against their declared digest. Covers WP3: 180 hours over 12 months."
+      },
+      {
+        "guid": "build-provenance",
+        "status": "active",
+        "name": "Provenance derived from the build graph",
+        "amount": 5500,
+        "currency": "EUR",
+        "frequency": "one-time",
+        "channels": [
+          "bank"
+        ],
+        "description": "Every build step is already recorded as a computation. This derives an SPDX SBOM and an in-toto attestation in SLSA form from those records, so a build's provenance comes from the build itself, not from a scan afterwards. Covers WP4: 100 hours over 12 months."
+      },
+      {
+        "guid": "verification-and-hardening",
+        "status": "active",
+        "name": "Reproducibility verification and executor hardening",
+        "amount": 11550,
+        "currency": "EUR",
+        "frequency": "one-time",
+        "channels": [
+          "bank"
+        ],
+        "description": "Re-executes recorded actions to localize non-determinism to the exact computation that caused it, finishes run bounds and partial cancellation in the confined executor, and extends CI to aarch64 so the sandbox paths are exercised on a second architecture. Covers WP6, WP7, WP8: 210 hours over 12 months."
+      },
+      {
+        "guid": "sustaining",
+        "status": "active",
+        "name": "Sustaining support",
+        "amount": 0,
+        "currency": "EUR",
+        "frequency": "one-time",
+        "channels": [
+          "bank"
+        ],
+        "description": "Any amount toward the open workplan, without a grant process."
+      }
+    ]
+  }
+}

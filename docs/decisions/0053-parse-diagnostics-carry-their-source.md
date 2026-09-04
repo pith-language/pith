@@ -6,7 +6,7 @@ id: decision-0053-parse-diagnostics-carry-their-source
 kind: decision
 status: proposed
 created: 2026-08-10
-updated: 2026-08-14
+updated: 2026-08-28
 tags:
   - diagnostics
   - parsing
@@ -26,6 +26,11 @@ relations:
 # a parsed text's diagnostics carry their source
 
 > takes the half of K-11 that has never run: "failures have stable semantic codes and structured context" names two things, and the codes are exercised while the context's source half is not. `Span::none()` is the only span any crate constructs — 78 sites in crate source, none elsewhere — and `SourceFile::new` is called only by pith-diag's own tests. the two parsers a person's edits actually reach today, the written lock (0041) and the index line (0046), compute line and field positions and throw them away, baking `line {number}` into prose and re-attributing the lock's messages to the index with a `line 0` that names nothing.
+
+> amendment, [0066](0066-frontend-diagnostics-carry-source-identity.md): a diagnostic returned as data by
+> a multi-file frontend computation carries the `ContentId` of the source input that owns its byte span.
+> The source text remains context and is not persisted in an engine diagnostic; the content identity is the
+> process-independent association a caller needs to attach the right context after hydration.
 
 ## context
 

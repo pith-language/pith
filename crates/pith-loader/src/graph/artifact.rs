@@ -26,10 +26,18 @@ impl InterfaceSurface {
     ) -> Self {
         let mut imports = imports.into_vec();
         imports.sort_by(|left, right| left.0.cmp(&right.0));
-        let mut provided = provided.into_iter().collect::<Vec<_>>();
-        provided.sort_by(|left, right| {
-            (left.0, left.1.encode_canonical()).cmp(&(right.0, right.1.encode_canonical()))
-        });
+        let mut provided = provided
+            .into_iter()
+            .map(|(category, interface)| {
+                let encoded = interface.encode_canonical();
+                (category, encoded, interface)
+            })
+            .collect::<Vec<_>>();
+        provided.sort_by(|left, right| (left.0, &left.1).cmp(&(right.0, &right.1)));
+        let provided = provided
+            .into_iter()
+            .map(|(category, _, interface)| (category, interface))
+            .collect::<Vec<_>>();
         Self {
             module: module.into(),
             imports: imports.into(),

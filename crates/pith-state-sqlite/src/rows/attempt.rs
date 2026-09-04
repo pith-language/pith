@@ -1,6 +1,8 @@
 //! The attempt row itself: status, result, reuse decision, and the queries
 //! that find attempts by computation, by reusability, or by being unfinished.
 
+use std::collections::BTreeMap;
+
 use pith_core::ActionComputationKey;
 use pith_engine::state::validate::TerminalAttemptState;
 use pith_engine::state::{
@@ -238,12 +240,167 @@ pub fn attempts_for_computation(
         .load(connection)?)
 }
 
+/// The newest attempt row under one computation, whatever its status. The
+/// read the whole history would answer with its last record, served from one
+/// indexed row instead.
+pub fn latest_attempt_row(
+    connection: &mut SqliteConnection,
+    computation: i64,
+) -> Result<Option<AttemptRow>, Failure> {
+    Ok(attempts::table
+        .filter(attempts::computation.eq(computation))
+        .order(attempts::id.desc())
+        .select(AttemptRow::as_select())
+        .first(connection)
+        .optional()?)
+}
+
 pub fn pending_attempt_rows(connection: &mut SqliteConnection) -> Result<Vec<AttemptRow>, Failure> {
     Ok(attempts::table
         .filter(attempts::status.eq(StoredStatus(DurableAttemptStatus::Pending)))
         .order(attempts::id.asc())
         .select(AttemptRow::as_select())
         .load(connection)?)
+}
+
+pub fn all_attempt_rows(connection: &mut SqliteConnection) -> Result<Vec<AttemptRow>, Failure> {
+    Ok(attempts::table
+        .order(attempts::id.asc())
+        .select(AttemptRow::as_select())
+        .load(connection)?)
+}
+
+/// The columns that key one reusable-index entry. A pure key interns to one
+/// computation row, so pure entries are one row per key already; an action
+/// computation row is never shared, so one action key can hold an entry per
+/// attempt, and the latest published of them is the one reads serve.
+#[derive(Clone, Ord, PartialOrd, Eq, PartialEq)]
+struct ReusableKey {
+    rule_identity: Vec<u8>,
+    rule_revision: Vec<u8>,
+    /// The pure digest for a pure entry, the action digest for an action one.
+    digest: Vec<u8>,
+}
+
+struct IndexedAttempt {
+    key: ReusableKey,
+    published: i64,
+    attempt: StoredAttemptId,
+}
+
+fn indexed_attempts(connection: &mut SqliteConnection) -> Result<Vec<IndexedAttempt>, Failure> {
+    let entries = reusable_index::table
+        .select((
+            reusable_index::computation,
+            reusable_index::attempt,
+            reusable_index::published,
+        ))
+        .load::<(i64, StoredAttemptId, i64)>(connection)?;
+    let mut indexed = Vec::with_capacity(entries.len());
+    for (computation, attempt, published) in entries {
+        let (identity, revision, pure, action, observation) = computations::table
+            .find(computation)
+            .select((
+                computations::rule_identity,
+                computations::rule_revision,
+                computations::pure_digest,
+                computations::action_digest,
+                computations::observation_digest,
+            ))
+            .first::<(
+                Vec<u8>,
+                Vec<u8>,
+                Option<Vec<u8>>,
+                Option<Vec<u8>>,
+                Option<Vec<u8>>,
+            )>(connection)
+            .optional()?
+            .ok_or_else(|| corrupt("the reusable index names a missing computation"))?;
+        let digest = match (pure, action, observation) {
+            (Some(digest), None, None) | (None, Some(digest), None) => digest,
+            _ => {
+                return Err(corrupt(
+                    "the reusable index names a computation without exactly one reusable kind",
+                ));
+            }
+        };
+        let attempt_computation = attempts::table
+            .find(attempt)
+            .select(attempts::computation)
+            .first::<i64>(connection)
+            .optional()?
+            .ok_or_else(|| corrupt("the reusable index names a missing attempt"))?;
+        if attempt_computation != computation {
+            return Err(corrupt(
+                "the reusable index key and attempt name different computations",
+            ));
+        }
+        indexed.push(IndexedAttempt {
+            key: ReusableKey {
+                rule_identity: identity,
+                rule_revision: revision,
+                digest,
+            },
+            published,
+            attempt,
+        });
+    }
+    Ok(indexed)
+}
+
+/// The newest-published entry per key, in creation order. Entries a later
+/// publication superseded are absent: this is the root set, not the history.
+fn newest_indexed_attempts(
+    connection: &mut SqliteConnection,
+) -> Result<Vec<StoredAttemptId>, Failure> {
+    let mut newest: BTreeMap<ReusableKey, IndexedAttempt> = BTreeMap::new();
+    for entry in indexed_attempts(connection)? {
+        match newest.get(&entry.key) {
+            Some(kept) if kept.published >= entry.published => {}
+            _ => {
+                let _ = newest.insert(entry.key.clone(), entry);
+            }
+        }
+    }
+    let mut attempts: Vec<StoredAttemptId> =
+        newest.into_values().map(|entry| entry.attempt).collect();
+    attempts.sort_unstable_by_key(|attempt| attempt.0);
+    Ok(attempts)
+}
+
+pub fn reusable_index_attempt_rows(
+    connection: &mut SqliteConnection,
+) -> Result<Vec<AttemptRow>, Failure> {
+    let attempts = newest_indexed_attempts(connection)?;
+    let mut rows = Vec::with_capacity(attempts.len());
+    for attempt in attempts {
+        let row = attempts::table
+            .find(attempt)
+            .select(AttemptRow::as_select())
+            .first(connection)
+            .optional()?
+            .ok_or_else(|| corrupt("the reusable index names a missing attempt"))?;
+        rows.push(row);
+    }
+    Ok(rows)
+}
+
+pub fn reusable_index_size(connection: &mut SqliteConnection) -> Result<i64, Failure> {
+    let attempts = newest_indexed_attempts(connection)?;
+    i64::try_from(attempts.len())
+        .map_err(|_| corrupt("the reusable index holds more entries than sqlite can count"))
+}
+
+/// The status column alone, in creation order. Enough to count a store
+/// without decoding any record's payload.
+pub fn attempt_status_column(
+    connection: &mut SqliteConnection,
+) -> Result<Vec<DurableAttemptStatus>, Failure> {
+    let statuses = attempts::table
+        .order(attempts::id.asc())
+        .select(attempts::status)
+        .load::<StoredStatus>(connection)?;
+    Ok(statuses.iter().map(|status| status.0).collect())
 }
 
 pub fn reusable_attempt_row(
@@ -262,7 +419,7 @@ pub fn reusable_attempt_row(
         .optional()?)
 }
 
-/// The latest published reusable attempt for one action key (decision 0031).
+/// The latest published reusable attempt for one action key.
 ///
 /// An action computation row is never shared — it carries the authorization of
 /// its own attempt — so one key can have many rows, each with its own index
@@ -299,16 +456,10 @@ pub fn publish_reusable(
     computation: i64,
     attempt: DurableAttemptId,
 ) -> Result<(), Failure> {
-    // The database's publication sequence, allocated as `max + 1` and moved
-    // on re-publication of the same computation so the pure key's upsert
-    // re-orders too. The read-then-insert is safe only under decision 0024's
-    // single-writer arrangement: within a process the store's mutex
-    // serializes writers, and across processes 0024 gives the writable
-    // database one owner at a time — a writer hands the file over by
-    // exiting, never by running beside another writer. Concurrent
-    // multi-process writes are not a supported mode; enabling them needs
-    // SQLite's own guarantee here, not this process's mutex: the allocation
-    // folded into the inserting statement, or a unique index over the
+    // Publication order uses `max + 1` so republishing a computation moves it
+    // to the end. The process mutex serializes local writers; concurrent
+    // writable processes are unsupported. Supporting them requires allocating
+    // the sequence inside the insertion statement or enforcing a unique
     // sequence catching a collision.
     let published: i64 = reusable_index::table
         .select(diesel::dsl::max(reusable_index::published))

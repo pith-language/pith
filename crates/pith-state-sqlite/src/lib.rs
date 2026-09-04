@@ -1,4 +1,4 @@
-//! The sqlite adapter for durable engine state (decisions 0024 and 0025).
+//! SQLite-backed durable engine state.
 //!
 //! `pith-engine` owns the [`EngineStateStore`] interface and the durable record
 //! types; this crate is one implementation of that interface and nothing else.
@@ -26,4 +26,4 @@ mod rows;
 mod schema;
 mod store;
 
-pub use store::{SqliteEngineStateStore, SqliteStateError};
+pub use store::{ReadOnlySqliteEngineStateStore, SqliteEngineStateStore, SqliteStateError};

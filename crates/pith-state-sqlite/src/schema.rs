@@ -7,16 +7,8 @@ use pith_engine::state::{EngineStateVersions, RECORD_ENCODING_VERSION, SchemaVer
 /// can be laid out differently, and the same layout can hold a new payload
 /// encoding.
 ///
-/// Pinned at 1 until something is released, per decision 0024: nothing has
-/// shipped, so no database outside a working tree needs to survive a change,
-/// the schema is free to follow the engine's shape, and an incompatible
-/// database is moved aside and rebuilt — starting clean is the intended
-/// behaviour here, not a fallback. Once there is a release to be compatible
-/// with, this starts moving for any change a prior build would misread: a
-/// new table or column, and equally a new code in an existing column —
-/// adding `Cancelled` to `attempts.status` left the layout untouched but
-/// would have had an older build pass the gate and then fail decoding a
-/// variant it does not have.
+/// Pinned at 1 before the first release. After release, any layout or encoded
+/// variant an older build could misread must increment this version.
 pub const SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(1);
 
 pub const CURRENT_VERSIONS: EngineStateVersions = EngineStateVersions {
@@ -25,9 +17,8 @@ pub const CURRENT_VERSIONS: EngineStateVersions = EngineStateVersions {
 };
 
 /// A completed pure result and a declared action contract are stored as the
-/// canonical bytes `pith-core` gives them, because both carry a digest that
-/// those exact bytes must reproduce. Everything else is columns and rows
-/// (decision 0025).
+/// canonical bytes `pith-core` gives them because both carry a digest those
+/// exact bytes must reproduce. Everything else is stored as columns and rows.
 pub const CREATE_SCHEMA: &str = "
     create table if not exists engine_state_versions (
         id integer primary key check (id = 0),
@@ -50,12 +41,16 @@ pub const CREATE_SCHEMA: &str = "
         observation_observer text,
         authorization_denied integer,
         authorization_policy text,
-        authorization_reason text
+        authorization_reason text,
+        check (
+            (pure_digest is not null)
+            + (action_digest is not null)
+            + (observation_digest is not null) = 1
+        )
     ) strict;
 
-    -- The inputs of the request an action computation was made from, in
-    -- request order (decision 0033). Each is the canonical bytes of one typed
-    -- value, because rebuilding the computation digest has to reproduce them.
+    -- Canonical request inputs in request order, retained so the computation
+    -- digest can be reproduced.
     create table if not exists action_request_inputs (
         computation integer not null references computations (id),
         position integer not null,
@@ -74,9 +69,8 @@ pub const CREATE_SCHEMA: &str = "
         on computations (rule_identity, rule_revision, pure_digest)
         where pure_digest is not null;
 
-    -- Not unique: an action computation row carries the authorization decision
-    -- of its own attempt, so one action key has a row per attempt. Reading the
-    -- reusable index needs all of them (decision 0031).
+    -- Not unique: each action attempt records its own authorization decision,
+    -- so one action key can have several computation rows.
     create index if not exists computations_action_key
         on computations (rule_identity, rule_revision, action_digest)
         where action_digest is not null;
@@ -125,9 +119,8 @@ pub const CREATE_SCHEMA: &str = "
         primary key (attempt, position)
     ) strict;
 
-    -- What a completed attempt requires, as opposed to what its executor
-    -- reported using (decision 0033). Separate from `report_capabilities`
-    -- because a pure attempt has requirements and no report.
+    -- Required capabilities are separate from executor-reported usage because
+    -- pure attempts can have requirements without an executor report.
     create table if not exists required_capabilities (
         attempt integer not null references attempts (id),
         position integer not null,

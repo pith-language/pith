@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use pith_ids::ContentId;
 
-use crate::{Blob, ContentStore, StoreError, Tree};
+use crate::{Blob, ContentStore, InventoryEntry, InventoryKind, StoreError, Tree, inventory};
 
 pub struct FilesystemContentStore {
     blob_directory: PathBuf,
@@ -16,17 +16,63 @@ impl FilesystemContentStore {
     /// # Errors
     /// Returns an adapter error when the content directories cannot be created.
     pub fn open(root: impl AsRef<Path>) -> Result<Self, StoreError> {
-        let blob_directory = root.as_ref().join("blobs");
-        let tree_directory = root.as_ref().join("trees");
+        let (blob_directory, tree_directory) = object_directories(root.as_ref());
         fs::create_dir_all(&blob_directory)
             .map_err(|error| io_error("create blob store directory", error))?;
         fs::create_dir_all(&tree_directory)
             .map_err(|error| io_error("create tree store directory", error))?;
-        Ok(Self {
+        Ok(Self::from_directories(blob_directory, tree_directory))
+    }
+
+    /// Open an existing store without creating or repairing its layout.
+    ///
+    /// # Errors
+    /// Returns an adapter error unless both object directories already exist.
+    pub fn open_existing(root: impl AsRef<Path>) -> Result<Self, StoreError> {
+        let (blob_directory, tree_directory) = object_directories(root.as_ref());
+        require_directory(&blob_directory, "blob")?;
+        require_directory(&tree_directory, "tree")?;
+        Ok(Self::from_directories(blob_directory, tree_directory))
+    }
+
+    /// Open a store for non-mutating queries. A wholly absent layout is an
+    /// empty store; a partial layout is reported as corruption.
+    ///
+    /// # Errors
+    /// Returns an adapter error when only one object directory exists or an
+    /// object path is not a directory.
+    pub fn open_read_only(root: impl AsRef<Path>) -> Result<Self, StoreError> {
+        let (blob_directory, tree_directory) = object_directories(root.as_ref());
+        let blobs = optional_directory(&blob_directory, "blob")?;
+        let trees = optional_directory(&tree_directory, "tree")?;
+        if blobs != trees {
+            return Err(StoreError::new(
+                "the content store layout is incomplete: both object directories must exist",
+            ));
+        }
+        Ok(Self::from_directories(blob_directory, tree_directory))
+    }
+
+    fn from_directories(blob_directory: PathBuf, tree_directory: PathBuf) -> Self {
+        Self {
             blob_directory,
             tree_directory,
             next_temporary_file: 0,
-        })
+        }
+    }
+
+    /// Every object this store's directories hold, in digest order.
+    ///
+    /// # Errors
+    /// Returns an adapter error when a directory cannot be walked or holds a
+    /// file this store did not write.
+    pub fn inventory(&self) -> Result<Vec<InventoryEntry>, StoreError> {
+        let blobs = inventory::directory_inventory(&self.blob_directory, InventoryKind::Blob)?;
+        let trees = inventory::directory_inventory(&self.tree_directory, InventoryKind::Tree)?;
+        let mut entries = blobs;
+        entries.extend(trees);
+        entries.sort_by_key(|entry| entry.id.digest());
+        Ok(entries)
     }
 
     fn blob_path(&self, identity: ContentId) -> PathBuf {
@@ -135,6 +181,33 @@ impl ContentStore for FilesystemContentStore {
             return Err(corrupt_object(&path));
         }
         Ok(Some(tree))
+    }
+}
+
+fn object_directories(root: &Path) -> (PathBuf, PathBuf) {
+    (root.join("blobs"), root.join("trees"))
+}
+
+fn require_directory(path: &Path, kind: &str) -> Result<(), StoreError> {
+    if optional_directory(path, kind)? {
+        Ok(())
+    } else {
+        Err(StoreError::new(format!(
+            "the {kind} store directory `{}` does not exist",
+            path.display()
+        )))
+    }
+}
+
+fn optional_directory(path: &Path, kind: &str) -> Result<bool, StoreError> {
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_dir() => Ok(true),
+        Ok(_) => Err(StoreError::new(format!(
+            "the {kind} store path `{}` is not a directory",
+            path.display()
+        ))),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(io_error(&format!("inspect {kind} store directory"), error)),
     }
 }
 

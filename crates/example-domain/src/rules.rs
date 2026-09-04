@@ -1,31 +1,30 @@
-//! The two rules: a pure entry that checks the template against its bindings,
-//! and the action that runs the renderer.
+//! The domain's host half: the action body that runs the renderer.
 //!
-//! The split follows the same seam xylem's rules do. What can be decided from
-//! the values alone — that every placeholder the template spells is bound, and
-//! that no name is bound twice — is decided in the pure rule, where a failure
-//! is a diagnostic and no process starts. Substituting the text is the
-//! renderer's, because the renderer is a program and running one is an action.
+//! The module's declarations — the nominal types, the action's signature, and
+//! the entry that checks the template against its bindings — are authored in
+//! `example.pi` and arrive as loaded declarations; registration binds this
+//! body to the coordinate the file declares. The seam the module follows is
+//! the one xylem's rules do. What can be decided from the values alone — that
+//! every placeholder the template spells is bound, and that no name is bound
+//! twice — is decided in the entry, where a failure is a diagnostic and no
+//! process starts. Substituting the text is the renderer's, because the
+//! renderer is a program and running one is an action.
 
 use pith_core::{
-    Action, ActionInput, ActionOutput, ActionProgram, ActionSpec, BodyRevision, Content,
-    ExitStatusContract, NetworkPolicy, OutputKind, PlatformRequirement, Pure, Request, Rule, Value,
+    ActionInput, ActionOutput, ActionProgram, ActionSpec, Content, ExitStatusContract,
+    NetworkPolicy, OutputKind, PlatformRequirement, Value,
 };
 use pith_diag::{Diag, DiagnosticSink, PithResult, Severity, Span, StableCode};
-use pith_engine::{ActionExecution, ActionRule, PureRule, PureRuleFrame, PureStep, Resumption};
+use pith_engine::{ActionExecution, ActionRule};
 use pith_ids::ContentId;
 
-use crate::types::{self, MODULE};
+use crate::types;
 
 /// The staged path of the template the renderer reads.
 const TEMPLATE_PATH: &str = "template";
 
 /// The staged path of the document the renderer writes.
 const DOCUMENT_PATH: &str = "document";
-
-/// The opening and closing delimiters of a placeholder.
-const OPEN: &str = "{{";
-const CLOSE: &str = "}}";
 
 /// The code every diagnostic from this domain carries.
 ///
@@ -129,23 +128,6 @@ fn pairs_of(value: &Value) -> PithResult<Vec<(Box<str>, Box<str>)>> {
     Ok(pairs)
 }
 
-/// The placeholder names `text` spells, in the order they appear, refusing a
-/// placeholder that is opened and never closed.
-fn placeholders(text: &str) -> PithResult<Vec<&str>> {
-    let mut names = Vec::new();
-    let mut rest = text;
-    while let Some((_, after_open)) = rest.split_once(OPEN) {
-        let Some((name, after_close)) = after_open.split_once(CLOSE) else {
-            return Err(diag(
-                "a placeholder is opened and never closed, so the template has no rendering",
-            ));
-        };
-        names.push(name);
-        rest = after_close;
-    }
-    Ok(names)
-}
-
 /// The renderer, the template, and the bindings a request supplies.
 fn request_parts(inputs: &[Value]) -> PithResult<(ContentId, ContentId, &Value)> {
     let [renderer, template, bound] = inputs else {
@@ -167,19 +149,6 @@ fn request_parts(inputs: &[Value]) -> PithResult<(ContentId, ContentId, &Value)>
 /// covers is the bytes that will run, and the bindings reach the program as
 /// arguments in the canonical order the value already carries.
 pub struct RenderAction;
-
-impl RenderAction {
-    #[must_use]
-    pub fn rule() -> Rule<Action> {
-        Rule::<Action>::declared(
-            MODULE,
-            types::RENDER,
-            BodyRevision(1),
-            types::render_interface(),
-            Span::none(),
-        )
-    }
-}
 
 impl ActionRule for RenderAction {
     fn plan(&self, inputs: &[Value]) -> PithResult<ActionSpec> {
@@ -222,100 +191,6 @@ impl ActionRule for RenderAction {
                 )),
             },
             None => Err(diag("the renderer produced no document")),
-        }
-    }
-}
-
-/// The pure entry: checks the template against its bindings, then requests the
-/// render.
-pub struct RenderRule;
-
-impl RenderRule {
-    #[must_use]
-    pub fn rule() -> Rule<Pure> {
-        Rule::<Pure>::declared(
-            MODULE,
-            types::RENDER_ENTRY,
-            BodyRevision(1),
-            types::render_interface(),
-            Span::none(),
-        )
-    }
-}
-
-impl PureRule for RenderRule {
-    fn start(&self, inputs: &[Value]) -> Box<dyn PureRuleFrame> {
-        Box::new(RenderFrame {
-            inputs: inputs.to_vec(),
-            phase: Phase::Start,
-        })
-    }
-}
-
-enum Phase {
-    Start,
-    AwaitingTemplate,
-    AwaitingDocument,
-}
-
-struct RenderFrame {
-    inputs: Vec<Value>,
-    phase: Phase,
-}
-
-impl RenderFrame {
-    /// Every placeholder the template spells is bound.
-    fn check(&self, template: &[u8]) -> PithResult<()> {
-        let Ok(text) = std::str::from_utf8(template) else {
-            return Err(diag(
-                "the template is not utf-8, so it spells no placeholders",
-            ));
-        };
-        let bound = pairs_of(self.bindings()?)?;
-        for name in placeholders(text)? {
-            if !bound
-                .iter()
-                .any(|(candidate, _)| candidate.as_ref() == name)
-            {
-                return Err(diag(&format!(
-                    "the template spells `{name}`, which the request does not bind"
-                )));
-            }
-        }
-        Ok(())
-    }
-
-    fn bindings(&self) -> PithResult<&Value> {
-        let (_, _, bound) = request_parts(&self.inputs)?;
-        Ok(bound)
-    }
-}
-
-impl PureRuleFrame for RenderFrame {
-    fn step(&mut self, input: Option<Resumption>) -> PithResult<PureStep> {
-        match self.phase {
-            Phase::Start => {
-                let (_, template, _) = request_parts(&self.inputs)?;
-                self.phase = Phase::AwaitingTemplate;
-                Ok(PureStep::NeedBlob(template))
-            }
-            Phase::AwaitingTemplate => {
-                let Some(Value::Bytes(bytes)) = input.and_then(Resumption::one) else {
-                    return Err(diag("the engine resumed the template read without bytes"));
-                };
-                self.check(&bytes)?;
-                self.phase = Phase::AwaitingDocument;
-                Ok(PureStep::NeedAction(Request::<Action>::new(
-                    types::RENDER,
-                    types::render_interface(),
-                    self.inputs.clone(),
-                    Span::none(),
-                )))
-            }
-            Phase::AwaitingDocument => match input.and_then(Resumption::one) {
-                Some(document) => Ok(PureStep::Complete(document)),
-                None => Err(diag("the render action completed without a document")),
-            },
         }
     }
 }

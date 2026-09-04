@@ -6,7 +6,7 @@ summary: chronological record of accepted and proposed architectural choices
 kind: decision
 status: active
 created: 2026-03-11
-updated: 2026-08-24
+updated: 2026-08-28
 tags:
   - decisions
 relations:
@@ -32,6 +32,7 @@ when an accepted decision changes, a new record supersedes it. the old record st
 - [0011: separate documentation by role](0011-document-structure.md)
 - [0015: select rules by interface match and refuse ambiguity](0015-interface-rule-selection.md)
 - [0021: a hand-built arena graph with explicit change propagation, not a salsa query DB](0021-arena-graph-engine.md)
+- [0026: a structural type calculus, with nominal identity, structural uncertainty, and no predicate types](0026-generic-typed-calculus.md)
 - [0028: a first-party sandboxed local executor using landlock and seccomp](0028-sandboxed-local-executor.md)
 - [0033: a consumer of an action revalidates by re-planning it](0033-consumer-of-action-reuse.md)
 - [0041: the written lock is a text projection of the lock value, and writing it is a caller effect](0041-the-written-lock.md)
@@ -55,7 +56,6 @@ when an accepted decision changes, a new record supersedes it. the old record st
 - [0023: separate stable rule identity from cache-invalidating rule revision](0023-rule-and-cache-identity.md)
 - [0024: persist content in a filesystem cas and engine state in sqlite](0024-persistent-engine-state.md)
 - [0025: store engine state as normalized relations, not as canonical record blobs](0025-relational-engine-state.md)
-- [0026: a generic structural type calculus, with nominal identity, generic uncertainty, and no predicate types](0026-generic-typed-calculus.md)
 - [0027: frame retention and garbage collection as roots, two stores, and composable policy axes](0027-retention-and-gc.md)
 - [0029: independence is declared by the rule body, not inferred by the scheduler](0029-declared-independence.md)
 - [0030: a toolchain enters an action as a declared closure of host paths](0030-toolchain-closure-as-declared-input.md)
@@ -90,6 +90,9 @@ when an accepted decision changes, a new record supersedes it. the old record st
 - [0061: a source artifact elaborates into a typed host-binding surface and a semantic ABI](0061-the-declaration-artifact.md)
 - [0062: the represented-body constructor set is enumerated, typed, and de Bruijn, with structural case on lists and the step protocol as its yield constructs](0062-the-ir-constructor-set.md)
 - [0063: frontend computations key imported semantic surfaces and return user failures as values](0063-the-frontend-graph-tier.md)
+- [0064: text breaking and joining are total, keep empty fields, and treat an empty separator as no match](0064-text-breaking.md)
+- [0065: an entry is a represented pure request and the CLI exposes evaluation, explanation, selection, planning, and provenance without linking a domain](0065-entry-evaluation-and-the-cli-query-surface.md)
+- [0066: a frontend diagnostic value names the source content that owns its span](0066-frontend-diagnostics-carry-source-identity.md)
 
 note: 0013 amends 0005 to add a fifth identity type. 0005 stands; the amendment is recorded in 0013.
 
@@ -97,7 +100,7 @@ note: 0022 refines 0019 by fixing where each effect category executes (synchrono
 
 note: 0025 refines 0024 by fixing how an adapter represents the records 0024 defines. 0024's choice of storage substrates stands; the representation within them is recorded in 0025.
 
-note: 0026 supersedes 0017 (its structural-default and nominal-by-declaration mechanism becomes one section of the larger calculus) and amends 0010 (settling the calculus questions among 0010's unresolved list). 0017 stays in the repository with a pointer; 0010 stands.
+note: 0026 supersedes 0017 (its structural-default and nominal-by-declaration mechanism becomes one section of the larger calculus) and amends 0010 (settling the calculus questions among 0010's unresolved list). M-13 supplies the notation and declines user-defined generics: concrete builtin applications such as `List<Text>` remain, while rank-1 quantification, type parameters and polymorphic rule declarations leave the accepted calculus. M-5a's convergence evidence therefore covers the implemented surface rather than a subset of a still-mandated generic one, and 0026 moves to `accepted`. 0017 stays in the repository with a pointer; 0010 stands.
 
 note: 0027 complements 0024 by framing the retention and GC problem 0024 left open. it does not implement GC; it defines the design space (roots, policy axes, cross-store ordering) a later workload-evidence record lands in.
 
@@ -176,3 +179,31 @@ note: 0061 records M-10's declaration artifact. effect category is a prefix on a
 note: 0062 enumerates the constructor set 0038 gated its own acceptance on, and the corpus is the argument's evidence rather than an illustration. thirty constructors: the pure expression language between yields over the 0026 calculus, one yield construct per fan-out shape the corpus actually requests — `NeedAll` for a static batch that may mix interfaces, `NeedEach` for one interface over a runtime-sized list — plus `MatchList`, which the corpus earned the hard way: grouping and first-match have no fold spelling under strict evaluation, because a fold's init is evaluated whatever the list holds and a data-dependent start has no value to start from. binders are de Bruijn indices in the ir itself, so the alpha-normalization question 0038 left open dissolves — there are no binder names to normalize and no formatting to spare. totality stays an absence: no recursion constructor, structural folds and cases only, every primitive total, `Fail` and `TextOfBytes` the two deterministic value failures. the encoding is its own versioned grammar under `pith:body-ir:v1`, whose version segment is the evaluator-abi version 0038 asked for; `Rule::represented` derives the revision from the body digest beside the interface encoding, the same two-halves shape a host rule's counter and interface have. twelve of the fifteen corpus bodies are expressed, validated and round-tripped against mirrored interfaces; the three that are not are named with the constructors they wait for — both text-splitting bodies on one undecided semantics, and phloem's resolver on host dispatch and general recursion, which is what the permanent host tier exists for. render-passwd's uid narrowing is the named divergence: a formatter boundary the typed body renders through instead of refusing, until a domain needs integer comparison for its own sake.
 
 note: 0063 records M-12's graph tier and the design correction its first complete producer-to-consumer path forced. an imported ABI digest is semantic identity but not a content address, so `ImportEnv` carries both the expected ABI and the blob identity of a semantic-only interface surface; the frame fetches the latter and verifies both before elaboration. `interface-of` returns the surface bytes for explicit driver publication because adding a pure write step would reopen 0062's step and body-encoding set. typed constructors canonicalize source paths and import bindings, user errors complete as values with source-bound diagnostics and incomplete coordinates, and the derived revision gate covers the four frontend crates. the current cutoff witness changes a rule label and therefore `bodies-of(A)` while holding A's interface; the exact represented-body source edit remains gated on M-13's notation, so M-12 is still underway.
+
+note: M-13 closes two deferrals in the preceding notes. The final clause of the 0015 promotion note is
+superseded: 0026 withdraws user-defined rank-1 generics and is accepted. The final clause of the 0063 note
+is also superseded: `a_body_edit_moves_bodies_and_leaves_the_interface_surface_byte_identical` edits a
+written represented body, recomputes `bodies-of(A)`, reuses `interface-of(A)`, and reuses the dependent
+`bodies-of(B)`, so M-12 is complete.
+
+note: 0064 amends 0062 with `TextBreak`, a total `Text × Text -> List<Text>` constructor, and `TextJoin`,
+its `List<Text> × Text -> Text` join side. The split keeps leading, trailing and adjacent empty fields,
+returns one empty field for empty text, and treats an empty separator as no match; the join places the
+separator between adjacent fields and nothing else. Two codec tags and no value type move xylem's compile
+entry and example's render entry into the represented corpus, and the join is a primitive rather than a
+fold of concatenations because that fold re-copies its accumulator every step — quadratic in the field
+count — while `strip_prefix`, its consumer, must stay linear. Phloem's recursive, host-dispatched resolver
+is the one remaining host body.
+
+note: 0065 records M-13's entry and CLI path. An invoked entry is a synthetic represented pure rule at
+`module::entry.name`, with `() -> T` and a body-derived revision; collisions remain E-1102 rather than a
+preferred-rule side channel. One transitive program loader binds represented rules into both the read-only
+selection engine and writable durable evaluation engine, amending 0057 with the two-engine construction.
+`run`, `explain`, `graph select|plan|deps`, and Unix `exec` expose the engine surfaces without linking a
+domain; host coordinates refuse explicitly. Drive-to-pause planning returns the first current action plan
+without executing it, explore gains entries/about, and the exhaustive JSON vocabulary moves to API 4.
+
+note: 0066 amends 0053 for graph-tier frontend results. A source file is still presentation context and is
+not copied into durable engine diagnostics, but a diagnostic returned as a reusable frontend value carries
+the source blob identity that owns its byte span. That identity is stable across processes and lets a
+multi-file client attach the correct text after hydration; `SourceId` cannot.

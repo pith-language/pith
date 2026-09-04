@@ -85,7 +85,7 @@
           pkgs.statix
           pkgs.git
           pkgs.clang
-          pkgs.jujutsu
+          pkgs.hyperfine
 
           # web
           pkgs.nodejs
@@ -94,6 +94,7 @@
 
           # source
           pkgs.forgejo-cli
+          pkgs.jujutsu
         ];
 
         shellHook = ''

@@ -137,6 +137,62 @@ impl std::fmt::Debug for ContentDigest {
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ParseDigestError {
+    WrongLength { actual: usize },
+    InvalidHex,
+}
+
+impl std::fmt::Display for ParseDigestError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::WrongLength { actual } => write!(
+                formatter,
+                "a digest is exactly {} hexadecimal characters, but this one has {actual}",
+                DIGEST_LEN.saturating_mul(2)
+            ),
+            Self::InvalidHex => {
+                formatter.write_str("a digest contains a non-hexadecimal character")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ParseDigestError {}
+
+impl std::str::FromStr for ContentDigest {
+    type Err = ParseDigestError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        if value.len() != DIGEST_LEN.saturating_mul(2) {
+            return Err(ParseDigestError::WrongLength {
+                actual: value.len(),
+            });
+        }
+
+        let mut digest = [0; DIGEST_LEN];
+        for (byte, pair) in digest.iter_mut().zip(value.as_bytes().chunks_exact(2)) {
+            let [high, low] = pair else {
+                return Err(ParseDigestError::InvalidHex);
+            };
+            *byte = hex_nibble(*high)
+                .zip(hex_nibble(*low))
+                .map(|(high, low)| high << 4 | low)
+                .ok_or(ParseDigestError::InvalidHex)?;
+        }
+        Ok(Self(digest))
+    }
+}
+
+const fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte.wrapping_sub(b'0')),
+        b'a'..=b'f' => Some(byte.wrapping_sub(b'a').wrapping_add(10)),
+        b'A'..=b'F' => Some(byte.wrapping_sub(b'A').wrapping_add(10)),
+        _ => None,
+    }
+}
+
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ContentId(ContentDigest);
 
@@ -175,6 +231,14 @@ impl ContentId {
 impl std::fmt::Debug for ContentId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "ContentId({:?})", self.0)
+    }
+}
+
+impl std::str::FromStr for ContentId {
+    type Err = ParseDigestError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        value.parse().map(Self)
     }
 }
 

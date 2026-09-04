@@ -16,9 +16,9 @@ pith-diag.workspace = true
 pith-ids.workspace = true
 pith-core.workspace = true
 pith-engine.workspace = true
+pith-loader.workspace = true
 
 [dev-dependencies]
-pith-loader.workspace = true
 pith-store.workspace = true
 pith-state-sqlite.workspace = true
 async-trait.workspace = true

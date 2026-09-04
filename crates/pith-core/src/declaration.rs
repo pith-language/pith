@@ -12,7 +12,10 @@
 //! declares one name twice, and it refuses a recursive alias, which has no
 //! finite canonical form because expansion is its only semantics.
 
+use std::collections::BTreeMap;
+
 use pith_ids::DeclarationDigest;
+use pith_output::dto::{DeclarationBodyRepr, DeclarationView, SumConstructorRepr};
 
 use crate::codec::{CanonicalDecodeError, CanonicalReader};
 use crate::manifest::{encode_bytes, encode_length, encode_str};
@@ -214,6 +217,71 @@ impl Declaration {
     }
 }
 
+/// The declaration grammar's spelling of a body. This is the source form a
+/// person wrote, so tooling that shows a declaration back — `pith explore`,
+/// a hover — echoes the grammar instead of inventing a second notation for
+/// one shape.
+impl std::fmt::Display for DeclarationBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Nominal { representation } => write!(f, "{representation}"),
+            Self::Alias { target } => write!(f, "{target}"),
+            Self::Sum { constructors } => {
+                let mut separator = "";
+                for constructor in constructors {
+                    f.write_str(separator)?;
+                    match &constructor.payload {
+                        Some(payload) => write!(f, "{}({payload})", constructor.name)?,
+                        None => f.write_str(&constructor.name)?,
+                    }
+                    separator = " | ";
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl From<&DeclarationBody> for DeclarationBodyRepr {
+    fn from(body: &DeclarationBody) -> Self {
+        match body {
+            DeclarationBody::Nominal { representation } => Self::Nominal {
+                representation: Box::new(representation.into()),
+            },
+            DeclarationBody::Alias { target } => Self::Alias {
+                target: Box::new(target.into()),
+            },
+            DeclarationBody::Sum { constructors } => Self::Sum {
+                constructors: constructors
+                    .iter()
+                    .map(|constructor| SumConstructorRepr {
+                        name: constructor.name.clone(),
+                        payload: constructor
+                            .payload
+                            .as_ref()
+                            .map(|payload| Box::new(payload.into())),
+                    })
+                    .collect(),
+            },
+        }
+    }
+}
+
+impl From<&Declaration> for DeclarationView {
+    fn from(declaration: &Declaration) -> Self {
+        Self {
+            name: declaration.coordinate().name.clone(),
+            body: declaration.body().into(),
+            rendered: declaration.body().to_string().into(),
+            digest: declaration.digest().digest().to_string().into(),
+            // Doc text is not part of a declaration; it rides the
+            // position-carrying sidecar (decision 0061), so the driver that
+            // holds the sidecar fills this in.
+            documentation: Box::from(""),
+        }
+    }
+}
+
 /// Why a declaration could not be registered.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DeclarationError {
@@ -261,14 +329,14 @@ impl std::error::Error for DeclarationError {}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeclarationTable {
     module: Box<str>,
-    entries: Vec<Declaration>,
+    entries: BTreeMap<Box<str>, Declaration>,
 }
 
 impl DeclarationTable {
     pub fn new(module: impl Into<Box<str>>) -> Self {
         Self {
             module: module.into(),
-            entries: Vec::new(),
+            entries: BTreeMap::new(),
         }
     }
 
@@ -330,40 +398,31 @@ impl DeclarationTable {
                 name: name.into(),
             });
         }
-        let coordinate = Coordinate::new(self.module.clone(), name);
-        match self
-            .entries
-            .binary_search_by(|entry| entry.coordinate.name.as_ref().cmp(name))
-        {
-            Ok(_) => {
-                return Err(DeclarationError::DuplicateName {
-                    module: self.module.clone(),
-                    name: name.into(),
-                });
-            }
-            Err(position) => self.entries.insert(
-                position,
-                Declaration {
-                    coordinate: coordinate.clone(),
-                    body: body.clone(),
-                },
-            ),
+        if self.entries.contains_key(name) {
+            return Err(DeclarationError::DuplicateName {
+                module: self.module.clone(),
+                name: name.into(),
+            });
         }
-        Ok(Type::of_declaration(&Declaration { coordinate, body }))
+        let coordinate = Coordinate::new(self.module.clone(), name);
+        let stored = Declaration {
+            coordinate: coordinate.clone(),
+            body: body.clone(),
+        };
+        let declared = Type::of_declaration(&stored);
+        self.entries.insert(stored.coordinate.name.clone(), stored);
+        Ok(declared)
     }
 
     /// The declaration this module holds under `name`.
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&Declaration> {
-        self.entries
-            .binary_search_by(|entry| entry.coordinate.name.as_ref().cmp(name))
-            .ok()
-            .and_then(|position| self.entries.get(position))
+        self.entries.get(name)
     }
 
     /// Every declaration in this module, in name order.
     pub fn iter(&self) -> impl Iterator<Item = &Declaration> {
-        self.entries.iter()
+        self.entries.values()
     }
 
     /// Encode the module and declarations in name order.
@@ -372,7 +431,7 @@ impl DeclarationTable {
         let mut manifest = Vec::new();
         encode_str(&mut manifest, &self.module);
         encode_length(&mut manifest, self.entries.len());
-        for entry in &self.entries {
+        for entry in self.entries.values() {
             encode_bytes(&mut manifest, &entry.encode_canonical());
         }
         manifest
@@ -409,7 +468,10 @@ impl DeclarationTable {
         }
         Ok(Self {
             module,
-            entries: entries.into(),
+            entries: entries
+                .into_iter()
+                .map(|entry| (entry.coordinate.name.clone(), entry))
+                .collect(),
         })
     }
 

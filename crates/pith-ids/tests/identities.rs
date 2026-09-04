@@ -35,6 +35,27 @@ fn all_bytes_digest_round_trips_through_debug_and_display() {
 }
 
 #[test]
+fn digest_spelling_round_trips() -> Result<(), Box<dyn std::error::Error>> {
+    let text = "13e68a5b642bf49fc4ed28d527abe43f3bca517f0f742af916910104019a0ce0";
+    let digest: ContentDigest = text.parse()?;
+    let id: ContentId = text.to_uppercase().parse()?;
+
+    assert_eq!(digest.to_string(), text);
+    assert_eq!(id.digest(), digest);
+    Ok(())
+}
+
+#[test]
+fn digest_spelling_rejects_the_wrong_length_and_non_hex_characters() {
+    assert!("abcd".parse::<ContentDigest>().is_err());
+    assert!(
+        "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            .parse::<ContentId>()
+            .is_err()
+    );
+}
+
+#[test]
 fn of_blob_and_of_tree_of_empty_input_are_distinct() {
     let blob = ContentId::of_blob(b"");
     let tree = ContentId::of_tree(b"");

@@ -7,6 +7,7 @@ use pith_ids::{
     ActionComputationDigest, ActionSpecDigest, ObservationComputationDigest, PureComputationDigest,
     RuleIdentity, RuleRevision,
 };
+use pith_output::dto::{InterfaceRepr, TierRepr};
 use smallvec::SmallVec;
 use std::marker::PhantomData;
 
@@ -68,6 +69,25 @@ pub struct Rule<K: EffectCategory = Pure> {
 pub enum RuleTier {
     Host,
     Represented,
+}
+
+impl From<RuleTier> for TierRepr {
+    fn from(tier: RuleTier) -> Self {
+        match tier {
+            RuleTier::Host => Self::Host,
+            RuleTier::Represented => Self::Represented,
+        }
+    }
+}
+
+impl From<&Interface> for InterfaceRepr {
+    fn from(interface: &Interface) -> Self {
+        Self {
+            inputs: interface.inputs.iter().map(Into::into).collect(),
+            output: Box::new((&interface.output).into()),
+            rendered: interface.to_string().into(),
+        }
+    }
 }
 
 /// Persistent identity for a pure rule application over the current semantic
@@ -337,6 +357,30 @@ impl Rule<Pure> {
     /// The body is not re-validated here. Registration is the boundary that
     /// validates; a rule built this way carries only the digest.
     pub fn represented(
+        module: &str,
+        label: &str,
+        body: &crate::body::RuleBody,
+        interface: Interface,
+        span: Span,
+    ) -> Self {
+        let mut manifest = body.digest().digest().as_bytes().to_vec();
+        encode_interface(&mut manifest, &interface);
+        Self::of_tier(
+            coordinate_of(module, label),
+            RuleTier::Represented,
+            manifest,
+            label,
+            interface,
+            span,
+        )
+    }
+}
+
+impl Rule<Action> {
+    /// Construct metadata for a represented action declaration. Action bodies
+    /// are still supplied through the engine's action-rule boundary; the body digest
+    /// fixes the declaration's tier and revision for tooling and selection.
+    pub fn represented_action(
         module: &str,
         label: &str,
         body: &crate::body::RuleBody,

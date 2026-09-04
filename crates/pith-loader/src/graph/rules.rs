@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use pith_core::Value;
 use pith_diag::{Diag, DiagnosticSink, Severity, SourceFile, SourceId, Span};
-use pith_elaborator::{elaborate, scope_imports};
+use pith_elaborator::{Visibility, elaborate, scope_imports};
 use pith_engine::{PureRule, PureRuleFrame, PureStep, Resumption};
 use pith_hir::{ParsedSurface, merge_module_files};
 use pith_ids::{ContentId, ModuleAbiDigest};
@@ -140,6 +140,7 @@ impl FrontendFrame {
             elaborated
                 .rules
                 .iter()
+                .filter(|rule| rule.visibility == Visibility::Public)
                 .map(|rule| (rule.category, rule.interface.clone())),
         );
         let mut diagnostics = self.content_diagnostics.clone();
@@ -178,18 +179,22 @@ impl FrontendFrame {
                 let mut entries = elaborated
                     .rules
                     .iter()
-                    .map(|rule| (rule.category, rule.interface.clone(), rule.label.clone()))
+                    .filter(|rule| rule.visibility == Visibility::Public)
+                    .map(|rule| {
+                        (
+                            rule.category,
+                            rule.interface.encode_canonical(),
+                            rule.interface.clone(),
+                            rule.label.clone(),
+                        )
+                    })
                     .collect::<Vec<_>>();
                 entries.sort_by(|left, right| {
-                    (left.0, left.1.encode_canonical(), &left.2).cmp(&(
-                        right.0,
-                        right.1.encode_canonical(),
-                        &right.2,
-                    ))
+                    (left.0, &left.1, &left.3).cmp(&(right.0, &right.1, &right.3))
                 });
                 let entries = entries
                     .into_iter()
-                    .map(|(category, interface, name)| {
+                    .map(|(category, _, interface, name)| {
                         (category, interface, self.source.module.clone(), name)
                     })
                     .collect::<Vec<_>>();

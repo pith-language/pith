@@ -18,22 +18,10 @@ use crate::{
     ExecutionReport,
 };
 
-/// Version of the canonical payload encodings durable records embed: a typed
-/// [`Value`] result and an [`ActionSpec`] contract. Reported as the
-/// `semantic_encoding` half of an adapter's [`EngineStateVersions`]. Adapters
-/// choose their own table layout and report it as `schema` (decision 0025).
-///
-/// Pinned at 1 until the first release (decision 0048), on the same terms the
-/// sqlite adapter pins its schema: no database outside a working tree needs to
-/// survive a change, so a pre-release database is moved aside and rebuilt
-/// rather than versioned around, and a stale one is deleted. It reached 5 and
-/// was returned to 1 before 0048 made the rule general, which is why 0026's
-/// account of four bumps describes history rather than the tree.
-///
-/// The first tag is the trigger. After it, this starts moving for any change a
-/// prior build would misread — a new constructor in the value grammar as much
-/// as a changed meaning of existing bytes — and engine state stays in 0048's
-/// derived-cache class, where discard-and-rebuild remains a legal answer.
+/// Version of canonical payload encodings embedded in durable records. It is
+/// independent from an adapter's schema version and remains 1 before the first
+/// release. After release, any payload change an older build could misread must
+/// increment this version.
 pub const RECORD_ENCODING_VERSION: SemanticEncodingVersion = SemanticEncodingVersion::new(1);
 
 pub const CURRENT_ENGINE_STATE_VERSIONS: EngineStateVersions = EngineStateVersions {
@@ -185,15 +173,11 @@ impl std::fmt::Display for DurableAttemptId {
 pub enum DurableComputation {
     Pure(PureComputationKey),
     Action {
-        /// The digest half of the reusable-index key (decision 0031). The rule
-        /// identity and revision the key also carries belong to the plan, and
-        /// [`Self::action_key`] rebuilds the whole key from both halves.
+        /// Digest half of the reusable-index key. [`Self::action_key`] combines
+        /// it with the rule identity and revision retained in the plan.
         computation_digest: ActionComputationDigest,
-        /// The request the key was built over. Retained because revalidating a
-        /// consumer's action edge re-selects a rule from the interface and
-        /// re-plans from the inputs (decision 0033), and because it makes
-        /// `computation_digest` derivable from the rest of the record instead
-        /// of a value the store takes on trust.
+        /// Retained request inputs used to re-plan and verify
+        /// `computation_digest`.
         request: DurableActionRequest,
         /// Boxed because a declared contract is by far the largest thing a
         /// durable computation holds, and every pure attempt would otherwise
@@ -435,12 +419,10 @@ pub enum DurableReuseDecision {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DurableReuseReason {
-    /// The engine that published this attempt had action caching switched off
-    /// (decision 0031).
+    /// The publishing engine had action caching disabled.
     ActionCachingDisabled,
-    /// A pure attempt that depends on an action. A pure key does not carry the
-    /// action rule's identity, so decision 0031 keeps the consumer out of the
-    /// reusable index even when the action itself is in it.
+    /// A pure attempt depends on an action whose rule identity is not part of
+    /// the pure computation key.
     EffectfulDependency {
         attempt: DurableAttemptId,
     },
@@ -465,10 +447,8 @@ pub struct CompletedAttempt {
     /// ordered: an action's own declared requirements, or the union of what a
     /// pure computation's dependencies require.
     ///
-    /// Propagation happens over the arena, which a hydrated node does not have
-    /// (decision 0033). Recorded rather than walked back out of the store on
-    /// every hydration, and checked against the recorded dependencies when the
-    /// attempt is published so the two cannot disagree.
+    /// Stored for hydration and checked against recorded dependencies when the
+    /// attempt is published.
     pub capabilities: Box<[CapabilityRequirement]>,
 }
 
@@ -524,8 +504,8 @@ impl DurableAttemptState {
 }
 
 /// Why a completed attempt is not reusable, as a chain over the dependency
-/// graph. Built by [`crate::state::EngineStateStore::explain_invalidation`] and
-/// the live mirror [`crate::EngineQuery::explain_invalidation`].
+/// graph. Built by [`crate::state::EngineStateReader::explain_invalidation`]
+/// and the live mirror [`crate::EngineQuery::explain_invalidation`].
 ///
 /// The chain follows the single dependency each [`DurableReuseReason`] names.
 /// When reuse is blocked by more than one dependency simultaneously, the

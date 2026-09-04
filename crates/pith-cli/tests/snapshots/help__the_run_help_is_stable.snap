@@ -1,0 +1,18 @@
+---
+source: crates/pith-cli/tests/help.rs
+expression: "help(&[\"run\"])?"
+---
+Evaluate a named entry and render its value
+
+Usage: pith run [OPTIONS] <ENTRY>
+
+Arguments:
+  <ENTRY>  The entry declared by the root module
+
+Options:
+      --module <PATH>    The root module. Defaults to module.pi, the M-14 workspace root name [default: module.pi]
+      --output <OUTPUT>  Output shape. Defaults to pretty on a TTY, plain otherwise [possible values: pretty, plain, json]
+      --store <DIR>      Content store root. Defaults to $PITH_HOME/store [env: PITH_STORE=]
+      --state <FILE>     Engine state root. Defaults to $PITH_HOME/state.db [env: PITH_STATE=]
+  -h, --help             Print help
+  -V, --version          Print version

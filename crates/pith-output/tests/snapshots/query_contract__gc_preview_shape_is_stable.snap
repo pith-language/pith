@@ -1,0 +1,27 @@
+---
+source: crates/pith-output/tests/query_contract.rs
+expression: "serde_json::to_value(&record).unwrap()"
+---
+{
+  "api_version": 4,
+  "code": 0,
+  "detail": "query",
+  "kind": "query",
+  "query": {
+    "content": {
+      "blobs": 9,
+      "live_blobs": 6,
+      "live_bytes": 2048,
+      "live_trees": 1,
+      "reclaimable_blobs": 3,
+      "reclaimable_bytes": 2048,
+      "reclaimable_trees": 1,
+      "total_bytes": 4096,
+      "trees": 2
+    },
+    "reclaimable_attempts": 2,
+    "retained_attempts": 5,
+    "roots": 3,
+    "view": "gc"
+  }
+}

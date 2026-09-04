@@ -1,0 +1,15 @@
+---
+source: crates/pith-cli/tests/help.rs
+expression: "help(&[\"gc\"])?"
+---
+Report what a collection would reclaim
+
+Usage: pith gc [OPTIONS]
+
+Options:
+      --dry-run          Report what a collection would reclaim, and reclaim nothing
+      --output <OUTPUT>  Output shape. Defaults to pretty on a TTY, plain otherwise [possible values: pretty, plain, json]
+      --store <DIR>      Content store root. Defaults to $PITH_HOME/store [env: PITH_STORE=]
+      --state <FILE>     Engine state root. Defaults to $PITH_HOME/state.db [env: PITH_STATE=]
+  -h, --help             Print help
+  -V, --version          Print version

@@ -35,16 +35,17 @@ fn the_surface_matches_the_live_table() {
 }
 
 #[test]
-fn typed_host_declarations_bind_the_domain_bodies() {
+fn typed_declarations_bind_the_host_body_and_register_the_represented_entry() {
     let loaded = loaded_module();
     let pure = loaded
-        .pure_rule("render-entry")
-        .unwrap_or_else(|| unreachable!("example.pi declares no pure rule `render-entry`"));
+        .represented_pure_rule("render-entry")
+        .unwrap_or_else(|| unreachable!("example.pi declares no represented `render-entry`"));
     let action = loaded
         .action_rule("render")
         .unwrap_or_else(|| unreachable!("example.pi declares no action rule `render`"));
     let mut engine = Engine::new();
-    pure.bind(&mut engine, BodyRevision(1), example_domain::RenderRule);
+    pure.register(&mut engine)
+        .unwrap_or_else(|error| unreachable!("the represented body does not register: {error}"));
     action.bind(&mut engine, BodyRevision(1), example_domain::RenderAction);
 
     let request = Request::new(

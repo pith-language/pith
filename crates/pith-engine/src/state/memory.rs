@@ -5,9 +5,9 @@ use pith_core::{ActionComputationKey, PureComputationKey};
 
 use super::validate::{AttemptLookup, TerminalAttemptState, validate_publication};
 use super::{
-    CURRENT_ENGINE_STATE_VERSIONS, CompletedAttempt, DurableAttempt, DurableAttemptId,
-    DurableAttemptState, DurableComputation, EngineStateError, EngineStateStore,
-    EngineStateVersions, InvalidationExplanation, StoppedAttempt,
+    AttemptStatistics, CURRENT_ENGINE_STATE_VERSIONS, CompletedAttempt, DurableAttempt,
+    DurableAttemptId, DurableAttemptState, DurableComputation, EngineStateError, EngineStateReader,
+    EngineStateStore, EngineStateVersions, InvalidationExplanation, StoppedAttempt,
 };
 
 /// Deterministic in-memory implementation of [`EngineStateStore`].
@@ -139,11 +139,112 @@ impl Default for MemoryEngineStateStore {
     }
 }
 
-impl EngineStateStore for MemoryEngineStateStore {
+impl EngineStateReader for MemoryEngineStateStore {
     fn versions(&self) -> EngineStateVersions {
         self.versions
     }
 
+    fn attempt_statistics(&self) -> Result<AttemptStatistics, EngineStateError> {
+        let records = self.locked()?;
+        let mut statistics = AttemptStatistics::default();
+        for attempt in records.attempts.values() {
+            statistics.record(attempt.state.status());
+        }
+        statistics.reusable_index = u64::try_from(
+            records
+                .latest_reusable
+                .len()
+                .saturating_add(records.latest_reusable_action.len()),
+        )
+        .unwrap_or(u64::MAX);
+        Ok(statistics)
+    }
+
+    fn all_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
+        let records = self.locked()?;
+        Ok(records.attempts.values().cloned().collect())
+    }
+
+    fn reusable_index_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
+        let records = self.locked()?;
+        let mut indexed: Vec<DurableAttemptId> = records
+            .latest_reusable
+            .values()
+            .chain(records.latest_reusable_action.values())
+            .copied()
+            .collect();
+        indexed.sort_unstable();
+        records.attempts_by_id(indexed)
+    }
+
+    fn attempt(
+        &self,
+        attempt: DurableAttemptId,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        Ok(self.locked()?.attempts.get(&attempt).cloned())
+    }
+
+    fn attempt_history(
+        &self,
+        computation: PureComputationKey,
+    ) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
+        let records = self.locked()?;
+        let Some(attempts) = records.pure_history.get(&computation) else {
+            return Ok(Box::new([]));
+        };
+        records.attempts_by_id(attempts.iter().copied())
+    }
+
+    fn latest_attempt(
+        &self,
+        computation: PureComputationKey,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        let records = self.locked()?;
+        let Some(attempts) = records.pure_history.get(&computation) else {
+            return Ok(None);
+        };
+        let Some(id) = attempts.last().copied() else {
+            return Ok(None);
+        };
+        Ok(records.attempts.get(&id).cloned())
+    }
+
+    fn latest_completed_reusable_attempt(
+        &self,
+        computation: PureComputationKey,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        let records = self.locked()?;
+        let indexed = records.latest_reusable.get(&computation).copied();
+        records.indexed_attempt(indexed)
+    }
+
+    fn latest_completed_reusable_action_attempt(
+        &self,
+        computation: ActionComputationKey,
+    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
+        let records = self.locked()?;
+        let indexed = records.latest_reusable_action.get(&computation).copied();
+        records.indexed_attempt(indexed)
+    }
+
+    fn explain_invalidation(
+        &self,
+        computation: PureComputationKey,
+    ) -> Result<Option<InvalidationExplanation>, EngineStateError> {
+        let records = self.locked()?;
+        let indexed = records.latest_reusable.get(&computation).copied();
+        let latest = records.indexed_attempt(indexed)?;
+        super::explain::explain_latest(&*records, latest)
+    }
+
+    fn pending_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
+        let records = self.locked()?;
+        let pending: Vec<_> = records.pending.iter().copied().collect();
+        records.attempts_by_id(pending)
+    }
+}
+
+impl EngineStateStore for MemoryEngineStateStore {
     fn create_pending_attempt(
         &self,
         computation: DurableComputation,
@@ -196,57 +297,5 @@ impl EngineStateStore for MemoryEngineStateStore {
         cancellation: StoppedAttempt,
     ) -> Result<(), EngineStateError> {
         self.publish(attempt, TerminalAttemptState::Cancelled(cancellation))
-    }
-
-    fn attempt(
-        &self,
-        attempt: DurableAttemptId,
-    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
-        Ok(self.locked()?.attempts.get(&attempt).cloned())
-    }
-
-    fn attempt_history(
-        &self,
-        computation: PureComputationKey,
-    ) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
-        let records = self.locked()?;
-        let Some(attempts) = records.pure_history.get(&computation) else {
-            return Ok(Box::new([]));
-        };
-        records.attempts_by_id(attempts.iter().copied())
-    }
-
-    fn latest_completed_reusable_attempt(
-        &self,
-        computation: PureComputationKey,
-    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
-        let records = self.locked()?;
-        let indexed = records.latest_reusable.get(&computation).copied();
-        records.indexed_attempt(indexed)
-    }
-
-    fn latest_completed_reusable_action_attempt(
-        &self,
-        computation: ActionComputationKey,
-    ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
-        let records = self.locked()?;
-        let indexed = records.latest_reusable_action.get(&computation).copied();
-        records.indexed_attempt(indexed)
-    }
-
-    fn explain_invalidation(
-        &self,
-        computation: PureComputationKey,
-    ) -> Result<Option<InvalidationExplanation>, EngineStateError> {
-        let records = self.locked()?;
-        let indexed = records.latest_reusable.get(&computation).copied();
-        let latest = records.indexed_attempt(indexed)?;
-        super::explain::explain_latest(&*records, latest)
-    }
-
-    fn pending_attempts(&self) -> Result<Box<[Arc<DurableAttempt>]>, EngineStateError> {
-        let records = self.locked()?;
-        let pending: Vec<_> = records.pending.iter().copied().collect();
-        records.attempts_by_id(pending)
     }
 }

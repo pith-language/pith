@@ -13,6 +13,9 @@
 //! finite list, and every primitive is total. A body can fail — `Fail` and
 //! `TextOfBytes` are deterministic value failures — but it cannot diverge.
 
+use std::hash::{Hash, Hasher};
+use std::sync::{Arc, OnceLock};
+
 use pith_ids::BodyIrDigest;
 
 use crate::rule::Interface;
@@ -26,15 +29,37 @@ pub const MAX_BODY_DEPTH: u32 = 128;
 /// A pure rule's body. The expression is checked against a rule's interface by
 /// [`Self::validate`]; the inputs are the deepest binders and the expression's
 /// type must be the interface's output.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+///
+/// The canonical digest is computed once and shared by every clone of the
+/// body: registration digests the same body its declaration already digested,
+/// and the expression is immutable, so the memo cannot go stale.
+#[derive(Clone, Debug)]
 pub struct RuleBody {
     expression: BodyExpr,
+    digest: Arc<OnceLock<BodyIrDigest>>,
+}
+
+impl PartialEq for RuleBody {
+    fn eq(&self, other: &Self) -> bool {
+        self.expression == other.expression
+    }
+}
+
+impl Eq for RuleBody {}
+
+impl Hash for RuleBody {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.expression.hash(state);
+    }
 }
 
 impl RuleBody {
     #[must_use]
     pub fn new(expression: BodyExpr) -> Self {
-        Self { expression }
+        Self {
+            expression,
+            digest: Arc::new(OnceLock::new()),
+        }
     }
 
     #[must_use]
@@ -47,7 +72,9 @@ impl RuleBody {
     /// version (decisions 0038, 0062).
     #[must_use]
     pub fn digest(&self) -> BodyIrDigest {
-        BodyIrDigest::of_manifest(&self.encode_canonical())
+        *self
+            .digest
+            .get_or_init(|| BodyIrDigest::of_manifest(&self.encode_canonical()))
     }
 
     /// Check the body against `interface`: every binder is resolved, every
@@ -209,6 +236,32 @@ pub enum BodyExpr {
     /// Decode bytes as UTF-8 text. Invalid bytes fail the body; the failure
     /// is a value, deterministic in the bytes, not a divergence.
     TextOfBytes { bytes: Box<BodyExpr> },
+    /// Split `text` on every occurrence of `separator`, keeping empty fields:
+    /// adjacent separators produce empty fields, and an empty text produces
+    /// one empty field, so appending the parts back with the separator
+    /// re-joins the text exactly. An empty separator never matches, and the
+    /// result is the whole text as one field. Every edge is decided rather
+    /// than refused, which is what totality asks of a primitive no input can
+    /// escape (decision 0064). The text-splitting constructor 0062 named as
+    /// unwritten: a delimiter walk is a split whose parts are split again,
+    /// and a prefix strip is a split whose second part is taken when there
+    /// is one.
+    TextBreak {
+        text: Box<BodyExpr>,
+        separator: Box<BodyExpr>,
+    },
+    /// Join a list of text with `separator` between adjacent fields: an empty
+    /// list joins to the empty text, a single field joins to itself, and the
+    /// separator appears neither before the first field nor after the last.
+    /// The join side of [`BodyExpr::TextBreak`]'s round trip — splitting a
+    /// text and joining its fields re-joins it exactly when the separator is
+    /// non-empty (decision 0064). A primitive rather than a fold of
+    /// concatenations, because an accumulating fold re-copies its result at
+    /// every step, and totality asks for the total cost too.
+    TextJoin {
+        list: Box<BodyExpr>,
+        separator: Box<BodyExpr>,
+    },
     /// Request one pure computation and continue under its result.
     Need {
         request: BodyRequest,
@@ -527,6 +580,19 @@ fn infer(
             expect(infer(bytes, binders, deeper)?, &Type::Bytes)?;
             Ok(Inferred::Typed(Type::Text))
         }
+        BodyExpr::TextBreak { text, separator } => {
+            expect(infer(text, binders, deeper)?, &Type::Text)?;
+            expect(infer(separator, binders, deeper)?, &Type::Text)?;
+            Ok(Inferred::Typed(Type::List(Box::new(Type::Text))))
+        }
+        BodyExpr::TextJoin { list, separator } => {
+            expect(
+                infer(list, binders, deeper)?,
+                &Type::List(Box::new(Type::Text)),
+            )?;
+            expect(infer(separator, binders, deeper)?, &Type::Text)?;
+            Ok(Inferred::Typed(Type::Text))
+        }
         BodyExpr::Need { .. }
         | BodyExpr::NeedAll { .. }
         | BodyExpr::NeedEach { .. }
@@ -805,38 +871,58 @@ fn infer_match(
             });
         }
     }
-    let declared: Vec<&str> = sum
-        .constructors
-        .iter()
-        .map(|constructor| constructor.name.as_ref())
-        .collect();
-    let covered: Vec<&str> = arms.iter().map(|arm| arm.constructor.as_ref()).collect();
-    if let Some(constructor) = covered
-        .iter()
-        .find(|constructor| !declared.contains(constructor))
-    {
+
+    let mut unknown: Option<&str> = None;
+    let mut missing: Vec<Box<str>> = Vec::new();
+    let mut arm = arms.iter().peekable();
+    for constructor in sum.constructors.iter() {
+        loop {
+            let Some(candidate) = arm.peek() else {
+                missing.push(constructor.name.clone());
+                break;
+            };
+            match candidate
+                .constructor
+                .as_ref()
+                .cmp(constructor.name.as_ref())
+            {
+                std::cmp::Ordering::Less => {
+                    unknown = unknown.or(Some(candidate.constructor.as_ref()));
+                    let _ = arm.next();
+                }
+                std::cmp::Ordering::Equal => {
+                    let _ = arm.next();
+                    break;
+                }
+                std::cmp::Ordering::Greater => {
+                    missing.push(constructor.name.clone());
+                    break;
+                }
+            }
+        }
+    }
+    for remaining in arm {
+        unknown = unknown.or(Some(remaining.constructor.as_ref()));
+    }
+    if let Some(constructor) = unknown {
         return Err(BodyError::UnknownArm {
             sum: spelling.into(),
-            constructor: (**constructor).into(),
+            constructor: constructor.into(),
         });
     }
-    let missing: Box<[Box<str>]> = declared
-        .iter()
-        .filter(|constructor| !covered.contains(constructor))
-        .map(|constructor| (**constructor).into())
-        .collect();
     if !missing.is_empty() {
         return Err(BodyError::NonExhaustiveMatch {
             sum: spelling.into(),
-            missing,
+            missing: missing.into(),
         });
     }
     let mut result: Option<Inferred> = None;
     for arm in arms {
         let payload = sum
             .constructors
-            .iter()
-            .find(|constructor| constructor.name == arm.constructor)
+            .binary_search_by(|constructor| constructor.name.as_ref().cmp(arm.constructor.as_ref()))
+            .ok()
+            .and_then(|position| sum.constructors.get(position))
             .and_then(|constructor| constructor.payload.clone());
         let arm_type = match payload {
             Some(payload) => {
@@ -1447,6 +1533,60 @@ mod tests {
             body.validate(&interface),
             Err(BodyError::DepthExceeded {
                 limit: MAX_BODY_DEPTH
+            })
+        );
+    }
+
+    #[test]
+    fn a_text_break_produces_a_list_of_text() {
+        let interface = Interface {
+            inputs: Box::new([Type::Text]),
+            output: Type::List(Box::new(Type::Text)),
+        };
+        let body = RuleBody::new(BodyExpr::TextBreak {
+            text: Box::new(BodyExpr::Bound(0)),
+            separator: Box::new(BodyExpr::Literal(Value::Text(",".into()))),
+        });
+        assert_eq!(body.validate(&interface), Ok(()));
+
+        let mistyped_separator = RuleBody::new(BodyExpr::TextBreak {
+            text: Box::new(BodyExpr::Bound(0)),
+            separator: Box::new(BodyExpr::Literal(Value::int(0))),
+        });
+        assert_eq!(
+            mistyped_separator.validate(&interface),
+            Err(BodyError::TypeMismatch {
+                expected: Type::Text,
+                found: Type::Int,
+            })
+        );
+    }
+
+    #[test]
+    fn a_text_join_produces_text_from_a_text_list() {
+        let interface = Interface {
+            inputs: Box::new([Type::List(Box::new(Type::Text))]),
+            output: Type::Text,
+        };
+        let body = RuleBody::new(BodyExpr::TextJoin {
+            list: Box::new(BodyExpr::Bound(0)),
+            separator: Box::new(BodyExpr::Literal(Value::Text(",".into()))),
+        });
+        assert_eq!(body.validate(&interface), Ok(()));
+
+        let mistyped_list = RuleBody::new(BodyExpr::TextJoin {
+            list: Box::new(BodyExpr::Bound(0)),
+            separator: Box::new(BodyExpr::Literal(Value::Text(",".into()))),
+        });
+        let ints_interface = Interface {
+            inputs: Box::new([Type::List(Box::new(Type::Int))]),
+            output: Type::Text,
+        };
+        assert_eq!(
+            mistyped_list.validate(&ints_interface),
+            Err(BodyError::TypeMismatch {
+                expected: Type::List(Box::new(Type::Text)),
+                found: Type::List(Box::new(Type::Int)),
             })
         );
     }

@@ -1,4 +1,4 @@
-//! A cross-adapter conformance suite for [`EngineStateStore`] (decision 0025).
+//! Cross-adapter conformance tests for [`EngineStateStore`].
 //!
 //! Adapters choose their own representation, so a generated sequence of store
 //! operations is applied both to the adapter under test and to
@@ -54,6 +54,7 @@ pub fn check(scenario: &Scenario, subject: &dyn EngineStateStore) -> Result<(), 
 mod tests {
     use super::fixtures::pure_key;
     use super::*;
+    use crate::state::EngineStateReader;
     use pith_core::{RecordField, Value};
     use proptest::prelude::*;
 

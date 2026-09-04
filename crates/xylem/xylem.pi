@@ -1,8 +1,13 @@
 nominal Toolchain = Text
+
 nominal CSource = Blob
+
 nominal Object = Blob
+
 nominal Executable = Blob
+
 nominal Depfile = Blob
+
 nominal TestReport = Bool
 
 -- Discovers source dependencies within the provided header universe.
