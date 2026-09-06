@@ -1,6 +1,6 @@
-//! One source claim per subject across the dependency closure.
+//! One canonical source per subject across the dependency closure.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, btree_map::Entry};
 use std::sync::Arc;
 
 use pith_diag::{Diag, SourceFile, Span};
@@ -10,22 +10,41 @@ use super::super::acquire::{AcquireFailure, ModuleStore, Route};
 use super::at;
 
 #[derive(PartialEq, Eq)]
-enum Identity<L> {
-    Path(L),
-    Registry {
-        name: Box<str>,
-        root_key: RootKey,
-    },
-    Git {
-        revision: Box<str>,
-        subpath: Option<Box<str>>,
-    },
-    Archive(Box<str>),
+enum Authority {
+    Path,
+    Registry(RootKey),
+    Git,
+    Archive,
+}
+
+#[derive(PartialEq, Eq)]
+struct LocatedSource<L> {
+    location: L,
+    authority: Authority,
+}
+
+impl<L> LocatedSource<L> {
+    fn acquire<S: ModuleStore<Location = L>>(
+        store: &S,
+        base: &L,
+        route: &Route<'_>,
+    ) -> Result<Self, AcquireFailure> {
+        let location = store.locate(base, route)?;
+        let authority = match route {
+            Route::Path { .. } | Route::Member { .. } => Authority::Path,
+            Route::Registry(registry) => Authority::Registry(registry.root_key().clone()),
+            Route::Git { .. } => Authority::Git,
+            Route::Archive { .. } => Authority::Archive,
+        };
+        Ok(Self {
+            location,
+            authority,
+        })
+    }
 }
 
 struct Claim<L> {
-    identity: Identity<L>,
-    location: L,
+    located: LocatedSource<L>,
     source: Arc<SourceFile>,
     span: Span,
 }
@@ -53,70 +72,31 @@ impl<L: Clone + Ord> Claims<L> {
         source: &Arc<SourceFile>,
         span: Span,
     ) -> Result<L, Failure> {
-        let (identity, located) = Identity::locate(store, base, route).map_err(Failure::Acquire)?;
-        if let Some(prior) = self.0.get(subject) {
-            return prior.agree(&identity, subject, source, span);
-        }
-
-        let location = match located {
-            Some(location) => location,
-            None => store.locate(base, route).map_err(Failure::Acquire)?,
-        };
-        self.0.insert(
-            subject.clone(),
-            Claim {
-                identity,
-                location: location.clone(),
-                source: Arc::clone(source),
-                span,
-            },
-        );
-        Ok(location)
-    }
-}
-
-impl<L: Clone + Ord> Identity<L> {
-    fn locate<S: ModuleStore<Location = L>>(
-        store: &S,
-        base: &L,
-        route: &Route<'_>,
-    ) -> Result<(Self, Option<L>), AcquireFailure> {
-        Ok(match route {
-            Route::Path { .. } | Route::Member { .. } => {
-                let location = store.locate(base, route)?;
-                (Identity::Path(location.clone()), Some(location))
+        let located = LocatedSource::acquire(store, base, route).map_err(Failure::Acquire)?;
+        match self.0.entry(subject.clone()) {
+            Entry::Occupied(prior) => prior.get().agree(&located, subject, source, span),
+            Entry::Vacant(entry) => {
+                let claim = entry.insert(Claim {
+                    located,
+                    source: Arc::clone(source),
+                    span,
+                });
+                Ok(claim.located.location.clone())
             }
-            Route::Registry(registry) => (
-                Identity::Registry {
-                    name: registry.name().into(),
-                    root_key: registry.root_key().clone(),
-                },
-                None,
-            ),
-            Route::Git {
-                revision, subpath, ..
-            } => (
-                Identity::Git {
-                    revision: (*revision).into(),
-                    subpath: subpath.map(Into::into),
-                },
-                None,
-            ),
-            Route::Archive { digest, .. } => (Identity::Archive((*digest).into()), None),
-        })
+        }
     }
 }
 
 impl<L: Clone + PartialEq> Claim<L> {
     fn agree(
         &self,
-        identity: &Identity<L>,
+        located: &LocatedSource<L>,
         subject: &ModuleSubject,
         source: &Arc<SourceFile>,
         span: Span,
     ) -> Result<L, Failure> {
-        if &self.identity == identity {
-            return Ok(self.location.clone());
+        if &self.located == located {
+            return Ok(self.located.location.clone());
         }
         Err(Failure::Conflict(Box::new([
             at(
@@ -137,3 +117,6 @@ impl<L: Clone + PartialEq> Claim<L> {
         ])))
     }
 }
+
+#[cfg(test)]
+mod tests;

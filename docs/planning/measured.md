@@ -405,13 +405,21 @@ configuration refused even when the project would override it, and project-only 
 routes before the adapter's `locate` call. Unused user declarations do not grant authority to a selected
 project route. The successful result retains the overrides for the caller to report.
 
-`route_claims.rs` measures a diamond with conflicting Git revisions, canonical path agreement and conflict,
-Git subpath disagreement, archive digest agreement and disagreement, and a change of source kind. Conflicts
-carry both consumers' source locations. Immutable route disagreement is refused before the second adapter
-call; paths first need the adapter's canonical location. Mirrors with matching revision/subpath or archive
-digest claims reuse the acquired location. Registry claims compare the configured name and root key;
-a locator is absent from each immutable claim. A reused registry selection is admitted against every
-consumer's range, including a later constraint that excludes the already-loaded version.
+`route_claims/` separates request spelling, adapter-canonical location, and the manifest/source bytes
+returned there. A diamond whose two repositories spell `main` but select different versions refuses in
+both traversal orders; different spellings resolving to one source load once. Git subpaths and archive
+digests at one locator can select different canonical sources. A later adapter refusal survives even when
+its request text matches an earlier success. Registry aliases elaborate and project through the frontend,
+while distinct registry locations or root keys refuse. Reused aliases still undergo each consumer's range
+admission. Every route is located, and agreement deduplicates manifest/source reads afterward.
+
+The original fixtures treated matching request strings as immutable identities and used only one registry
+name. They therefore confirmed a reuse shortcut without exercising the adapter's canonicalization boundary.
+The symbolic-reference and registry-alias regressions both fail against that implementation and pass after
+the fix. The low-level claim tests cover adapter failure after success, failed acquisition leaving no claim,
+and a conflict preserving the original claim. The CLI's `route_agreement` suite checks equivalent and
+conflicting real filesystem paths, source-bearing JSON diagnostics, exit status, and absence of engine
+state from `check`.
 
 The configuration owner is a type parameter, and its runtime provenance derives from that type. The graph
 has no default or unconfigured routing state: construction requires a parsed root and validated routing.
@@ -419,9 +427,10 @@ The source changes do not alter elaborated artifacts; the acquisition parity fix
 and registry-shaped loading through the same frontend.
 
 Limits: the project-only binding policy is the authority-origin check needed by `strict`, not its network
-or lock contract. No command consumes user configuration yet. The Git/archive fixtures compare declared
-claims through an in-memory store; they do not verify cryptographic content or implement those transports.
+or lock contract. No command consumes user configuration yet. The Git/archive fixtures exercise adapter canonicalization
+through an in-memory store; they do not verify cryptographic content or implement those transports.
 Signed entries, immutable source verification, locks, and withdrawal replay remain open.
 
-`just ci` passes at 1135 tests across 121 suites. Formatting, Clippy, rustdoc, dependency policy,
+The initial implementation passed `just ci` at 1135 tests across 121 suites despite the missing cases.
+The correction passes at 1147 tests across 122 suites. Formatting, Clippy, rustdoc, dependency policy,
 notebook validation, determinism, and the recorded elaborator digest all pass.

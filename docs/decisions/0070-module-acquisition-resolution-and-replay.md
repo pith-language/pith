@@ -121,6 +121,13 @@ own configuration rather than something to rank. Two routes that agree — the s
 the same revision through two locators — load once, which 0067 already established for paths and 0069's
 locator rule extends to the rest.
 
+Every route reaches the acquisition adapter's canonicalization before this reuse check. A parsed revision
+or digest is request text, not evidence that two sources agree. The adapter's location must distinguish
+selected revisions, subpaths, archive content, and registries, while giving equivalent mirrors one
+location. A registry's local configuration name is absent from agreement; its pinned root key remains,
+so an alias cannot either manufacture a conflict or erase a different trust claim. Manifest and source
+bytes are acquired once after agreement, without skipping validation of later routes.
+
 ### solving is a computation; consulting a lock is not
 
 Resolution is a pure rule registered on the same engine API a peer domain uses, over a universe acquired

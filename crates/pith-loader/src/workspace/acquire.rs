@@ -140,7 +140,11 @@ impl Route<'_> {
 pub trait ModuleStore {
     type Location: Clone + Ord + std::fmt::Display;
 
-    /// The location `route` reaches, relative to the manifest at `base`.
+    /// The canonical source selected by `route`, relative to the manifest at `base`.
+    /// Every route is located before reuse. Locations must distinguish selected
+    /// revisions, subpaths, archive content, and registries; equivalent mirrors
+    /// and registry aliases produce equal locations. The adapter validates source
+    /// references here: request spelling alone is not proof of source identity.
     ///
     /// # Errors
     /// Returns [`AcquireFailure::Unsupported`] for a route this store does
