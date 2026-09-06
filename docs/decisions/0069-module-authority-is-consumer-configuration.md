@@ -250,24 +250,31 @@ deliberately, with the loss stated, rather than by drift.
 
 ## evidence
 
-The routing portion now has executable evidence in
-[measured](../planning/measured.md#m-14-consumer-configuration-and-route-agreement). The signing,
-publication, and replay contracts remain obligations, so this record remains proposed. The two probes that *have* run belong to
+The routing portion has executable evidence in
+[measured](../planning/measured.md#m-14-consumer-configuration-and-route-agreement), and the trust
+chain now does too: [the signed-index slice](../planning/measured.md#m-14-the-module-registry--the-signed-index-slice)
+implements the root key over domain key sets, key-set generations, per-line signatures, and the
+consumer's per-subject append-only record as four distinct refusals, with key rotation and
+generation-rollback fixtures and the wrong-cache and content-identity refusals at acquisition. The
+signature scheme this record left open is settled by that encoder: ed25519, detached, over each
+line's canonical rendering, spelled `ed25519:<hex>` — the recommendation above, confirmed before
+any index bytes existed outside fixtures. The record stays proposed until the lock round trip runs
+its claims; the two probes that *have* run belong to
 [0068](0068-published-surfaces-are-context-bound.md) and constrain what a registry may publish about a
 released version rather than how it is authorized.
 
 The third planned probe — withdraw an admitted, locked selection and replay the lock — remains unrunnable
-until registry machinery exists. It is the one that decides whether a lock replays a selection without
-replaying a judgment about that selection's fitness, and it belongs to the slice that builds the round
-trip.
+until the lock document exists. It is the one that decides whether a lock replays a selection without
+replaying a judgment about that selection's fitness, and it belongs to the slice that builds the
+round trip.
 
 ## unresolved
 
-**Signature format and key distribution.** One scheme, chosen once, before an encoder exists. Signed git
-commits reuse forge machinery but bind the model to git and to a keyring; detached per-line signatures work
-over any transport including a static mirror, and are the recommendation.
+**Signature format and key distribution.** The scheme is settled — ed25519, detached, per line, per
+the signed-index slice above — but key distribution is not: how a publisher's key reaches a person,
+and what the first-party registry's enrollment story is, remain open alongside bootstrap below.
 
-**Threshold semantics.** A key set carries a threshold and the model above verifies one publisher
+**Threshold semantics.** A key set carries a threshold and the client verifies one publisher
 signature. Whether the first registry requires multi-signature releases or merely permits them is
 undecided, and it is the strongest available answer to a stolen publisher key.
 

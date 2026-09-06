@@ -296,6 +296,17 @@ route agreement now have witnesses in
 [measured](../measured.md#m-14-consumer-configuration-and-route-agreement). Full operation modes, signed
 entries, and locks remain open.
 
+The signed-index half has since landed, on the evidence in
+[measured](../measured.md#m-14-the-module-registry--the-signed-index-slice): the line format and its
+ed25519 signatures, publication that derives every cached field from the manifest it releases and
+refuses path dependencies, the client's four checks with rotation and rollback fixtures, the
+directory host, and the store whose acquisition pipeline refuses a wrong cache, a wrong tree, an
+unreachable index, and a withdrawn release each at its own boundary — with the round trip that
+elaborates the same bytes identically from a local directory and through the signed index. What
+remains of this slice is the lock document with its text projection, the withdrawal-replay probe
+that needs it, and the admission-value calculus; the store serves exact selections until slice 4
+wires the version universe through `modules.resolve`.
+
 
 Start with a temporary directory registry and exact selections. Publish `example-domain` as an ordinary
 manifest module. Generate index metadata from the manifest, store its source tree and advertised surface,

@@ -434,3 +434,73 @@ Signed entries, immutable source verification, locks, and withdrawal replay rema
 The initial implementation passed `just ci` at 1135 tests across 121 suites despite the missing cases.
 The correction passes at 1147 tests across 122 suites. Formatting, Clippy, rustdoc, dependency policy,
 notebook validation, determinism, and the recorded elaborator digest all pass.
+
+
+## M-14: the module registry — the signed-index slice
+
+status: the milestone is open. This slice is two of slice 3's three reviewable pieces — the
+signed-entry publication path and the key-set and append-only client — plus the round trip that
+loads one module set through both, per the ordering that refuses to grow authorization after a
+round trip that admitted content on the registry's word. The lock document and its text projection
+are the remaining piece, with the withdrawal-replay probe that needs it.
+
+evidence: the index is a line-oriented directory tree — a `root` file naming the root public key,
+one signed key-set document per domain under `domains/`, one append-only line file per subject
+under `index/`, and the host's content under `sources/` addressed by the revision an entry names.
+A release line carries the canonical version, its requirements, the revision pin, the measured
+tree digest, the signing key (`by`), the detached signature (`sig`), and the registry's admission
+time last, covered by neither signature; a signature covers the canonical rendering of the line's
+values, so a re-spelled line with equal values verifies and an edited value does not. The scheme
+is ed25519 — the choice 0069 left open before an encoder existed — spelled
+`ed25519:<hex>` everywhere, deterministic over fixed seeds so an index on disk is a function of
+what was published to it and nothing else.
+
+Publication derives, never authors: `registry::derive` reads the module's manifest and source set
+through the local store, refuses a path dependency with `E-3057`, measures the normalized tree
+over the manifest and the canonically ordered sources, and signs the rendered claims. The client
+runs the four checks at `open`, each a distinct refusal attached to the file and line that earned
+it: a key set not signed by the pinned root, and a served root key that disagrees with the pinned
+one, refuse as `E-3049`; a generation below the consumer's recorded one refuses as `E-3050`; a
+line whose named signer is absent from the domain key set, or whose signature does not verify
+under it, refuses as `E-3048`; and a previously admitted line now altered or absent — including
+one whose unsigned admission time moved — refuses as `E-3051`, the fork check. Two entries for one
+canonical version refuse as `E-3062`. A `Verified` index has one constructor, the read that
+passed, so acquisition cannot reach an unverified line.
+
+Rotation is measured through the consumer's record, and the semantics the fixture forced are now
+stated: a line the consumer already admitted answers to the append-only check, not to the current
+key set — rotation retires a key for what it may sign next, not for what it signed while enrolled —
+while a line new to the read answers to the current set, so a release signed after rotation by the
+retired key refuses as `E-3048`. The `tests/registry.rs` fixtures run key rotation forward, replay
+the superseded generation backwards (`E-3050`), and alter an admission time so only the fork check
+can fire.
+
+The store serves exact selections — the one release the index carries for a subject — because
+selecting among versions is the resolver's computation; an index carrying several versions says so
+rather than preferring one silently. Its acquisition pipeline refuses each mismatch at its own
+boundary: an entry whose cached subject, version, or requirements disagree with the manifest at its
+pinned revision refuses as `E-3052` naming the field and both values, never reconciled; fetched
+bytes whose measured tree disagrees with the entry's digest refuse as `E-3053` naming both
+identities; an unreadable index refuses as `E-3054`, distinct from carrying no entry; and a
+withdrawn release refuses as `E-3055`, naming the issuer and the reason, substituting nothing. The
+round-trip witness loads the same module bytes from a local directory and through the signed index
+and asserts equal source content identities, equal elaborated ABIs, and equal published surfaces
+per subject, with only the rendered origin moving — the same shape `acquisition.rs` compares
+stores by, now through a trust chain rather than a fixture that stands where the client will.
+
+`cargo test --locked --workspace` passes at 1174 tests across 123 suites; formatting, Clippy,
+rustdoc, dependency policy, and notebook validation pass. The elaborator digest was re-recorded at
+`ELABORATOR_SEMANTIC_VERSION` 1: the check is a source digest over the frontend crates, this slice
+added files to `pith-loader` without touching what an elaboration means, and the parity fixtures —
+phloem's declaration table and the xylem revision agreement — pass unchanged as the evidence.
+
+limits, stated so the section is not read past its scope. The consumer's append-only record is
+caller-held memory passed to `open` and returned for the caller to keep; nothing persists it, so
+the replay protections are exercised between two reads in one process. A fresh consumer reading an
+index whose domain has rotated still meets historical lines under keys no longer enrolled —
+key-set history read from the index substrate is the named resolution, and the git host keeps that
+history where a single-file directory host cannot. The threshold is carried in the key-set format
+and checked for satisfiability, but one signature is verified; multi-signature releases remain
+0069's open question. The admission-value calculus — `Stale`, `Unreachable`, `Conflicted`,
+`Unchecked` — the lock document, the withdrawal-replay probe, any snapshot or git transport, and
+any person-facing command remain with the slices that own them.
