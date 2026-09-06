@@ -5,12 +5,12 @@
 use std::sync::Arc;
 
 use pith_diag::SourceFile;
-use pith_hir::{FrontendCode, Manifest, ManifestUse, ModuleSubject};
+use pith_hir::{FrontendCode, Manifest, ManifestUse};
 
 use super::super::acquire::{AcquireFailure, ModuleStore};
 use super::super::admission;
 use super::super::module::SourceSet;
-use super::{ManifestFile, PendingModule, Resolution, at, view_of};
+use super::{ManifestFile, PendingModule, Resolution, at, claims, view_of};
 
 /// What a `use` clause's route reached.
 pub(super) enum Reached<L> {
@@ -20,7 +20,7 @@ pub(super) enum Reached<L> {
     /// A location already emitted into the graph.
     Loaded(usize),
     /// A location read for the first time on this walk.
-    Fresh(L, Arc<ManifestFile<L>>),
+    Fresh(L, Arc<ManifestFile>),
 }
 
 impl<S: ModuleStore> Resolution<S> {
@@ -55,7 +55,7 @@ impl<S: ModuleStore> Resolution<S> {
     fn resolve_use(
         &mut self,
         consumer_location: &S::Location,
-        consumer: &Arc<ManifestFile<S::Location>>,
+        consumer: &Arc<ManifestFile>,
         use_: &ManifestUse,
     ) {
         if use_.alias.as_ref() == crate::import::BUILTIN_MODULE {
@@ -71,7 +71,7 @@ impl<S: ModuleStore> Resolution<S> {
         }
         match self.route(consumer_location, consumer, use_) {
             Some(Reached::Cycle) | None => {}
-            Some(Reached::Loaded(index)) => self.check_loaded_subject(index, consumer, use_),
+            Some(Reached::Loaded(index)) => self.admit_loaded(index, consumer, use_),
             Some(Reached::Fresh(location, dependency)) => {
                 self.admit_dependency(location, dependency, consumer, use_)
             }
@@ -87,7 +87,7 @@ impl<S: ModuleStore> Resolution<S> {
     fn route(
         &mut self,
         consumer_location: &S::Location,
-        consumer: &Arc<ManifestFile<S::Location>>,
+        consumer: &Arc<ManifestFile>,
         use_: &ManifestUse,
     ) -> Option<Reached<S::Location>> {
         let span = use_.source_span();
@@ -98,9 +98,20 @@ impl<S: ModuleStore> Resolution<S> {
                 return None;
             }
         };
-        let location = match self.store.locate(consumer_location, &route) {
+        let location = match self.claims.locate(
+            &self.store,
+            consumer_location,
+            &route,
+            &use_.subject,
+            consumer.parsed.source(),
+            span,
+        ) {
             Ok(location) => location,
-            Err(failure) => {
+            Err(claims::Failure::Conflict(diagnostics)) => {
+                self.diagnostics.extend(*diagnostics);
+                return None;
+            }
+            Err(claims::Failure::Acquire(failure)) => {
                 let code = match failure {
                     AcquireFailure::Unsupported { .. } => FrontendCode::UnsupportedSource,
                     _ => FrontendCode::MissingManifest,
@@ -157,20 +168,12 @@ impl<S: ModuleStore> Resolution<S> {
         Some(Reached::Fresh(location, dependency))
     }
 
-    /// A route already walked: its declared subject must be the one the
-    /// clause selected.
-    fn check_loaded_subject(
-        &mut self,
-        index: usize,
-        consumer: &Arc<ManifestFile<S::Location>>,
-        use_: &ManifestUse,
-    ) {
-        let declared = self
-            .modules
-            .get(index)
-            .map(|module| module.view.subject().clone());
-        if let Some(declared) = declared {
-            self.check_subject(&declared, consumer, use_);
+    fn admit_loaded(&mut self, index: usize, consumer: &Arc<ManifestFile>, use_: &ManifestUse) {
+        if let Some(module) = self.modules.get(index)
+            && let Some(diagnostic) =
+                admission_diagnostic(&module.view, &module.location, consumer, use_)
+        {
+            self.diagnostics.push(diagnostic);
         }
     }
 
@@ -179,28 +182,15 @@ impl<S: ModuleStore> Resolution<S> {
     fn admit_dependency(
         &mut self,
         location: S::Location,
-        dependency: Arc<ManifestFile<S::Location>>,
-        consumer: &Arc<ManifestFile<S::Location>>,
+        dependency: Arc<ManifestFile>,
+        consumer: &Arc<ManifestFile>,
         use_: &ManifestUse,
     ) {
         let Some(view) = view_of(&dependency) else {
             return;
         };
-        let request = admission::Request::new(use_.subject.clone(), use_.range.clone());
-        if let Err(refusal) = admission::admit(&request, &view) {
-            let span = match refusal.clause {
-                admission::Clause::Subject { .. } => use_.subject_span,
-                admission::Clause::Version { .. } => use_.range_span,
-            };
-            self.diagnostics.push(at(
-                FrontendCode::UnexpectedSubject,
-                span,
-                consumer.parsed.source(),
-                format!(
-                    "`{}` binds {}: {} (acquired at `{location}`)",
-                    use_.alias, use_.subject, refusal
-                ),
-            ));
+        if let Some(diagnostic) = admission_diagnostic(&view, &location, consumer, use_) {
+            self.diagnostics.push(diagnostic);
             return;
         }
         if let Some(nested) = view.workspace() {
@@ -253,31 +243,6 @@ impl<S: ModuleStore> Resolution<S> {
         }
     }
 
-    /// Whether the dependency declares the subject the `use` clause names.
-    /// A mismatch is refused rather than re-bound: an alias selects, it does
-    /// not rename.
-    fn check_subject(
-        &mut self,
-        declared: &ModuleSubject,
-        consumer: &Arc<ManifestFile<S::Location>>,
-        use_: &ManifestUse,
-    ) -> bool {
-        if declared == &use_.subject {
-            return true;
-        }
-        self.diagnostics.push(at(
-            FrontendCode::SubjectMismatch,
-            use_.subject_span,
-            consumer.parsed.source(),
-            format!(
-                "the dependency at `{}` declares the subject {declared}, not {}",
-                use_.path().map_or("", |(path, _)| path),
-                use_.subject
-            ),
-        ));
-        false
-    }
-
     /// Record that `directory` declares the view's subject. A second
     /// location declaring it is refused even if the bytes match; the same
     /// location declaring it twice is one module seen twice.
@@ -305,4 +270,27 @@ impl<S: ModuleStore> Resolution<S> {
         }
         self.subjects.insert(subject.clone(), location.clone());
     }
+}
+
+fn admission_diagnostic(
+    view: &Manifest,
+    location: &impl std::fmt::Display,
+    consumer: &ManifestFile,
+    use_: &ManifestUse,
+) -> Option<pith_diag::Diag> {
+    let request = admission::Request::new(use_.subject.clone(), use_.range.clone());
+    let refusal = admission::admit(&request, view).err()?;
+    let span = match refusal.clause {
+        admission::Clause::Subject { .. } => use_.subject_span,
+        admission::Clause::Version { .. } => use_.range_span,
+    };
+    Some(at(
+        FrontendCode::UnexpectedSubject,
+        span,
+        consumer.parsed.source(),
+        format!(
+            "`{}` binds {}: {} (acquired at `{location}`)",
+            use_.alias, use_.subject, refusal
+        ),
+    ))
 }

@@ -44,7 +44,9 @@ pub use frontend::{
 };
 pub use module::{ModuleFile, ResolvedModule, SourceSet};
 pub use root_files::RootFiles;
-pub use routing::RegistryRoute;
+pub use routing::{
+    BindingOrigin, BindingOverride, BindingPolicy, BindingSite, RegistryRoute, UserBindings,
+};
 
 /// The store a workspace resolves against: where a route leads, and what
 /// bytes live there.
@@ -79,8 +81,21 @@ impl Workspace {
     /// Returns every acquisition failure and validation refusal, each
     /// attached to the clause or file that caused it.
     pub fn resolve<S: ModuleStore>(store: S, root: &S::Location) -> Result<Self, Box<[Diag]>> {
-        let mut resolution = graph::Resolution::new(store);
-        resolution.load_root(root);
+        Self::resolve_configured(store, root, None, BindingPolicy::ProjectOnly)
+            .map(WorkspaceResolution::into_workspace)
+    }
+
+    /// Resolves with explicitly supplied user authority and retains project override evidence.
+    ///
+    /// # Errors
+    /// Returns configuration, acquisition, or manifest refusals with their sources.
+    pub fn resolve_configured<S: ModuleStore>(
+        store: S,
+        root: &S::Location,
+        user: Option<UserBindings>,
+        policy: BindingPolicy,
+    ) -> Result<WorkspaceResolution, Box<[Diag]>> {
+        let mut resolution = graph::Resolution::prepare(store, root, user, policy)?;
         resolution.acquire_source_sets();
         resolution.finish()
     }
@@ -88,5 +103,33 @@ impl Workspace {
     #[must_use]
     pub fn module(&self, subject: &ModuleSubject) -> Option<&ResolvedModule> {
         self.modules().find(|module| module.subject() == subject)
+    }
+}
+
+/// A resolved workspace with the authority collisions its caller must report.
+#[must_use]
+pub struct WorkspaceResolution {
+    pub(crate) workspace: Workspace,
+    pub(crate) overrides: Box<[BindingOverride]>,
+}
+
+impl WorkspaceResolution {
+    #[must_use]
+    pub fn workspace(&self) -> &Workspace {
+        &self.workspace
+    }
+
+    #[must_use]
+    pub fn overrides(&self) -> &[BindingOverride] {
+        &self.overrides
+    }
+
+    #[must_use]
+    pub fn into_parts(self) -> (Workspace, Box<[BindingOverride]>) {
+        (self.workspace, self.overrides)
+    }
+
+    fn into_workspace(self) -> Workspace {
+        self.workspace
     }
 }

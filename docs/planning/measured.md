@@ -393,3 +393,35 @@ documentation, determinism, elaborator-digest, licence, and lint checks pass; th
 re-recorded at `ELABORATOR_SEMANTIC_VERSION` 1 for the source-text move of the loader refactor, with
 the parity fixtures — phloem's declaration table and the xylem revision agreement — passing unchanged
 as the evidence that no digest domain moved under it.
+
+
+## M-14: consumer configuration and route agreement
+
+The loader accepts user authority only as a caller-supplied `UserBindings`, validated from the registry
+and domain clauses of a parsed manifest. It discovers no user file. Project and user layers resolve their
+own registry names before merging. `configuration.rs` measures project precedence, both source identities
+in override warnings, a user domain preserved when the project reuses its registry name, invalid user
+configuration refused even when the project would override it, and project-only authority refusing user
+routes before the adapter's `locate` call. Unused user declarations do not grant authority to a selected
+project route. The successful result retains the overrides for the caller to report.
+
+`route_claims.rs` measures a diamond with conflicting Git revisions, canonical path agreement and conflict,
+Git subpath disagreement, archive digest agreement and disagreement, and a change of source kind. Conflicts
+carry both consumers' source locations. Immutable route disagreement is refused before the second adapter
+call; paths first need the adapter's canonical location. Mirrors with matching revision/subpath or archive
+digest claims reuse the acquired location. Registry claims compare the configured name and root key;
+a locator is absent from each immutable claim. A reused registry selection is admitted against every
+consumer's range, including a later constraint that excludes the already-loaded version.
+
+The configuration owner is a type parameter, and its runtime provenance derives from that type. The graph
+has no default or unconfigured routing state: construction requires a parsed root and validated routing.
+The source changes do not alter elaborated artifacts; the acquisition parity fixtures still compare local
+and registry-shaped loading through the same frontend.
+
+Limits: the project-only binding policy is the authority-origin check needed by `strict`, not its network
+or lock contract. No command consumes user configuration yet. The Git/archive fixtures compare declared
+claims through an in-memory store; they do not verify cryptographic content or implement those transports.
+Signed entries, immutable source verification, locks, and withdrawal replay remain open.
+
+`just ci` passes at 1135 tests across 121 suites. Formatting, Clippy, rustdoc, dependency policy,
+notebook validation, determinism, and the recorded elaborator digest all pass.

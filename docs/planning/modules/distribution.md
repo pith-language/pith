@@ -291,7 +291,10 @@ fallback, and adapters receive a `RegistryRoute` carrying the consumer-selected 
 Its private fields keep unchecked registry clauses out of that adapter route. Dependency-supplied authority
 is diagnosed before walking that dependency's own requirements. `tests/routing.rs` records adapter calls
 for these refusals; `tests/acquisition.rs` consumes the configured route in the existing equivalence fixture.
-User configuration, precedence and strict mode, source conflicts, signed entries, and locks remain open.
+Explicit user configuration, project precedence, the project-owned authority check, and whole-closure
+route agreement now have witnesses in
+[measured](../measured.md#m-14-consumer-configuration-and-route-agreement). Full operation modes, signed
+entries, and locks remain open.
 
 
 Start with a temporary directory registry and exact selections. Publish `example-domain` as an ordinary

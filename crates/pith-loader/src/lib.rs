@@ -42,9 +42,10 @@ pub use source::{
 };
 pub use workspace::{
     AcquireFailure, AcquiredManifest, AcquiredSource, AdmissionClause, AdmissionRefusal,
-    AdmissionRequest, AdmittedSource, CheckedModule, Closure, ElaborateError, ElaboratedWorkspace,
-    FrontendInputs, FrontendProjection, LocalDirectory, LocalFiles, MANIFEST_NAME, ModuleFile,
-    ModuleStore, Outcome, ProjectedModule, ProjectionError, PublishedInterface, RegistryRoute,
-    ResolvedModule, RootFiles, Route, SOURCE_DIRECTORY, SOURCE_SUFFIX, SourceSet, Workspace,
-    WorkspaceCheck, WorkspacePass, admit_source,
+    AdmissionRequest, AdmittedSource, BindingOrigin, BindingOverride, BindingPolicy, BindingSite,
+    CheckedModule, Closure, ElaborateError, ElaboratedWorkspace, FrontendInputs,
+    FrontendProjection, LocalDirectory, LocalFiles, MANIFEST_NAME, ModuleFile, ModuleStore,
+    Outcome, ProjectedModule, ProjectionError, PublishedInterface, RegistryRoute, ResolvedModule,
+    RootFiles, Route, SOURCE_DIRECTORY, SOURCE_SUFFIX, SourceSet, UserBindings, Workspace,
+    WorkspaceCheck, WorkspacePass, WorkspaceResolution, admit_source,
 };

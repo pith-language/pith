@@ -68,7 +68,13 @@ diagnostic lists the bindings that are configured rather than reporting a missin
 Configuration lives in two places with one precedence rule: the project's root manifest, and the user's
 own configuration. A project binding wins over a user binding for the same domain, and the collision names
 both declarations rather than being silently resolved. Two bindings for one domain *at the same level* are
-refused at configuration load, before any I/O.
+refused at configuration load, before any dependency I/O.
+
+Registry names are local to each configuration layer. A domain route is bound to that layer's registry
+before precedence is applied; reusing a registry name in the project cannot retarget an otherwise
+unchanged user domain route. A project domain therefore names a registry declared by the project. Explicit
+`from registry name` requirements consult the merged names, with project precedence and the same collision
+report. The selected registry and domain declaration each retain their owner and source location.
 
 A **dependency's manifest can never supply, replace, or extend** a registry binding, a domain route, or an
 admission policy. A dependency's `registry` and `domain` clauses parse — they are grammatical, and a module
@@ -244,8 +250,9 @@ deliberately, with the loss stated, rather than by drift.
 
 ## evidence
 
-None. This record settles contracts before their encoders exist, which is its purpose; every claim above is
-an obligation on the slices that implement it, not a measurement. The two probes that *have* run belong to
+The routing portion now has executable evidence in
+[measured](../planning/measured.md#m-14-consumer-configuration-and-route-agreement). The signing,
+publication, and replay contracts remain obligations, so this record remains proposed. The two probes that *have* run belong to
 [0068](0068-published-surfaces-are-context-bound.md) and constrain what a registry may publish about a
 released version rather than how it is authorized.
 

@@ -9,6 +9,8 @@
 //! the dependency closure, and [`sources`] acquires each resolved module's
 //! source set.
 
+mod bootstrap;
+mod claims;
 mod members;
 mod sources;
 mod walk;
@@ -23,9 +25,8 @@ use super::acquire::{AcquireFailure, ModuleStore};
 use super::module::{ResolvedModule, SourceSet};
 use crate::source::{ManifestSource, ParsedManifestFile};
 
-/// A manifest as read and parsed, with the location it came from.
-pub(super) struct ManifestFile<L> {
-    pub(super) location: L,
+/// A parsed manifest shared by every route reaching it.
+pub(super) struct ManifestFile {
     pub(super) parsed: ParsedManifestFile,
 }
 
@@ -33,7 +34,7 @@ pub(super) struct ManifestFile<L> {
 /// acquired.
 pub(super) struct PendingModule<L> {
     pub(super) location: L,
-    pub(super) file: Arc<ManifestFile<L>>,
+    pub(super) file: Arc<ManifestFile>,
     pub(super) view: Manifest,
     pub(super) sources: SourceSet,
 }
@@ -43,6 +44,7 @@ pub(super) struct PendingModule<L> {
 pub(super) struct Resolution<S: ModuleStore> {
     pub(super) store: S,
     pub(super) routing: super::routing::Routing,
+    claims: claims::Claims<S::Location>,
     /// Emitted in dependency order: every dependency precedes its consumer.
     pub(super) modules: Vec<PendingModule<S::Location>>,
     pub(super) by_location: BTreeMap<S::Location, usize>,
@@ -53,75 +55,19 @@ pub(super) struct Resolution<S: ModuleStore> {
     pub(super) stack_locations: BTreeSet<S::Location>,
     /// Every manifest read so far, member or dependency, by location, so a
     /// diamond reads one.
-    pub(super) read: BTreeMap<S::Location, Arc<ManifestFile<S::Location>>>,
+    pub(super) read: BTreeMap<S::Location, Arc<ManifestFile>>,
     pub(super) next_source_id: u32,
     pub(super) diagnostics: Vec<Diag>,
 }
 
 impl<S: ModuleStore> Resolution<S> {
-    pub(super) fn new(store: S) -> Self {
-        Self {
-            store,
-            routing: super::routing::Routing::default(),
-            modules: Vec::new(),
-            by_location: BTreeMap::new(),
-            subjects: BTreeMap::new(),
-            stack: Vec::new(),
-            stack_locations: BTreeSet::new(),
-            read: BTreeMap::new(),
-            next_source_id: 0,
-            diagnostics: Vec::new(),
-        }
-    }
-
-    /// Read the root manifest, validate the members it lists, and resolve
-    /// the dependency closure of the root into dependency order.
-    pub(super) fn load_root(&mut self, location: &S::Location) {
-        let root = match self.read(location) {
-            Ok(root) => root,
-            Err(failure) => {
-                self.diagnostics.push(sourceless(
-                    FrontendCode::MissingManifest,
-                    failure.describe(),
-                ));
-                return;
-            }
-        };
-        let Some(view) = view_of(&root) else {
-            return;
-        };
-        self.routing = match super::routing::Routing::from_root(&view, root.parsed.source()) {
-            Ok(routing) => routing,
-            Err(diagnostics) => {
-                self.diagnostics.extend(diagnostics);
-                return;
-            }
-        };
-        for use_ in view.uses() {
-            if let Err(diagnostic) = self.routing.route(use_, root.parsed.source()) {
-                self.diagnostics.push(diagnostic);
-            }
-        }
-        if !self.diagnostics.is_empty() {
-            return;
-        }
-        self.declare_subject(&root.location, &view, root.parsed.source());
-        self.validate_members(&root.location.clone(), root.parsed.source(), &view);
-        self.walk(PendingModule {
-            location: root.location.clone(),
-            sources: SourceSet::empty(),
-            view,
-            file: root,
-        });
-    }
-
     /// Read and parse a directory's manifest. Parse diagnostics join the
     /// resolution's; the read failure is the caller's to attach, because
     /// only the caller knows which clause reached for the file.
     pub(super) fn read(
         &mut self,
         location: &S::Location,
-    ) -> Result<Arc<ManifestFile<S::Location>>, AcquireFailure> {
+    ) -> Result<Arc<ManifestFile>, AcquireFailure> {
         if let Some(read) = self.read.get(location) {
             return Ok(Arc::clone(read));
         }
@@ -129,7 +75,6 @@ impl<S: ModuleStore> Resolution<S> {
         let source_id = pith_diag::SourceId::from_raw(self.next_source_id);
         self.next_source_id = self.next_source_id.saturating_add(1);
         let file = Arc::new(ManifestFile {
-            location: location.clone(),
             parsed: crate::source::parse_manifest(&ManifestSource::new(
                 source_id,
                 acquired.label,
@@ -142,7 +87,7 @@ impl<S: ModuleStore> Resolution<S> {
         Ok(file)
     }
 
-    pub(super) fn finish(self) -> Result<super::Workspace, Box<[Diag]>> {
+    pub(super) fn finish(self) -> Result<super::WorkspaceResolution, Box<[Diag]>> {
         if self
             .diagnostics
             .iter()
@@ -160,11 +105,15 @@ impl<S: ModuleStore> Resolution<S> {
                 sources: module.sources,
             })
             .collect::<Vec<_>>();
-        super::Closure::from_dependency_order(modules).ok_or_else(|| {
+        let workspace = super::Closure::from_dependency_order(modules).ok_or_else(|| {
             Box::from([sourceless(
                 FrontendCode::MissingManifest,
                 "the resolution reached no root manifest".into(),
             )])
+        })?;
+        Ok(super::WorkspaceResolution {
+            workspace,
+            overrides: self.routing.into_overrides(),
         })
     }
 }
@@ -172,7 +121,7 @@ impl<S: ModuleStore> Resolution<S> {
 /// The validated view of a read manifest, when its parse allows one. Both
 /// failure halves are already diagnosed by the parse, so there is no second
 /// diagnostic to push here.
-pub(super) fn view_of<L>(file: &ManifestFile<L>) -> Option<Manifest> {
+pub(super) fn view_of(file: &ManifestFile) -> Option<Manifest> {
     file.parsed.validated().ok()
 }
 

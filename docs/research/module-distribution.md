@@ -137,3 +137,19 @@ collision, while a successful check proves only that consumer. Likewise, an unch
 changed body do not prove behavioral compatibility. Publication can enforce conservative surface-version
 rules without claiming a proof of all future program behavior. The missing evidence is two small Pith
 fixtures, not another general comparison of package managers.
+
+
+## Rust boundaries for consumer authority
+
+Rust's [visibility rules](https://doc.rust-lang.org/reference/visibility-and-privacy.html) let a public
+route expose observations while keeping construction inside validation. A borrowed route then cannot
+outlive the configuration it names. [PhantomData](https://doc.rust-lang.org/std/marker/struct.PhantomData.html)
+carries a type parameter without storing an owner value; an internal trait's associated constant derives
+runtime provenance from the project or user marker. This makes a swapped layer a type error at the merge
+call, rather than a reversed precedence boolean. These features are available on the pinned toolchain.
+
+The [ordered-map entry API](https://doc.rust-lang.org/std/collections/btree_map/enum.Entry.html) separates
+vacant insertion from occupied replacement. The implementation uses that distinction to retain the prior
+declaration on a duplicate and both declarations on an override. No additional collection library or
+runtime-dispatched policy trait is needed. These are implementation choices for the authority boundary,
+not evidence that a registry signature or a source digest has been verified.
