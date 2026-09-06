@@ -12,7 +12,7 @@
 //! diagnostic file identity — by implementing the trait, never by growing
 //! a second path beside it.
 
-mod acquire;
+pub(crate) mod acquire;
 mod admission;
 mod closure;
 mod elaborate;

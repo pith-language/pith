@@ -122,6 +122,7 @@ fn source_tree_refused(
     let code = match failure {
         AcquireFailure::Symlink { .. } => FrontendCode::SymlinkedSource,
         AcquireFailure::Irregular { .. } => FrontendCode::IrregularSource,
+        AcquireFailure::Refused { code, .. } => *code,
         AcquireFailure::Unreadable { .. } | AcquireFailure::Unsupported { .. } => {
             FrontendCode::UnreadableSource
         }

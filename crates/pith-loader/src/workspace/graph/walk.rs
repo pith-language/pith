@@ -114,6 +114,7 @@ impl<S: ModuleStore> Resolution<S> {
             Err(claims::Failure::Acquire(failure)) => {
                 let code = match failure {
                     AcquireFailure::Unsupported { .. } => FrontendCode::UnsupportedSource,
+                    AcquireFailure::Refused { code, .. } => code,
                     _ => FrontendCode::MissingManifest,
                 };
                 self.diagnostics.push(at(
@@ -152,8 +153,12 @@ impl<S: ModuleStore> Resolution<S> {
         let dependency = match self.read(&location) {
             Ok(manifest) => manifest,
             Err(failure) => {
+                let code = match failure {
+                    AcquireFailure::Refused { code, .. } => code,
+                    _ => FrontendCode::MissingManifest,
+                };
                 self.diagnostics.push(at(
-                    FrontendCode::MissingManifest,
+                    code,
                     span,
                     consumer.parsed.source(),
                     format!(

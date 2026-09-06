@@ -51,8 +51,12 @@ impl<S: ModuleStore> Resolution<S> {
                     continue;
                 }
                 Err(failure) => {
+                    let code = match failure {
+                        AcquireFailure::Refused { code, .. } => code,
+                        _ => FrontendCode::UnreadableSource,
+                    };
                     self.diagnostics.push(at(
-                        FrontendCode::UnreadableSource,
+                        code,
                         span,
                         &source,
                         format!(

@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use pith_hir::ModuleSubject;
+use pith_hir::{FrontendCode, ModuleSubject};
 
 /// The manifest file name a module directory is named by.
 pub const MANIFEST_NAME: &str = "module.pi";
@@ -56,10 +56,17 @@ pub enum AcquireFailure {
     /// Something that is not a regular file where one was required. Reading
     /// a fifo blocks, so this is refused before the read rather than after.
     Irregular { path: Box<str> },
+    /// A store with its own trust boundaries refused the route: the code
+    /// names which boundary, so the refusal lands as itself rather than
+    /// as a generic unreadable source.
+    Refused {
+        code: FrontendCode,
+        message: Box<str>,
+    },
 }
 
 impl AcquireFailure {
-    fn unreadable(what: &str, path: &Path, error: &std::io::Error) -> Self {
+    pub(crate) fn unreadable(what: &str, path: &Path, error: &std::io::Error) -> Self {
         Self::Unreadable {
             message: format!("cannot {what} `{}`: {error}", path.display()).into(),
         }
@@ -84,6 +91,7 @@ impl AcquireFailure {
                 "`{path}` is not a regular file, and a module owns regular files under src/"
             )
             .into(),
+            Self::Refused { message, .. } => message.clone(),
         }
     }
 }
@@ -253,7 +261,7 @@ impl std::fmt::Display for LocalDirectory {
 /// Every regular `.pi` file under a regular `src/`, recursively, keyed by
 /// module-relative path in forward slashes and so sorted canonically before
 /// any parse.
-fn discover(directory: &Path) -> Result<BTreeMap<Box<str>, PathBuf>, AcquireFailure> {
+pub(crate) fn discover(directory: &Path) -> Result<BTreeMap<Box<str>, PathBuf>, AcquireFailure> {
     let mut files = BTreeMap::new();
     let source_root = directory.join(SOURCE_DIRECTORY);
     let metadata = match fs::symlink_metadata(&source_root) {
@@ -315,7 +323,7 @@ fn walk(
 /// A path about to be read must name a regular file. Anything else — a
 /// symlink, a fifo, a device — either hides an external tree or blocks the
 /// read; neither is a manifest.
-fn require_regular(path: &Path, what: &str) -> Result<(), AcquireFailure> {
+pub(crate) fn require_regular(path: &Path, what: &str) -> Result<(), AcquireFailure> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| AcquireFailure::unreadable("inspect", path, &error))?;
     if metadata.file_type().is_file() {
