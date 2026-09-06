@@ -7,6 +7,7 @@ members = [
     "crates/pith-store",
     "crates/pith-arena",
     "crates/pith-core",
+    "crates/pith-constraint",
     "crates/pith-engine",
     "crates/pith-executor-local",
     "crates/pith-state-sqlite",
@@ -89,6 +90,7 @@ pith-ids = { path = "crates/pith-ids", version = "0.1.0" }
 pith-store = { path = "crates/pith-store", version = "0.1.0" }
 pith-arena = { path = "crates/pith-arena", version = "0.1.0" }
 pith-core = { path = "crates/pith-core", version = "0.1.0" }
+pith-constraint = { path = "crates/pith-constraint", version = "0.1.0" }
 pith-engine = { path = "crates/pith-engine", version = "0.1.0" }
 pith-state-sqlite = { path = "crates/pith-state-sqlite", version = "0.1.0" }
 pith-hir = { path = "crates/pith-hir", version = "0.1.0" }

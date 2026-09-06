@@ -7,6 +7,11 @@ use pith_ids::ModuleAbiDigest;
 
 #[derive(Clone)]
 pub struct ImportedModule {
+    /// The imported module's declared identity: its subject spelling under
+    /// a manifest, its module name in standalone mode. This is what crosses
+    /// the ABI boundary; the key the environment files it under is the
+    /// consumer's local binding, which is elaboration input only.
+    subject: Box<str>,
     pub(crate) abi_digest: ModuleAbiDigest,
     pub(crate) table: DeclarationTable,
     definitions: Box<[DefinitionLocation]>,
@@ -15,6 +20,11 @@ pub struct ImportedModule {
 }
 
 impl ImportedModule {
+    #[must_use]
+    pub fn subject(&self) -> &str {
+        &self.subject
+    }
+
     #[must_use]
     pub const fn abi_digest(&self) -> ModuleAbiDigest {
         self.abi_digest
@@ -61,6 +71,7 @@ impl ImportEnv {
     pub fn insert(
         &mut self,
         binding: impl Into<Box<str>>,
+        subject: impl Into<Box<str>>,
         abi_digest: ModuleAbiDigest,
         table: DeclarationTable,
         definitions: impl Into<Box<[DefinitionLocation]>>,
@@ -70,6 +81,7 @@ impl ImportEnv {
         self.modules.insert(
             binding.into(),
             ImportedModule {
+                subject: subject.into(),
                 abi_digest,
                 table,
                 declaration_index: index,

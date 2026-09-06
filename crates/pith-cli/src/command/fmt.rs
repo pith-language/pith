@@ -26,18 +26,25 @@ impl Execute for Fmt {
         } else {
             pith_query::FormatMode::Write
         };
-        let report = pith_query::format(&self.path, mode)?;
-        let status = report.status;
-        let records = vec![OutputRecord::query(QueryView::Format(report))];
-        match status {
-            FmtStatus::WouldFormat => Ok(Report::refused(
+        let reports = pith_query::format(&self.path, mode)?;
+        let not_canonical = reports
+            .iter()
+            .any(|report| report.status == FmtStatus::WouldFormat);
+        let records = reports
+            .into_iter()
+            .map(QueryView::Format)
+            .map(OutputRecord::query)
+            .collect::<Vec<_>>();
+        if not_canonical {
+            Ok(Report::refused(
                 records,
                 Failure::user(format!(
                     "`{}` is not canonical; run `pith fmt` without --check to write it",
                     self.path.display()
                 )),
-            )),
-            FmtStatus::Unchanged | FmtStatus::Formatted => Ok(Report::of(records)),
+            ))
+        } else {
+            Ok(Report::of(records))
         }
     }
 }

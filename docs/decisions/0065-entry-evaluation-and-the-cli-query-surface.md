@@ -100,6 +100,11 @@ The root accepts `diff`, `update`, and `add` as documented M-14 variants and ref
 workspace”. One root `after_help` statement names the workspace boundary. Entry commands accept
 `--module PATH`, defaulting to M-14's future `module.pi`, so their short shape is already final.
 
+> amended by [0067](0067-local-module-workspaces.md): `--module` now names a manifest, and passing
+> `module.pi` selects manifest loading unconditionally. The file-relative neighbor resolver is reachable
+> only through explicitly loading a standalone `.pi` file, never as a workspace fallback. The version
+> sentence above is historical: with no release cut, the query contract restarts at version 1.
+
 ### contract and rendering
 
 `pith explore` now includes entries and `about` blocks beside imports, declarations, rules, interfaces,

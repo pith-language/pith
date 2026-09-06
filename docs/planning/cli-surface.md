@@ -14,16 +14,16 @@ relations:
   informed_by:
     - research-tooling
   depends_on:
-    - planning-language-frontend
+    - planning-frontend-language
     - planning-frontend-architecture
-    - planning-surface-notation
+    - planning-frontend-surface-notation
     - decision-0027-retention-and-gc
   supersedes: []
 ---
 
 # the cli surface
 
-this is the cli half of round six of [the language frontend](language-frontend.md), folded into M-13
+this is the cli half of round six of [the language frontend](frontend/language.md), folded into M-13
 because a notation nobody can invoke is not testable by a person. M-13 implements this surface through
 the versioned `pith-query` API; [0065](../decisions/0065-entry-evaluation-and-the-cli-query-surface.md)
 records the entry and engine boundaries it added.
@@ -61,7 +61,7 @@ needs persisting. that rule is what would have stopped `nix-env` from being a pr
 
 `check`, `fmt` and `explore` touch no store and no engine. they call the elaborator library directly,
 which is the library `interface-of` calls from inside the graph rule, and is what
-[the frontend architecture](frontend-architecture.md) means by one elaborator serving two drivers.
+[the frontend architecture](frontend/architecture.md) means by one elaborator serving two drivers.
 
 `check` is the only command that has to produce useful output when elaboration fails, and that is why it
 cannot be an entry. an entry is a value in the graph, so anything required to work while the graph does
@@ -126,12 +126,12 @@ it ships dry-run only. nothing in the tree prunes anything today, there being no
 `pith-store`, `pith-state-sqlite` or `pith-engine/src/state`, and 0027's default numeric parameters wait
 on workload evidence that does not exist. a dry run reporting what the root set holds and what would be
 reclaimed produces that evidence. deletion is its own round, and it needs the retention axis
-[the frontend architecture](frontend-architecture.md) names as an amendment 0027 owes: the reusable index
+[the frontend architecture](frontend/architecture.md) names as an amendment 0027 owes: the reusable index
 is per-key, each save mints a key, and a permanent root per save is a growth rate nobody has priced.
 
 ## linting is severity, not a command
 
-[the frontend architecture](frontend-architecture.md) names the gap. `PithResult<T> = Result<T,
+[the frontend architecture](frontend/architecture.md) names the gap. `PithResult<T> = Result<T,
 DiagnosticSink>` carries no sink on the `Ok` arm, so a successful parse cannot return warnings, and an
 editor with no warnings is not an editor. The CLI half does not invent a second diagnostic path: successful
 frontend results already carry their warning list. Wiring incremental publication into the language-server
@@ -143,7 +143,7 @@ diagnostic path drifting from the first. severity lives in `check`, with `--deny
 four lints have a reader already. an unused import and an unused local definition or declaration are the
 cheap ones. an interface this module provides that another in-scope module also provides is the `E-1102`
 hazard, warned at check time before registration discovers it. the fourth is stated outright in
-[the surface notation](surface-notation.md): a wide positional interface is a signal to take a declared
+[the surface notation](frontend/surface-notation.md): a wide positional interface is a signal to take a declared
 record, so the notation's own advice becomes a diagnostic.
 
 ## formatting, and the property that makes it safe

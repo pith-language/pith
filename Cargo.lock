@@ -778,6 +778,7 @@ name = "phloem"
 version = "0.1.0"
 dependencies = [
  "miette",
+ "pith-constraint",
  "pith-core",
  "pith-diag",
  "pith-engine",
@@ -823,6 +824,10 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
 ]
+
+[[package]]
+name = "pith-constraint"
+version = "0.1.0"
 
 [[package]]
 name = "pith-core"
@@ -899,6 +904,7 @@ version = "0.1.0"
 dependencies = [
  "indexmap",
  "pith-arena",
+ "pith-constraint",
  "pith-core",
  "pith-diag",
 ]
@@ -917,6 +923,7 @@ name = "pith-loader"
 version = "0.1.0"
 dependencies = [
  "phloem",
+ "pith-constraint",
  "pith-core",
  "pith-diag",
  "pith-elaborator",
@@ -927,6 +934,7 @@ dependencies = [
  "pith-syntax",
  "proptest",
  "stele",
+ "tempfile",
  "xylem",
 ]
 

@@ -36,6 +36,7 @@ when an accepted decision changes, a new record supersedes it. the old record st
 - [0028: a first-party sandboxed local executor using landlock and seccomp](0028-sandboxed-local-executor.md)
 - [0033: a consumer of an action revalidates by re-planning it](0033-consumer-of-action-reuse.md)
 - [0041: the written lock is a text projection of the lock value, and writing it is a caller effect](0041-the-written-lock.md)
+- [0067: a local module is a declared subject with a manifest, a src tree, and module-local import bindings, loaded from an explicit root without a solver](0067-local-module-workspaces.md)
 
 ## proposed
 
@@ -93,6 +94,7 @@ when an accepted decision changes, a new record supersedes it. the old record st
 - [0064: text breaking and joining are total, keep empty fields, and treat an empty separator as no match](0064-text-breaking.md)
 - [0065: an entry is a represented pure request and the CLI exposes evaluation, explanation, selection, planning, and provenance without linking a domain](0065-entry-evaluation-and-the-cli-query-surface.md)
 - [0066: a frontend diagnostic value names the source content that owns its span](0066-frontend-diagnostics-carry-source-identity.md)
+- [0068: a published module surface is a claim about one dependency context, and an added provider is not a minor change](0068-published-surfaces-are-context-bound.md)
 
 note: 0013 amends 0005 to add a fifth identity type. 0005 stands; the amendment is recorded in 0013.
 
@@ -207,3 +209,35 @@ note: 0066 amends 0053 for graph-tier frontend results. A source file is still p
 not copied into durable engine diagnostics, but a diagnostic returned as a reusable frontend value carries
 the source blob identity that owns its byte span. That identity is stable across processes and lets a
 multi-file client attach the correct text after hydration; `SourceId` cannot.
+
+note: 0067 records the first M-14 slice: local module workspaces. A manifest declares a `domain/name`
+subject — paths, aliases, and versions do not enter identity — and owns the `.pi` files under its `src`
+recursively, with symlinks refused and enumeration order canonicalized. One lexer and one parser gain a
+document context rather than a second configuration language; `use` clauses build a module-local
+alias-to-subject environment, so transitive dependencies are unimportable without a direct binding. The
+digest amendment is the record's other half: the module ABI and the interface surface encode a sorted,
+deduplicated set of imported subject/ABI pairs instead of binding names, repricing the affected domains
+openly under 0047 and 0048 — an alias edit now leaves every digest it possibly can unchanged. Workspaces
+are explicit member lists with no upward search and no ambient configuration; versions are metadata with
+no solver and no lock; registry, git, and archive sources refuse by name. Standalone `.pi` loading keeps
+its file-stem identity and neighbor resolver, reachable only explicitly; acquisition admits only regular
+files under a validated `src/` root, so a fifo or a symlinked tree refuses instead of hanging or leaking.
+With no release cut, the pre-release contract versions — the query API and the elaborator revision —
+restart at 1. The record is accepted against the evidence in
+[measured](../planning/measured.md#m-14-the-module-system--the-local-workspace-slice). Closing it
+strengthened one claim the plan had stated too weakly: comparing two direct elaborations shows equal
+outputs, not a reusable lookup, so a resolved workspace gained a projection onto the frontend graph tier
+and the ABI cutoff is measured through the loader a person reaches.
+
+note: 0068 measures two assumptions M-14 was about to encode. 0067 put imported subject/ABI pairs inside
+the module ABI, and the consequence is that a consumer's ABI and its interface surface both move when a
+dependency's public surface moves, with the consumer's source byte-identical — what moves inside the
+surface is exactly the dependency's ABI digest. So a registry publishes a surface together with its
+context, the imported pairs and the elaborator revision, and a consumer reuses it only when both match.
+The added-rule-is-minor classification is withdrawn, and the measurement relocates the break: within one
+module two rules providing one interface are refused at elaboration, E-3012, so a publisher cannot build
+it; across modules the closure elaborates cleanly and the consumer fails at evaluation, E-1102. An
+addition is therefore potentially breaking, the break belongs to a consumer's whole closure rather than to
+the edited module, the publisher's own check cannot see it, and no comparison of two versions of one module
+can prove an addition safe. The differ reports structure, context, and named-consumer evidence separately,
+and an unchanged structural report is not a compatibility proof.

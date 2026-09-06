@@ -91,7 +91,7 @@ the way this record says it should be — by making the types distinguish the ru
 picks. xylem's two content-producing rules collapsed to `() -> Blob` and collided as `E-1102` until
 `CSource`, `Object` and `Executable` became distinct nominals; its generate and test rules share their
 input types and differ only in output; stele's three text renders needed the same treatment; and
-[the frontend architecture](../planning/frontend-architecture.md) reports the fourth independent instance
+[the frontend architecture](../planning/frontend/architecture.md) reports the fourth independent instance
 before writing a line — `interface-of`, `bodies-of` and `index-of` over identical input lists, needing
 three distinct nominal outputs.
 

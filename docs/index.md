@@ -6,7 +6,7 @@ summary: map of the project foundation, current design, requirements, research, 
 kind: index
 status: active
 created: 2026-02-24
-updated: 2026-08-21
+updated: 2026-09-06
 tags:
   - documentation
 relations:
@@ -59,13 +59,27 @@ the repository separates current design from the evidence and decisions that pro
 
 ## planning
 
+planning notes are named for their subject. the order the work runs in lives in one place, the
+milestones, so that renaming a milestone never renames a design note.
+
 - [open questions](planning/open-questions.md)
 - [milestones](planning/milestones.md)
+- [what the completed milestones measured](planning/measured.md)
 - [the reordering](planning/reordering.md)
-- [the language frontend](planning/language-frontend.md)
-- [the module surface](planning/module-surface.md)
-- [the module system](planning/module-system.md)
-- [the frontend architecture](planning/frontend-architecture.md)
-- [the surface notation](planning/surface-notation.md)
 - [the cli surface](planning/cli-surface.md)
+- [repository history](planning/repository-history.md)
 
+### the frontend
+
+- [the language frontend](planning/frontend/language.md)
+- [the frontend architecture](planning/frontend/architecture.md)
+- [the surface notation](planning/frontend/surface-notation.md)
+
+### modules
+
+- [the module system](planning/modules/system.md)
+- [the module surface](planning/modules/surface.md)
+- [module workspaces](planning/modules/workspaces.md)
+- [module distribution](planning/modules/distribution.md)
+- [the module registry](planning/modules/registry.md)
+- [registry integration](planning/modules/registry-integration.md)

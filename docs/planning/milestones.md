@@ -6,7 +6,7 @@ summary: the order the work runs in, what each milestone owes, and why the seque
 kind: planning
 status: draft
 created: 2026-03-23
-updated: 2026-08-28
+updated: 2026-09-06
 tags:
   - planning
   - milestones
@@ -59,7 +59,7 @@ move the architecture are all in front of that boundary.
 
 ## the latency spike
 
-not a milestone and not a round. [the frontend architecture](frontend-architecture.md) rests on a bet it
+not a milestone and not a round. [the frontend architecture](frontend/architecture.md) rests on a bet it
 names as such — the design's central latency bet — that no in-process incremental layer is needed because
 re-elaborating an edited module is fast enough, with sorbet as the control case.
 [0021](../decisions/0021-arena-graph-engine.md) forecloses the fallback by an accepted record, so a failed
@@ -85,7 +85,7 @@ pruning has no analogue on an observation edge and every consumer of one would b
 non-reusable. what an observation's identity and freshness are is the question.
 
 it moves ahead of the frontend for a structural reason rather than a preference. M-11 fixes the IR
-constructor set, and [the frontend architecture](frontend-architecture.md) states what that set encodes —
+constructor set, and [the frontend architecture](frontend/architecture.md) states what that set encodes —
 "the `PureStep` protocol — `Need`, `NeedAll`, `NeedBlob`, `NeedAction` — is the effect vocabulary of the
 core ir". M-5b enumerates the cost of an observation step: "new variants in `PureStep`, `Resumption`,
 `DependencyEdge`, `ComputationKind`, `DurableComputation` and `DurableProvenance`". a variant arriving in
@@ -104,8 +104,8 @@ adapter boundary, durable record and freshness admission are exercised rather th
 status: complete. the evidence is in [measured](measured.md), and
 [0061](../decisions/0061-the-declaration-artifact.md) is the record.
 
-round one of [the language frontend](language-frontend.md), designed in
-[the module surface](module-surface.md). `Declaration::encode_canonical`, a table encoder, the ABI and
+round one of [the language frontend](frontend/language.md), designed in
+[the module surface](modules/surface.md). `Declaration::encode_canonical`, a table encoder, the ABI and
 revision digests, the `.pi` declaration grammar, the loader crate, the two-phase intra-module pass.
 
 *measured claim:* the four crates' live tables and their `.pi` counterparts agree digest-for-digest, and
@@ -148,7 +148,7 @@ by test and the domain stays at v1.
 status: complete. [0063](../decisions/0063-the-frontend-graph-tier.md) records the graph boundary; the
 body-edit cutoff evidence is in [measured](measured.md).
 
-round three, designed in [the frontend architecture](frontend-architecture.md). the syntax, HIR and
+round three, designed in [the frontend architecture](frontend/architecture.md). the syntax, HIR and
 elaborator crates; `interface-of`, `bodies-of` and `index-of`; the derived elaborator revision; the
 `NeedBlob` entry-point question.
 
@@ -179,7 +179,32 @@ and writable SQLite evaluation path share one program binding construction.
 
 ## M-14: the module system
 
-round five, designed in [the module system](module-system.md). identity and the deferred domain-authority
+The first implementation slice is [module workspaces](modules/workspaces.md): manifests,
+explicit path dependencies, and a runnable multi-module CLI fixture. That slice is complete, and its
+completion does not close M-14. [0067](../decisions/0067-local-module-workspaces.md) is the slice's
+record — declared subjects, `module.pi`, workspace membership, source discovery, module-local bindings,
+and the ABI's subject-based import basis, with its refusal table and acceptance fixture — and it is
+accepted against the evidence in [measured](measured.md).
+
+That evidence corrected one thing the slice thought it already had. Comparing two direct elaborations
+proves equal semantic outputs, not a reusable lookup, so the resolved workspace gained a projection onto
+the frontend graph tier and the cutoff is now measured through the loader a person reaches rather than
+through hand-built inputs. What the projection has not yet changed is the CLI: `pith-query` still
+elaborates a manifest program directly, so no person-facing command reuses a frontend computation. That
+is the seam the registry slice has to feed, which is why it was worth building before any acquired
+source depends on it.
+
+[Module distribution](modules/distribution.md) holds the remaining contracts, their implementation order,
+and the exit witnesses, including the authority, dependency-context, and compatibility decisions needed
+before the next encodings. [Registry integration](modules/registry-integration.md) states how far the
+registry is a part of Pith rather than a service beside it.
+[0068](../decisions/0068-published-surfaces-are-context-bound.md) measured the milestone's first two design
+probes and settled what a registry may publish about a released version.
+[The module registry](modules/registry.md) holds the registry's own design: a signed, append-only,
+metadata-only index in a Git repository, where the registry says which bytes and Git says these are those
+bytes. Publication uploads nothing, so there is no upload credential to steal.
+
+round five, designed in [the module system](modules/system.md). identity and the deferred domain-authority
 question; `module.pi`; the four source kinds as adapters; domain-bound registries with no search order;
 workspaces; the lock; the scoped universe; `pith diff`; the index-versus-no-index fork argued rather than
 assumed.
@@ -191,7 +216,7 @@ against the local-path entry, plus the two configuration refusals.
 
 the peer domain library in the shape of `stdenv.mkDerivation`, authored in `.pi`.
 
-[the language frontend](language-frontend.md) diagnosed this and no milestone covered it: "the missing
+[the language frontend](frontend/language.md) diagnosed this and no milestone covered it: "the missing
 piece is a peer domain library in the shape of `stdenv.mkDerivation`, not a language feature ... it is
 unbuilt work no milestone covers ... and the gap sits between M-4 and anything a person would use." 0045's
 shape — a package's declared build running as one pure rule over xylem's compile and link entries, file by

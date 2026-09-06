@@ -6,7 +6,7 @@ use pith_diag::{Diag, DiagnosticSink, Severity, SourceFile, SourceId, Span};
 use pith_elaborator::{Visibility, elaborate, scope_imports};
 use pith_engine::{PureRule, PureRuleFrame, PureStep, Resumption};
 use pith_hir::{ParsedSurface, merge_module_files};
-use pith_ids::{ContentId, ModuleAbiDigest};
+use pith_ids::ContentId;
 
 use super::artifact::InterfaceSurface;
 use super::values::{
@@ -129,13 +129,15 @@ impl FrontendFrame {
             &merged.files,
             &mut self.diagnostics,
         );
-        let ordered_imports = scoped
-            .iter()
-            .map(|(name, imported)| (Box::from(name), imported.abi_digest()))
-            .collect::<Vec<(Box<str>, ModuleAbiDigest)>>();
+        let ordered_imports = pith_elaborator::ImportedAbis::new(
+            scoped
+                .iter()
+                .map(|(_, imported)| (imported.subject().into(), imported.abi_digest())),
+        )
+        .unwrap_or_else(|_| unreachable!("the import environment admits one ABI per subject"));
         let surface = InterfaceSurface::of_parts(
             &self.source.module,
-            ordered_imports.into(),
+            ordered_imports,
             elaborated.table.clone(),
             elaborated
                 .rules

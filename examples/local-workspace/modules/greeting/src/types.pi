@@ -1,0 +1,2 @@
+-- The dependency's own spelling of a message, in its own file.
+nominal Message = Text

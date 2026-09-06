@@ -8,7 +8,7 @@ mod admission;
 pub(crate) mod model;
 mod serving;
 
-pub use self::admission::{Refusal, admit};
+pub use self::admission::{Clause, Refusal, admit};
 pub use self::model::{
     Admission, Admitted, AdmittedOrigins, BinaryOffer, SUBSTITUTION, substitution_type,
 };
@@ -164,11 +164,11 @@ mod tests {
         let mut unknown_origin = offer();
         unknown_origin.origin = Origin::Registry("attacker.example".into());
 
-        let cases: [(BinaryOffer, &[u8], Refusal); 7] = [
+        let cases: [(BinaryOffer, &[u8], Clause); 7] = [
             (
                 wrong_version,
                 BINARY,
-                Refusal::Coordinates {
+                Clause::Coordinates {
                     bound: package(),
                     offered: PackageVersion::new(package().identity().clone(), "1.4"),
                 },
@@ -176,7 +176,7 @@ mod tests {
             (
                 wrong_features,
                 BINARY,
-                Refusal::Features {
+                Clause::Features {
                     bound: Box::new([Box::from("shared")]),
                     offered: Box::new([]),
                 },
@@ -184,7 +184,7 @@ mod tests {
             (
                 wrong_source,
                 BINARY,
-                Refusal::Source {
+                Clause::Source {
                     bound: source(),
                     offered: ContentId::of_blob(b"zlib-1.3-republished.tar"),
                 },
@@ -192,7 +192,7 @@ mod tests {
             (
                 wrong_platform,
                 BINARY,
-                Refusal::Platform {
+                Clause::Platform {
                     running: platform.clone(),
                     offered: elsewhere,
                 },
@@ -200,7 +200,7 @@ mod tests {
             (
                 wrong_toolchain,
                 BINARY,
-                Refusal::Toolchain {
+                Clause::Toolchain {
                     running: toolchain.clone(),
                     offered: xylem::types::toolchain("/nix/store/clang-18"),
                 },
@@ -208,7 +208,7 @@ mod tests {
             (
                 offer(),
                 b"zlib-1.3-tampered.so",
-                Refusal::Content {
+                Clause::Content {
                     claimed: ContentId::of_blob(BINARY),
                     measured: ContentId::of_blob(b"zlib-1.3-tampered.so"),
                 },
@@ -216,7 +216,7 @@ mod tests {
             (
                 unknown_origin,
                 BINARY,
-                Refusal::Unauthorized {
+                Clause::Unauthorized {
                     origin: Origin::Registry("attacker.example".into()),
                     admitted: origins.0.clone(),
                 },
@@ -229,7 +229,10 @@ mod tests {
                 bytes,
             )
             .expect_err("the perturbed input is refused");
-            assert_eq!(refusal, expected, "the refusal names the moved input");
+            assert_eq!(
+                refusal.clause, expected,
+                "the refusal names the moved input"
+            );
         }
     }
 
@@ -261,7 +264,7 @@ mod tests {
         else {
             unreachable!("an unauthorized offer builds and records the refusal");
         };
-        assert!(matches!(refusal, Refusal::Unauthorized { .. }));
+        assert!(matches!(refusal.clause, Clause::Unauthorized { .. }));
         assert!(
             serving_request(&refused, toolchain.clone(), &tree(), &description().build).is_some(),
             "the build runs in the refused offer's place"
@@ -292,7 +295,9 @@ mod tests {
         assert!(matches!(
             first,
             Serving::Built {
-                refused: Some(Refusal::Unauthorized { .. })
+                refused: Some(Refusal {
+                    clause: Clause::Unauthorized { .. }
+                })
             }
         ));
 

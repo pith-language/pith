@@ -1,0 +1,7 @@
+module example/hello 0.1.0
+
+workspace {
+  members: ["modules/greeting"],
+}
+
+use greeting = example/greeting from path "modules/greeting"

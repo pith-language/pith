@@ -2,11 +2,10 @@
 //! declarations, the ABI digest, and the sidecars tooling reads.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use pith_core::{Action, DeclarationTable, Pure};
 use pith_diag::{ByteOffset, Diag, SourceFile};
-use pith_hir::{DefinitionKind, DefinitionLocation, PositionSidecar, SurfaceAbout};
+use pith_hir::{DefinitionKind, DefinitionLocation, ModuleFiles, PositionSidecar, SurfaceAbout};
 use pith_ids::{ContentId, ModuleAbiDigest};
 
 use crate::bind::{
@@ -17,10 +16,10 @@ use crate::graph::InterfaceSurface;
 pub struct LoadedModule {
     pub(crate) module: Box<str>,
     pub(crate) artifact_id: ContentId,
-    pub(crate) source: Arc<SourceFile>,
+    pub(crate) files: ModuleFiles,
     pub(crate) diagnostics: Box<[Diag]>,
     pub(crate) table: DeclarationTable,
-    pub(crate) imports: Box<[(Box<str>, ModuleAbiDigest)]>,
+    pub(crate) imports: pith_elaborator::ImportedAbis,
     pub(crate) pure_rules: Box<[RuleDeclaration<Pure>]>,
     pub(crate) action_rules: Box<[RuleDeclaration<Action>]>,
     pub(crate) abi_digest: ModuleAbiDigest,
@@ -41,9 +40,12 @@ impl LoadedModule {
         self.artifact_id
     }
 
+    /// The module's files, mapping every elaborated span back to the file
+    /// that owns it — one file in standalone mode, a sorted set in manifest
+    /// mode.
     #[must_use]
-    pub fn source(&self) -> &Arc<SourceFile> {
-        &self.source
+    pub const fn files(&self) -> &ModuleFiles {
+        &self.files
     }
 
     /// Diagnostics emitted while the module successfully elaborated.
@@ -57,9 +59,10 @@ impl LoadedModule {
         &self.table
     }
 
+    /// The imported subject/ABI pairs in canonical form.
     #[must_use]
     pub fn imports(&self) -> &[(Box<str>, ModuleAbiDigest)] {
-        &self.imports
+        self.imports.as_slice()
     }
 
     #[must_use]
@@ -146,9 +149,15 @@ impl LoadedModule {
         self.entries.iter().find(|entry| entry.name() == name)
     }
 
+    /// The definition visible at `offset` within `source`. Offsets are
+    /// file-local; a module of several files answers from the file named.
     #[must_use]
-    pub fn go_to_definition(&self, offset: ByteOffset) -> Option<&DefinitionLocation> {
-        self.positions.definition_at(offset)
+    pub fn go_to_definition(
+        &self,
+        source: &SourceFile,
+        offset: ByteOffset,
+    ) -> Option<&DefinitionLocation> {
+        self.positions.definition_at(source, offset)
     }
 
     #[must_use]

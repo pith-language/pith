@@ -16,7 +16,7 @@ relations:
     - research-tooling
     - research-diagnostic-spans
   depends_on:
-    - planning-language-frontend
+    - planning-frontend-language
     - decision-0021-arena-graph-engine
     - decision-0022-sync-core-async-scheduler
     - decision-0053-parse-diagnostics-carry-their-source
@@ -26,7 +26,7 @@ relations:
 
 # the frontend architecture
 
-this is round three of [the language frontend](language-frontend.md).
+this is round three of [the language frontend](language.md).
 
 ## one boundary, and it is derived
 
@@ -155,11 +155,11 @@ of the fastest language servers in production. pith starts closer to sorbet's sh
 language does — no subtyping, no rows, no higher-kinded types, no type-level computation, no inference
 pass, an interface of two fields, and selection as one map lookup.
 
-this is the design's central latency bet, and it is measured. the spike [milestones](milestones.md) put in
+this is the design's central latency bet, and it is measured. the spike [milestones](../milestones.md) put in
 front of M-10 ran it: two hundred modules generated from stele's declaration shapes — 35 declarations and
 8 rules each, about 185 lines, 36,961 lines in all, up to three imports resolved per module — with a
 throwaway lexer, recursive-descent parser and elaborator deriving per-declaration digests and the module
-ABI digest as [the module surface](module-surface.md) specifies them, timing the keystroke path against an
+ABI digest as [the module surface](../modules/surface.md) specifies them, timing the keystroke path against an
 import environment holding the other one hundred and ninety-nine modules. on an AMD Ryzen AI MAX+ PRO 395,
 re-parse plus re-elaboration of the edited module is 105.6 µs at p50 and 117.3 µs at p99 over two thousand
 samples, the same whether the edit holds the ABI digest or moves it; parsing alone is about a quarter of
@@ -179,7 +179,7 @@ second is about 0.4 s, and the figure the argument wanted was the edited module'
 about 2 ms.
 
 salsa is not merely unpersuasive here, it is refused by an accepted record.
-[0021](../decisions/0021-arena-graph-engine.md) rejects it on three named grounds and is `accepted`. the
+[0021](../../decisions/0021-arena-graph-engine.md) rejects it on three named grounds and is `accepted`. the
 grounds are engine-specific — five identity types, capability propagation per edge, category-dependent cache
 contracts, a macro-coupled extension surface — and a parser has none of them, so a record may argue that a
 frontend-local query layer is a different question. what it may not do is treat the matter as open. and 0021

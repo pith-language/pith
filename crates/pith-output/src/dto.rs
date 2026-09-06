@@ -75,7 +75,7 @@ pub struct SumConstructorRepr {
 /// binary: bump this when a DTO's shape changes, and never for a change that
 /// only adds a command. The `query_view_shape_is_stable` snapshots are what
 /// make the number mean something.
-pub const QUERY_API_VERSION: u32 = 4;
+pub const QUERY_API_VERSION: u32 = 1;
 
 /// A DTO projection of `pith_diag::Severity`. Mirrored here rather than
 /// imported for the reason `ValueRepr` is: this crate holds serde and depends

@@ -16,7 +16,7 @@ tags:
 relations:
   informed_by:
     - decision-0047-the-declaration-table
-    - planning-language-frontend
+    - planning-frontend-language
   depends_on:
     - decision-0018-termination-and-recursion
     - decision-0023-rule-and-cache-identity
@@ -77,6 +77,10 @@ A module ABI manifest contains, in order:
 2. declaration digests in declaration-name order;
 3. explicitly imported module names and ABI digests in module-name order; and
 4. the sorted multiset of provided effect-category and canonical-interface pairs.
+
+> amended by [0067](0067-local-module-workspaces.md): item 3 becomes a sorted, deduplicated set of imported
+> subject/ABI pairs. A local binding name is an elaboration input and a tooling sidecar, not a semantic
+> fact, so renaming a `use` alias leaves the module ABI unchanged.
 
 Declaration names are already committed by their digests and are not repeated beside them. Rule labels, source spans, documentation, formatting, and host body revisions do not enter the module ABI. A declaration representation, import ABI, interface, or effect-category change does.
 

@@ -3,6 +3,20 @@
 
 use super::Printer;
 
+/// A string literal, carrying the two escapes the lexer reads and no
+/// others. Shared with the manifest printer, whose paths are always quoted.
+pub(super) fn quoted(out: &mut String, text: &str) {
+    out.push('"');
+    for character in text.chars() {
+        match character {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            other => out.push(other),
+        }
+    }
+    out.push('"');
+}
+
 impl<'a> Printer<'a> {
     /// A name as the grammar spells it: bare when it is one identifier
     /// token, quoted when it is not. The two elaborate to identical bytes,
@@ -11,22 +25,14 @@ impl<'a> Printer<'a> {
         if is_identifier(name) {
             self.out.push_str(name);
         } else {
-            self.quoted(name);
+            quoted(&mut self.out, name);
         }
     }
 
     /// A string literal, carrying the two escapes the lexer reads and no
     /// others.
     pub(super) fn quoted(&mut self, text: &str) {
-        self.out.push('"');
-        for character in text.chars() {
-            match character {
-                '"' => self.out.push_str("\\\""),
-                '\\' => self.out.push_str("\\\\"),
-                other => self.out.push(other),
-            }
-        }
-        self.out.push('"');
+        quoted(&mut self.out, text);
     }
 }
 

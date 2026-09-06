@@ -163,19 +163,23 @@ const code = `impl ExampleEngine for Engine {
             <h2 class="display sec-title">what runs today</h2>
             <div class="prose">
                 <p>
-                    A working prototype, not a tool for general use.
-                    Declarations and rule signatures are written as typed
-                    <code>.pi</code> text; rule bodies are still rust, and the
-                    command line covers an evaluation stub and content
-                    materialization. What exists is one vertical slice, deep
-                    enough that the parts push back:
+                    A working prototype, not a tool for general use. The
+                    language and its command line run: declarations, rule
+                    signatures, and written bodies are <code>.pi</code> text,
+                    and a program is invoked through entries the engine
+                    computes once and hydrates thereafter. Two loading modes
+                    share one grammar — a standalone file, and a
+                    <code>module.pi</code> manifest declaring subjects and
+                    path dependencies, the first slice of the module system.
+                    What exists is one vertical slice, deep enough that the
+                    parts push back:
                 </p>
             </div>
             <ul class="runs">
                 <li>
                     typed rule selection, incremental evaluation, and
-                    equality-based pruning when a recomputed dependency lands on
-                    the value it already had
+                    equality-based pruning when a recomputed dependency lands
+                    on the value it already had
                 </li>
                 <li>
                     content-addressed blobs and trees, engine state in SQLite,
@@ -194,10 +198,10 @@ const code = `impl ExampleEngine for Engine {
                 </li>
                 <li>
                     builds under two real toolchains with discovered header
-                    dependencies; package resolution, locks, and admitted binary
-                    substitution; development environments over a lock; and an
-                    immutable Linux tree composed from files, users, units, and
-                    boot configuration
+                    dependencies; package resolution, locks, and admitted
+                    binary substitution; development environments over a lock;
+                    and an immutable Linux tree composed from files, users,
+                    units, and boot configuration
                 </li>
                 <li>
                     module surfaces as typed <code>.pi</code> text, one per
@@ -206,12 +210,19 @@ const code = `impl ExampleEngine for Engine {
                     digest holds importers' keys still across a comment edit
                     while a representation change reaches every importer
                 </li>
+                <li>
+                    multi-module programs: a checked-in workspace declares two
+                    local modules, imports a dependency through a manifest
+                    binding, and runs a pure entry that computes once and
+                    hydrates in the next process
+                </li>
             </ul>
             <div class="prose">
                 <p>
-                    The IR constructor set is next: the second frontend round,
-                    fixing the vocabulary represented rule bodies will encode
-                    before the encoding freezes it.
+                    The module system is the open round: local workspaces run,
+                    and registries, locks, and version resolution are the
+                    halves still owed before the tree's own domains resolve
+                    through it.
                 </p>
             </div>
         </div>

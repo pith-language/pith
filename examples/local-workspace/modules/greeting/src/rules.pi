@@ -1,0 +1,1 @@
+pure rule greet(who: Message) -> Text = { unwrap who }

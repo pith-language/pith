@@ -939,3 +939,420 @@ fn gc_dry_run_names_admitted_content_as_reclaimable() -> TestResult {
     );
     Ok(())
 }
+
+/// The checked-in local workspace of decision 0067: two modules, one path
+/// dependency with a two-file source set, one pure entry. This is the M-14
+/// slice's acceptance witness — check, explore, fmt --check, run computing
+/// then hydrating in a fresh process, and the graph commands addressing the
+/// entry, all from the fixture's own root.
+#[test]
+fn the_local_workspace_fixture_checks_explores_and_hydrates() -> TestResult {
+    let home = scratch()?;
+    let root = workspace_file("examples/local-workspace");
+
+    let checked = query_in(
+        home.path(),
+        &["--output", "json", "check", "module.pi"],
+        &root,
+    )?;
+    assert_eq!(
+        checked
+            .pointer("/errors")
+            .and_then(serde_json::Value::as_u64),
+        Some(0),
+        "the fixture checks: {checked}"
+    );
+    assert!(
+        checked
+            .pointer("/abi_digest")
+            .is_some_and(serde_json::Value::is_string),
+        "a checked manifest reports the root module's ABI: {checked}"
+    );
+
+    let explored = query_in(
+        home.path(),
+        &["--output", "json", "explore", "module.pi"],
+        &root,
+    )?;
+    assert_eq!(
+        explored
+            .pointer("/imports/0/module")
+            .and_then(serde_json::Value::as_str),
+        Some("example/greeting"),
+        "the manifest's binding shows the imported subject: {explored}"
+    );
+
+    let formatted = run_in(
+        home.path(),
+        &["--output", "json", "fmt", "--check", "module.pi"],
+        &root,
+    )?;
+    assert_eq!(formatted.code(), 0, "{}", formatted.stderr());
+    let files = formatted
+        .records()?
+        .into_iter()
+        .filter(|record| record.get("kind").and_then(serde_json::Value::as_str) == Some("query"))
+        .count();
+    assert_eq!(
+        files, 2,
+        "fmt reports the manifest and the root's own source file, nothing else"
+    );
+
+    let first = run_in(home.path(), &["--output", "json", "run", "hello"], &root)?;
+    assert_eq!(first.code(), 0, "{}", first.stderr());
+    let run = first.query()?.ok_or_else(|| test_error("no run record"))?;
+    assert_eq!(
+        run.pointer("/source").and_then(serde_json::Value::as_str),
+        Some("computed"),
+        "the first run computes: {run}"
+    );
+
+    let second = run_in(home.path(), &["--output", "json", "run", "hello"], &root)?;
+    assert_eq!(second.code(), 0, "{}", second.stderr());
+    let run = second.query()?.ok_or_else(|| test_error("no run record"))?;
+    assert_eq!(
+        run.pointer("/source").and_then(serde_json::Value::as_str),
+        Some("hydrated"),
+        "a new process over the same store hydrates: {run}"
+    );
+    assert_eq!(
+        run.pointer("/value/s").and_then(serde_json::Value::as_str),
+        Some("hello"),
+        "the entry returns the dependency's answer: {run}"
+    );
+
+    let dependencies = query_in(
+        home.path(),
+        &["--output", "json", "graph", "deps", "hello"],
+        &root,
+    )?;
+    assert_eq!(
+        dependencies
+            .pointer("/root/label")
+            .and_then(serde_json::Value::as_str),
+        Some("example/hello::entry.hello"),
+        "the dependency tree addresses the entry: {dependencies}"
+    );
+
+    let explained = run_in(
+        home.path(),
+        &["--output", "json", "explain", "hello"],
+        &root,
+    )?;
+    assert_eq!(explained.code(), 0, "{}", explained.stderr());
+    assert!(
+        explained
+            .records()?
+            .iter()
+            .any(
+                |record| record.get("kind").and_then(serde_json::Value::as_str) == Some("explain")
+            ),
+        "the explanation commands address the entry"
+    );
+    Ok(())
+}
+
+/// The fixture's commands run from the workspace's own root, which is what
+/// their default `--module module.pi` names.
+fn run_in(home: &Path, arguments: &[&str], root: &Path) -> TestResult<Run> {
+    let output = pith_command(home, arguments).current_dir(root).output()?;
+    Ok(Run { output })
+}
+
+fn query_in(home: &Path, arguments: &[&str], root: &Path) -> TestResult<serde_json::Value> {
+    let run = run_in(home, arguments, root)?;
+    assert_eq!(run.code(), 0, "{}", run.stderr());
+    run.query()?.ok_or_else(|| test_error("no query record"))
+}
+
+/// Manifest-mode selection reads state without creating it, exactly as the
+/// standalone tier does.
+///
+/// Each read-only command gets its own store, so one of them creating a
+/// database cannot be hidden by another that legitimately would. `fmt
+/// --check` is here for the second half of its contract too: it reports
+/// without writing, so the fixture's own bytes must survive it.
+#[test]
+fn the_read_only_manifest_commands_create_no_state_database() -> TestResult {
+    let root = workspace_file("examples/local-workspace");
+    let before = std::fs::read(root.join("src/main.pi"))?;
+    for arguments in [
+        ["--output", "json", "graph", "select", "hello"].as_slice(),
+        ["--output", "json", "check", "module.pi"].as_slice(),
+        ["--output", "json", "explore", "module.pi"].as_slice(),
+        ["--output", "json", "fmt", "--check", "module.pi"].as_slice(),
+    ] {
+        let home = scratch()?;
+        let run = run_in(home.path(), arguments, &root)?;
+        assert_eq!(run.code(), 0, "{arguments:?}: {}", run.stderr());
+        assert!(
+            !home.path().join("state.db").exists(),
+            "`{arguments:?}` created a state database"
+        );
+    }
+    assert_eq!(
+        before,
+        std::fs::read(root.join("src/main.pi"))?,
+        "fmt --check rewrote the file it was asked to report on"
+    );
+    Ok(())
+}
+/// Design probe, not a regression of a chosen behavior: where an added rule
+/// can break a consumer, and where it cannot.
+///
+/// The module-system proposal classified an added rule as a minor change.
+/// That is wrong, but not in the way the proposal's critics would guess, and
+/// the two halves below fix the actual boundary.
+///
+/// Within one module, two rules providing one interface are refused at
+/// elaboration (`E-3012`), so a publisher cannot build that break, let alone
+/// publish it. Across modules, elaboration accepts both providers and the
+/// consumer only fails when it evaluates (`E-1102`).
+///
+/// The consequences for the differ are exact. An addition is potentially
+/// breaking, the break is a property of a consumer's whole closure rather than
+/// of the edited module, the publisher's own `check` cannot detect it, and no
+/// comparison of two versions of one module can prove an addition safe.
+#[test]
+fn a_rule_added_to_one_dependency_breaks_a_consumer_that_imports_another() -> TestResult {
+    const CONSUMER: &str = "import one\nimport two\n\nentry hello : Bool = ask (\"x\")\n";
+    let home = scratch()?;
+    let project = scratch()?;
+    let root = project.path();
+
+    for directory in ["src", "one/src", "two/src"] {
+        std::fs::create_dir_all(root.join(directory))?;
+    }
+    write(
+        root,
+        "module.pi",
+        "module example/root 0.1.0\n\nuse one = example/one from path \"one\"\nuse two = example/two from path \"two\"\n",
+    )?;
+    write(&root.join("src"), "main.pi", CONSUMER)?;
+    write(&root.join("one"), "module.pi", "module example/one 0.1.0\n")?;
+    write(
+        &root.join("one/src"),
+        "rules.pi",
+        "pure rule yes(value: Text) -> Bool = { true }\n",
+    )?;
+    write(&root.join("two"), "module.pi", "module example/two 0.1.0\n")?;
+    write(&root.join("two/src"), "types.pi", "nominal Marker = Text\n")?;
+
+    let manifest = root.join("module.pi").display().to_string();
+    let before = pith(
+        home.path(),
+        &["--output", "json", "run", "hello", "--module", &manifest],
+    )?;
+    assert_eq!(
+        before
+            .query()?
+            .and_then(|query| query.pointer("/value/b").cloned()),
+        Some(serde_json::Value::Bool(true)),
+        "the consumer resolved to the one provider it had"
+    );
+    assert_eq!(
+        before.code(),
+        0,
+        "the consumer selects one provider before the addition: {}",
+        before.stderr()
+    );
+
+    // The only edit: a second module gains a rule with the interface the first
+    // already provides. Neither module declares a duplicate of its own, and the
+    // consumer's source is untouched.
+    write(
+        &root.join("two/src"),
+        "types.pi",
+        "nominal Marker = Text\npure rule no(value: Text) -> Bool = { false }\n",
+    )?;
+    assert_eq!(
+        std::fs::read_to_string(root.join("src/main.pi"))?,
+        CONSUMER,
+        "the probe edited the consumer; it must only edit a dependency"
+    );
+
+    // A cold state for the runs below. Whether an existing recorded answer is
+    // revalidated when a dependency gains a competing provider is a separate
+    // question about reuse, and this probe is about selection.
+    let cold = scratch()?;
+
+    // Elaboration accepts the closure: the break is not a frontend fact, and a
+    // publisher running `check` on either dependency sees nothing wrong.
+    let checked = pith(cold.path(), &["--output", "json", "check", &manifest])?;
+    assert_eq!(
+        checked.code(),
+        0,
+        "the addition failed to elaborate, so the probe no longer isolates \
+         selection: {}",
+        checked.stderr()
+    );
+
+    let after = pith(
+        cold.path(),
+        &["--output", "json", "run", "hello", "--module", &manifest],
+    )?;
+    assert_ne!(
+        after.code(),
+        0,
+        "a competing provider in a second dependency left the selection unique; \
+         an added rule would then be minor after all: {}",
+        after.stdout()
+    );
+    assert!(
+        after.stderr().contains("E-1102") || after.stdout().contains("E-1102"),
+        "the refusal was not the ambiguous-rule code: {} {}",
+        after.stdout(),
+        after.stderr()
+    );
+    Ok(())
+}
+
+/// The other half: a publisher cannot ship the intra-module version of that
+/// break, because their own module refuses to elaborate.
+#[test]
+fn two_rules_providing_one_interface_in_one_module_are_refused_at_elaboration() -> TestResult {
+    let home = scratch()?;
+    let project = scratch()?;
+    let module = write(
+        project.path(),
+        "root.pi",
+        "pure rule yes(value: Text) -> Bool = { true }\npure rule no(value: Text) -> Bool = { false }\n\nentry hello : Bool = ask (\"x\")\n",
+    )?;
+
+    let run = pith(
+        home.path(),
+        &["--output", "json", "check", &module.display().to_string()],
+    )?;
+    assert_ne!(run.code(), 0, "the duplicate interface was accepted");
+    assert!(
+        run.stdout().contains("3012") || run.stderr().contains("3012"),
+        "the refusal was not the duplicate-interface code: {} {}",
+        run.stdout(),
+        run.stderr()
+    );
+    Ok(())
+}
+
+/// The first-party module that imports another, still loading the way
+/// M-13 loaded it: file-relative, by name, no manifest. Pinning this beside
+/// the manifest fixture is the migration boundary 0067 names — a `.pi`
+/// source file and a `module.pi` are different documents, and neither
+/// falls back to the other.
+#[test]
+fn the_standalone_importing_module_still_checks_by_file_relative_route() -> TestResult {
+    let home = scratch()?;
+    let module = workspace_file("crates/phloem/phloem.pi");
+
+    let run = pith(
+        home.path(),
+        &["--output", "json", "check", &module.display().to_string()],
+    )?;
+
+    assert_eq!(run.code(), 0, "{}", run.stderr());
+    let query = run.query()?.ok_or_else(|| test_error("no query record"))?;
+    assert_eq!(
+        query.get("module").and_then(serde_json::Value::as_str),
+        Some("phloem"),
+        "a standalone file's identity is still its file stem: {query}"
+    );
+    assert_eq!(
+        query.get("errors").and_then(serde_json::Value::as_u64),
+        Some(0),
+        "phloem elaborates over its imported xylem: {query}"
+    );
+    assert!(
+        query
+            .get("abi_digest")
+            .and_then(serde_json::Value::as_str)
+            .is_some(),
+        "the ABI is absent, so `import xylem` did not resolve file-relatively: {query}"
+    );
+    Ok(())
+}
+
+/// A changed dependency body revalidates the entry at run time: the
+/// consumer's elaboration is reusable — its ABI and entry revision did not
+/// move — but the recorded dependency edge did, so a fresh process over the
+/// same store recomputes rather than hydrates the stale answer.
+#[test]
+fn an_edited_dependency_body_revalidates_the_entry() -> TestResult {
+    let home = scratch()?;
+    let project = scratch()?;
+    let directory = project.path();
+    std::fs::create_dir_all(directory.join("src"))?;
+    std::fs::create_dir_all(directory.join("dep/src"))?;
+    std::fs::write(
+        directory.join("module.pi"),
+        "module example/root 0.1.0\n\nuse dep = example/dep from path \"dep\"\n",
+    )?;
+    std::fs::write(
+        directory.join("src/main.pi"),
+        "import dep\n\nentry hello : Text = ask (Message(\"hello\"))\n",
+    )?;
+    std::fs::write(
+        directory.join("dep/module.pi"),
+        "module example/dep 0.1.0\n",
+    )?;
+    std::fs::write(
+        directory.join("dep/src/types.pi"),
+        "nominal Message = Text\n",
+    )?;
+    std::fs::write(
+        directory.join("dep/src/rules.pi"),
+        "pure rule speak(who: Message) -> Text = { \"first\" }\n",
+    )?;
+
+    let first = run_in(
+        home.path(),
+        &["--output", "json", "run", "hello"],
+        directory,
+    )?;
+    assert_eq!(first.code(), 0, "{}", first.stderr());
+    let run = first.query()?.ok_or_else(|| test_error("no run record"))?;
+    assert_eq!(
+        run.pointer("/source").and_then(serde_json::Value::as_str),
+        Some("computed")
+    );
+    assert_eq!(
+        run.pointer("/value/s").and_then(serde_json::Value::as_str),
+        Some("first")
+    );
+
+    std::fs::write(
+        directory.join("dep/src/rules.pi"),
+        "pure rule speak(who: Message) -> Text = { \"second\" }\n",
+    )?;
+    let second = run_in(
+        home.path(),
+        &["--output", "json", "run", "hello"],
+        directory,
+    )?;
+    assert_eq!(second.code(), 0, "{}", second.stderr());
+    let run = second.query()?.ok_or_else(|| test_error("no run record"))?;
+    assert_eq!(
+        run.pointer("/source").and_then(serde_json::Value::as_str),
+        Some("computed"),
+        "a changed called result was served stale: {run}"
+    );
+    assert_eq!(
+        run.pointer("/value/s").and_then(serde_json::Value::as_str),
+        Some("second")
+    );
+
+    let third = run_in(
+        home.path(),
+        &["--output", "json", "run", "hello"],
+        directory,
+    )?;
+    let run = third.query()?.ok_or_else(|| test_error("no run record"))?;
+    assert_eq!(
+        run.pointer("/source").and_then(serde_json::Value::as_str),
+        Some("hydrated"),
+        "the recomputed result did not hydrate afterwards: {run}"
+    );
+    assert_eq!(
+        run.pointer("/value/s").and_then(serde_json::Value::as_str),
+        Some("second")
+    );
+    Ok(())
+}

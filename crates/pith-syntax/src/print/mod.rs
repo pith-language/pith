@@ -9,9 +9,12 @@
 mod expression;
 mod items;
 mod layout;
+mod manifest;
 mod names;
 mod request;
 mod types;
+
+pub use manifest::print_manifest;
 
 use pith_diag::{SourceFile, Span};
 use pith_hir::{
@@ -19,7 +22,7 @@ use pith_hir::{
     SurfaceLocal, SurfaceRule,
 };
 
-use layout::slice;
+use layout::{Spacing, slice};
 
 /// The canonical text of `surface`, whose documentation comments are sliced
 /// from `source`.
@@ -30,8 +33,7 @@ pub fn print(surface: &ParsedSurface, source: &SourceFile) -> String {
         text: source.source_text(),
         out: String::new(),
         indent: 0,
-        written: false,
-        pending_comment: false,
+        spacing: Spacing::new(),
     };
     printer.module();
     printer.out
@@ -42,8 +44,7 @@ struct Printer<'a> {
     text: &'a str,
     out: String,
     indent: usize,
-    written: bool,
-    pending_comment: bool,
+    spacing: Spacing,
 }
 
 enum ModuleEvent<'a> {
@@ -106,52 +107,29 @@ impl<'a> Printer<'a> {
                 ModuleEvent::About(about) => self.item(|printer| printer.about(about)),
             }
         }
-        if self.written {
-            self.out.push('\n');
-        }
+        self.spacing.finish(&mut self.out);
     }
 
     fn item(&mut self, spell: impl FnOnce(&mut Self)) {
-        if self.pending_comment {
-            self.out.push('\n');
-            self.pending_comment = false;
-        } else if self.written {
-            self.out.push_str("\n\n");
-        }
-        self.written = true;
+        self.spacing.begin_item(&mut self.out);
         spell(self);
     }
 
     fn leading_comment(&mut self, span: Span) {
-        if self.pending_comment {
-            self.out.push('\n');
-        } else if self.written {
-            self.out.push_str("\n\n");
-        }
-        self.written = true;
-        self.pending_comment = true;
+        self.spacing.begin_leading_comment(&mut self.out);
         self.comment(span);
     }
 
     fn trailing_comment(&mut self, span: Span) {
-        if !self.written || self.pending_comment {
+        if !self.spacing.trailing_comment(&mut self.out) {
             self.leading_comment(span);
             return;
         }
-        self.out.push_str("  ");
         self.comment(span);
     }
 
     fn comment(&mut self, span: Span) {
-        let comment = slice(self.text, span)
-            .strip_prefix("--")
-            .unwrap_or_default()
-            .trim();
-        self.out.push_str("--");
-        if !comment.is_empty() {
-            self.out.push(' ');
-            self.out.push_str(comment);
-        }
+        Spacing::comment(&mut self.out, slice(self.text, span));
     }
 }
 

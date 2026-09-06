@@ -18,7 +18,7 @@ relations:
   depends_on:
     - planning-milestones
     - planning-measured
-    - planning-language-frontend
+    - planning-frontend-language
     - planning-open-questions
     - foundation-scope
   amends:
@@ -64,7 +64,7 @@ gather more evidence for a settled question. the questions that can still move t
 elaborator's latency bet (measured since, by the spike below), whether the ABI cutoff pays for itself,
 whether the declaration surface can express the corpus — had no evidence at all and sat behind four
 planning documents with no milestone
-number, because [the language frontend](language-frontend.md) files itself as "a record sequence, not a
+number, because [the language frontend](frontend/language.md) files itself as "a record sequence, not a
 milestone".
 
 that filing is a category error with scheduling consequences. work inside this file gets rounds; work
@@ -74,7 +74,7 @@ outside it gets planning documents. the frontend has four planning documents and
 
 round two of the frontend sequence is [0038](../decisions/0038-represented-rule-bodies.md)'s named first
 design task: enumerate the IR constructor set and fix its canonical encoding and digest domain.
-[the frontend architecture](frontend-architecture.md) states what that set encodes — "the `PureStep`
+[the frontend architecture](frontend/architecture.md) states what that set encodes — "the `PureStep`
 protocol — `Need`, `NeedAll`, `NeedBlob`, `NeedAction` — is the effect vocabulary of the core ir".
 
 `Observation` has no step protocol, and M-5b enumerates what adding one costs: "new variants in
@@ -100,7 +100,7 @@ occurrences in the workspace are in `pith-engine/benches/scale.rs`.
 [0018](../decisions/0018-termination-and-recursion.md) requires it, 0022 requires it,
 [0028](../decisions/0028-sandboxed-local-executor.md)'s unresolved section claims the executor already
 accepts one, M-5a's image tools want one, M-6's mutations cannot be unbounded, and the configure-script
-case in [the language frontend](language-frontend.md) is blocked on it. one mechanism owed to five callers is
+case in [the language frontend](frontend/language.md) is blocked on it. one mechanism owed to five callers is
 one record under one-mechanism-per-concern, not five deferrals. it currently lives as a paragraph inside
 M-6, the furthest-out milestone that needs it.
 
@@ -111,7 +111,7 @@ the generic builder needs it for the reason 0032's own text gives — an `Action
 happened, and for a foreign build that claim is false, so the run overclaims in provenance rather than
 failing. no milestone owns it.
 
-the read-only state adapter. [the language frontend](language-frontend.md) names it in one line — "an
+the read-only state adapter. [the language frontend](frontend/language.md) names it in one line — "an
 editor and a CLI at one store root, against a sqlite state store with one lock and `synchronous=full`,
 needs a read-only adapter path" — and it is a hard blocker for the language server, found in planning and
 owned by nobody.
@@ -120,7 +120,7 @@ each is cheaper before its caller than after, and each is currently scheduled af
 
 ## the gap between M-4 and a user
 
-[the language frontend](language-frontend.md) states it plainly: "the missing piece is a peer domain
+[the language frontend](frontend/language.md) states it plainly: "the missing piece is a peer domain
 library in the shape of `stdenv.mkDerivation`, not a language feature ... that library is an ordinary peer
 under 0004 and 0009, which is the right architecture and also means it is unbuilt work no milestone covers
 — M-5a is system composition, M-5b activation, M-6 deployment, M-7 broader execution, and the gap sits
@@ -177,7 +177,7 @@ which is enough work to stall the project for months with no domain evidence arr
 
 two things answer it. the engine is no longer unproven, per the expiry above. and the sequence is not
 a prerequisite chain in which nothing ships until round four —
-[the module surface](module-surface.md) says round one ships on its own: "step one — declarations only,
+[the module surface](modules/surface.md) says round one ships on its own: "step one — declarations only,
 every body `= host` — ships inside round 1, and at that point `import xylem` typechecks, completion and
 hover and go-to-definition work, and not one line of rust has moved."
 
@@ -188,7 +188,7 @@ for deferring the sequence.
 ## the proposed order
 
 a spike, before anything, and it is not a round. measure the latency bet.
-[the frontend architecture](frontend-architecture.md) calls it "the design's central latency bet", and
+[the frontend architecture](frontend/architecture.md) calls it "the design's central latency bet", and
 [0021](../decisions/0021-arena-graph-engine.md) forecloses the obvious fallback by an accepted record.
 generate two hundred modules from stele's declaration shapes, write a throwaway parser and elaborator, and
 get one number against the 50 ms bracket. the code is discarded and the number goes into the frontend
@@ -208,7 +208,7 @@ express an ordering. so a label is an identity and the file states the order, wh
 2. M-9, observation identity and freshness. the record only, detached from M-5b, so the step vocabulary is
    closed before the IR encodes it. whether it ships with one thin observation prototyped beside it is the
    second fork below.
-3. M-10, the declaration artifact and [the module surface](module-surface.md). frontend round one. it gates
+3. M-10, the declaration artifact and [the module surface](modules/surface.md). frontend round one. it gates
    everything after it, needs no unbuilt constructor, and ships hover, completion and go-to-definition on
    its own. it also discharges phloem's lazy declaration table.
 4. M-11, the IR constructor set. frontend round two, now enumerated against a closed vocabulary.
@@ -217,7 +217,7 @@ express an ordering. so a label is an identity and the file states the order, wh
 6. M-13, the surface notation and the CLI. frontend round four and the CLI half of round six. `pith check`
    and the entry construct's first evaluation command exist here, `explain_invalidation` becomes something
    a person can see, and the read-only state adapter is needed.
-7. M-14, [the module system](module-system.md). frontend round five.
+7. M-14, [the module system](modules/system.md). frontend round five.
 8. M-15, the generic builder. the `stdenv.mkDerivation`-shaped peer, authored in `.pi`, which is what makes
    packaging a real program tractable. `Opaque`'s step protocol lands here, because a foreign build is the
    caller that needs it, and M-8 comes first because a hung configure is unbounded.

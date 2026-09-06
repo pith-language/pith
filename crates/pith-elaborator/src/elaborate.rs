@@ -899,9 +899,11 @@ impl<'a> Elaborator<'a> {
 
     fn record_local_reference(&mut self, name: &str, span: Span) {
         if let Some(definition) = self.definitions.get(name) {
+            let (source, local) = self.files.file_of(span);
             self.references.push(ReferenceSite::new(
                 Coordinate::new(self.module, name),
-                span,
+                source.clone(),
+                local,
                 definition.clone(),
             ));
         }
@@ -925,9 +927,11 @@ impl<'a> Elaborator<'a> {
             return None;
         };
         if let Some(definition) = imported.declaration_definition(name) {
+            let (source, local) = self.files.file_of(span);
             self.references.push(ReferenceSite::new(
                 Coordinate::new(module, name),
-                span,
+                source.clone(),
+                local,
                 definition.clone(),
             ));
         }

@@ -136,3 +136,53 @@ fn the_builtin_exec_type_is_evaluated_before_the_caller_effect() -> TestResult {
     assert_eq!(invocation.arguments.as_ref(), [Box::<str>::from("hello")]);
     Ok(())
 }
+
+/// A host rule in a dependency's second file refuses with that file's own
+/// label and a file-local span: multi-file modules present engine refusals
+/// where the declaration lives, not at a module-wide offset.
+#[test]
+fn an_unbound_host_rule_in_a_later_file_points_there() -> TestResult {
+    let source = tempfile::tempdir()?;
+    let home = tempfile::tempdir()?;
+    let directory = source.path();
+    let dependency = directory.join("dep");
+    std::fs::create_dir_all(dependency.join("src"))?;
+    std::fs::write(dependency.join("module.pi"), "module example/dep 0.1.0\n")?;
+    std::fs::write(dependency.join("src/types.pi"), "nominal Message = Text\n")?;
+    std::fs::write(
+        dependency.join("src/rules.pi"),
+        "-- speaks a message\npure rule speak(who: Message) -> Text = host\n",
+    )?;
+    std::fs::create_dir_all(directory.join("root/src"))?;
+    std::fs::write(
+        directory.join("root/module.pi"),
+        "module example/root 0.1.0\n\nuse dep = example/dep from path \"../dep\"\n",
+    )?;
+    std::fs::write(
+        directory.join("root/src/main.pi"),
+        "import dep\n\nentry main : Text = ask (Message(\"hello\"))\n",
+    )?;
+
+    let error = writable(home.path())?
+        .run_entry(&directory.join("root/module.pi"), "main")
+        .err()
+        .ok_or("the unbound host rule evaluated")?;
+
+    let refusal = error
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| diagnostic.message.0.contains("example/dep.speak"))
+        .ok_or("the host refusal named its coordinate")?;
+    let source_file = refusal
+        .source
+        .as_ref()
+        .ok_or("the refusal carries its source")?;
+    assert_eq!(source_file.label.as_ref(), "src/rules.pi");
+    let (line, column) = source_file.line_col(refusal.span.start);
+    assert_eq!(
+        (line, column),
+        (2, 1),
+        "the span selects the rule's effect keyword, locally in the second file"
+    );
+    Ok(())
+}

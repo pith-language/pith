@@ -1,6 +1,6 @@
 ---
 schema: design-doc/v1
-id: planning-language-frontend
+id: planning-frontend-language
 title: the language frontend
 summary: why the frontend is three separable projects, what each is gated on, and the record sequence that builds them
 kind: planning
@@ -21,10 +21,10 @@ relations:
   depends_on:
     - planning-open-questions
     - planning-reordering
-    - planning-module-surface
-    - planning-module-system
+    - planning-modules-surface
+    - planning-modules-system
     - planning-frontend-architecture
-    - planning-surface-notation
+    - planning-frontend-surface-notation
     - decision-0026-generic-typed-calculus
     - decision-0038-represented-rule-bodies
     - decision-0047-the-declaration-table
@@ -35,7 +35,7 @@ relations:
 
 this is a proposal, not a record. it spans four sibling documents plus this one, decomposes into roughly seven
 records and eight amendments, named at the end, and no part of it is prototyped. it is in `planning/` for the
-same reason [milestones](milestones.md) is: it is an ordering over work whose individual claims belong to
+same reason [milestones](../milestones.md) is: it is an ordering over work whose individual claims belong to
 records.
 
 ## three projects, not one
@@ -50,7 +50,7 @@ private, its only construction site is `DeclarationTable::declare`, there is no
 ingredient is built and none is assembled. this is the gate on everything else, and it is not blocked by any
 part of the 0026 calculus that is missing.
 
-the core IR replaces rust closures as what the kernel evaluates. [0038](../decisions/0038-represented-rule-bodies.md)
+the core IR replaces rust closures as what the kernel evaluates. [0038](../../decisions/0038-represented-rule-bodies.md)
 settles its shape and explicitly does not enumerate its constructor set — "that enumeration is the first
 design task this record gates". it does not sit behind surface syntax: 0038's own first frontend is the
 rust registration API over hand-built IR.
@@ -58,19 +58,19 @@ rust registration API over hand-built IR.
 the surface notation is the parser, elaborator, module system and editor support. it is the only one of the
 three that needs a lexer, and it is the last one gated.
 
-[open-questions](open-questions.md) gates surface syntax on "the 0026 calculus landing in the core". that
+[open-questions](../open-questions.md) gates surface syntax on "the 0026 calculus landing in the core". that
 gate is correctly sized for the notation and oversized for the other two. what is missing from the
 calculus is type parameters, `Map`/`Option`/`Result` and the five uncertainty constructors — and
-[0047](../decisions/0047-the-declaration-table.md) removed the first three from 0026's set outright and
+[0047](../../decisions/0047-the-declaration-table.md) removed the first three from 0026's set outright and
 gates each uncertainty constructor on the subsystem that would read it. the constructors the existing
 corpus actually uses — the six scalars, `Nominal`, `List`, `Record`, `Sum`, `Cut` — are all built.
 
 the declaration surface is buildable today.
 
-four sibling documents carry the designs these rounds discharge. [the module surface](module-surface.md)
+four sibling documents carry the designs these rounds discharge. [the module surface](../modules/surface.md)
 holds the declaration artifact: the encoders, the digests, the `.pi` declaration grammar, the loader, and the
-two-phase intra-module pass. [the module system](module-system.md) holds identity, `module.pi`, the four
-source kinds, the registries, the lock, and the scoped universe. [the frontend architecture](frontend-architecture.md)
+two-phase intra-module pass. [the module system](../modules/system.md) holds identity, `module.pi`, the four
+source kinds, the registries, the lock, and the scoped universe. [the frontend architecture](architecture.md)
 holds the syntax, HIR and elaborator crates, the three graph rules, the IR constructor set they produce, and
 the tooling and query surface built over them. [the surface notation](surface-notation.md) holds the
 spelling — the calling convention, the name lexeme, the operator and builtin sets, local definitions, `about`
@@ -105,7 +105,7 @@ filter admits 77 syscalls each measured from a compiler, the linker or a shell f
 runs hundreds of small probe programs doing what a compiler never does; 0028 already predicted the list widens
 per toolchain and it has been measured twice, clang alone needing `sigaltstack`, `rename` and `alarm`. the
 second was the absent timeout, since a hung configure is unbounded — no longer absent: M-8's run bound
-([0059](../decisions/0059-a-caller-declared-run-bound.md)) kills a hung child at the run's deadline. the
+([0059](../../decisions/0059-a-caller-declared-run-bound.md)) kills a hung child at the run's deadline. the
 third is `Opaque`'s lack of a step
 protocol, and it is the subtle one: running a foreign build as a plain `Action` works, but an `Action`'s
 contract *claims* these inputs and these outputs and this is what happened, and for a foreign build the last
@@ -117,7 +117,7 @@ language feature: nix's answer to "why is packaging easy" is its generic builder
 software there by writing per-compile derivations either. that library is an ordinary peer under 0004 and
 0009, which is the right architecture and also meant it was unbuilt work no milestone covered — M-5a is
 system composition, M-5b activation, M-6 deployment, M-7 broader execution, and the gap sat between M-4 and
-anything a person would use. [the reordering](reordering.md) took that finding as one of its four and gave
+anything a person would use. [the reordering](../reordering.md) took that finding as one of its four and gave
 the library milestone M-15, with `Opaque`'s step protocol landing there because a foreign build is the
 caller that needs it, and the backstop limit ahead of it as M-8 because a hung configure is unbounded.
 
@@ -175,14 +175,14 @@ milestones — and open-questions gated surface syntax on the calculus rather th
 filed as a record sequence.
 
 that filing turned out to have a scheduling consequence rather than being a neutral description: work
-inside [milestones](milestones.md) gets rounds and work outside it gets planning documents, and this
-proposal accumulated four documents and no commits. [the reordering](reordering.md) puts the sequence into
+inside [milestones](../milestones.md) gets rounds and work outside it gets planning documents, and this
+proposal accumulated four documents and no commits. [the reordering](../reordering.md) puts the sequence into
 the milestone track. the rounds below are unchanged and their measured claims stand; what each gained is a
 label — round one is M-10, round two M-11, round three M-12, round four M-13 together with the CLI half of
 round six, and round five M-14. round seven, migration, stays distributed the way it is described here:
 step one inside round one, and the two body migrations as their own rounds after the notation exists.
 
-1. the declaration artifact and [the module surface](module-surface.md). `Declaration::encode_canonical`, a
+1. the declaration artifact and [the module surface](../modules/surface.md). `Declaration::encode_canonical`, a
    table encoder, the ABI and revision digests, the `.pi` declaration grammar (three forms plus effect-typed
    rule signatures and `= host`), the loader crate, the two-phase intra-module pass. *measured claim:* the four
    crates' live tables and their `.pi` counterparts agree digest-for-digest, and xylem's nine rule revisions
@@ -191,10 +191,10 @@ step one inside round one, and the two body migrations as their own rounds after
    the set it will eventually hold" — so an out-of-process consumer asking phloem what it declares gets
    different answers on different runs, and one coordinate it names is not in the table at all. it gates
    everything.
-2. the IR constructor set, designed in [the frontend architecture](frontend-architecture.md). 0038's named
+2. the IR constructor set, designed in [the frontend architecture](architecture.md). 0038's named
    first design task, plus the canonical encoding, the digest domain, and the validator. *measured claim:*
    every corpus rule body that can be expressed is expressed, and the round names the ones that cannot.
-3. [the frontend architecture](frontend-architecture.md). the syntax, HIR and elaborator crates; the three
+3. [the frontend architecture](architecture.md). the syntax, HIR and elaborator crates; the three
    graph rules; the derived elaborator revision; the `NeedBlob` entry-point question. *measured claim:* the
    ABI cutoff — edit a body in A, assert `bodies-of(B)`'s key is byte-identical and the reusable lookup hits.
 4. [the surface notation](surface-notation.md). the calling convention, the name lexeme, the operator and
@@ -202,18 +202,18 @@ step one inside round one, and the two body migrations as their own rounds after
    claim:* `example-domain` — four nominals, one interface, two rules, built so that no crate names it — as
    one `.pi` file producing byte-identical interface encodings and an identical contract-test result, plus
    equal body digests under qualified and unqualified spelling.
-5. [the module system](module-system.md). identity and the deferred domain-authority question; `module.pi`;
+5. [the module system](../modules/system.md). identity and the deferred domain-authority question; `module.pi`;
    the four source kinds as adapters; configured forge sugar; domain-bound registries with no search order;
    workspaces as the bootstrap locator; the lock; the scoped universe; `pith diff`; and the
    index-versus-no-index fork argued rather than assumed. *measured claim:* publish `example-domain` to a
    temporary registry and assert byte-identical elaborated IR against the local-path entry, plus the two
    configuration refusals — a domain claimed twice refused before any network access, and a domain no registry
    serves refused with no fallback.
-6. tooling, designed in [the frontend architecture](frontend-architecture.md). `pith check`, `fmt`, `explore`,
+6. tooling, designed in [the frontend architecture](architecture.md). `pith check`, `fmt`, `explore`,
    `run`, the entry construct, the query surface, the server, the read-only state adapter. *measured claim:*
    keystroke-path latency on two hundred generated modules built from stele's declaration shapes, plus
    formatter idempotence and semantic preservation.
-7. migration, designed in [the module surface](module-surface.md). step one — declarations only, every body
+7. migration, designed in [the module surface](../modules/surface.md). step one — declarations only, every body
    `= host` — ships inside round 1, and at that point `import xylem` typechecks, completion and hover and
    go-to-definition work, and not one line of rust has moved. steps two and three are their own rounds:
    `stele.render-passwd` first, being a pure projection with no yields over a domain with no rule state, then

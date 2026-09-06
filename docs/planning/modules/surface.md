@@ -1,6 +1,6 @@
 ---
 schema: design-doc/v1
-id: planning-module-surface
+id: planning-modules-surface
 title: the module surface
 summary: a module publishes its declarations and rule signatures as pi text, the rust crate binds host bodies to coordinates it does not own, and one artifact crosses the boundary
 kind: planning
@@ -14,7 +14,7 @@ relations:
   informed_by:
     - research-language-frontend
   depends_on:
-    - planning-language-frontend
+    - planning-frontend-language
     - decision-0038-represented-rule-bodies
     - decision-0047-the-declaration-table
     - decision-0004-first-party-without-privilege
@@ -23,7 +23,7 @@ relations:
 
 # the module surface
 
-this is round one of [the language frontend](language-frontend.md), and it gates every round after it.
+this is round one of [the language frontend](../frontend/language.md), and it gates every round after it.
 
 ## the module surface is the source of truth, and rust binds to it
 
@@ -99,7 +99,7 @@ from the IR, full stop, and this table is the only place it can come from.
 ## the host tier, and how a rule migrates
 
 a rule declaration prefixes its effect category. its body position carries the implementation tier:
-`= host` marks a rust body, and a represented body replaces it on the same declaration. [0061](../decisions/0061-the-declaration-artifact.md)
+`= host` marks a rust body, and a represented body replaces it on the same declaration. [0061](../../decisions/0061-the-declaration-artifact.md)
 records the exact grammar and artifact boundary.
 
 the temptation here is lean's `@[extern]`, where the surface body is "the logical model" and the native
@@ -125,7 +125,7 @@ participating in `RuleRevision`. that is a separate record and it should not be 
 mechanism.
 
 `= host` is visible at the declaration site and in queries, not at the call site. that contradicts
-[0018](../decisions/0018-termination-and-recursion.md), which requires an escape hatch to stay "marked at
+[0018](../../decisions/0018-termination-and-recursion.md), which requires an escape hatch to stay "marked at
 the call site". the contradiction is real and the amendment is the honest resolution rather than a
 workaround: selection is by interface, and a tier inside the interface would make host-to-represented an
 API break. so 0018's sentence is amended, and the tooling takes the obligation — an inlay hint or hover
@@ -141,7 +141,7 @@ whole improvement available.
 
 not on `Engine`. a loader crate reads a module surface, produces `Rule` values, and calls the existing
 public `register_rule` and `register_action_rule`. those two calls stay public and stay the peerhood proof
-[0056](../decisions/0056-peerhood-is-a-registered-crate.md) rests on — demoting them behind a test feature
+[0056](../../decisions/0056-peerhood-is-a-registered-crate.md) rests on — demoting them behind a test feature
 would run U-10's only executable evidence through a surface whose own manifest says it is "not part of the
 engine", and cargo's feature unification would make the restriction advisory anyway.
 

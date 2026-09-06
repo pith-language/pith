@@ -6,7 +6,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use pith_diag::{Diag, Severity, SourceId};
 use pith_loader::{
-    DefinitionKind, DefinitionLocation, LoadedModule, ModuleSource, elaborate_module, format_module,
+    DefinitionKind, DefinitionLocation, LoadedModule, ManifestSource, ModuleSource, RootFiles,
+    elaborate_module, format_manifest, format_module,
 };
 use pith_output::dto::{
     AboutValueRepr, AboutView, CheckReport, DeclarationView, DiagnosticRepr, EntryView, FmtReport,
@@ -14,7 +15,7 @@ use pith_output::dto::{
 };
 
 use crate::error::QueryError;
-use crate::program::prepared_imports;
+use crate::program::{Program, check_workspace, is_manifest, prepared_imports};
 
 /// Whether `format` writes the canonical spelling back or only verifies it.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -25,16 +26,26 @@ pub enum FormatMode {
 
 /// Format the module at `path`: write the canonical spelling of its parsed
 /// surface back, or under [`FormatMode::Check`] name what a write would
-/// change without touching the file.
+/// change without touching the file. A manifest formats itself and the
+/// root module's own source files, one report per file, and edits neither
+/// dependencies nor other members.
 ///
-/// The module has to parse — there is no canonical spelling of a module that
-/// does not — but it does not have to elaborate, which is the property `fmt`
-/// shares with `check`.
+/// A module has to parse — there is no canonical spelling of a module that
+/// does not — but it does not have to elaborate, which is the property
+/// `fmt` shares with `check`.
 ///
 /// # Errors
 /// [`QueryError`] when the file cannot be read, is not named as a module,
 /// does not parse, or cannot be written.
-pub fn format(path: &Path, mode: FormatMode) -> Result<FmtReport, QueryError> {
+pub fn format(path: &Path, mode: FormatMode) -> Result<Vec<FmtReport>, QueryError> {
+    if is_manifest(path) {
+        format_workspace(path, mode)
+    } else {
+        format_standalone(path, mode).map(|report| vec![report])
+    }
+}
+
+fn format_standalone(path: &Path, mode: FormatMode) -> Result<FmtReport, QueryError> {
     let source = read_module(path)?;
     let canonical = format_module(&source).map_err(|diagnostics| {
         QueryError::user(format!(
@@ -43,7 +54,84 @@ pub fn format(path: &Path, mode: FormatMode) -> Result<FmtReport, QueryError> {
         ))
         .with_diagnostics(diagnostics)
     })?;
-    let status = match (mode, canonical.as_str() == source.text.as_ref()) {
+    let status = write_or_check(path, mode, &canonical, &source.text)?;
+    Ok(FmtReport {
+        module: source.module.clone(),
+        path: path.display().to_string().into(),
+        status,
+    })
+}
+
+fn format_workspace(root_manifest: &Path, mode: FormatMode) -> Result<Vec<FmtReport>, QueryError> {
+    // Acquisition only: the canonical spelling of the manifest and the
+    // root's own sources is a function of those files, so no dependency
+    // route is resolved and no member validated.
+    let root = RootFiles::acquire(root_manifest).map_err(|diagnostics| {
+        QueryError::user(format!(
+            "`{}` does not parse or its source tree is not acquirable, so it has no canonical \
+             spelling",
+            root_manifest.display()
+        ))
+        .with_diagnostics(diagnostics)
+    })?;
+    let identity = root.subject().spelling();
+
+    let mut reports = Vec::new();
+    let manifest_text = fs::read_to_string(root_manifest).map_err(|error| {
+        QueryError::user(format!(
+            "cannot read `{}`: {error}",
+            root_manifest.display()
+        ))
+    })?;
+    let manifest_canonical = format_manifest(&ManifestSource::new(
+        SourceId::from_raw(0),
+        root_manifest.display().to_string(),
+        manifest_text.clone(),
+    ))
+    .map_err(|diagnostics| {
+        QueryError::user(format!(
+            "`{}` does not parse, so it has no canonical spelling",
+            root_manifest.display()
+        ))
+        .with_diagnostics(diagnostics)
+    })?;
+    reports.push(FmtReport {
+        module: identity.clone(),
+        path: root_manifest.display().to_string().into(),
+        status: write_or_check(root_manifest, mode, &manifest_canonical, &manifest_text)?,
+    });
+
+    for file in root.sources().files() {
+        let path = root.directory().join(file.path());
+        let canonical = format_module(&ModuleSource::new(
+            identity.clone(),
+            SourceId::from_raw(0),
+            file.path(),
+            file.text(),
+        ))
+        .map_err(|diagnostics| {
+            QueryError::user(format!(
+                "`{}` does not parse, so it has no canonical spelling",
+                path.display()
+            ))
+            .with_diagnostics(diagnostics)
+        })?;
+        reports.push(FmtReport {
+            module: identity.clone(),
+            path: path.display().to_string().into(),
+            status: write_or_check(&path, mode, &canonical, file.text())?,
+        });
+    }
+    Ok(reports)
+}
+
+fn write_or_check(
+    path: &Path,
+    mode: FormatMode,
+    canonical: &str,
+    current: &str,
+) -> Result<FmtStatus, QueryError> {
+    Ok(match (mode, canonical == current) {
         (_, true) => FmtStatus::Unchanged,
         (FormatMode::Check, false) => FmtStatus::WouldFormat,
         (FormatMode::Write, false) => {
@@ -52,11 +140,6 @@ pub fn format(path: &Path, mode: FormatMode) -> Result<FmtReport, QueryError> {
             })?;
             FmtStatus::Formatted
         }
-    };
-    Ok(FmtReport {
-        module: source.module.clone(),
-        path: path.display().to_string().into(),
-        status,
     })
 }
 
@@ -66,6 +149,9 @@ pub fn format(path: &Path, mode: FormatMode) -> Result<FmtReport, QueryError> {
 /// # Errors
 /// [`QueryError`] when the file cannot be read or is not named as a module.
 pub fn check(path: &Path) -> Result<CheckReport, QueryError> {
+    if is_manifest(path) {
+        return check_manifest(path);
+    }
     let source = read_module(path)?;
     let (imports, parsed) = prepared_imports(path, &source)?;
     let (diagnostics, abi_digest) = match elaborate_module(parsed, &imports) {
@@ -87,6 +173,22 @@ pub fn check(path: &Path) -> Result<CheckReport, QueryError> {
     })
 }
 
+fn check_manifest(root_manifest: &Path) -> Result<CheckReport, QueryError> {
+    let checked = check_workspace(root_manifest)?;
+    let errors = count(&checked.diagnostics, Severity::Error);
+    let warnings = count(&checked.diagnostics, Severity::Warning);
+    Ok(CheckReport {
+        module: checked.root,
+        path: root_manifest.display().to_string().into(),
+        abi_digest: checked
+            .abi_digest
+            .map(|digest| digest.digest().to_string().into()),
+        diagnostics: checked.diagnostics.iter().map(diagnostic).collect(),
+        errors,
+        warnings,
+    })
+}
+
 /// What the module at `path` declares: its types, its rules, the interface
 /// each rule provides, and which tier answers it.
 ///
@@ -95,6 +197,10 @@ pub fn check(path: &Path) -> Result<CheckReport, QueryError> {
 /// does not elaborate. Unlike `check`, this one needs a module that loaded:
 /// there is nothing to explore about a module with no declarations.
 pub fn explore(path: &Path) -> Result<ModuleView, QueryError> {
+    if is_manifest(path) {
+        let program = Program::load(path)?;
+        return Ok(module_view(path, program.root()));
+    }
     let source = read_module(path)?;
     let (imports, parsed) = prepared_imports(path, &source)?;
     let loaded = elaborate_module(parsed, &imports).map_err(|diagnostics| {
@@ -230,13 +336,14 @@ fn documentation(definitions: &BTreeMap<&str, &DefinitionLocation>, name: &str) 
 }
 
 fn span_documentation(loaded: &LoadedModule, spans: &[pith_diag::Span]) -> String {
-    let source = loaded.source().source_text();
     spans
         .iter()
         .filter_map(|span| {
-            let start = usize::try_from(span.start.0).ok()?;
-            let end = usize::try_from(span.end.0).ok()?;
-            source.get(start..end)
+            let (source, local) = loaded.files().file_of(*span);
+            let text = source.source_text();
+            let start = usize::try_from(local.start.0).ok()?;
+            let end = usize::try_from(local.end.0).ok()?;
+            text.get(start..end)
         })
         .map(|line| line.strip_prefix("--").unwrap_or(line).trim())
         .collect::<Vec<_>>()

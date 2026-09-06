@@ -7,9 +7,11 @@ use crate::lock::Origin;
 
 use super::model::{Admission, Admitted, BinaryOffer};
 
-/// Which clause of the admission test turned an offer down.
+/// The clauses of the admission test, one per claim: a variant exists for
+/// each fact the test consults, and a refusal names exactly one, with both
+/// of its sides.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Refusal {
+pub enum Clause {
     Coordinates {
         bound: PackageVersion,
         offered: PackageVersion,
@@ -40,7 +42,7 @@ pub enum Refusal {
     },
 }
 
-impl std::fmt::Display for Refusal {
+impl std::fmt::Display for Clause {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Coordinates { bound, offered } => write!(
@@ -108,7 +110,94 @@ fn admitted_list(admitted: &[Origin]) -> String {
         .join(", ")
 }
 
-/// Applies the admission test to an offer and its bytes.
+/// The substitution admission's refusal: the shared refusal over this
+/// mechanism's clauses, so a refused source elsewhere refuses with the same
+/// machinery under a different vocabulary.
+pub type Refusal = pith_constraint::Refusal<Clause>;
+
+fn differ(held: bool, clause: Clause) -> Result<(), Clause> {
+    held.then_some(()).ok_or(clause)
+}
+
+/// Whether the offer names the binding's package.
+fn coordinates(admission: &Admission<'_>, offer: &BinaryOffer) -> Result<(), Clause> {
+    differ(
+        admission.entry.package == offer.package,
+        Clause::Coordinates {
+            bound: admission.entry.package.clone(),
+            offered: offer.package.clone(),
+        },
+    )
+}
+
+/// Whether the offer carries exactly the binding's features.
+fn features(admission: &Admission<'_>, offer: &BinaryOffer) -> Result<(), Clause> {
+    differ(
+        admission.entry.features == offer.features,
+        Clause::Features {
+            bound: admission.entry.features.clone(),
+            offered: offer.features.clone(),
+        },
+    )
+}
+
+/// Whether the offer was built from the source the binding pins.
+fn source(admission: &Admission<'_>, offer: &BinaryOffer) -> Result<(), Clause> {
+    differ(
+        admission.entry.source == offer.built_from,
+        Clause::Source {
+            bound: admission.entry.source,
+            offered: offer.built_from,
+        },
+    )
+}
+
+/// Whether the offer targets the platform this run realizes on.
+fn platform(admission: &Admission<'_>, offer: &BinaryOffer) -> Result<(), Clause> {
+    differ(
+        admission.platform == &offer.platform,
+        Clause::Platform {
+            running: admission.platform.clone(),
+            offered: offer.platform.clone(),
+        },
+    )
+}
+
+/// Whether the offer was built under the toolchain this run realizes under.
+fn toolchain(admission: &Admission<'_>, offer: &BinaryOffer) -> Result<(), Clause> {
+    differ(
+        admission.toolchain == &offer.toolchain,
+        Clause::Toolchain {
+            running: admission.toolchain.clone(),
+            offered: offer.toolchain.clone(),
+        },
+    )
+}
+
+/// Whether the bytes measure what the offer claims.
+fn content(offer: &BinaryOffer, measured: ContentId) -> Result<(), Clause> {
+    differ(
+        measured == offer.claimed,
+        Clause::Content {
+            claimed: offer.claimed,
+            measured,
+        },
+    )
+}
+
+/// Whether an admitted origin covers the offer's origin.
+fn authorization(admission: &Admission<'_>, offer: &BinaryOffer) -> Result<(), Clause> {
+    differ(
+        admission.origins.covering(&offer.origin).is_some(),
+        Clause::Unauthorized {
+            origin: offer.origin.clone(),
+            admitted: admission.origins.0.clone(),
+        },
+    )
+}
+
+/// Applies the admission test to an offer and its bytes: each claim in
+/// order, the first failure the refusal.
 ///
 /// # Errors
 /// Returns the first admission clause that rejects the offer.
@@ -117,54 +206,29 @@ pub fn admit(
     offer: &BinaryOffer,
     bytes: &[u8],
 ) -> Result<Admitted, Refusal> {
-    let entry = admission.entry;
-    if entry.package != offer.package {
-        return Err(Refusal::Coordinates {
-            bound: entry.package.clone(),
-            offered: offer.package.clone(),
-        });
-    }
-    if entry.features != offer.features {
-        return Err(Refusal::Features {
-            bound: entry.features.clone(),
-            offered: offer.features.clone(),
-        });
-    }
-    if entry.source != offer.built_from {
-        return Err(Refusal::Source {
-            bound: entry.source,
-            offered: offer.built_from,
-        });
-    }
-    if admission.platform != &offer.platform {
-        return Err(Refusal::Platform {
-            running: admission.platform.clone(),
-            offered: offer.platform.clone(),
-        });
-    }
-    if admission.toolchain != &offer.toolchain {
-        return Err(Refusal::Toolchain {
-            running: admission.toolchain.clone(),
-            offered: offer.toolchain.clone(),
-        });
-    }
     let measured = ContentId::of_blob(bytes);
-    if measured != offer.claimed {
-        return Err(Refusal::Content {
-            claimed: offer.claimed,
-            measured,
-        });
-    }
+    pith_constraint::admit([
+        coordinates(admission, offer),
+        features(admission, offer),
+        source(admission, offer),
+        platform(admission, offer),
+        toolchain(admission, offer),
+        content(offer, measured),
+        authorization(admission, offer),
+    ])?;
+    // The authorization claim held, so a covering origin exists here.
     let Some(authorized_by) = admission.origins.covering(&offer.origin) else {
-        return Err(Refusal::Unauthorized {
-            origin: offer.origin.clone(),
-            admitted: admission.origins.0.clone(),
+        return Err(pith_constraint::Refusal {
+            clause: Clause::Unauthorized {
+                origin: offer.origin.clone(),
+                admitted: admission.origins.0.clone(),
+            },
         });
     };
     Ok(Admitted {
-        package: entry.package.clone(),
-        features: entry.features.clone(),
-        built_from: entry.source,
+        package: admission.entry.package.clone(),
+        features: admission.entry.features.clone(),
+        built_from: admission.entry.source,
         platform: offer.platform.clone(),
         toolchain: admission.toolchain.clone(),
         measured,

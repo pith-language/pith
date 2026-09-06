@@ -1,12 +1,12 @@
 ---
 schema: design-doc/v1
-id: planning-module-system
+id: planning-modules-system
 title: the module system
 summary: three layers from a bare name to bytes, sources as routes rather than identities, registries bound to domains and never searched, and workspaces as the bootstrap locator
 kind: planning
 status: draft
 created: 2026-08-17
-updated: 2026-08-24
+updated: 2026-09-06
 tags:
   - planning
   - language
@@ -15,7 +15,7 @@ relations:
     - research-language-frontend
     - research-dependency-resolution
   depends_on:
-    - planning-language-frontend
+    - planning-frontend-language
     - decision-0039-package-identity
     - decision-0040-declared-constraints-and-resolution
     - decision-0041-the-written-lock
@@ -25,8 +25,12 @@ relations:
 
 # the module system
 
-this is round five of [the language frontend](language-frontend.md), and its subject is modules, imports
+this is round five of [the language frontend](../frontend/language.md), and its subject is modules, imports
 and dependencies.
+
+[Module distribution](distribution.md) gives the implementation sequence after workspaces. It also
+identifies two assumptions below that need decisions before implementation: a published ABI needs its
+dependency context, and adding a rule is not unconditionally a compatible change.
 
 ## what each layer answers
 
@@ -134,6 +138,11 @@ because it uses github's tarball api, so the two forms fetch and lock differentl
 total means adding `codeberg:` is not a language change and a self-hosted forge is never second-class,
 because it writes the general form.
 
+[module distribution](distribution.md) sharpens what "configured" means: a forge is a declared interface
+implemented in `.pi` with typed options, not a table of base urls, so a provider's auth style and archive
+capability are named typed fields. the implementation is pure — it computes locators, it never fetches —
+and the general git route still needs no forge at all, which is what keeps bootstrap acyclic.
+
 each source kind is an adapter that must measure content and produce provenance, and that bill belongs in
 the record per adapter rather than waved at as "support all of them". 0044 built one — the archive fetch —
 plus git tree materialization, and the network case is still "no executor admits it at all", so every fetch
@@ -218,7 +227,7 @@ monorepo writes the same one, and nothing in the resolver knows which is which.
 ## resolution, and what the compiler links
 
 the frontend is a peer domain declaring its own constraint model and its own solver body under
-[0040](../decisions/0040-declared-constraints-and-resolution.md)'s protocol. it shares the range algebra
+[0040](../../decisions/0040-declared-constraints-and-resolution.md)'s protocol. it shares the range algebra
 with phloem and shares nothing else.
 
 that split is 0040's own seam and the proposal must not cross it. 0040's holding is a section heading:
@@ -299,7 +308,7 @@ the workspace's own modules are not a generated registry under `target/`: that a
 module-resolution event.
 
 `pith.lock` is claimed twice today — `name.md` calls it the ecosystem lock file, and
-[0043](../decisions/0043-the-development-environment.md) derives it as phloem's default-environment lock,
+[0043](../../decisions/0043-the-development-environment.md) derives it as phloem's default-environment lock,
 which cannot be merged with another. the resolution favors `name.md`: modules resolve into `pith.lock`, and
 0043 is amended in one sentence so every environment lock including the default is `<name>.pith.lock`. that
 is 0043's own one-lock-per-resolution rule applied honestly, and pre-release the rename is free.
@@ -311,11 +320,20 @@ was adopted as MVS's safety mechanism and killed because "people hate it when co
 bumped" and equally hate the ecosystem sweep when they are; the replacement is prose.
 
 elm's answer is the only credible one and pith is in a better position to take it than elm was. `pith diff`
-over two module surfaces is a total function, because both are canonical values: an added declaration or
-rule is minor; a removed declaration, a moved nominal representation, a changed constructor set or a changed
-interface is major; doc, order, formatting or a revision bump is patch. the registry adapter gates
-publication on it. elm computes this from published documentation; pith's inputs are already canonically
-encoded, so the differ is exact rather than approximate.
+over two module surfaces is a total function, because both are canonical values: a removed declaration, a
+moved nominal representation, a changed constructor set or a changed interface is major; doc, order,
+formatting or a revision bump is patch. the registry adapter gates publication on it. elm computes this from
+published documentation; pith's inputs are already canonically encoded, so the differ is exact rather than
+approximate.
+
+the classification of an *addition* as minor is withdrawn, and the probes in
+`crates/pith-cli/tests/end_to_end.rs` say why with more precision than the original objection had. within
+one module two rules providing one interface are refused at elaboration, `E-3012`, so a publisher cannot
+build that break at all. across modules the closure elaborates cleanly and the consumer fails only when it
+evaluates, `E-1102`. so an added provider is potentially breaking, the break belongs to a consumer's whole
+closure rather than to the edited module, a publisher's own `check` cannot see it, and no comparison of two
+versions of one module can prove an addition safe. [module distribution](distribution.md) carries the
+conservative policy that replaces it.
 
 single version per subject is not policy here, it is a type-system requirement. two versions declaring
 `xylem.Object` are two declarations at one coordinate with two digests, and `inhabits` compares coordinate

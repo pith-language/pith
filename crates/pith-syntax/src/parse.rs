@@ -1,4 +1,5 @@
 mod expression;
+mod manifest;
 mod request;
 
 use core::range::Range;
@@ -7,15 +8,15 @@ use std::sync::Arc;
 use pith_core::{Int, Value};
 use pith_diag::{ByteOffset, Diag, SourceFile, Span};
 use pith_hir::{
-    FrontendCode, ParsedSurface, RuleCategory, SurfaceAbout, SurfaceAboutValue, SurfaceArm,
-    SurfaceBatchMember, SurfaceBinder, SurfaceBody, SurfaceClause, SurfaceComment,
+    FrontendCode, ParsedManifest, ParsedSurface, RuleCategory, SurfaceAbout, SurfaceAboutValue,
+    SurfaceArm, SurfaceBatchMember, SurfaceBinder, SurfaceBody, SurfaceClause, SurfaceComment,
     SurfaceConstructor, SurfaceDeclaration, SurfaceEntry, SurfaceExpr, SurfaceExprArena,
     SurfaceExprId, SurfaceField, SurfaceImport, SurfaceLocal, SurfaceOperator, SurfaceParam,
     SurfaceRequest, SurfaceRule, SurfaceRuleBody, SurfaceStatement, SurfaceTypeArena,
     SurfaceTypeId, SurfaceTypeNode, SurfaceValue, SurfaceValueField, SurfaceWrittenBody,
 };
 
-use crate::lex::{Token, TokenKind, error, lex};
+use crate::lex::{Document, Token, TokenKind, error, lex, lex_in};
 
 pub fn parse(source: &Arc<SourceFile>) -> (ParsedSurface, Vec<Diag>) {
     let (tokens, mut diagnostics) = lex(source);
@@ -31,6 +32,25 @@ pub fn parse(source: &Arc<SourceFile>) -> (ParsedSurface, Vec<Diag>) {
     let surface = parser.module();
     diagnostics.append(&mut parser.diagnostics);
     (surface, diagnostics)
+}
+
+/// The manifest document a `module.pi` file spells. The clause grammar is
+/// this crate's, lexed in the manifest document context, so a manifest and a
+/// source file cannot be confused for one another at the type level.
+pub fn parse_manifest(source: &Arc<SourceFile>) -> (ParsedManifest, Vec<Diag>) {
+    let (tokens, mut diagnostics) = lex_in(source, Document::Manifest);
+    let mut parser = Parser {
+        tokens: &tokens,
+        position: 0,
+        source,
+        types: SurfaceTypeArena::new(),
+        exprs: SurfaceExprArena::new(),
+        fields: Vec::new(),
+        diagnostics: Vec::new(),
+    };
+    let manifest = parser.manifest_document();
+    diagnostics.append(&mut parser.diagnostics);
+    (manifest, diagnostics)
 }
 
 struct Named {
@@ -93,16 +113,29 @@ impl Parser<'_> {
                     .map(|item| about.push(item)),
                 _ => {
                     let token = self.take();
-                    self.diagnostics.push(error(
-                        FrontendCode::UnexpectedToken,
-                        token.span,
-                        format!(
-                            "expected `import`, `nominal`, `sum`, `type`, `pure rule`, \
-                             `action rule`, `let`, `entry`, or `about`, found {}",
-                            self.describe(&token)
-                        ),
-                        self.source,
-                    ));
+                    let (code, message) = if token.kind == TokenKind::Ident
+                        && crate::lex::MANIFEST_CLAUSES.contains(&self.lexeme(&token))
+                    {
+                        (
+                            FrontendCode::WrongDocument,
+                            format!(
+                                "`{}` opens a manifest clause, and a source file holds none; \
+                                 manifests are `module.pi` files",
+                                self.lexeme(&token)
+                            ),
+                        )
+                    } else {
+                        (
+                            FrontendCode::UnexpectedToken,
+                            format!(
+                                "expected `import`, `nominal`, `sum`, `type`, `pure rule`, \
+                                 `action rule`, `let`, `entry`, or `about`, found {}",
+                                self.describe(&token)
+                            ),
+                        )
+                    };
+                    self.diagnostics
+                        .push(error(code, token.span, message, self.source));
                     Some(())
                 }
             };
@@ -735,6 +768,14 @@ impl Parser<'_> {
             )
     }
 
+    /// The span of the token just taken, for a production reporting on
+    /// everything it consumed.
+    fn previous_span(&self) -> Span {
+        self.tokens
+            .get(self.position.saturating_sub(1))
+            .map_or_else(|| Span::point(ByteOffset(0)), |token| token.span)
+    }
+
     fn previous_end(&self) -> u32 {
         self.tokens
             .get(self.position.saturating_sub(1))
@@ -817,8 +858,11 @@ fn punctuation(kind: TokenKind) -> &'static str {
         TokenKind::Plus => "+",
         TokenKind::Star => "*",
         TokenKind::Pipe => "|",
+        TokenKind::Slash => "/",
         TokenKind::Lt => "<",
         TokenKind::Gt => ">",
+        TokenKind::LtEq => "<=",
+        TokenKind::GtEq => ">=",
         TokenKind::LParen => "(",
         TokenKind::RParen => ")",
         TokenKind::LBrace => "{",

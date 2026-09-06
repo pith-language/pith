@@ -1,5 +1,9 @@
-//! A root module and the transitive file-relative modules it imports, loaded
-//! once and ready to bind onto either engine authority.
+//! A root module and its transitive dependencies, loaded once and ready to
+//! bind onto either engine authority. Two routes reach the same shape:
+//! standalone source files with their file-relative imports, and a
+//! `module.pi` manifest with its explicit path dependencies. Passing a
+//! manifest selects manifest mode unconditionally — a malformed manifest
+//! never falls back to source mode.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -12,7 +16,7 @@ use pith_engine::{
 };
 use pith_loader::{
     EntryDeclaration, ImportEnv, LoadedModule, ModuleSource, ParsedModule, RuleDeclaration,
-    elaborate_module, parse_module,
+    Workspace, elaborate_module, parse_module,
 };
 
 use crate::error::QueryError;
@@ -25,6 +29,14 @@ pub(crate) struct Program {
 
 impl Program {
     pub(crate) fn load(path: &Path) -> Result<Self, QueryError> {
+        if is_manifest(path) {
+            Self::load_workspace(path)
+        } else {
+            Self::load_standalone(path)
+        }
+    }
+
+    fn load_standalone(path: &Path) -> Result<Self, QueryError> {
         let source = read_module(path)?;
         let mut imports = builtin_environment()?;
         let mut loading = BTreeSet::from([path.to_path_buf()]);
@@ -44,6 +56,19 @@ impl Program {
             root,
             dependencies: dependencies.into(),
         })
+    }
+
+    fn load_workspace(root_manifest: &Path) -> Result<Self, QueryError> {
+        let workspace = resolve_workspace(root_manifest)?;
+        let (root, dependencies) = workspace
+            .elaborate()
+            .map_err(elaborate_failure)?
+            .into_parts();
+        Ok(Self { root, dependencies })
+    }
+
+    pub(crate) fn root(&self) -> &LoadedModule {
+        &self.root
     }
 
     pub(crate) fn module(&self) -> &str {
@@ -93,6 +118,71 @@ pub(crate) fn prepared_imports(
     let mut loading = BTreeSet::from([path.to_path_buf()]);
     let parsed = populate_imports(path, source, &mut imports, &mut loading, None)?;
     Ok((imports, parsed))
+}
+
+/// Whether `path` names a manifest, selecting manifest mode. The name is
+/// the mode's whole rule: any other file loads as standalone source.
+pub(crate) fn is_manifest(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|name| name == pith_loader::MANIFEST_NAME)
+}
+
+fn resolve_workspace(root_manifest: &Path) -> Result<Workspace, QueryError> {
+    Workspace::load(root_manifest).map_err(|diagnostics| {
+        QueryError::user(format!(
+            "`{}` does not resolve as a workspace root",
+            root_manifest.display()
+        ))
+        .with_diagnostics(diagnostics)
+    })
+}
+
+/// What `check` reports for a manifest-rooted program: the root's subject,
+/// the root's ABI when it elaborated, and every module's diagnostics. A
+/// module whose dependency failed reports no diagnostics of its own, so one
+/// refusal cannot cascade into missing-binding noise.
+pub(crate) struct WorkspaceCheck {
+    pub(crate) root: Box<str>,
+    pub(crate) abi_digest: Option<pith_ids::ModuleAbiDigest>,
+    pub(crate) diagnostics: Vec<Diag>,
+}
+
+pub(crate) fn check_workspace(root_manifest: &Path) -> Result<WorkspaceCheck, QueryError> {
+    let checked = match Workspace::load(root_manifest) {
+        Ok(workspace) => workspace.check().map_err(elaborate_failure)?,
+        Err(diagnostics) => {
+            return Ok(WorkspaceCheck {
+                root: root_manifest
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .unwrap_or_default()
+                    .into(),
+                abi_digest: None,
+                diagnostics: diagnostics.into_vec(),
+            });
+        }
+    };
+    Ok(WorkspaceCheck {
+        root: checked.root,
+        abi_digest: checked.root_abi,
+        diagnostics: checked
+            .modules
+            .into_iter()
+            .flat_map(|module| module.diagnostics.into_vec())
+            .collect(),
+    })
+}
+
+fn elaborate_failure(error: pith_loader::ElaborateError) -> QueryError {
+    match error {
+        pith_loader::ElaborateError::Diagnostics(diagnostics) => {
+            QueryError::user("a module of the workspace does not elaborate")
+                .with_diagnostics(diagnostics)
+        }
+        pith_loader::ElaborateError::Builtins(error) => {
+            QueryError::internal(format!("cannot construct builtin types: {error}"))
+        }
+    }
 }
 
 fn builtin_environment() -> Result<ImportEnv, QueryError> {
@@ -227,12 +317,13 @@ where
 }
 
 fn unbound_host(module: &LoadedModule, coordinate: String, span: pith_diag::Span) -> Diag {
+    let (source, local) = module.files().file_of(span);
     Diag::engine(
         EngineCode::NoRuleForInterface,
-        span,
+        local,
         format!("`{coordinate}` is `= host`; the CLI links no domain crate"),
     )
-    .with_source(module.source().clone())
+    .with_source(source.clone())
 }
 
 pub(crate) fn teach_entry_collision(mut diagnostic: Diag) -> Diag {

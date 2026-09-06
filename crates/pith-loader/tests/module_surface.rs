@@ -140,10 +140,13 @@ fn artifact_only_edits_do_not_move_the_abi() {
     let edited = load("test", edited, &ImportEnv::new());
     assert_ne!(base.artifact_id(), edited.artifact_id());
     assert_eq!(base.abi_digest(), edited.abi_digest());
-    assert_eq!(
-        base.artifact_id(),
-        ContentId::of_blob(base.source().source_text().as_bytes())
-    );
+    let text = base
+        .files()
+        .sources()
+        .first()
+        .map(|source| source.source_text().as_bytes().to_vec())
+        .unwrap_or_default();
+    assert_eq!(base.artifact_id(), ContentId::of_blob(&text));
 }
 
 #[test]
@@ -184,4 +187,101 @@ fn semantic_surface_edits_move_the_abi() {
         &changed_imports,
     );
     assert_ne!(base.abi_digest(), imported.abi_digest());
+}
+
+#[test]
+fn renaming_an_import_alias_leaves_every_digest_it_can_unchanged() {
+    let dependency = load(
+        "example/dep",
+        "nominal Message = Text\npure rule greet(Message) -> Text = host\n",
+        &ImportEnv::new(),
+    );
+    let mut through_binding = ImportEnv::new();
+    through_binding.insert_alias("dep", &dependency);
+    let mut through_alias = ImportEnv::new();
+    through_alias.insert_alias("greeting", &dependency);
+
+    let consumer = |binding: &str| {
+        load(
+            "example/consumer",
+            &format!(
+                "import {binding}\npure rule render({binding}.Message) -> Text = {{ ask Text (\"x\") }}\n"
+            ),
+            if binding == "dep" {
+                &through_binding
+            } else {
+                &through_alias
+            },
+        )
+    };
+    let named = consumer("dep");
+    let aliased = consumer("greeting");
+
+    assert_eq!(
+        named.abi_digest(),
+        aliased.abi_digest(),
+        "an alias edit moved the semantic ABI"
+    );
+    assert_eq!(
+        named.interface_surface().encode(),
+        aliased.interface_surface().encode(),
+        "an alias edit moved the interface surface"
+    );
+    let body = |loaded: &LoadedModule| {
+        loaded
+            .represented_pure_rule("render")
+            .map(|rule| rule.digest())
+    };
+    assert_eq!(body(&named), body(&aliased));
+    assert_eq!(
+        named
+            .pure_rule("render")
+            .map(|rule| rule.coordinate().clone()),
+        aliased
+            .pure_rule("render")
+            .map(|rule| rule.coordinate().clone())
+    );
+}
+
+#[test]
+fn two_aliases_for_one_subject_produce_one_decodable_surface() {
+    let dependency = load("example/dep", "nominal Message = Text\n", &ImportEnv::new());
+    let mut single = ImportEnv::new();
+    single.insert_alias("dep", &dependency);
+    let mut double = ImportEnv::new();
+    double.insert_alias("dep", &dependency);
+    double.insert_alias("also_dep", &dependency);
+
+    let once = load(
+        "example/consumer",
+        "import dep\nnominal W = dep.Message\n",
+        &single,
+    );
+    let twice = load(
+        "example/consumer",
+        "import dep\nimport also_dep\nnominal W = dep.Message\n",
+        &double,
+    );
+
+    let encoded = twice.interface_surface().encode();
+    let decoded = pith_loader::InterfaceSurface::decode(&encoded)
+        .unwrap_or_else(|error| unreachable!("the two-alias surface decodes: {error}"));
+    assert_eq!(
+        decoded.encode(),
+        encoded,
+        "decode re-encodes the same bytes"
+    );
+
+    // The imports half is the canonical set: one entry per imported
+    // subject, whichever aliases reached it — the same form the ABI takes.
+    let expected = [(dependency.module().into(), dependency.abi_digest())];
+    assert_eq!(twice.interface_surface().imports(), &expected);
+    assert_eq!(once.interface_surface().imports(), &expected);
+    // And the ABI agrees: a second binding for one subject, changing no
+    // declarations, leaves the digest alone.
+    assert_eq!(
+        twice.abi_digest(),
+        once.abi_digest(),
+        "a second alias for one subject moved the ABI"
+    );
 }

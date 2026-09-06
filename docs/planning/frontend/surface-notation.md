@@ -1,6 +1,6 @@
 ---
 schema: design-doc/v1
-id: planning-surface-notation
+id: planning-frontend-surface-notation
 title: the surface notation
 summary: five request constructs matching the step protocol, rules whose interface derives from the signature, metadata split by whether anything reads it, and declared entry points
 kind: planning
@@ -15,7 +15,7 @@ relations:
     - research-language-frontend
     - research-dispatch
   depends_on:
-    - planning-language-frontend
+    - planning-frontend-language
     - decision-0015-interface-rule-selection
     - decision-0018-termination-and-recursion
     - decision-0026-generic-typed-calculus
@@ -25,7 +25,7 @@ relations:
 
 # the surface notation
 
-this is the surface notation, round four of [the language frontend](language-frontend.md).
+this is the surface notation, round four of [the language frontend](language.md).
 
 ## the calling convention
 
@@ -156,7 +156,7 @@ never participates in selection, so an entry name selects *which request to buil
 answers it*. 0015 is untouched.
 
 one mechanism keeps this from being a task runner. `scope.md` says pith is not an ordered task
-runner and [milestones](milestones.md) records that the record settling that contradiction does not exist. so
+runner and [milestones](../milestones.md) records that the record settling that contradiction does not exist. so
 an entry denotes a value and the caller performs the effect, which is 0041's rule for the lock — "the
 written lock is a text projection whose write is a caller effect" — applied to execution. `Exec` is one
 nominal any domain can produce, so there is no first-party verb table and 0002 holds, because the entry

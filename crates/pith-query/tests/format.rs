@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use pith_diag::SourceId;
 use pith_loader::{ImportEnv, LoadedModule, ModuleSource, format_module, load_module};
-use pith_output::dto::FmtStatus;
+use pith_output::dto::{FmtReport, FmtStatus};
 use pith_query::{FormatMode, format};
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
@@ -140,6 +140,14 @@ fn formatting_moves_no_body_digest() -> TestResult {
     Ok(())
 }
 
+/// The one report a standalone file formats into.
+fn single(reports: Vec<FmtReport>) -> FmtReport {
+    let [only] = reports.as_slice() else {
+        unreachable!("a standalone file formats into one report");
+    };
+    only.clone()
+}
+
 /// `fmt(fmt(x))` equals `fmt(x)`, over the corpus, the notation, and one
 /// deliberately non-canonical module, through the query the `pith fmt`
 /// command takes. The tree keeps its corpus canonical, so a corpus module's
@@ -165,9 +173,9 @@ fn formatting_is_idempotent() -> TestResult {
     for (name, text) in modules {
         let path = directory.path().join(&name);
         std::fs::write(&path, text.as_bytes())?;
-        let once = format(&path, FormatMode::Write)?;
-        let twice = format(&path, FormatMode::Write)?;
-        let checked = format(&path, FormatMode::Check)?;
+        let once = single(format(&path, FormatMode::Write)?);
+        let twice = single(format(&path, FormatMode::Write)?);
+        let checked = single(format(&path, FormatMode::Check)?);
         wrote |= once.status == FmtStatus::Formatted;
         assert_eq!(
             twice.status,
@@ -192,7 +200,7 @@ fn check_names_a_change_without_making_it() -> TestResult {
     let path = directory.path().join("checked.pi");
     std::fs::write(&path, b"nominal   X   =   Text\n")?;
 
-    let checked = format(&path, FormatMode::Check)?;
+    let checked = single(format(&path, FormatMode::Check)?);
     assert_eq!(checked.status, FmtStatus::WouldFormat);
     assert_eq!(
         std::fs::read_to_string(&path).unwrap_or_default(),
@@ -216,12 +224,45 @@ fn formatting_preserves_file_permissions() -> TestResult {
     std::fs::write(&path, b"nominal   X = Text\n")?;
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640))?;
 
-    let report = format(&path, FormatMode::Write)?;
+    let report = single(format(&path, FormatMode::Write)?);
 
     assert_eq!(report.status, FmtStatus::Formatted);
     assert_eq!(
         std::fs::metadata(&path)?.permissions().mode() & 0o777,
         0o640
+    );
+    Ok(())
+}
+
+/// A manifest formats without resolving a single dependency: the canonical
+/// spelling of the manifest and the root's own sources is a function of
+/// those files, and a missing dependency directory cannot refuse it.
+#[test]
+fn formatting_a_manifest_resolves_no_dependencies() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let directory = root.path();
+    std::fs::create_dir_all(directory.join("src"))?;
+    std::fs::write(
+        directory.join("module.pi"),
+        "module example/root 0.1.0\n\nuse ghost = example/ghost from path \"ghost\"\n",
+    )?;
+    std::fs::write(
+        directory.join("src/main.pi"),
+        "import ghost\nnominal   T   =   Text\n",
+    )?;
+
+    let reports = format(&directory.join("module.pi"), FormatMode::Write)?;
+
+    assert_eq!(reports.len(), 2, "the manifest and the one source file");
+    let [manifest, source] = reports.as_slice() else {
+        unreachable!("two reports");
+    };
+    assert_eq!(manifest.status, FmtStatus::Unchanged);
+    assert_eq!(source.status, FmtStatus::Formatted);
+    assert_eq!(
+        std::fs::read_to_string(directory.join("src/main.pi"))?,
+        "import ghost\n\nnominal T = Text\n",
+        "the source file was not written canonically"
     );
     Ok(())
 }

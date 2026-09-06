@@ -6,6 +6,7 @@
 
 use std::cmp::Ordering;
 
+use pith_constraint::{Compare, Edge, Range as SharedRange};
 use pith_core::{DeclarationTable, SumConstructor, Type, Value};
 use pith_diag::PithResult;
 
@@ -94,6 +95,18 @@ fn bound_type() -> Type {
     record_type([(FIELD_VERSION, Type::Text), (INCLUSIVE, Type::Bool)])
 }
 
+/// A scheme orders spellings, so it orders borrowed spellings for the
+/// shared range algebra. The algebra never sees a scheme of its own.
+/// A scheme as the shared algebra's comparator: the algebra sees an
+/// ordering of borrowed spellings and never a scheme of its own.
+struct SchemeOrder<'a>(&'a dyn VersionScheme);
+
+impl<'a, 'spelling> Compare<&'spelling str> for SchemeOrder<'a> {
+    fn compare(&self, left: &&'spelling str, right: &&'spelling str) -> Ordering {
+        VersionScheme::compare(self.0, left, right)
+    }
+}
+
 /// A version range evaluated against a declared ordering.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Range {
@@ -102,6 +115,52 @@ pub enum Range {
     AtLeast(Bound),
     AtMost(Bound),
     Between { lower: Bound, upper: Bound },
+}
+
+/// A bound as a shared edge over its borrowed spelling.
+fn shared_edge(bound: &Bound) -> Edge<&str> {
+    Edge {
+        version: bound.version.as_ref(),
+        inclusive: bound.inclusive,
+    }
+}
+
+/// A shared edge over a borrowed spelling as an owning bound.
+fn owned_bound(edge: Edge<&str>) -> Bound {
+    Bound {
+        version: edge.version.into(),
+        inclusive: edge.inclusive,
+    }
+}
+
+impl Range {
+    /// The same range in the shared algebra, over borrowed spellings.
+    fn shared(&self) -> SharedRange<&str> {
+        match self {
+            Self::Any => SharedRange::Any,
+            Self::Exactly(version) => SharedRange::Exactly(version.as_ref()),
+            Self::AtLeast(bound) => SharedRange::AtLeast(shared_edge(bound)),
+            Self::AtMost(bound) => SharedRange::AtMost(shared_edge(bound)),
+            Self::Between { lower, upper } => SharedRange::Between {
+                lower: shared_edge(lower),
+                upper: shared_edge(upper),
+            },
+        }
+    }
+
+    /// The owning form of a shared range over borrowed spellings.
+    fn from_shared(shared: SharedRange<&str>) -> Self {
+        match shared {
+            SharedRange::Any => Self::Any,
+            SharedRange::Exactly(version) => Self::Exactly(version.into()),
+            SharedRange::AtLeast(bound) => Self::AtLeast(owned_bound(bound)),
+            SharedRange::AtMost(bound) => Self::AtMost(owned_bound(bound)),
+            SharedRange::Between { lower, upper } => Self::Between {
+                lower: owned_bound(lower),
+                upper: owned_bound(upper),
+            },
+        }
+    }
 }
 
 /// The declared range sum type: `Any`, `Exactly(Text)`,
@@ -226,29 +285,15 @@ impl Range {
     /// compares.
     #[must_use]
     pub fn satisfies(&self, scheme: &dyn VersionScheme, version: &str) -> bool {
-        match self {
-            Self::Any => true,
-            Self::Exactly(exact) => scheme.compare(version, exact) == Ordering::Equal,
-            Self::AtLeast(bound) => above(scheme, version, bound),
-            Self::AtMost(bound) => below(scheme, version, bound),
-            Self::Between { lower, upper } => {
-                above(scheme, version, lower) && below(scheme, version, upper)
-            }
-        }
+        self.shared().contains(&SchemeOrder(scheme), &version)
     }
 
     /// Returns the nonempty intersection of two ranges.
     #[must_use]
     pub fn intersect(&self, scheme: &dyn VersionScheme, other: &Self) -> Option<Self> {
-        let (lower, upper) = (
-            tighter_lower(scheme, self.interval().0, other.interval().0),
-            tighter_upper(scheme, self.interval().1, other.interval().1),
-        );
-        let (lower, upper) = (lower?, upper?);
-        if interval_is_empty(scheme, &lower, &upper) {
-            return None;
-        }
-        Some(interval_to_range(lower, upper))
+        self.shared()
+            .intersect(&SchemeOrder(scheme), &other.shared())
+            .map(Self::from_shared)
     }
 
     /// The complement, as the union of at most two ranges: the complement of
@@ -257,42 +302,12 @@ impl Range {
     /// the range is `Any`.
     #[must_use]
     pub fn negate(&self) -> Box<[Self]> {
-        let (lower, upper) = self.interval();
-        let mut parts = Vec::with_capacity(2);
-        if let Some(lower) = lower {
-            parts.push(Self::AtMost(Bound {
-                version: lower.version,
-                inclusive: !lower.inclusive,
-            }));
-        }
-        if let Some(upper) = upper {
-            parts.push(Self::AtLeast(Bound {
-                version: upper.version,
-                inclusive: !upper.inclusive,
-            }));
-        }
-        parts.into()
-    }
-
-    /// The range as interval edges. `Exactly(v)` is the closed interval at
-    /// `v`; the constructor is kept because it is the spelling a pin wants.
-    fn interval(&self) -> (Option<Bound>, Option<Bound>) {
-        match self {
-            Self::Any => (None, None),
-            Self::Exactly(version) => (
-                Some(Bound {
-                    version: version.clone(),
-                    inclusive: true,
-                }),
-                Some(Bound {
-                    version: version.clone(),
-                    inclusive: true,
-                }),
-            ),
-            Self::AtLeast(bound) => (Some(bound.clone()), None),
-            Self::AtMost(bound) => (None, Some(bound.clone())),
-            Self::Between { lower, upper } => (Some(lower.clone()), Some(upper.clone())),
-        }
+        self.shared()
+            .negate()
+            .into_vec()
+            .into_iter()
+            .map(Self::from_shared)
+            .collect()
     }
 }
 
@@ -303,81 +318,6 @@ fn bound_of(payload: Option<&Value>, constructor: &str) -> PithResult<Bound> {
         )));
     };
     Bound::from_value(payload)
-}
-
-/// Whether `version` sits at or above `bound` under the scheme.
-fn above(scheme: &dyn VersionScheme, version: &str, bound: &Bound) -> bool {
-    match scheme.compare(version, &bound.version) {
-        Ordering::Greater => true,
-        Ordering::Equal => bound.inclusive,
-        Ordering::Less => false,
-    }
-}
-
-/// Whether `version` sits at or below `bound` under the scheme.
-fn below(scheme: &dyn VersionScheme, version: &str, bound: &Bound) -> bool {
-    match scheme.compare(version, &bound.version) {
-        Ordering::Less => true,
-        Ordering::Equal => bound.inclusive,
-        Ordering::Greater => false,
-    }
-}
-
-/// The tighter of two lower edges: the greater version, and the exclusive
-/// edge when the versions tie.
-fn tighter_lower(
-    scheme: &dyn VersionScheme,
-    left: Option<Bound>,
-    right: Option<Bound>,
-) -> Option<Bound> {
-    combine_edges(scheme, left, right, Ordering::Greater)
-}
-
-/// The tighter of two upper edges: the lesser version, and the exclusive
-/// edge when the versions tie.
-fn tighter_upper(
-    scheme: &dyn VersionScheme,
-    left: Option<Bound>,
-    right: Option<Bound>,
-) -> Option<Bound> {
-    combine_edges(scheme, left, right, Ordering::Less)
-}
-
-fn combine_edges(
-    scheme: &dyn VersionScheme,
-    left: Option<Bound>,
-    right: Option<Bound>,
-    tighter: Ordering,
-) -> Option<Bound> {
-    match (left, right) {
-        (None, other) | (other, None) => other,
-        (Some(left), Some(right)) => Some(match scheme.compare(&left.version, &right.version) {
-            ordering if ordering == tighter => left,
-            Ordering::Equal => {
-                if left.inclusive {
-                    right
-                } else {
-                    left
-                }
-            }
-            _ => right,
-        }),
-    }
-}
-
-/// Whether an interval with these edges holds no version: the lower edge
-/// passes the upper edge, or the two name one version that at least one edge
-/// excludes.
-fn interval_is_empty(scheme: &dyn VersionScheme, lower: &Bound, upper: &Bound) -> bool {
-    match scheme.compare(&lower.version, &upper.version) {
-        Ordering::Greater => true,
-        Ordering::Equal => !lower.inclusive || !upper.inclusive,
-        Ordering::Less => false,
-    }
-}
-
-fn interval_to_range(lower: Bound, upper: Bound) -> Range {
-    Range::Between { lower, upper }
 }
 
 /// One hard constraint: a range and a feature set over one package's

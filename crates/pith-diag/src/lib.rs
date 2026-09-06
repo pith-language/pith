@@ -31,6 +31,25 @@ impl Span {
             end: ByteOffset(0),
         }
     }
+
+    /// The smallest span covering both, for a construct whose diagnostic
+    /// should select the whole of what was written rather than one token of
+    /// it.
+    #[must_use]
+    pub const fn join(self, other: Self) -> Self {
+        Self {
+            start: if self.start.0 <= other.start.0 {
+                self.start
+            } else {
+                other.start
+            },
+            end: if self.end.0 >= other.end.0 {
+                self.end
+            } else {
+                other.end
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

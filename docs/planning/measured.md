@@ -29,6 +29,9 @@ the paragraph makes in place and the M-3 sentence kept "as the state M-2 measure
 the tree". a milestone's forward-looking half — what it still owes — stays in
 [milestones](milestones.md), because that is a claim about work rather than about evidence.
 
+M-14 is the first milestone to close a slice before closing itself, so its section below records one
+slice's evidence and says so. the milestone's own status stays in [milestones](milestones.md).
+
 ## M-1: semantic prototype
 
 define typed values, requests, rules, dependency recording, structured diagnostics, and an in-memory query interface.
@@ -285,3 +288,108 @@ The JSON contract moves from query API 3 to 4 and snapshots all twelve exhaustiv
 Root, run, and graph help snapshots pin the new clap surface, including the visible M-14 `diff`, `update`,
 and `add` workspace refusals. The formatter property runs across every written corpus body: body digests and
 module ABIs are byte-identical before and after formatting, and `fmt(fmt(x)) == fmt(x)`.
+
+## M-14: the module system — the local-workspace slice
+
+status: the milestone is open. this slice is complete; [module distribution](modules/distribution.md)
+holds the rest.
+
+evidence: [0067](../decisions/0067-local-module-workspaces.md) records the slice. The checked-in fixture
+`examples/local-workspace` runs end to end through the CLI in
+`the_local_workspace_fixture_checks_explores_and_hydrates`: check and explore succeed, `fmt --check`
+reports the manifest and the root's own source file, the first `run` computes and a fresh process over the
+same store hydrates, and the dependency and explanation commands address `example/hello::entry.hello`.
+`the_read_only_manifest_commands_create_no_state_database` pins the read-only half over all four
+commands the record names — `graph select`, `check`, `explore`, and `fmt --check` — each under its own
+store root, and asserts `fmt --check` left the fixture's bytes alone.
+
+The digest-basis amendment holds. `renaming_an_import_alias_leaves_every_digest_it_can_unchanged` shows
+two consumers binding one subject under different aliases elaborating to equal ABIs, equal
+interface-surface bytes, equal body digests, and equal coordinates. The M-10 parity fixtures survive the
+amendment unchanged: `live_and_surface_declaration_tables_agree` and `xylem_rule_revisions_agree` still
+pass, which is what makes the repricing observable rather than assumed. Alias environments are
+module-local in both directions: `one_alias_means_different_subjects_in_different_modules` has a root and
+its dependency both binding `helper`, to different subjects, each naming a declaration only its own
+binding provides, and `an_undeclared_transitive_import_is_refused` refuses a subject reachable only
+through a dependency.
+
+The graph-tier claim is the one this slice had to strengthen, and it is the reason the slice took a
+sixth step. Comparing two direct elaborations shows equal semantic outputs, which a frontend that
+recomputed everything would also satisfy; it is not a reusable lookup. `Workspace::project_onto_frontend`
+gives a resolved workspace its route into `interface-of` and `bodies-of`, and
+`workspace_graph::a_dependency_body_edit_leaves_the_consumer_bodies_reusable` measures the cutoff through
+it: a body edit in the dependency moves that module's source inputs and recomputes its `bodies-of`, while
+the dependency's ABI and published surface stay put, the consumer's frontend inputs are equal, and the
+consumer's `bodies-of` is served `Reused`.
+`a_public_representation_edit_moves_the_consumer_inputs` is the control that keeps this from being
+vacuous, and `relocation_leaves_the_projected_inputs_identical` shows two checkouts of the same bytes
+projecting to the same inputs and the second reusing the first's computation. The runtime half stays a
+separate witness, as the plan requires: `an_edited_dependency_body_revalidates_the_entry` drives compute,
+edit, recompute rather than serve stale, then hydrate, through the CLI.
+
+The loader's graph properties — the diamond loaded once, member isolation, relocation and enumeration
+permutation — are in the workspace suite, and every row of 0067's refusal table has a test asserting its
+code. Multi-file attribution is witnessed in `a_declaration_in_one_file_is_visible_to_the_rules_in_another`
+and `an_error_in_the_second_file_names_that_file_and_local_offsets`.
+
+limitations, stated so the section is not read past its scope. The frontend graph tier now has a
+production projection and a witness, but `pith-query` still elaborates a manifest program directly; no
+person-facing command reuses a frontend computation yet, and routing them through the projection is not
+part of this slice. Nothing here involves a registry, a version range, a solver, a lock, or acquired
+content. `just ci` passes at 1083 tests across 112 suites, including the documentation, determinism,
+elaborator-digest, licence, and lint checks. The elaborator digest was re-recorded at
+`ELABORATOR_SEMANTIC_VERSION` 1: that guard hashes frontend source text rather than meaning, and the
+parity fixtures above are the evidence that no digest domain moved under it.
+
+## M-14: the module system — the acquisition-boundary slice
+
+status: the milestone is open. this slice is complete on its own exit criteria;
+[module distribution](modules/distribution.md) holds the rest, and slice 1's records —
+[0069](../decisions/0069-module-authority-is-consumer-configuration.md) and
+[0070](../decisions/0070-module-acquisition-resolution-and-replay.md) — remain proposed until the
+registry round trip runs their claims.
+
+evidence: acquisition became a boundary rather than a directory walk. `ModuleStore` names what
+resolution needs from the world — locate, manifest, sources, over the store's own location type — and
+`acquisition::the_same_module_bytes_through_two_stores_produce_equal_semantic_artifacts` loads one
+module set through the local filesystem and through a registry-shaped fixture store, asserting equal
+source content identities, equal elaborated ABIs, and equal published surfaces per subject, with only
+the rendered origin differing. The same file witnesses the diagnostic half: a manifest that does not
+parse, served from the fixture, reports under the store's own file identity, and
+`a_registry_routed_range_reaches_the_admission_decision` drives 0070's `E-3063` from both sides of a
+written range. Resolving a `Route::Use` carries the subject, because a registry serves by subject and
+the route alone names nothing there; that is the seam the fixture store exists to hold open for the
+registry client.
+
+Admission is one mechanism with distinct claims. `pith-constraint` holds the range interval algebra
+over an abstract ordering and the `Refusal<Clause>` envelope with a first-refusal conjunction; phloem's
+`Range` and its substitution `admit` delegate behind adapters that preserve the declared names and
+digests — `declaration_table` and the whole phloem suite pass unchanged — and the module source
+admission refuses with `Subject` and `Version` clauses through the same envelope.
+`admission::a_refused_source_and_a_refused_substitution_share_the_refusal_type` renders both refusals
+through one function over the shared type, and the clauses differ because each checker's vocabulary is
+its own: no check can set another's clause because no other clause type fits.
+
+The module resolver registers the way a peer does. `module_resolver` binds `modules.resolve` through
+`RegisterModuleResolver` — the engine's public `register_rule` — and evaluates through it: the diamond
+agrees on one version, a case that needs backtracking revises an earlier choice, incompatible ranges
+report the subject and the constraints in force, a spent budget is its own outcome and never evidence
+of unsatisfiability, two realizations of one version are refused as underdetermined rather than ranked,
+input permutations produce one answer and one universe identity, and both ends of the preference read.
+The revision derives from the resolver's interface manifest, so no authored constant keys the engine;
+the search itself is pure, its inputs values. `frontend_closure` derives the first-party domains from
+the crates directory and holds every kernel crate's linked dependencies to none of them, which is the
+driver-side half of the claim: `pith-query` and `pith-cli` link no domain crate, by manifest rather
+than by assertion.
+
+limitations, stated so the section is not read past its scope. The universe a solve runs over is
+acquired by the caller — here, test fixtures — so "the solver performs no I/O" is structural purity,
+witnessed by its signature, until slice 3's registry client makes the removal-of-network test runnable.
+The module lock document, its text projection, and the admission clauses over content identity,
+witness evidence, and policy belong to that slice; the fixture store is not a registry, and the
+published-surface cache entry a registry will serve is not built. No person-facing command consumes
+the resolver or the projection yet. `cargo test --locked --workspace` passes at 1115 tests, and the
+documentation, determinism, elaborator-digest, licence, and lint checks pass; the elaborator digest was
+re-recorded at `ELABORATOR_SEMANTIC_VERSION` 1 for the source-text move of the loader refactor, with
+the parity fixtures — phloem's declaration table and the xylem revision agreement — passing unchanged
+as the evidence that no digest domain moved under it.

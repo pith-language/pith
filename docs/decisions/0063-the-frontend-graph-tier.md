@@ -68,6 +68,10 @@ semantic contract the caller expects. The content identity lets the frame fetch 
 fetch, the frame verifies the encoded module, derives and compares its ABI, and verifies its blob
 identity before admitting it to scope. A repeated binding is refused during construction.
 
+> amended by [0067](0067-local-module-workspaces.md): the `module` half of each entry is the declared
+> subject of the imported module, and the surface encoding and validation compare subjects. The binding
+> half remains and continues to feed only scoping and elaboration.
+
 The surface encoding contains the module, its sorted imported ABI pairs, its canonical declaration
 table, and its sorted provided `(effect category, interface)` pairs. It contains no source positions,
 documentation, rule labels, or bodies. Its storage identity therefore has the same invalidation

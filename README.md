@@ -80,9 +80,16 @@ measured on.
 
 ## What runs today
 
-A working prototype, not a tool for general use. There is no source language,
-and the command line covers an evaluation stub and content materialization.
-What exists is one vertical slice, deep enough that the parts push back:
+A working prototype, not a tool for general use. There is a source language and
+a command line, and the language has two loading modes that share one grammar:
+a standalone `.pi` file whose identity is its file stem, and a `module.pi`
+manifest declaring a `domain/name` subject with explicit path dependencies —
+the first slice of the module system. The modes are a temporary distinction:
+loading a bare source file still resolves imports against neighboring files,
+while manifest mode resolves `use` clauses and a workspace's members, and the
+remaining migration work — registries, locks, version resolution, and retiring
+the file-relative resolver — is what [M-14](docs/planning/milestones.md) still
+owes. What exists is one vertical slice, deep enough that the parts push back:
 
 - typed rule selection, incremental evaluation, and equality-based pruning when a
   recomputed dependency lands on the value it already had
@@ -94,6 +101,9 @@ What exists is one vertical slice, deep enough that the parts push back:
   resolution, locks, and admitted binary substitution; development environments
   over a lock; and an immutable Linux tree composed from files, users, units,
   and boot configuration
+- multi-module programs: `examples/local-workspace` declares two local modules,
+  imports a dependency through a manifest binding, and runs a pure entry that
+  computes once and hydrates in the next process
 
 Observation identity and freshness now run in the kernel. An observation rule
 derives a typed subject, an observer returns a value and revision, and a pure

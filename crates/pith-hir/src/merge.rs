@@ -33,28 +33,35 @@ impl ModuleFiles {
         }
     }
 
-    pub fn source_of(&self, span: Span) -> &Arc<SourceFile> {
-        let Some(source) = self.files.get(self.position_of(span)) else {
-            unreachable!("a module always holds at least one file");
-        };
-        source
+    pub fn sources(&self) -> &[Arc<SourceFile>] {
+        &self.files
     }
 
-    pub fn error(&self, code: FrontendCode, span: Span, message: impl Into<String>) -> Diag {
+    /// The file a merged span landed in, with the span rebased to that
+    /// file's own offsets — the attribution every position sidecar and
+    /// diagnostic needs when one module holds several files.
+    pub fn file_of(&self, span: Span) -> (&Arc<SourceFile>, Span) {
         let position = self.position_of(span);
         let Some(source) = self.files.get(position) else {
             unreachable!("a module always holds at least one file");
         };
         let base = self.bases.get(position).copied().unwrap_or(0);
-        error(
-            code,
+        (
+            source,
             Span::new(
                 ByteOffset(span.start.0.saturating_sub(base)),
                 ByteOffset(span.end.0.saturating_sub(base)),
             ),
-            message,
-            source,
         )
+    }
+
+    pub fn source_of(&self, span: Span) -> &Arc<SourceFile> {
+        self.file_of(span).0
+    }
+
+    pub fn error(&self, code: FrontendCode, span: Span, message: impl Into<String>) -> Diag {
+        let (source, local) = self.file_of(span);
+        error(code, local, message, source)
     }
 
     fn position_of(&self, span: Span) -> usize {

@@ -1,9 +1,11 @@
 //! The load pipeline: parse, scope imports, elaborate, and derive the ABI.
 
 use pith_core::{Action, Pure};
-use pith_diag::{Diag, Severity};
-use pith_elaborator::{RuleSignature, Visibility, abi_digest, elaborate, scope_imports};
-use pith_hir::{ModuleFiles, PositionSidecar, RuleCategory};
+use pith_diag::{Diag, Severity, Span};
+use pith_elaborator::{
+    ImportedAbis, RuleSignature, Visibility, abi_digest, elaborate, scope_imports,
+};
+use pith_hir::{FrontendCode, PositionSidecar, RuleCategory};
 
 use crate::bind::{
     DeclarationMetadata, EntryDeclaration, HostRuleDeclaration, RepresentedRuleDeclaration,
@@ -23,12 +25,11 @@ pub fn elaborate_module(
     let ParsedModule {
         module,
         artifact_id,
-        source,
+        files,
         surface,
         mut diagnostics,
         positions,
     } = parsed;
-    let files = ModuleFiles::one(&source);
     let scoped = scope_imports(&surface, &imports.inner, &files, &mut diagnostics);
     let definitions = declaration_definitions(&positions);
     let elaborated = elaborate(
@@ -39,10 +40,22 @@ pub fn elaborate_module(
         &files,
         &mut diagnostics,
     );
-    let ordered_imports = scoped
-        .iter()
-        .map(|(name, imported)| (Box::from(name), imported.abi_digest()))
-        .collect::<Vec<_>>();
+    let ordered_imports = match ImportedAbis::new(
+        scoped
+            .iter()
+            .map(|(_, imported)| (imported.subject().into(), imported.abi_digest())),
+    ) {
+        Ok(imports) => imports,
+        Err(conflict) => {
+            diagnostics.push(Diag::new(
+                Severity::Error,
+                FrontendCode::MalformedSurface.stable(),
+                Span::none(),
+                conflict.to_string(),
+            ));
+            ImportedAbis::empty()
+        }
+    };
     let abi_signatures = elaborated
         .rules
         .iter()
@@ -117,10 +130,10 @@ pub fn elaborate_module(
     Ok(LoadedModule {
         module,
         artifact_id,
-        source,
+        files,
         diagnostics: diagnostics.into(),
         table: elaborated.table,
-        imports: ordered_imports.into(),
+        imports: ordered_imports,
         pure_rules: pure_rules.into(),
         action_rules: action_rules.into(),
         abi_digest,

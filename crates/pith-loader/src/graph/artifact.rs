@@ -1,7 +1,7 @@
 use pith_core::codec::{CanonicalDecodeError, CanonicalReader};
 use pith_core::manifest::{encode_bytes, encode_length, encode_str};
 use pith_core::{DeclarationTable, Interface};
-use pith_elaborator::{GRAMMAR_VERSION, RuleSignature, abi_digest};
+use pith_elaborator::{GRAMMAR_VERSION, ImportedAbis, RuleSignature, abi_digest};
 use pith_hir::RuleCategory;
 use pith_ids::{ContentId, ModuleAbiDigest};
 
@@ -12,7 +12,7 @@ const INTERFACE_SURFACE_VERSION: u8 = 1;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InterfaceSurface {
     pub(crate) module: Box<str>,
-    imports: Box<[(Box<str>, ModuleAbiDigest)]>,
+    imports: ImportedAbis,
     pub(crate) table: DeclarationTable,
     provided: Box<[(RuleCategory, Interface)]>,
 }
@@ -20,12 +20,10 @@ pub struct InterfaceSurface {
 impl InterfaceSurface {
     pub(crate) fn of_parts(
         module: &str,
-        imports: Box<[(Box<str>, ModuleAbiDigest)]>,
+        imports: ImportedAbis,
         table: DeclarationTable,
         provided: impl IntoIterator<Item = (RuleCategory, Interface)>,
     ) -> Self {
-        let mut imports = imports.into_vec();
-        imports.sort_by(|left, right| left.0.cmp(&right.0));
         let mut provided = provided
             .into_iter()
             .map(|(category, interface)| {
@@ -40,7 +38,7 @@ impl InterfaceSurface {
             .collect::<Vec<_>>();
         Self {
             module: module.into(),
-            imports: imports.into(),
+            imports,
             table,
             provided: provided.into(),
         }
@@ -50,7 +48,7 @@ impl InterfaceSurface {
     pub fn of_module(loaded: &LoadedModule) -> Self {
         Self::of_parts(
             loaded.module(),
-            loaded.imports().to_vec().into(),
+            loaded.imports.clone(),
             loaded.table().clone(),
             loaded
                 .pure_rules()
@@ -63,6 +61,13 @@ impl InterfaceSurface {
                         .map(|rule| (RuleCategory::Action, rule.interface().clone())),
                 ),
         )
+    }
+
+    /// The imported subject/ABI pairs this surface elaborated against, in
+    /// canonical form: sorted, one entry per subject.
+    #[must_use]
+    pub fn imports(&self) -> &[(Box<str>, ModuleAbiDigest)] {
+        self.imports.as_slice()
     }
 
     #[must_use]
@@ -92,8 +97,8 @@ impl InterfaceSurface {
         ];
         encode_str(&mut artifact, &self.module);
         encode_bytes(&mut artifact, &self.table.encode_canonical());
-        encode_length(&mut artifact, self.imports.len());
-        for (name, digest) in &self.imports {
+        encode_length(&mut artifact, self.imports.as_slice().len());
+        for (name, digest) in self.imports.as_slice() {
             encode_str(&mut artifact, name);
             artifact.extend_from_slice(digest.digest().as_bytes());
         }
@@ -142,6 +147,9 @@ impl InterfaceSurface {
                 });
             }
         }
+        let imports = ImportedAbis::new(imports).unwrap_or_else(|_| {
+            unreachable!("decode rejected duplicate subjects before construction")
+        });
         let provided = reader
             .read_sequence(|reader| {
                 let category = match reader.read_byte()? {
@@ -163,7 +171,7 @@ impl InterfaceSurface {
         reader.finish()?;
         Ok(Self {
             module,
-            imports: imports.into(),
+            imports,
             table,
             provided: provided.into(),
         })

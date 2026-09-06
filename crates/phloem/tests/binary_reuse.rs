@@ -22,7 +22,7 @@ use phloem::resolution::{Resolution, resolve_request};
 use phloem::resolve::{ResolveSolver, Schemes};
 use phloem::source::SourceBinding;
 use phloem::substitution::{
-    Admission, AdmittedOrigins, BinaryOffer, Refusal, Serving, serve, serving_request,
+    Admission, AdmittedOrigins, BinaryOffer, Clause, Refusal, Serving, serve, serving_request,
 };
 use phloem::universe::{Candidate, CandidateUniverse};
 use pith_core::{Pure, PureComputationKey, Request, Rule, RuleIdentity, RuleRevision, Value};
@@ -293,9 +293,11 @@ fn a_refused_offer_builds_in_the_binarys_place_with_the_clause_named() {
     };
     assert_eq!(
         refused,
-        &Some(Refusal::Content {
-            claimed: ContentId::of_blob(BINARY),
-            measured: ContentId::of_blob(tampered),
+        &Some(Refusal {
+            clause: Clause::Content {
+                claimed: ContentId::of_blob(BINARY),
+                measured: ContentId::of_blob(tampered),
+            }
         }),
         "the refusal names the clause and both digests"
     );
@@ -406,7 +408,9 @@ fn a_refused_offer_is_refused_again_because_nothing_remembers_it() {
     assert!(matches!(
         first,
         Serving::Built {
-            refused: Some(Refusal::Unauthorized { .. })
+            refused: Some(Refusal {
+                clause: Clause::Unauthorized { .. }
+            })
         }
     ));
 

@@ -198,9 +198,16 @@ fn positions_retain_docs_and_alias_references() {
     let Some(alias_offset) = text.find("Alias)") else {
         return;
     };
-    let Some(alias_definition) =
-        loaded.go_to_definition(ByteOffset(u32::try_from(alias_offset).unwrap_or(u32::MAX)))
-    else {
+    let source = loaded
+        .files()
+        .sources()
+        .first()
+        .cloned()
+        .unwrap_or_else(|| unreachable!("a standalone module holds one file"));
+    let Some(alias_definition) = loaded.go_to_definition(
+        &source,
+        ByteOffset(u32::try_from(alias_offset).unwrap_or(u32::MAX)),
+    ) else {
         return;
     };
     assert_eq!(alias_definition.coordinate().spelling(), "test.Alias");
@@ -251,9 +258,16 @@ fn imported_references_reach_the_imported_source() {
     let Some(offset) = text.find("dep.A") else {
         return;
     };
-    let Some(definition) =
-        consumer.go_to_definition(ByteOffset(u32::try_from(offset).unwrap_or(u32::MAX)))
-    else {
+    let consumer_source = consumer
+        .files()
+        .sources()
+        .first()
+        .cloned()
+        .unwrap_or_else(|| unreachable!("a standalone module holds one file"));
+    let Some(definition) = consumer.go_to_definition(
+        &consumer_source,
+        ByteOffset(u32::try_from(offset).unwrap_or(u32::MAX)),
+    ) else {
         return;
     };
     assert_eq!(definition.source().label.as_ref(), "dep.pi");
@@ -270,8 +284,12 @@ fn parsed_modules_retain_source_and_partial_positions_on_error() {
         "-- docs\nnominal A = Missing\n",
     ));
     assert_eq!(
-        parsed.source().source_text(),
-        "-- docs\nnominal A = Missing\n"
+        parsed
+            .files()
+            .sources()
+            .first()
+            .map(|source| source.source_text()),
+        Some("-- docs\nnominal A = Missing\n")
     );
     assert_eq!(parsed.positions().definitions().len(), 1);
     assert_ne!(parsed.artifact_id(), pith_ids::ContentId::of_blob(b""));

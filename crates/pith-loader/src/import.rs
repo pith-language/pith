@@ -59,9 +59,15 @@ impl ImportEnv {
     /// Returns a declaration error if the builtin nominal table is invalid.
     pub fn with_builtins() -> Result<Self, DeclarationError> {
         let (table, _) = builtin_table()?;
-        let abi = pith_elaborator::abi_digest(BUILTIN_MODULE, &table, &[], &[]);
+        let abi = pith_elaborator::abi_digest(
+            BUILTIN_MODULE,
+            &table,
+            &pith_elaborator::ImportedAbis::empty(),
+            &[],
+        );
         let mut environment = Self::new();
         environment.inner.insert(
+            BUILTIN_MODULE,
             BUILTIN_MODULE,
             abi,
             table,
@@ -73,6 +79,20 @@ impl ImportEnv {
     pub fn insert_loaded(&mut self, loaded: &LoadedModule) {
         self.inner.insert(
             loaded.module.clone(),
+            loaded.module.clone(),
+            loaded.abi_digest,
+            loaded.table.clone(),
+            loaded.positions.definitions(),
+        );
+    }
+
+    /// Insert a loaded module under the alias its consumer's manifest bound.
+    /// The binding files it for scoping; the subject — the loaded module's
+    /// declared identity — is what crosses the ABI boundary.
+    pub fn insert_alias(&mut self, alias: impl Into<Box<str>>, loaded: &LoadedModule) {
+        self.inner.insert(
+            alias,
+            loaded.module.clone(),
             loaded.abi_digest,
             loaded.table.clone(),
             loaded.positions.definitions(),
@@ -82,6 +102,7 @@ impl ImportEnv {
     pub(crate) fn insert_surface(&mut self, binding: &str, surface: &InterfaceSurface) {
         self.inner.insert(
             binding,
+            surface.module.clone(),
             surface.abi_digest(),
             surface.table.clone(),
             Box::<[DefinitionLocation]>::default(),
