@@ -12,6 +12,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+ed25519-dalek.workspace = true
 pith-constraint.workspace = true
 pith-core.workspace = true
 pith-diag.workspace = true

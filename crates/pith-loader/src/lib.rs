@@ -8,6 +8,7 @@ mod graph;
 mod import;
 mod load;
 mod loaded;
+pub mod registry;
 mod resolve;
 mod source;
 mod workspace;
