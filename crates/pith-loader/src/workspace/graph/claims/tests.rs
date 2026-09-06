@@ -1,3 +1,5 @@
+mod generated;
+
 use std::cell::Cell;
 
 use super::*;
