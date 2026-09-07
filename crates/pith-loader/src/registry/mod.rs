@@ -16,16 +16,21 @@
 mod host;
 mod keys;
 mod line;
+mod parse;
 mod publish;
+mod range;
+mod reading;
 mod store;
+mod token;
 mod tree;
 mod trust;
 
 pub use host::Host;
 pub use keys::{Detached, Public, Signing, SpellingError};
-pub use line::{KeySet, Line, Malformed, Pin, Release, Withdrawal};
+pub use line::{KeySet, Line, Pin, Release, Withdrawal};
 pub use publish::{Draft, derive};
 pub use store::{Location as RegistryLocation, RegistryStore};
+pub use token::Malformed;
 pub use tree::{Measured, measure};
 pub use trust::{Record, Verified, read as read_index};
 

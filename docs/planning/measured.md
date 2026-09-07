@@ -471,7 +471,7 @@ Rotation is measured through the consumer's record, and the semantics the fixtur
 stated: a line the consumer already admitted answers to the append-only check, not to the current
 key set — rotation retires a key for what it may sign next, not for what it signed while enrolled —
 while a line new to the read answers to the current set, so a release signed after rotation by the
-retired key refuses as `E-3048`. The `tests/registry.rs` fixtures run key rotation forward, replay
+retired key refuses as `E-3048`. The `tests/registry/` fixtures run key rotation forward, replay
 the superseded generation backwards (`E-3050`), and alter an admission time so only the fork check
 can fire.
 
