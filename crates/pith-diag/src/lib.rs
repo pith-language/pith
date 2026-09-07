@@ -6,6 +6,8 @@
 
 use std::sync::{Arc, OnceLock};
 
+pub mod text;
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ByteOffset(pub u32);
 
