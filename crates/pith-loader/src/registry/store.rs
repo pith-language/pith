@@ -3,12 +3,9 @@
 //!
 //! This store serves exact selections — the one release the index carries
 //! for a subject — because choosing among versions is the resolver's
-//! computation, not a store's. Around [`super::trust`] it adds the content
-//! half of the model: the bytes a revision names are read, normalized,
-//! and measured against the digest the entry pins, and the manifest those
-//! bytes carry is checked field by field against what the entry caches,
-//! so a wrong cache and a wrong tree are refused at their own boundaries
-//! rather than discovered by elaboration.
+//! computation, not a store's. A manifest that disagrees with what its
+//! entry caches and bytes that measure against what the entry pins are
+//! both refused here, not discovered by elaboration.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

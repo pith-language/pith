@@ -1,17 +1,10 @@
 //! The module registry: a signed, append-only, metadata-only index.
 //!
-//! An entry says which content a released version is — the revision it
-//! was measured from and the digest it measured to — and every field but
-//! the signatures and the admission time is derived from that revision, so
-//! verifying the index is re-deriving it. The index stores no module
-//! bytes; a serving host keeps content beside it, addressed by the
-//! revision an entry names.
-//!
-//! Trust is four checks, each refused at its own boundary: the pinned
-//! root key over the domain key sets, key-set generations against the
-//! consumer's record, each line's signature against its domain's keys,
-//! and the whole index against the append-only state the consumer
-//! previously admitted.
+//! An entry names the revision a released version was measured from and
+//! the digest it measured to; the trees those revisions name live beside
+//! the index, in the serving host. `line` renders and `parse` reads the
+//! documents, `trust` reads an index as a client, `publish` and `host`
+//! are the registry's side, and `store` serves what passed.
 
 mod host;
 mod keys;

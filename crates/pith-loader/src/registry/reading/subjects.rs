@@ -112,12 +112,9 @@ impl Reading<'_> {
                     continue;
                 }
             };
-            // A line the consumer already admitted answers to the
-            // append-only check, not to the current key set: it was
-            // admitted under a set the consumer recorded, and rotation
-            // retires a key for what it may sign next, not for what it
-            // signed while enrolled. A line new to this read answers to
-            // the current set.
+            // Previously admitted lines answer to the append-only check,
+            // not the current key set: rotation retires a key for what it
+            // may sign next, not for what it signed while enrolled.
             let fresh = !self.prior.subjects.get(subject).is_some_and(|admitted| {
                 admitted
                     .iter()

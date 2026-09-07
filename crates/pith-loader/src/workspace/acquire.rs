@@ -72,10 +72,8 @@ impl AcquireFailure {
         }
     }
 
-    /// The refusal's own boundary, when it has one: a route naming a kind
-    /// this loader does not serve, a tree refusing its own shape, and a
-    /// store with trust decisions naming the code its refusal is, so each
-    /// lands as itself rather than as a generic unreadable source.
+    /// The code this refusal lands as, when it names its own boundary;
+    /// a caller with no better code falls back to its generic one.
     #[must_use]
     pub(crate) const fn diagnostic_code(&self) -> Option<FrontendCode> {
         match self {

@@ -1,11 +1,7 @@
-//! The read in progress: every file, every check, one diagnostic per
-//! refusal earned.
-//!
-//! The walker holds no judgment of its own — each method is one of the
-//! four checks or the plumbing around one, and [`super::trust::read`]
-//! decides what the diagnostics add up to. The first check lives here;
-//! the key-set checks in [`domains`], the subject-line checks in
-//! [`subjects`].
+//! The read in progress: one diagnostic per refusal earned. The first
+//! check lives here; the key-set checks in [`domains`], the subject-line
+//! checks in [`subjects`]; [`super::trust::read`] decides what the
+//! diagnostics add up to.
 
 mod domains;
 mod subjects;

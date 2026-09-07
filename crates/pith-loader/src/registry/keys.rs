@@ -1,10 +1,8 @@
 //! ed25519 signatures for the registry index: detached, over canonical
 //! bytes, spelled `ed25519:<hex>`.
 //!
-//! A signature covers rendered values rather than a file's bytes, so a
-//! re-spelled line with unchanged values verifies and an edited value does
-//! not. [`Signing`] is the half a root or a publisher holds; [`Public`] is
-//! the half an index spells and a consumer pins.
+//! [`Signing`] is the half a root or a publisher holds; [`Public`] is the
+//! half an index spells and a consumer pins.
 
 use ed25519_dalek::{Signature as Ed25519Signature, Signer, SigningKey, Verifier, VerifyingKey};
 

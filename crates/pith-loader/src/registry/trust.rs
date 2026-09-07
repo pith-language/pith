@@ -1,15 +1,8 @@
 //! The verified surface: what a client keeps after reading an index.
 //!
-//! The four checks — the pinned root key over the domain key sets,
-//! key-set generations against the consumer's record, each line's
-//! signature against its domain's keys, and the whole index against the
-//! append-only state the consumer previously admitted — are each a
-//! distinct refusal at its own boundary, because a key absent from a set,
-//! a set the root never signed, a generation that moved backwards, and a
-//! line that changed are four different facts about the world. The walk
-//! that runs them lives in [`super::reading`]; [`read`] here is the only
-//! constructor of [`Verified`], so acquisition cannot reach a line that
-//! did not pass.
+//! The walk that runs the checks lives in [`super::reading`]; [`read`]
+//! is the only constructor of [`Verified`], so acquisition cannot reach
+//! a line that did not pass.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;

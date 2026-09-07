@@ -1,11 +1,8 @@
 //! Publication: derive an entry from the module it releases.
 //!
-//! Every cached field of an entry — the subject, the version, the
-//! requirements — is read from the module's own manifest, never authored,
-//! so an entry that disagrees with the revision it pins can only be a bug
-//! in whoever signed it. A module holding a path dependency is refused
-//! here: a path is a live local input, and a release naming one would
-//! claim requirements no consumer can satisfy.
+//! Every cached field is read from the module's manifest, never authored.
+//! A module holding a path dependency is refused: a path makes no
+//! witnessed-content claim to publish.
 
 use std::collections::BTreeMap;
 use std::path::Path;
