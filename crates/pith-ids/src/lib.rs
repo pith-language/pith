@@ -120,20 +120,13 @@ impl ContentDigest {
 
 impl std::fmt::Display for ContentDigest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for byte in &self.0 {
-            write!(f, "{byte:02x}")?;
-        }
-        Ok(())
+        f.write_str(&encode_hex(&self.0))
     }
 }
 
 impl std::fmt::Debug for ContentDigest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ContentDigest(")?;
-        for byte in &self.0 {
-            write!(f, "{byte:02x}")?;
-        }
-        write!(f, ")")
+        write!(f, "ContentDigest({})", encode_hex(&self.0))
     }
 }
 
@@ -169,22 +162,50 @@ impl std::str::FromStr for ContentDigest {
                 actual: value.len(),
             });
         }
-
         let mut digest = [0; DIGEST_LEN];
-        for (byte, pair) in digest.iter_mut().zip(value.as_bytes().chunks_exact(2)) {
-            let [high, low] = pair else {
-                return Err(ParseDigestError::InvalidHex);
-            };
-            *byte = hex_nibble(*high)
-                .zip(hex_nibble(*low))
-                .map(|(high, low)| high << 4 | low)
-                .ok_or(ParseDigestError::InvalidHex)?;
+        if !decode_hex_into(&mut digest, value) {
+            return Err(ParseDigestError::InvalidHex);
         }
         Ok(Self(digest))
     }
 }
 
-const fn hex_nibble(byte: u8) -> Option<u8> {
+/// Lowercase hexadecimal, the spelling every digest, key, and signature
+/// in the kernel writes.
+#[must_use]
+pub fn encode_hex(bytes: &[u8]) -> String {
+    let mut spelling = String::with_capacity(bytes.len().saturating_mul(2));
+    for byte in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(spelling, "{byte:02x}");
+    }
+    spelling
+}
+
+/// Decodes hexadecimal into `bytes`: true when `text` carries exactly the
+/// digits `bytes` takes, all of them hexadecimal, filling `bytes`; false
+/// otherwise.
+#[must_use]
+pub fn decode_hex_into(bytes: &mut [u8], text: &str) -> bool {
+    if text.len() != bytes.len().saturating_mul(2) {
+        return false;
+    }
+    for (byte, pair) in bytes.iter_mut().zip(text.as_bytes().chunks_exact(2)) {
+        let [high, low] = pair else {
+            return false;
+        };
+        match nibble(*high)
+            .zip(nibble(*low))
+            .map(|(high, low)| high << 4 | low)
+        {
+            Some(decoded) => *byte = decoded,
+            None => return false,
+        }
+    }
+    true
+}
+
+const fn nibble(byte: u8) -> Option<u8> {
     match byte {
         b'0'..=b'9' => Some(byte.wrapping_sub(b'0')),
         b'a'..=b'f' => Some(byte.wrapping_sub(b'a').wrapping_add(10)),
