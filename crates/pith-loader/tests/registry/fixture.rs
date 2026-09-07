@@ -2,19 +2,13 @@
 //! directory host serving it, and the opened-store helpers with their
 //! diagnostics intact for refusals asserted by code.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
+use std::collections::BTreeSet;
 use std::path::Path;
 
-use pith_engine::{Engine, MemoryEngineStateStore};
+pub(crate) use crate::common::{TestResult, file, module_of, semantics};
 use pith_hir::{FrontendCode, ModuleSubject, RootKey};
+use pith_loader::Workspace;
 use pith_loader::registry::{Host, Record, RegistryStore, Signing, derive};
-use pith_loader::{
-    ElaboratedWorkspace, FrontendProjection, RegisterFrontend, ResolvedModule, Workspace,
-};
-use pith_store::MemoryContentStore;
-
-pub(crate) type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 pub(crate) const ROOT_SEED: [u8; 32] = [1; 32];
 pub(crate) const PUBLISHER_SEED: [u8; 32] = [3; 32];
@@ -41,14 +35,6 @@ pub(crate) fn successor() -> Signing {
 pub(crate) fn pinned_key() -> RootKey {
     RootKey::parse(&root().public().spelling())
         .unwrap_or_else(|_| unreachable!("the fixture's root key spelling parses"))
-}
-
-pub(crate) fn file(path: &Path, text: &str) -> TestResult {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, text)?;
-    Ok(())
 }
 
 /// The two modules every fixture publishes: a dependency and a root that
@@ -161,62 +147,6 @@ pub(crate) fn resolved_through(directory: &Path) -> Result<Workspace, Box<[pith_
         )])
     })?;
     Workspace::resolve(store, &root)
-}
-
-pub(crate) fn engine() -> Engine {
-    let mut engine = Engine::with_state_store(
-        MemoryContentStore::default(),
-        MemoryEngineStateStore::default(),
-    );
-    engine.register_frontend();
-    engine
-}
-
-pub(crate) fn module_of<'workspace>(
-    workspace: &'workspace Workspace,
-    spelling: &str,
-) -> &'workspace ResolvedModule {
-    workspace
-        .modules()
-        .find(|module| module.subject().spelling().as_ref() == spelling)
-        .unwrap_or_else(|| unreachable!("the closure resolved {spelling}"))
-}
-
-/// One module's semantic identity through the whole pipeline, the shape
-/// `acquisition.rs` compares stores by.
-pub(crate) struct Semantic {
-    pub(crate) source_ids: Vec<pith_ids::ContentId>,
-    pub(crate) abi: pith_ids::ModuleAbiDigest,
-    pub(crate) surface: pith_ids::ContentId,
-}
-
-pub(crate) fn semantics(workspace: &Workspace) -> TestResult<BTreeMap<Box<str>, Semantic>> {
-    let elaborated: ElaboratedWorkspace = workspace
-        .elaborate()
-        .map_err(|error| format!("the workspace elaborates: {error}"))?;
-    let mut engine = engine();
-    let projection: FrontendProjection<'_> = workspace
-        .project_onto_frontend(&mut engine)
-        .map_err(|error| format!("the workspace projects: {error}"))?;
-    let mut semantics = BTreeMap::new();
-    for ((module, projected), elaborated_module) in projection.modules().zip(elaborated.modules()) {
-        let mut source_ids = module
-            .sources()
-            .files()
-            .iter()
-            .map(|file| file.content_id())
-            .collect::<Vec<_>>();
-        source_ids.sort_by_key(|id| id.digest());
-        semantics.insert(
-            module.subject().spelling(),
-            Semantic {
-                source_ids,
-                abi: elaborated_module.abi_digest(),
-                surface: projected.interface().surface(),
-            },
-        );
-    }
-    Ok(semantics)
 }
 
 pub(crate) fn carries(diagnostics: &[pith_diag::Diag], code: FrontendCode) -> bool {

@@ -11,19 +11,16 @@
 //! registry-routed clause's written range reaches the admission decision
 //! through the same path a local source's subject agreement does.
 
+mod common;
+
 use std::collections::BTreeMap;
-use std::fs;
 use std::path::Path;
 
-use pith_engine::{Engine, MemoryEngineStateStore};
+use common::{TestResult, file, module_of, semantics};
 use pith_hir::FrontendCode;
 use pith_loader::{
-    AcquireFailure, AcquiredManifest, AcquiredSource, ElaboratedWorkspace, FrontendProjection,
-    ModuleStore, RegisterFrontend, ResolvedModule, Route, Workspace,
+    AcquireFailure, AcquiredManifest, AcquiredSource, ModuleStore, Route, Workspace,
 };
-use pith_store::MemoryContentStore;
-
-type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 const ROOT_MANIFEST: &str =
     "module example/root 0.1.0\n\nuse dep = example/dep from path \"dep\"\n";
@@ -31,14 +28,6 @@ const DEP_MANIFEST: &str = "module example/dep 1.2.0\n";
 const DEP_TYPES: &str = "nominal Message = Text\n";
 const DEP_RULES: &str = "pure rule speak(who: Message) -> Text = { \"first\" }\n";
 const ROOT_MAIN: &str = "import dep\n\nentry hello : Text = ask (Message(\"hello\"))\n";
-
-fn file(path: &Path, text: &str) -> TestResult {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, text)?;
-    Ok(())
-}
 
 /// The on-disk fixture: a root and one path dependency.
 fn local_project(directory: &Path) -> TestResult {
@@ -183,62 +172,6 @@ impl ModuleStore for RegistryFixture {
             })
             .collect())
     }
-}
-
-fn engine() -> Engine {
-    let mut engine = Engine::with_state_store(
-        MemoryContentStore::default(),
-        MemoryEngineStateStore::default(),
-    );
-    engine.register_frontend();
-    engine
-}
-
-fn module_of<'workspace>(
-    workspace: &'workspace Workspace,
-    spelling: &str,
-) -> &'workspace ResolvedModule {
-    workspace
-        .modules()
-        .find(|module| module.subject().spelling().as_ref() == spelling)
-        .unwrap_or_else(|| unreachable!("the closure resolved {spelling}"))
-}
-
-/// One module's semantic identity through the whole pipeline: its source
-/// content identities, its elaborated ABI, and its published surface.
-struct Semantic {
-    source_ids: Vec<pith_ids::ContentId>,
-    abi: pith_ids::ModuleAbiDigest,
-    surface: pith_ids::ContentId,
-}
-
-fn semantics(workspace: &Workspace) -> TestResult<BTreeMap<Box<str>, Semantic>> {
-    let elaborated: ElaboratedWorkspace = workspace
-        .elaborate()
-        .map_err(|error| format!("the workspace elaborates: {error}"))?;
-    let mut engine = engine();
-    let projection: FrontendProjection<'_> = workspace
-        .project_onto_frontend(&mut engine)
-        .map_err(|error| format!("the workspace projects: {error}"))?;
-    let mut semantics = BTreeMap::new();
-    for ((module, projected), elaborated_module) in projection.modules().zip(elaborated.modules()) {
-        let mut source_ids = module
-            .sources()
-            .files()
-            .iter()
-            .map(|file| file.content_id())
-            .collect::<Vec<_>>();
-        source_ids.sort_by_key(|id| id.digest());
-        semantics.insert(
-            module.subject().spelling(),
-            Semantic {
-                source_ids,
-                abi: elaborated_module.abi_digest(),
-                surface: projected.interface().surface(),
-            },
-        );
-    }
-    Ok(semantics)
 }
 
 #[test]

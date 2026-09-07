@@ -6,6 +6,9 @@
 //! admission times, so an index on disk is a function of what was
 //! published to it and nothing else.
 
+#[path = "../common/mod.rs"]
+mod common;
+
 mod acquisition;
 mod fixture;
 mod refusals;
