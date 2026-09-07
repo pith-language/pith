@@ -7,7 +7,7 @@ use std::sync::Arc;
 use pith_diag::SourceFile;
 use pith_hir::{FrontendCode, Manifest, ManifestUse};
 
-use super::super::acquire::{AcquireFailure, ModuleStore};
+use super::super::acquire::ModuleStore;
 use super::super::admission;
 use super::super::module::SourceSet;
 use super::{ManifestFile, PendingModule, Resolution, at, claims, view_of};
@@ -112,11 +112,9 @@ impl<S: ModuleStore> Resolution<S> {
                 return None;
             }
             Err(claims::Failure::Acquire(failure)) => {
-                let code = match failure {
-                    AcquireFailure::Unsupported { .. } => FrontendCode::UnsupportedSource,
-                    AcquireFailure::Refused { code, .. } => code,
-                    _ => FrontendCode::MissingManifest,
-                };
+                let code = failure
+                    .diagnostic_code()
+                    .unwrap_or(FrontendCode::MissingManifest);
                 self.diagnostics.push(at(
                     code,
                     span,
@@ -153,10 +151,9 @@ impl<S: ModuleStore> Resolution<S> {
         let dependency = match self.read(&location) {
             Ok(manifest) => manifest,
             Err(failure) => {
-                let code = match failure {
-                    AcquireFailure::Refused { code, .. } => code,
-                    _ => FrontendCode::MissingManifest,
-                };
+                let code = failure
+                    .diagnostic_code()
+                    .unwrap_or(FrontendCode::MissingManifest);
                 self.diagnostics.push(at(
                     code,
                     span,

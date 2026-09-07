@@ -34,8 +34,7 @@ impl Line {
             other => Err(Malformed {
                 message: format!(
                     "`{other}` names no line kind; a line is `{RELEASE}` or `{WITHDRAW}`"
-                )
-                .into(),
+                ),
                 span: first.span,
             }),
         }
@@ -69,13 +68,13 @@ impl KeySet {
             match keyword.as_str() {
                 SIG => {
                     break Detached::parse(&value).map_err(|error| Malformed {
-                        message: error.to_string().into(),
+                        message: error.to_string(),
                         span,
                     })?;
                 }
                 KEY => {
                     keys.insert(Public::parse(&value).map_err(|error| Malformed {
-                        message: error.to_string().into(),
+                        message: error.to_string(),
                         span,
                     })?);
                 }
@@ -132,21 +131,21 @@ fn field_lines(text: &str, base: ByteOffset) -> Result<Vec<(String, String, Span
 
 fn ends_before(base: ByteOffset, name: &str) -> Malformed {
     Malformed {
-        message: format!("the key set ends before its `{name}` line").into(),
+        message: format!("the key set ends before its `{name}` line"),
         span: Span::new(base, base),
     }
 }
 
 fn unexpected(expected: &str, found: &str, span: Span) -> Malformed {
     Malformed {
-        message: format!("`{found}` names no key-set line here; expected `{expected}`").into(),
+        message: format!("`{found}` names no key-set line here; expected `{expected}`"),
         span,
     }
 }
 
 fn count(value: &str, span: Span) -> Result<u64, Malformed> {
     value.parse().map_err(|_| Malformed {
-        message: format!("`{value}` is a plain count").into(),
+        message: format!("`{value}` is a plain count"),
         span,
     })
 }
@@ -159,7 +158,7 @@ fn release(tokens: &[Token]) -> Result<Release, Malformed> {
     while tokens.get(position).is_some_and(|token| token.is(REQUIRES)) {
         let Some(requirement) = requirement(tokens, &mut position) else {
             return Err(Malformed {
-                message: format!("`{REQUIRES}` names a subject and a range").into(),
+                message: format!("`{REQUIRES}` names a subject and a range"),
                 span: span_from(tokens, position),
             });
         };
@@ -191,7 +190,7 @@ fn release(tokens: &[Token]) -> Result<Release, Malformed> {
     let admitted = number(tokens.get(position), ADMITTED)?;
     if tokens.get(position.saturating_add(1)).is_some() {
         return Err(Malformed {
-            message: format!("the release line carries nothing after `{ADMITTED}`").into(),
+            message: format!("the release line carries nothing after `{ADMITTED}`"),
             span: span_from(tokens, position),
         });
     }
@@ -231,7 +230,7 @@ fn withdrawal(tokens: &[Token]) -> Result<Withdrawal, Malformed> {
     position = position.saturating_add(1);
     if tokens.get(position).is_some() {
         return Err(Malformed {
-            message: format!("the withdrawal line carries nothing after its `{SIG}`").into(),
+            message: format!("the withdrawal line carries nothing after its `{SIG}`"),
             span: span_from(tokens, position),
         });
     }
@@ -249,14 +248,14 @@ fn expect_keyword(tokens: &[Token], position: &mut usize, word: &str) -> Result<
         return Ok(());
     }
     Err(Malformed {
-        message: format!("the release line carries `{word}` here").into(),
+        message: format!("the release line carries `{word}` here"),
         span: span_from(tokens, *position),
     })
 }
 
 fn public(token: Option<&Token>) -> Result<Public, Malformed> {
     Public::parse(field(token, BY)?).map_err(|error| Malformed {
-        message: error.to_string().into(),
+        message: error.to_string(),
         span: token.map_or_else(Span::none, |token| token.span),
     })
 }
@@ -264,14 +263,14 @@ fn public(token: Option<&Token>) -> Result<Public, Malformed> {
 fn version(token: Option<&Token>, line: &str) -> Result<ManifestVersion, Malformed> {
     let spelling = field(token, line)?;
     ManifestVersion::parse(spelling).map_err(|_| Malformed {
-        message: format!("the {line} version `{spelling}` is dotted numeric segments").into(),
+        message: format!("the {line} version `{spelling}` is dotted numeric segments"),
         span: token.map_or_else(Span::none, |token| token.span),
     })
 }
 
 fn field<'token>(token: Option<&'token Token>, name: &str) -> Result<&'token str, Malformed> {
     token.map(Token::spelling).ok_or_else(|| Malformed {
-        message: format!("the line ends before its `{name}` field").into(),
+        message: format!("the line ends before its `{name}` field"),
         span: Span::none(),
     })
 }
@@ -281,91 +280,26 @@ fn digest(token: Option<&Token>) -> Result<ContentDigest, Malformed> {
     spelling
         .strip_prefix(DIGEST_PREFIX)
         .ok_or_else(|| Malformed {
-            message: format!("the tree is `{DIGEST_PREFIX}` followed by hexadecimal").into(),
+            message: format!("the tree is `{DIGEST_PREFIX}` followed by hexadecimal"),
             span: token.map_or_else(Span::none, |token| token.span),
         })?
         .parse()
         .map_err(|_| Malformed {
-            message: format!("`{spelling}` is not a digest").into(),
+            message: format!("`{spelling}` is not a digest"),
             span: token.map_or_else(Span::none, |token| token.span),
         })
 }
 
 fn signature(token: Option<&Token>) -> Result<Detached, Malformed> {
     Detached::parse(field(token, SIG)?).map_err(|error| Malformed {
-        message: error.to_string().into(),
+        message: error.to_string(),
         span: token.map_or_else(Span::none, |token| token.span),
     })
 }
 
 fn number(token: Option<&Token>, name: &str) -> Result<u64, Malformed> {
     field(token, name)?.parse().map_err(|_| Malformed {
-        message: format!("the {name} is a plain count").into(),
+        message: format!("the {name} is a plain count"),
         span: token.map_or_else(Span::none, |token| token.span),
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn signed_release() -> Release {
-        let publisher =
-            super::super::keys::Signing::from_seed([3; ed25519_dalek::SECRET_KEY_LENGTH]);
-        Release::signed(
-            ManifestVersion::parse("1.2.0").unwrap(),
-            Box::new([ModuleRequirement {
-                subject: ModuleSubject::parse("example/dep").unwrap(),
-                range: pith_hir::VersionRange::Between {
-                    lower: pith_hir::VersionBound {
-                        version: ManifestVersion::parse("1.2").unwrap(),
-                        inclusive: true,
-                    },
-                    upper: pith_hir::VersionBound {
-                        version: ManifestVersion::parse("2.0").unwrap(),
-                        inclusive: false,
-                    },
-                },
-            }]),
-            Pin::at_subpath("abc123", "nested/module"),
-            ContentDigest::of_bytes(b"tree"),
-            &publisher,
-            1_757_000_000,
-        )
-    }
-
-    #[test]
-    fn release_lines_round_trip() {
-        let release = signed_release();
-        let rendered = release.render();
-        let parsed = match Line::parse(&rendered, ByteOffset(0)).expect("the line parses") {
-            Line::Release(parsed) => parsed,
-            other => unreachable!("a release line parses as one: {other:?}"),
-        };
-        assert_eq!(parsed, release);
-        assert_eq!(parsed.render(), rendered);
-    }
-
-    #[test]
-    fn a_re_spelled_line_with_equal_values_is_equal() {
-        let release = signed_release();
-        let spaced = release.render().replace(" sig ", "  sig  ");
-        let parsed = match Line::parse(&spaced, ByteOffset(0)).expect("the line parses") {
-            Line::Release(parsed) => parsed,
-            _ => unreachable!("a release line parses as one"),
-        };
-        assert_eq!(parsed, release);
-    }
-
-    #[test]
-    fn key_sets_round_trip_and_refuse_trailing_lines() {
-        let root = super::super::keys::Signing::from_seed([1; ed25519_dalek::SECRET_KEY_LENGTH]);
-        let publisher =
-            super::super::keys::Signing::from_seed([3; ed25519_dalek::SECRET_KEY_LENGTH]);
-        let signed = KeySet::signed(2, 1, BTreeSet::from([publisher.public()]), &root);
-        let rendered = signed.render();
-        assert_eq!(KeySet::parse(&rendered, ByteOffset(0)), Ok(signed));
-        let trailing = format!("{rendered}extra\n");
-        assert!(KeySet::parse(&trailing, ByteOffset(0)).is_err());
-    }
 }

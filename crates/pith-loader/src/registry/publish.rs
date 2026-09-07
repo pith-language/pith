@@ -11,12 +11,13 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use pith_diag::{Diag, Severity, SourceFile, SourceId, Span};
+use pith_diag::{Diag, Severity, SourceFile, SourceId};
 use pith_hir::{FrontendCode, Manifest, ManifestVersion, ModuleSubject};
 
 use super::keys::Signing;
 use super::line::{Pin, Release};
 use super::tree::{Measured, measure};
+use crate::workspace::graph::sourceless;
 use crate::{AcquiredSource, LocalDirectory, LocalFiles, ModuleRequirement, ModuleStore};
 
 /// A release waiting on a signature: everything an entry caches, derived
@@ -179,8 +180,4 @@ fn source_map(sources: &[AcquiredSource]) -> BTreeMap<Box<str>, Box<str>> {
         .iter()
         .map(|source| (source.path.clone(), source.text.clone()))
         .collect()
-}
-
-fn sourceless(code: FrontendCode, message: impl Into<Box<str>>) -> Diag {
-    Diag::new(Severity::Error, code.stable(), Span::none(), message)
 }

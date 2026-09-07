@@ -40,7 +40,7 @@ pub(crate) fn render(range: &VersionRange) -> String {
 /// spelling.
 pub(crate) fn parse(token: &Token) -> Result<VersionRange, Malformed> {
     let refuse = |message: String| Malformed {
-        message: message.into(),
+        message,
         span: token.span,
     };
     if token.is("*") {

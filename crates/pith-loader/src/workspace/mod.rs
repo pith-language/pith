@@ -17,7 +17,7 @@ mod admission;
 mod closure;
 mod elaborate;
 mod frontend;
-mod graph;
+pub(crate) mod graph;
 mod module;
 mod root_files;
 mod routing;

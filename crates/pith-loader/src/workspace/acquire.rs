@@ -72,6 +72,21 @@ impl AcquireFailure {
         }
     }
 
+    /// The refusal's own boundary, when it has one: a route naming a kind
+    /// this loader does not serve, a tree refusing its own shape, and a
+    /// store with trust decisions naming the code its refusal is, so each
+    /// lands as itself rather than as a generic unreadable source.
+    #[must_use]
+    pub(crate) const fn diagnostic_code(&self) -> Option<FrontendCode> {
+        match self {
+            Self::Unsupported { .. } => Some(FrontendCode::UnsupportedSource),
+            Self::Symlink { .. } => Some(FrontendCode::SymlinkedSource),
+            Self::Irregular { .. } => Some(FrontendCode::IrregularSource),
+            Self::Refused { code, .. } => Some(*code),
+            _ => None,
+        }
+    }
+
     /// The failure as a sentence, for the caller that attaches the span:
     /// an acquisition failure carries no source of its own, because only
     /// the clause that reached for the file knows where to point.

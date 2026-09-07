@@ -71,7 +71,11 @@ impl Public {
     pub fn parse(spelling: &str) -> Result<Self, SpellingError> {
         let hex = key_material(spelling, KEY_HEX_LEN)?;
         let mut bytes = [0; ed25519_dalek::PUBLIC_KEY_LENGTH];
-        decode_hex_into(hex, &mut bytes, spelling)?;
+        if !pith_ids::decode_hex_into(&mut bytes, hex) {
+            return Err(SpellingError::Shape {
+                spelling: spelling.into(),
+            });
+        }
         VerifyingKey::from_bytes(&bytes)
             .map(Self)
             .map_err(|_| SpellingError::Shape {
@@ -117,11 +121,7 @@ pub struct Detached(Ed25519Signature);
 impl Detached {
     #[must_use]
     pub fn spelling(&self) -> Box<str> {
-        let mut spelling = format!("{ALGORITHM}:");
-        for byte in self.0.to_bytes() {
-            spelling.push_str(&format!("{byte:02x}"));
-        }
-        spelling.into()
+        format!("{ALGORITHM}:{}", pith_ids::encode_hex(&self.0.to_bytes())).into()
     }
 
     /// # Errors
@@ -130,7 +130,11 @@ impl Detached {
     pub fn parse(spelling: &str) -> Result<Self, SpellingError> {
         let hex = key_material(spelling, SIGNATURE_HEX_LEN)?;
         let mut bytes = [0; ed25519_dalek::SIGNATURE_LENGTH];
-        decode_hex_into(hex, &mut bytes, spelling)?;
+        if !pith_ids::decode_hex_into(&mut bytes, hex) {
+            return Err(SpellingError::Shape {
+                spelling: spelling.into(),
+            });
+        }
         Ok(Self(Ed25519Signature::from_bytes(&bytes)))
     }
 }
@@ -170,32 +174,6 @@ fn key_material(spelling: &str, hex_len: usize) -> Result<&str, SpellingError> {
         .ok_or(SpellingError::Shape {
             spelling: spelling.into(),
         })
-}
-
-fn decode_hex_into(hex: &str, bytes: &mut [u8], spelling: &str) -> Result<(), SpellingError> {
-    for (byte, pair) in bytes.iter_mut().zip(hex.as_bytes().chunks_exact(2)) {
-        let [high, low] = pair else {
-            return Err(SpellingError::Shape {
-                spelling: spelling.into(),
-            });
-        };
-        *byte = nibble(*high)
-            .zip(nibble(*low))
-            .map(|(high, low)| high << 4 | low)
-            .ok_or(SpellingError::Shape {
-                spelling: spelling.into(),
-            })?;
-    }
-    Ok(())
-}
-
-const fn nibble(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte.wrapping_sub(b'0')),
-        b'a'..=b'f' => Some(byte.wrapping_sub(b'a').wrapping_add(10)),
-        b'A'..=b'F' => Some(byte.wrapping_sub(b'A').wrapping_add(10)),
-        _ => None,
-    }
 }
 
 #[cfg(test)]

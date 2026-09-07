@@ -119,14 +119,9 @@ fn source_tree_refused(
     source: &std::sync::Arc<pith_diag::SourceFile>,
     failure: &AcquireFailure,
 ) -> Diag {
-    let code = match failure {
-        AcquireFailure::Symlink { .. } => FrontendCode::SymlinkedSource,
-        AcquireFailure::Irregular { .. } => FrontendCode::IrregularSource,
-        AcquireFailure::Refused { code, .. } => *code,
-        AcquireFailure::Unreadable { .. } | AcquireFailure::Unsupported { .. } => {
-            FrontendCode::UnreadableSource
-        }
-    };
+    let code = failure
+        .diagnostic_code()
+        .unwrap_or(FrontendCode::UnreadableSource);
     Diag::new(
         Severity::Error,
         code.stable(),

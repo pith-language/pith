@@ -108,7 +108,7 @@ impl<S: ModuleStore> Resolution<S> {
         let workspace = super::Closure::from_dependency_order(modules).ok_or_else(|| {
             Box::from([sourceless(
                 FrontendCode::MissingManifest,
-                "the resolution reached no root manifest".into(),
+                "the resolution reached no root manifest",
             )])
         })?;
         Ok(super::WorkspaceResolution {
@@ -126,12 +126,12 @@ pub(super) fn view_of(file: &ManifestFile) -> Option<Manifest> {
 }
 
 /// A diagnostic that carries no source, because nothing was read.
-pub(super) fn sourceless(code: FrontendCode, message: Box<str>) -> Diag {
+pub(crate) fn sourceless(code: FrontendCode, message: impl Into<Box<str>>) -> Diag {
     Diag::new(Severity::Error, code.stable(), Span::none(), message)
 }
 
 /// A diagnostic attached to the manifest that caused it.
-pub(super) fn at(
+pub(crate) fn at(
     code: FrontendCode,
     span: Span,
     source: &Arc<SourceFile>,
