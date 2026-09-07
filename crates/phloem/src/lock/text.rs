@@ -1,15 +1,13 @@
-//! Tokens, quoting, feature lists, and digest spelling for lock text.
-//!
-//! Fields use bare tokens when possible and quoted tokens with backslash
-//! escapes otherwise. Digests render as `blake3:` followed by lowercase
-//! hexadecimal digits; parsing also accepts uppercase digits.
+//! Fields, feature lists, digests, and ranges for lock text: the
+//! domain-specific halves of a wire format whose token half is
+//! [`pith_diag::text`].
 //!
 //! Every parse here refuses with a span selecting the offending field in the
 //! source, and the message naming what is wrong with it; the caller holds
 //! the source and attaches it.
 
-use std::fmt::Write as _;
-
+pub(crate) use pith_diag::text::{Refusal, Token, token, tokenize};
+use pith_diag::text::{is_bare, quoted_token};
 use pith_diag::{ByteOffset, Span};
 use pith_ids::{ContentId, DIGEST_LEN};
 
@@ -17,220 +15,11 @@ use crate::codec::digest_from_hex;
 
 const HEX_LEN: usize = DIGEST_LEN * 2;
 
-/// One written field: the text after quoting is resolved, and the span of
-/// its written spelling in the source.
-#[derive(Debug)]
-pub(crate) struct Token {
-    pub text: String,
-    pub span: Span,
-}
-
-/// A refusal from token or field parsing: what is wrong, and the span it
-/// happened in.
-#[derive(Debug)]
-pub(crate) struct Refusal {
-    pub message: String,
-    pub span: Span,
-}
-
-/// The byte offset of `rest`, a tail of `line`, when `line` begins at
-/// `base` in the source.
-fn at(base: ByteOffset, line: &str, rest: &str) -> ByteOffset {
-    let consumed = line.len().saturating_sub(rest.len());
-    ByteOffset(
-        base.0
-            .saturating_add(u32::try_from(consumed).unwrap_or(u32::MAX)),
-    )
-}
-
 fn end_of(base: ByteOffset, line: &str) -> ByteOffset {
     ByteOffset(
         base.0
             .saturating_add(u32::try_from(line.len()).unwrap_or(u32::MAX)),
     )
-}
-
-/// One text field in its written spelling: bare when it contains none of
-/// the reserved characters, quoted with backslash escapes otherwise.
-pub(crate) fn token(text: &str) -> String {
-    if is_bare(text) {
-        return text.into();
-    }
-    let mut out = String::with_capacity(text.len().saturating_add(2));
-    out.push('"');
-    for character in text.chars() {
-        match character {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            control if control.is_control() => {
-                let _ = write!(out, "\\u{{{:x}}}", control as u32);
-            }
-            other => out.push(other),
-        }
-    }
-    out.push('"');
-    out
-}
-
-pub(crate) fn is_bare(text: &str) -> bool {
-    !text.is_empty()
-        && text.chars().all(|character| {
-            !character.is_whitespace()
-                && !character.is_control()
-                && !matches!(character, '"' | '#' | '\\' | '[' | ']')
-        })
-}
-
-/// Split a line into tokens on spaces, keeping each token's span. A span
-/// runs from the token's first character to the character after its last,
-/// quoted material included; a `[`-bracketed group stays one token with
-/// quoting honored inside it; an unquoted `#` ends the line as a comment.
-/// A refusal spans the offending token's start through the end of the line,
-/// because every way a token fails leaves the rest of the line suspect.
-pub(crate) fn tokenize(line: &str, base: ByteOffset) -> Result<Vec<Token>, Refusal> {
-    let mut tokens = Vec::new();
-    let mut rest = line;
-    loop {
-        rest = rest.trim_start_matches(' ');
-        if rest.is_empty() || rest.starts_with('#') {
-            return Ok(tokens);
-        }
-        let start = at(base, line, rest);
-        let (text, remaining) = if let Some(inner) = rest.strip_prefix('[') {
-            match bracket_group(inner) {
-                Ok((group, remaining)) => (format!("[{group}]"), remaining),
-                Err(message) => {
-                    return Err(Refusal {
-                        message,
-                        span: Span::new(start, end_of(base, line)),
-                    });
-                }
-            }
-        } else if rest.starts_with('"') {
-            match quoted_token(rest) {
-                Ok((token, remaining)) => (token, remaining),
-                Err(message) => {
-                    return Err(Refusal {
-                        message,
-                        span: Span::new(start, end_of(base, line)),
-                    });
-                }
-            }
-        } else {
-            bare_token(rest).map_err(|message| Refusal {
-                message,
-                span: Span::new(start, end_of(base, line)),
-            })?
-        };
-        tokens.push(Token {
-            text,
-            span: Span::new(start, at(base, line, remaining)),
-        });
-        rest = remaining;
-    }
-}
-
-fn bare_token(rest: &str) -> Result<(String, &str), String> {
-    let end = rest.find([' ', '"', '[', ']', '#']).unwrap_or(rest.len());
-    let (token, remaining) = rest.split_at(end);
-    if remaining.starts_with(['"', '[', ']']) {
-        return Err(format!(
-            "the bare token `{token}` runs into a reserved character; quote the whole token"
-        ));
-    }
-    Ok((token.into(), remaining))
-}
-
-fn quoted_token(rest: &str) -> Result<(String, &str), String> {
-    let mut token = String::new();
-    let mut chars = rest.chars();
-    chars.next();
-    loop {
-        let Some(character) = chars.next() else {
-            return Err(format!("the quoted token `{rest}` is never closed"));
-        };
-        match character {
-            '"' => return Ok((token, chars.as_str())),
-            '\\' => token.push(escape(&mut chars)?),
-            other => token.push(other),
-        }
-    }
-}
-
-fn bracket_group(rest: &str) -> Result<(String, &str), String> {
-    let mut group = String::new();
-    let mut chars = rest.chars();
-    loop {
-        let Some(character) = chars.next() else {
-            return Err("the bracketed feature list is never closed".into());
-        };
-        match character {
-            ']' => return Ok((group, chars.as_str())),
-            '"' => {
-                group.push('"');
-                loop {
-                    let Some(inner) = chars.next() else {
-                        return Err("a quoted feature name is never closed".into());
-                    };
-                    group.push(inner);
-                    match inner {
-                        '\\' => {
-                            chars
-                                .next()
-                                .map(|escaped| group.push(escaped))
-                                .ok_or_else(|| {
-                                    "a quoted feature name ends on an escape".to_string()
-                                })?;
-                        }
-                        '"' => break,
-                        _ => {}
-                    }
-                }
-            }
-            other => group.push(other),
-        }
-    }
-}
-
-fn escape(chars: &mut std::str::Chars<'_>) -> Result<char, String> {
-    let Some(escaped) = chars.next() else {
-        return Err("a quoted token ends on an escape".into());
-    };
-    match escaped {
-        '\\' => Ok('\\'),
-        '"' => Ok('"'),
-        'n' => Ok('\n'),
-        'r' => Ok('\r'),
-        't' => Ok('\t'),
-        'u' => {
-            let mut hex = String::new();
-            if chars.next() != Some('{') {
-                return Err("a unicode escape opens with `\\u{`".into());
-            }
-            let mut closed = false;
-            for character in chars.by_ref() {
-                match character {
-                    '}' => {
-                        closed = true;
-                        break;
-                    }
-                    digit if digit.is_ascii_hexdigit() => hex.push(digit),
-                    other => return Err(format!("`{other}` is not a hexadecimal digit")),
-                }
-            }
-            if !closed {
-                return Err("a unicode escape is never closed with `}`".into());
-            }
-            u32::from_str_radix(&hex, 16)
-                .ok()
-                .and_then(char::from_u32)
-                .ok_or_else(|| format!("`\\u{{{hex}}}` is not a unicode scalar value"))
-        }
-        other => Err(format!("`\\{other}` is not an escape this format defines")),
-    }
 }
 
 /// A feature set in its written spelling: `[`-bracketed, comma-separated,

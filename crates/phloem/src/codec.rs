@@ -65,22 +65,8 @@ pub(crate) fn value_content_id(domain: DigestDomain, value: &Value) -> ContentId
 
 /// Decode exactly one SHA-256 digest written as hexadecimal.
 pub(crate) fn digest_from_hex(text: &str) -> Option<ContentDigest> {
-    if text.len() != DIGEST_LEN * 2 {
-        return None;
-    }
-    let nibbles: Vec<u8> = text
-        .chars()
-        .map(|character| {
-            character
-                .to_digit(16)
-                .and_then(|digit| u8::try_from(digit).ok())
-        })
-        .collect::<Option<_>>()?;
-    let bytes: Vec<u8> = nibbles
-        .chunks_exact(2)
-        .map(|pair| pair.iter().fold(0u8, |byte, nibble| (byte << 4) | nibble))
-        .collect();
-    Some(ContentDigest::from_bytes(bytes.as_slice().try_into().ok()?))
+    let mut bytes = [0; DIGEST_LEN];
+    pith_ids::decode_hex_into(&mut bytes, text).then(|| ContentDigest::from_bytes(bytes))
 }
 
 /// A record's field payload by name, or `None` when the record has no such
