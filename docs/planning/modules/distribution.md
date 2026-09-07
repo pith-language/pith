@@ -283,6 +283,15 @@ still have one concrete caller, so none was extracted; the range algebra and the
 were the two with two. No person-facing command consumes the resolver or the projection yet; slice 7
 routes them.
 
+The signed-index slice ran the audit again and found two more with two concrete callers: the
+line-oriented tokenizer phloem's lock text had grown and the registry's line format needed, now
+`pith-diag`'s `text` module with phloem delegating to it; and the hexadecimal codecs that digests,
+keys, and signatures all spell, now `pith-ids`' `encode_hex` and `decode_hex_into` with
+`ContentDigest`, phloem's digest reader, and the registry's key spellings sharing one
+implementation. The range-token codec stayed apart deliberately: phloem's bounds carry opaque
+scheme-spelled versions parsed by the domain, the registry's carry typed segments parsed by the
+grammar, and one codec would force a single payload semantics on both.
+
 ### 3. complete an exact-version registry and lock round trip
 
 The first routing boundary is implemented. Root domain bindings are checked before member or dependency
