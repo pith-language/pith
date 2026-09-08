@@ -1,10 +1,9 @@
 //! Versioned storage encoding for [`ActionSpec`].
 //!
-//! Distinct from the action-spec *manifest* in [`crate::action`], which exists
-//! to derive an [`ActionSpecDigest`] and whose byte layout is frozen by every
-//! persisted digest (decision 0023). This encoding exists to store and restore
-//! a contract, and is versioned independently so the storage contract can
-//! evolve without invalidating identities (decision 0024).
+//! Distinct from the action-spec manifest in [`crate::action`], which exists
+//! to derive an [`ActionSpecDigest`]: that manifest's byte layout is frozen by
+//! every persisted digest, while this encoding stores and restores a contract
+//! and is versioned independently.
 //!
 //! [`ActionSpecDigest`]: pith_ids::ActionSpecDigest
 
@@ -18,14 +17,9 @@ use crate::codec::{
 };
 
 /// Version of the stored contract encoding, versioned independently of the
-/// digest manifest (0024).
-///
-/// Pinned at 1 until the first release (decision 0048). Nothing is released, so
-/// no reader exists that a grammar change could break, and a pre-release
-/// database carrying an older encoding is moved aside and rebuilt rather than
-/// migrated. The grammar this version gates has already grown twice under that
-/// rule — the program as a tagged sum (0036) and the exit-status contract a rule
-/// reads a verdict from (0037) — without the number moving.
+/// digest manifest. Pinned at 1 until the first release: no released reader
+/// exists, so grammar changes are answered by moving a pre-release database
+/// aside and rebuilding it rather than by a migration.
 const ENCODING_VERSION: u8 = 1;
 
 const TAG_PROGRAM_HOST_PATH: u8 = 0;
@@ -87,9 +81,9 @@ impl ActionSpec {
     /// Decode a contract from the versioned storage format.
     ///
     /// # Errors
-    /// Returns a canonical decoding error for an unsupported version, an
-    /// unknown discriminant tag, truncated or trailing data, invalid UTF-8, or
-    /// a length not representable on this platform.
+    /// [`CanonicalDecodeError`] for an unsupported version, unknown tag,
+    /// truncated or trailing data, invalid UTF-8, or an unrepresentable
+    /// length.
     pub fn decode_stored(encoded: &[u8]) -> Result<Self, CanonicalDecodeError> {
         let mut reader = CanonicalReader::new(encoded);
         reader.read_version(ENCODING_VERSION)?;
@@ -298,8 +292,7 @@ mod tests {
 
     #[test]
     fn round_tripping_preserves_the_contract_digest() {
-        // The storage encoding is a separate contract from the digest manifest,
-        // but restoring a contract must not change the identity it had.
+        // Restoring a contract must not change the identity it had.
         let spec = populated_spec();
         let decoded =
             ActionSpec::decode_stored(&spec.encode_stored()).expect("the contract decodes");

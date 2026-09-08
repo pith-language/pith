@@ -1,4 +1,4 @@
-//! Public diagnostic-contract tests for stable codes and source locations (K-11).
+//! Public diagnostic-contract tests for stable codes and source locations.
 
 use miette::Diagnostic as _;
 use pith_diag::{

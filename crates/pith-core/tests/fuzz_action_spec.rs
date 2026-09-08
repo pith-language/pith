@@ -1,17 +1,9 @@
-//! Property tests for declared action-contract identity (`ActionSpec::digest`).
-//!
-//! The digest is the persistent identity of a contract (decision 0023). Its
-//! invariants, fuzzed here over many generated *valid* contracts:
-//!
-//! - it is deterministic;
-//! - it ignores the order of set-like fields (inputs, outputs, environment,
-//!   capabilities, allowed hosts) because the canonical manifest sorts them;
-//! - it preserves argument order (arguments are a sequence, not a set);
-//! - storage round-trip does not change it.
-//!
-//! The strategy builds contracts from disjoint alphabets of single-component
-//! paths and NUL-free strings so every generated contract passes `validate()`
-//! by construction; a guard test fails the suite if that ever stops holding.
+//! Property tests for `ActionSpec::digest`, the persistent identity of a
+//! contract: deterministic, ignores the order of set-like fields (the
+//! canonical manifest sorts them), preserves argument order, and survives a
+//! storage round trip. The strategy draws from disjoint alphabets of
+//! single-component paths and NUL-free strings, so every generated contract
+//! passes `validate()`; a guard test fails the suite if that stops holding.
 
 use pith_core::{
     ActionInput, ActionOutput, ActionProgram, ActionSpec, CapabilityRequirement, Content,
@@ -289,15 +281,13 @@ proptest! {
             reordered.network = NetworkPolicy::AllowHosts(reversed.into_boxed_slice());
         }
 
-        // The canonical manifest sorts these fields, so reordering is invisible
-        // to identity.
         prop_assert_eq!(spec.digest().ok(), reordered.digest().ok());
     }
 
     #[test]
     fn digest_preserves_argument_order(spec in valid_spec()) {
-        // Arguments are a sequence, not a set: reversing them must change the
-        // digest whenever the reversal actually changes the sequence.
+        // Arguments are a sequence: skip palindromic argument lists, where
+        // reversal changes nothing.
         let reversed_args: Vec<Box<str>> = spec.arguments.iter().rev().cloned().collect();
         let unchanged = spec.arguments.iter().eq(reversed_args.iter());
         prop_assume!(!unchanged);

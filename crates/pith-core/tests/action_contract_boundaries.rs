@@ -1,9 +1,6 @@
-//! Boundary and invariance tests for the declared action contract (A-1).
-//!
-//! These intentionally exercise the public API rather than codec internals:
-//! callers must be able to validate a contract before planning or execution,
-//! and its digest must distinguish semantic changes while ignoring ordering in
-//! fields whose order has no meaning.
+//! Contract validation and digest invariance, exercised through the public API
+//! rather than codec internals: callers must be able to validate a contract
+//! before planning or execution.
 
 use pith_core::{
     ActionInput, ActionOutput, ActionProgram, ActionSpec, CapabilityRequirement, Content,

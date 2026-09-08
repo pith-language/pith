@@ -1,9 +1,9 @@
 //! Property tests for the identity and digest primitives in `pith-ids`.
 //!
-//! These exercise the contracts the docs rely on (decisions 0005, 0013, 0023):
-//! digests are deterministic, domain-separated, and length-prefixed so moving
-//! bytes across a field boundary changes identity; every restorable digest
-//! round-trips through its `from_digest`/`from_parts` constructor.
+//! These exercise the identity and encoding contracts the rest of the workspace
+//! relies on: digests are deterministic, domain-separated, and length-prefixed
+//! so moving bytes across a field boundary changes identity; every restorable
+//! digest round-trips through its `from_digest`/`from_parts` constructor.
 
 use pith_ids::{
     ActionSpecDigest, ContentDigest, ContentId, PureComputationDigest, RuleIdentity, RuleRevision,

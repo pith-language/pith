@@ -1,12 +1,8 @@
-//! Property tests binding indexed selection to the scan it replaced
-//! (decision 0057).
-//!
-//! The index is a view of the rule population, so the contract is agreement:
-//! for any population and any request, the table answers what a linear scan
-//! comparing every rule's interface would have answered — the same rule when
-//! one matches, the same candidates in the same order when several do, and no
-//! match when none does. The reference below is the pre-0057 implementation,
-//! kept here so the equivalence is executable rather than argued.
+//! Property tests binding indexed selection to the linear scan it replaced:
+//! for any population and request, the table answers what a scan comparing
+//! every rule's interface would answer, the same rule when one matches, the
+//! same candidates in the same order when several do, and no match when none
+//! does. The scan below is the executable reference.
 
 use pith_core::{
     DeclarationTable, Interface, Pure, Request, Rule, RuleId, RuleTable, SelectOutcome, Type,
@@ -16,10 +12,9 @@ use pith_ids::{RuleIdentity, RuleRevision};
 use proptest::prelude::*;
 use smallvec::SmallVec;
 
-/// The types interfaces are drawn from. Two, so that a population of a dozen
-/// rules over fourteen possible interfaces collides often: agreement on the
-/// ambiguous branch is the half of the contract a wider pool would rarely
-/// generate.
+/// The types interfaces are drawn from. A pool this small makes interface
+/// collisions common: agreement on the ambiguous branch is the half of the
+/// contract a wider pool would rarely generate.
 #[allow(
     clippy::expect_used,
     reason = "fixture setup; a pool this test cannot declare has nothing to select over"
@@ -62,7 +57,7 @@ fn population_strategy() -> impl Strategy<Value = Vec<(usize, Interface)>> {
     )
 }
 
-/// Selection as it was before the index: compare every registered rule's
+/// Selection without the index: compare every registered rule's
 /// interface with the request's, then order the survivors canonically.
 fn scan<'table>(table: &'table RuleTable<Pure>, request: &Request<Pure>) -> SelectOutcome {
     let mut candidates: Vec<(&'table Interface, &'table str, RuleId)> = table
@@ -112,8 +107,8 @@ proptest! {
         prop_assert_eq!(table.select(&request), scan(&table, &request));
     }
 
-    /// The same agreement when the request names an interface no rule provides:
-    /// an absent key is a miss, not a bucket that happens to be empty.
+    /// The same agreement when the request names an interface no rule
+    /// provides: an absent key is a miss.
     #[test]
     fn an_unprovided_interface_misses_in_both(population in population_strategy()) {
         let table = table_of(&population);
@@ -126,9 +121,8 @@ proptest! {
         prop_assert_eq!(scan(&table, &request), SelectOutcome::NoMatch);
     }
 
-    /// Registration order changes ids but not the outcome's shape: reversing the
-    /// population selects the rule with the same label, and reports the same
-    /// candidate labels in the same order (decision 0015).
+    /// Registration order changes ids but not the outcome: reversing the
+    /// population selects the same labels in the same order.
     #[test]
     fn reversing_the_population_selects_the_same_labels(
         population in population_strategy(),

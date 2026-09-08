@@ -1,29 +1,18 @@
-//! Version ranges and the interval algebra over them.
-//!
-//! The five constructors are the range model the resolver protocol settled:
-//! `Any`, `Exactly`, `AtLeast`, `AtMost`, `Between`. Membership,
-//! intersection, and complement are closed over those constructors — every
-//! operation returns ranges a manifest could have written — and every
-//! answer is a function of the ordering the caller supplies, never of a
-//! spelling.
+//! Version ranges and the interval algebra over them. Every operation
+//! returns a range the constructors can express, evaluated under the
+//! ordering the caller supplies; no spelling is parsed.
 
 use std::cmp::Ordering;
 
-/// How a domain orders its versions.
-///
-/// The algebra never parses a version: it compares the caller's version
-/// values under the ordering the caller declares, so one algebra serves
-/// scheme-carried spellings and typed segment sequences alike.
+/// How a domain orders its versions. The algebra compares the caller's
+/// version values; it never parses spellings.
 pub trait Compare<Version: ?Sized> {
     /// How `left` orders against `right`.
     fn compare(&self, left: &Version, right: &Version) -> Ordering;
 }
 
-/// Orders versions by their own [`Ord`].
-///
-/// The comparator for version types whose ordering is total and derived —
-/// canonical segment sequences, notably — where no scheme sits between a
-/// range and its members.
+/// Orders versions by their own [`Ord`], for version types whose ordering
+/// is total and derived.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ByOrdering;
 
@@ -88,9 +77,8 @@ impl<Version: Clone> Range<Version> {
         Some(Range::Between { lower, upper })
     }
 
-    /// The complement, as the union of at most two ranges: everything
-    /// below the lower edge plus everything above the upper edge, each
-    /// edge flipping its inclusivity. Empty when the range is `Any`.
+    /// The complement, as the union of at most two ranges, each edge with
+    /// its inclusivity flipped. Empty for `Any`.
     #[must_use]
     pub fn negate(&self) -> Box<[Self]> {
         let (lower, upper) = self.edges();
@@ -111,8 +99,8 @@ impl<Version: Clone> Range<Version> {
     }
 
     /// The range as interval edges. `Exactly(v)` is the closed interval at
-    /// `v`; the constructor is kept elsewhere because it is the spelling a
-    /// pin wants.
+    /// `v`; the constructor stays distinct because a pin wants that
+    /// spelling.
     fn edges(&self) -> (Option<Edge<Version>>, Option<Edge<Version>>) {
         match self {
             Self::Any => (None, None),

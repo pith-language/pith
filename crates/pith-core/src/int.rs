@@ -1,15 +1,12 @@
-//! The arbitrary-precision integer behind [`Value::Int`](crate::Value::Int)
-//! (decision 0055).
+//! The arbitrary-precision integer behind [`Value::Int`](crate::Value::Int).
 //!
-//! Sign and magnitude, in little-endian 32-bit limbs, kept normalized: the most
-//! significant limb is never zero, and zero carries an empty magnitude with
-//! `negative` false. One value has one representation, which is what lets the
-//! derived `PartialEq` and `Hash` agree with numeric equality and what makes the
-//! canonical encoding injective.
-//!
-//! Addition, subtraction, negation, and multiplication are total: every pair of
-//! integers has a sum, a difference, and a product, and the type has room for
-//! all of them. Division is absent, not deferred by oversight — see the record.
+//! Sign and magnitude, in little-endian 32-bit limbs, kept normalized: the
+//! most significant limb is never zero, and zero carries an empty magnitude
+//! with `negative` false. One value has one representation, which is what
+//! lets the derived `PartialEq` and `Hash` agree with numeric equality and
+//! makes the canonical encoding injective. Addition, subtraction, negation,
+//! and multiplication are total; division is absent, not deferred by
+//! oversight.
 
 use std::cmp::Ordering;
 
@@ -18,9 +15,8 @@ use smallvec::SmallVec;
 type Limb = u32;
 const LIMB_BITS: u32 = 32;
 
-/// Two limbs inline: the 64-bit range that used to be the whole type costs no
-/// allocation, and the type stays smaller than `Value::Sum`, so `Value` is the
-/// size it was before the integer grew.
+/// Two limbs inline: integers in the 64-bit range cost no allocation, and the
+/// type stays smaller than `Value::Sum`, so `Value` stays small.
 type Magnitude = SmallVec<[Limb; 2]>;
 
 /// Chunk size for decimal rendering: the largest power of ten that fits in a
@@ -286,10 +282,9 @@ fn compare_magnitudes(left: &[Limb], right: &[Limb]) -> Ordering {
     }
 }
 
-/// Every limb product below fits in a `u64` — `(2^32 - 1)^2` plus two limbs is
-/// `2^64 - 1` — so the `wrapping_` operations here cannot wrap. They are spelled
-/// as methods because the workspace denies the arithmetic operators, and the
-/// widening is the argument that no operation needs an escape hatch.
+/// `(2^32 - 1)^2` plus two limbs is `2^64 - 1`, so the `wrapping_` operations
+/// here cannot wrap. They are spelled as methods because the workspace denies
+/// the arithmetic operators.
 fn add_magnitudes(left: &[Limb], right: &[Limb]) -> Magnitude {
     let width = left.len().max(right.len());
     let mut sum = Magnitude::with_capacity(width.saturating_add(1));
@@ -347,10 +342,8 @@ fn multiply_magnitudes(left: &[Limb], right: &[Limb]) -> Magnitude {
 }
 
 /// Divide a magnitude in place by [`DECIMAL_CHUNK`], returning the remainder.
-///
-/// Decimal rendering is the only division in the type, and its divisor is that
-/// constant, so the zero-divisor case the record leaves open does not arise
-/// here: `checked_div` states it and the fallback is unreachable.
+/// Decimal rendering is the only division in the type and its divisor is that
+/// nonzero constant, so `checked_div`'s fallback is unreachable.
 fn divide_by_decimal_chunk(magnitude: &mut Magnitude) -> Limb {
     let divisor = u64::from(DECIMAL_CHUNK);
     let mut remainder: u64 = 0;
@@ -371,8 +364,8 @@ fn divide_by_decimal_chunk(magnitude: &mut Magnitude) -> Limb {
 mod tests {
     use super::*;
 
-    /// The 64-bit range the type used to be, plus the limb boundaries the
-    /// representation is built out of.
+    /// The 64-bit range plus the limb boundaries the representation is built
+    /// out of.
     const EDGES: [i64; 11] = [
         0,
         1,
@@ -401,8 +394,7 @@ mod tests {
 
     #[test]
     fn arithmetic_agrees_with_a_wider_machine_integer() {
-        // i128 is the oracle wherever both can answer, which is what makes the
-        // hand-rolled limb arithmetic checkable rather than self-consistent.
+        // i128 is the oracle wherever both can answer.
         for left in EDGES {
             for right in EDGES {
                 let (left_wide, right_wide) = (i128::from(left), i128::from(right));
@@ -431,8 +423,7 @@ mod tests {
 
     #[test]
     fn a_product_beyond_the_machine_range_is_exact() {
-        // 2^64 has no i64, and the square of i64::MAX has no i128 either, so
-        // this is the case a fixed-width type answers with a failure.
+        // 2^64 has no i64, and the square of i64::MAX has no i128 either.
         let two = int(2);
         let mut power = int(1);
         for _ in 0..64u32 {
@@ -454,8 +445,9 @@ mod tests {
 
     #[test]
     fn zero_has_one_representation() {
-        // Sign travels beside the magnitude, so a negative zero is constructible
-        // in principle. Normalization is what keeps equality and hashing right.
+        // Sign travels beside the magnitude, so a negative zero is
+        // constructible in principle; normalization keeps equality and
+        // hashing right.
         let negative_zero = int(-5).added(&int(5));
         assert_eq!(negative_zero, Int::zero());
         assert!(!negative_zero.is_negative());
@@ -482,9 +474,9 @@ mod tests {
             );
         }
 
-        // A leading zero byte spells a value that already has an encoding, and
-        // so does a negative zero. Both are refused rather than normalized, so
-        // one value keeps one digest.
+        // A leading zero byte spells a value that already has an encoding,
+        // and so does a negative zero. Both are refused rather than
+        // normalized, so one value keeps one digest.
         assert_eq!(Int::from_sign_and_magnitude(false, &[0, 1]), None);
         assert_eq!(Int::from_sign_and_magnitude(false, &[0]), None);
         assert_eq!(Int::from_sign_and_magnitude(true, &[]), None);

@@ -1,15 +1,8 @@
-//! The canonical wire primitives shared by every versioned pith encoding.
-//!
-//! The private manifest encoder owns the write half: a little-endian `u64`
-//! length followed by raw bytes, so two encodings that differ only by field
-//! boundaries cannot collide. This module owns the matching read half and
-//! re-exports both, so a persistence adapter outside `pith-core` builds on the
-//! same primitive rather than a second implementation of it.
-//!
-//! A *digest* manifest and a *storage* encoding are different contracts even
-//! when they share these primitives. Decision 0023 keeps the digest manifest
-//! format owned by its producer; decision 0024 makes the storage encoding a
-//! separately versioned contract. Sharing the primitive does not couple them.
+//! The canonical wire primitives shared by every versioned pith encoding: a
+//! little-endian `u64` length prefix with its reader, so encodings that
+//! differ only by field boundaries cannot collide. A digest manifest and a
+//! storage encoding are separate contracts even where they share these
+//! primitives.
 
 pub use crate::manifest::{encode_bytes, encode_length, encode_str};
 pub use crate::value_codec::CanonicalDecodeError;
@@ -172,14 +165,10 @@ pub fn encode_sequence<T>(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Shared record primitives
-//
-// Encodings outside `pith-core` (the engine-state storage codec) need the same
-// byte layout for these small shared types as the action-contract encoding
-// uses. Defining them once here keeps a capability or a content reference from
-// acquiring two spellings on disk.
-// ---------------------------------------------------------------------------
+// Shared record primitives: encodings outside `pith-core` (the engine-state
+// storage codec) need the same byte layout for these small shared types as
+// the action-contract encoding, so a capability or content reference cannot
+// acquire two spellings on disk.
 
 use crate::action::{ActionInputContent, CapabilityRequirement, Content, OutputKind};
 

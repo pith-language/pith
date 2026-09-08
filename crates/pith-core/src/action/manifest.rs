@@ -8,9 +8,8 @@ use super::{
 use crate::codec::{encode_content, output_kind_tag};
 use crate::manifest::{encode_length, encode_str};
 
-// These tags spell the manifest, not the action codec; the equality with
-// `action_codec`'s tag values is incidental, and the two encodings change
-// independently.
+// These tags spell the manifest; the equality with `action_codec`'s tag
+// values is incidental, and the two encodings change independently.
 const TAG_PROGRAM_HOST_PATH: u8 = 0;
 const TAG_PROGRAM_CONTENT: u8 = 1;
 const TAG_EXIT_SUCCESS_REQUIRED: u8 = 0;
@@ -22,10 +21,9 @@ const TAG_NETWORK_ALLOW_HOSTS: u8 = 1;
 const TAG_NETWORK_ALLOW_ALL: u8 = 2;
 
 impl ActionSpec {
-    /// Derive a stable digest from a valid declared contract.
-    ///
-    /// This digest identifies the specification, not a resolved execution or
-    /// reusable cache entry.
+    /// Derive a stable digest from a valid declared contract. The digest
+    /// identifies the specification, not a resolved execution or reusable
+    /// cache entry.
     ///
     /// # Errors
     /// Returns `E-1105` when [`ActionSpec::validate`] rejects the contract.

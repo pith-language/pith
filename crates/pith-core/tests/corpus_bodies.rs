@@ -1,14 +1,9 @@
-//! The corpus measurement of the represented-body constructor set (decision
-//! 0062): every pure rule body the four first-party domains registered is
-//! either expressed here as a hand-built [`RuleBody`] that validates and
-//! round-trips, or named below with the constructor it waits for.
-//!
-//! The interfaces and declaration shapes mirror the live tables in `xylem`,
-//! `stele`, and the peer fixture domain; the coordinates and representations are
-//! copied, not approximated, so a body expressed here is a body a migration
-//! could carry. M-11 ships no evaluator, so expression means construction,
-//! validation against the mirrored interface, and a canonical-encoding round
-//! trip — the round M-12's interpreter and M-13's notation build on.
+//! The represented-body corpus: every pure rule body the first-party
+//! domains register is either expressed here as a hand-built [`RuleBody`] or
+//! named in `NAMED` with the constructor it waits for. Interfaces and
+//! representations mirror the live `xylem`, `stele`, and peer-domain tables so
+//! a body expressed here is one a migration could carry. Nothing evaluates a
+//! body; expression means construction, validation, and a round trip.
 
 use pith_core::{
     BodyExpr, BodyRequest, DeclarationTable, Interface, MatchArm, NominalType, RecordField, Rule,
@@ -16,11 +11,11 @@ use pith_core::{
 };
 
 // ---------------------------------------------------------------------------
-// The one unexpressible body, named with what it waits for.
+// The unexpressible bodies, named with what they wait for.
 // ---------------------------------------------------------------------------
 
-/// The corpus rule bodies the constructor set cannot express, each with the
-/// reason. A body leaves this list only by amendment to 0062.
+/// Bodies the constructor set cannot express, each with the reason. A body
+/// leaves this list only when the set grows to express it.
 const NAMED: &[(&str, &str)] = &[(
     "phloem.resolve",
     "version ordering is a host trait object selected by a request-visible \
@@ -37,8 +32,7 @@ mod xylem {
 
     use super::*;
 
-    /// The domain's own shape: one table behind a `OnceLock`, each type named
-    /// once and derived from it.
+    /// Xylem's declared types, built once from a single table.
     struct Declarations {
         toolchain: Type,
         c_source: Type,
@@ -97,8 +91,8 @@ mod xylem {
         Type::List(Box::new(provided_header_record()))
     }
 
-    /// The discovered header set is a bare `List<Text>`, not a nominal: the
-    /// parser's canonical order is the type's whole discipline.
+    /// The discovered header set is a bare `List<Text>`, not a nominal:
+    /// canonical order is all the type carries.
     pub fn headers() -> Type {
         list(Type::Text)
     }
@@ -637,16 +631,12 @@ fn empty_list(element: Type) -> BodyExpr {
     }
 }
 
-/// Deepen every free binder reference by `extra`: an expression correct at one
-/// scope stays correct under `extra` more pushed binders, which is what
-/// embedding a captured subexpression inside a fold or case requires. The
-/// cutoff keeps references a construct binds internally pointing where they
-/// did.
-///
-/// A match is refused rather than descended into: whether an arm binds a
-/// payload depends on the sum being eliminated, which the syntax does not
-/// carry, and the corpus never embeds one under additional binders. The
-/// general walk belongs to the elaborator M-12 builds.
+/// Deepen every free binder reference by `extra`, leaving bound references
+/// below the cutoff alone: an expression correct at one scope stays correct
+/// under more pushed binders. A match is refused rather than descended into:
+/// whether an arm binds a payload depends on the sum being eliminated, which
+/// the syntax does not carry, and the corpus never embeds one under
+/// additional binders.
 fn shift(expression: &BodyExpr, extra: usize) -> BodyExpr {
     deepen(expression, extra, 0)
 }
@@ -845,11 +835,9 @@ fn reverse(list_of_type: Type, source: BodyExpr) -> BodyExpr {
 }
 
 /// The first element of `source` satisfying `holds` over the element at
-/// `Bound(0)`, or the failure `miss` names. The collect-then-case shape keeps
-/// the miss a failure rather than a fabricated value.
-///
-/// `holds` builds its predicate at the fold-step scope, so a captured
-/// expression it embeds must arrive already deepened by two.
+/// `Bound(0)`, or the failure `miss` names. `holds` builds its predicate at
+/// the fold-step scope, so a captured expression it embeds must arrive
+/// already deepened by two.
 fn first_matching(
     element: Type,
     source: BodyExpr,
@@ -876,9 +864,8 @@ fn first_matching(
     }
 }
 
-/// Split `text` on every occurrence of `separator` (decision 0064): empty
-/// fields kept, an empty text one empty field, an empty separator never
-/// matching.
+/// Split `text` on every occurrence of `separator`: empty fields kept, an
+/// empty text one empty field, an empty separator never matching.
 fn break_on(source: BodyExpr, separator: &str) -> BodyExpr {
     BodyExpr::TextBreak {
         text: Box::new(source),
@@ -901,11 +888,8 @@ fn join(parts: BodyExpr, separator: &str) -> BodyExpr {
 }
 
 /// `strip_prefix`: when `source` starts with `prefix`, the remainder after the
-/// first occurrence; otherwise `source` unchanged. The first field of a split
-/// is empty exactly when the text began with the separator, and the remaining
-/// fields joined are the remainder. One strip, not the host body's repeated
-/// one — `././a.h` keeps its second prefix, the narrowing a comment at the
-/// test names.
+/// first occurrence; otherwise `source` unchanged. Strips once, where the host
+/// body loops: `././a.h` keeps its second prefix.
 fn strip_prefix(source: BodyExpr, prefix: &str) -> BodyExpr {
     BodyExpr::MatchList {
         list: Box::new(break_on(source.clone(), prefix)),
@@ -921,9 +905,8 @@ fn strip_prefix(source: BodyExpr, prefix: &str) -> BodyExpr {
 }
 
 /// The space-separated fields of `source` that are not empty, in reverse
-/// source order. One separator, not the host parse's whitespace class —
-/// make's joined prerequisite list separates on single spaces, and the
-/// narrowing is named at the test.
+/// source order. One separator, where the host parse admits any whitespace:
+/// make's prerequisite list separates on single spaces.
 fn nonempty_fields(source: BodyExpr) -> BodyExpr {
     fold(
         break_on(source, " "),
@@ -968,8 +951,7 @@ fn dedup_sorted(sorted: BodyExpr, element: Type) -> BodyExpr {
 
 /// Everything after a list's first element: the depfile's tokens without the
 /// make target, or a template scan's pieces without the text before the first
-/// delimiter. The empty arm is the unreachable no-first-element case a case
-/// construct demands anyway.
+/// delimiter.
 fn tail_of(source: BodyExpr, element: Type) -> BodyExpr {
     BodyExpr::MatchList {
         list: Box::new(source),
@@ -979,9 +961,8 @@ fn tail_of(source: BodyExpr, element: Type) -> BodyExpr {
 }
 
 /// Whether a bindings list `{name: Text, value: Text}` holds `name`. Both
-/// arguments are correct at the caller's scope; the name moves two binders
-/// deeper to reach the fold's step, and the bindings themselves are the fold's
-/// source, read at the scope the fold runs at.
+/// arguments arrive at the caller's scope; the name shifts two binders deeper
+/// to reach the fold's step.
 fn name_is_bound(name: &BodyExpr, bindings: &BodyExpr) -> BodyExpr {
     fold(
         bindings.clone(),
@@ -1026,11 +1007,11 @@ fn assert_expressed(module: &str, label: &str, interface: &Interface, body: &Rul
 }
 
 // ---------------------------------------------------------------------------
-// xylem: the three action wrappers
+// xylem: the action wrappers
 // ---------------------------------------------------------------------------
 
 /// `NeedAction` with the rule's own inputs forwarded verbatim, then the
-/// action's result passed through: the whole of link, generate, and test.
+/// action's result passed through.
 fn action_passthrough(interface: &Interface) -> RuleBody {
     let forwarded: Box<[BodyExpr]> = (0..interface.inputs.len())
         .rev()
@@ -1075,11 +1056,11 @@ fn xylem_test_entry_is_expressed() {
 /// The depfile parse the host body runs between its two actions: decode the
 /// captured bytes, join backslash-newline continuations, split the fields,
 /// drop the make target, canonicalize `./` spellings, sort and deduplicate,
-/// and drop the source's own prerequisite — then request the compile. Two
-/// narrowings against the host parse, both formatter-shaped rather than
-/// contractual: fields split on the single space make emits (the host's
-/// `split_whitespace` admits every whitespace), and `./` strips once (the
-/// host loops). UTF-8 refusal keeps its constructor's own message.
+/// and drop the source's own prerequisite, then request the compile. Two
+/// narrowings against the host parse: fields split on the single space make
+/// emits (the host's `split_whitespace` admits every whitespace), and `./`
+/// strips once (the host loops). Invalid UTF-8 keeps its constructor's own
+/// refusal.
 #[test]
 fn xylem_compile_entry_is_expressed() {
     let interface = xylem::compile_interface();
@@ -1090,8 +1071,7 @@ fn xylem_compile_entry_is_expressed() {
             &[bound(2), bound(1), bound(0)],
         ),
         resume: Box::new(BodyExpr::NeedBlob {
-            // The discovery pass completed with a depfile; its blob identity
-            // is what the entry materializes.
+            // The discovery pass returns the depfile's blob identity.
             content: Box::new(BodyExpr::Unwrap {
                 nominal: Box::new(bound(0)),
             }),
@@ -1198,7 +1178,7 @@ fn stele_compose_system_is_expressed() {
                 resume: Box::new({
                     // Under [unit-text(0) passwd-text(1) boot-text(2)
                     // file-set(3) users-table(4) unit(5) repl(6) units(7)
-                    // policy(8) users(9) etc(10) boot(11) tools(12)] — the
+                    // policy(8) users(9) etc(10) boot(11) tools(12)]: the
                     // first batch pushed [file-set, table, unit], so the
                     // unit is three binders out.
                     let machine = field("machine")(BodyExpr::Unwrap {
@@ -1234,10 +1214,9 @@ fn stele_compose_system_is_expressed() {
 // ---------------------------------------------------------------------------
 
 /// The keyed merge both file and user composition run: decorate each entry
-/// with its owner and key, sort by key then owner, then fold with the
-/// head-of-kept case — agreeing entries collapse, one key naming two values
-/// fails naming both owners — and finally rebuild the declared entry shape in
-/// key order.
+/// with its owner and key, sort by key then owner, then fold where agreeing
+/// neighbors collapse and one key naming two values fails naming both owners,
+/// and finally rebuild the declared entry shape in key order.
 #[expect(
     clippy::too_many_arguments,
     reason = "a keyed merge is parameterized by its key, value, and rebuild projections"
@@ -1394,8 +1373,7 @@ fn flat_unit_type() -> Type {
     ])
 }
 
-/// The policy's behavior for `name`, defaulting to agree: a fold over the
-/// policy entries whose accumulator is the current answer.
+/// The policy's behavior for `name`, defaulting to agree.
 fn policy_behavior(policy_list: BodyExpr, name: &str) -> BodyExpr {
     fold(
         policy_list,
@@ -1413,11 +1391,11 @@ fn policy_behavior(policy_list: BodyExpr, name: &str) -> BodyExpr {
 }
 
 /// One merged field under `policy_lookup` and `contributions`, both correct at
-/// the scope the result lands in: agree checks every carrier against the
-/// first and takes that carrier's value; concat appends every carrier's list
-/// in owner order and canonicalizes it. A concat-named field that is not a
-/// list is the refusal the host body raises at its decode gate — the typed
-/// body cannot append a text, so it fails here instead.
+/// the scope the result lands in: agree checks every carrier against the first
+/// and takes that carrier's value; concat appends every carrier's list in
+/// owner order, then sorts and deduplicates. A concat-named field that is not
+/// a list fails here, where the host body raises the refusal at its decode
+/// gate: the typed body cannot append a text.
 fn merged_field(
     name: &str,
     field_type: Type,
@@ -1516,7 +1494,7 @@ fn merged_field(
 /// Apply every replacement in order: each names a field, the owner it expects
 /// to be replacing, and the value that takes the field. A replacement whose
 /// field is not one of the unit's, or whose owner no longer declares it, is
-/// the refusal 0052 spells; otherwise the value lands on every carrier.
+/// refused; otherwise the value lands on every carrier.
 fn replacements_applied(contributions: BodyExpr, replacements: BodyExpr) -> BodyExpr {
     let unit_fields = ["after", "description", "exec", "name", "wants"];
     // Inside the outer step: replacement(0) carried(1).
@@ -1550,9 +1528,8 @@ fn replacements_applied(contributions: BodyExpr, replacements: BodyExpr) -> Body
     // The value lands on every carrier: a case on the field's name selects
     // which field the rebuilt record carries it in. Inside the mapping fold:
     // carrier(0) mapped-so-far(1) replacement(2).
-    // A replacement's value is a text, so only a text field can receive it.
-    // The untyped host body would land it on a list field and fail later at
-    // a decode gate; the typed body refuses it here, at the replacement.
+    // A replacement's value is a text, so only a text field can receive it;
+    // the host body would land it on a list field and fail at a decode gate.
     let replaceable = ["description", "exec", "name"];
     let rebuilt_record = |name: &str| {
         let fields: Vec<(&str, BodyExpr)> = unit_fields
@@ -1775,11 +1752,9 @@ fn stele_render_unit_is_expressed() {
 
 /// The user-table projection. The host body narrows uid and gid to a machine
 /// integer because its formatter takes one, refusing ids outside that range;
-/// the represented body renders the arbitrary-precision decimal instead and
-/// accepts what the host body refuses. The narrowing is a formatter boundary,
-/// not a designed contract, and integer comparison — the constructor that
-/// would restore the refusal — stays out until a domain needs it for its own
-/// sake.
+/// the represented body renders the arbitrary-precision decimal and accepts
+/// what the host refuses. That narrowing is a formatter boundary, not a
+/// designed contract.
 #[test]
 fn stele_render_passwd_is_expressed() {
     let interface = stele::render_passwd_interface();
@@ -1939,8 +1914,8 @@ fn phloem_package_library_is_expressed() {
 
 /// The merged header set: the package's own includes joined with every
 /// dependency's offered headers, path-sorted, agreeing duplicates collapsed,
-/// and one spelling naming two contents the refusal the merge names both
-/// digests for. `own` and `libraries` are correct at the caller's scope.
+/// and a path naming two contents refused with both digests. `own` and
+/// `libraries` are correct at the caller's scope.
 fn merged_provided(own: BodyExpr, libraries: BodyExpr) -> BodyExpr {
     let header = xylem::provided_header_record();
     let everything = fold(
@@ -2063,9 +2038,9 @@ fn phloem_package_build_is_expressed() {
 
 /// The placeholder `piece` (the text after one `{{`) names: the text up to the
 /// next `}}`, or the refusal when the template opens a placeholder it never
-/// closes. A split yields at least one field, so the outer empty arm — a
-/// piece that cannot even be split — never runs; the inner empty arm is the
-/// unclosed case itself.
+/// closes. A split yields at least one field, so the outer empty arm (a piece
+/// that cannot even be split) never runs; the inner empty arm is the unclosed
+/// case.
 fn placeholder_of(piece: BodyExpr) -> BodyExpr {
     let unclosed = || {
         fail(&[lit(text(
@@ -2084,12 +2059,12 @@ fn placeholder_of(piece: BodyExpr) -> BodyExpr {
 }
 
 /// The template scan the host body runs between its blob read and its render
-/// request: decode the template, walk the `{{`..`}}` pieces in order, and
-/// refuse naming the first placeholder the bindings do not bind — then request
-/// the render with the entry's own inputs forwarded. The host checks each
-/// placeholder as it scans; the body collects the names and finds the first
-/// unbound one, which names the same placeholder the host's first failure
-/// would. UTF-8 refusal keeps its constructor's own message.
+/// request: decode the template, walk the `{{`..`}}` pieces in order, refuse
+/// naming the first placeholder the bindings do not bind, then request the
+/// render with the entry's own inputs forwarded. The host checks each
+/// placeholder as it scans; the body collects names and finds the first
+/// unbound one, the same placeholder the host's first failure names. Invalid
+/// UTF-8 keeps its constructor's own refusal.
 #[test]
 fn example_render_entry_is_expressed() {
     let interface = example::render_interface();
@@ -2104,7 +2079,7 @@ fn example_render_entry_is_expressed() {
                 bytes: Box::new(bound(0)),
             }),
             rest: Box::new(BodyExpr::Let {
-                // N: the placeholder names, in scan order — the pieces after
+                // N: the placeholder names, in scan order: the pieces after
                 // the first `{{`, each cut at its `}}`. T(0).
                 bound: Box::new(reverse(
                     Type::Text,
@@ -2186,8 +2161,8 @@ const EXPRESSED: &[&str] = &[
     "example.render-entry",
 ];
 
-/// The corpus is the fifteen pure rule bodies the four first-party domains
-/// register: fourteen expressed above, one named with what it waits for.
+/// The expressed and named lists together are the whole corpus, and no body
+/// is in both.
 #[test]
 fn the_corpus_is_fifteen_bodies() {
     assert_eq!(EXPRESSED.len() + NAMED.len(), 15);

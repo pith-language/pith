@@ -1,16 +1,11 @@
-//! Declarations and the per-module table that holds them (decision 0047).
+//! Declarations and the per-module table that holds them: a nominal type
+//! over a structural representation, a sum over a fixed constructor set, and
+//! a structural alias that expands to its target.
 //!
-//! Three things are declarable: a nominal type over a structural
-//! representation, a declared sum over a fixed constructor set, and a structural
-//! alias that expands to its target. A declaration's identity is its
-//! *coordinate* — the module identity plus the declared name — and its revision
-//! is a digest over its body. That is decision 0023's two-halves shape applied
-//! to types: the coordinate survives a representation change, the digest does
-//! not.
-//!
-//! The table is what makes a coordinate meaningful. It refuses a module that
-//! declares one name twice, and it refuses a recursive alias, which has no
-//! finite canonical form because expansion is its only semantics.
+//! A declaration's identity is its coordinate (module plus declared name);
+//! its revision is a digest over its body, so a representation change moves
+//! the revision but not the identity. The table refuses a duplicate name and
+//! a recursive alias, which has no finite canonical form.
 
 use std::collections::BTreeMap;
 
@@ -23,12 +18,8 @@ use crate::value::{SumConstructor, Type};
 use crate::value_codec::{decode_type_payload, encode_type_payload as encode_type_manifest};
 
 /// The stable coordinate of a declaration: a module identity and a declared
-/// name (decision 0047).
-///
-/// Two modules declaring the same short name are two declarations, because the
-/// key is the pair. The module identity is accepted at the registration
-/// boundary, as decision 0023 already accepts for rule identities; what a
-/// module identity is beyond a string stays 0023's and 0038's open question.
+/// name. Two modules declaring the same short name are two declarations,
+/// because the key is the pair.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Coordinate {
     pub module: Box<str>,
@@ -44,12 +35,10 @@ impl Coordinate {
     }
 
     /// Split a dotted spelling back into a coordinate, for the best-effort
-    /// declaration [`crate::Value::value_type`] synthesizes from a value's name.
-    ///
-    /// The last dot separates the module from the name, so a module identity
-    /// containing a dot round-trips as a longer module and the shorter name.
-    /// That ambiguity is recorded in decision 0047; the prototype's population
-    /// is single-segment module identities.
+    /// declaration [`crate::Value::value_type`] synthesizes from a value's
+    /// name. The last dot separates the module from the name, so a module
+    /// identity containing a dot round-trips as a longer module and the
+    /// shorter name.
     #[must_use]
     pub fn parse(spelling: &str) -> Self {
         match spelling.rsplit_once('.') {
@@ -58,18 +47,14 @@ impl Coordinate {
         }
     }
 
-    /// The dotted spelling a value carries and a diagnostic renders.
+    /// The dotted spelling a value carries and a diagnostic renders: a value
+    /// names its type with this string, being data rather than a coordinate.
+    /// The spelling is ambiguous when a module identity contains a dot;
+    /// module identities are currently single-segment, and a dot-tolerant
+    /// grammar belongs to the module-system record.
     ///
-    /// A value names its type with this string rather than with a coordinate,
-    /// because a value is data (decision 0047). The spelling is ambiguous when a
-    /// module identity contains a dot; the prototype's population is
-    /// single-segment module identities, and the grammar belongs to the
-    /// module-system record.
-    ///
-    /// Inverse of [`Self::parse`] on every input, including a dotless one: a
-    /// coordinate with no module spells as the bare name, so the best-effort
-    /// declaration `value_type` synthesizes from a dotless value name spells
-    /// back to that name and reflexivity holds.
+    /// Inverse of [`Self::parse`] on every input: a coordinate with no module
+    /// spells as the bare name, so dotless names round-trip.
     #[must_use]
     pub fn spelling(&self) -> String {
         if self.module.is_empty() {
@@ -82,9 +67,9 @@ impl Coordinate {
 /// What a declaration declares.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum DeclarationBody {
-    /// A nominal type over a structural representation. `xylem.CSource` over
-    /// `Blob` is one. Two nominals over the same representation are distinct,
-    /// which is the reason identity is a coordinate rather than a content hash.
+    /// A nominal type over a structural representation, as `xylem.CSource`
+    /// over `Blob`. Two nominals over the same representation are distinct,
+    /// which is why identity is a coordinate and not a content hash.
     Nominal { representation: Type },
     /// A declared sum over a fixed constructor set, sorted by constructor name.
     Sum { constructors: Box<[SumConstructor]> },
@@ -123,12 +108,9 @@ impl Declaration {
     }
 
     /// The declaration's revision: a domain-separated digest over its
-    /// coordinate, its kind, and the canonical encoding of its body.
-    ///
-    /// Three things do not participate, on the ground that a digest must not
-    /// move for what no reader can observe: a doc comment, the declaration's
-    /// position in its table, and formatting. One thing does: a change to what
-    /// the declaration says.
+    /// coordinate, its kind, and the canonical encoding of its body. A doc
+    /// comment, the declaration's position in its table, and formatting do
+    /// not participate; a change to what the declaration says does.
     #[must_use]
     pub fn digest(&self) -> DeclarationDigest {
         DeclarationDigest::of_manifest(&self.encode_canonical())
@@ -217,10 +199,9 @@ impl Declaration {
     }
 }
 
-/// The declaration grammar's spelling of a body. This is the source form a
-/// person wrote, so tooling that shows a declaration back — `pith explore`,
-/// a hover — echoes the grammar instead of inventing a second notation for
-/// one shape.
+/// The declaration grammar's spelling of a body, the source form a person
+/// wrote, so tooling that shows a declaration back (`pith explore`, a hover)
+/// echoes the grammar instead of inventing a second notation.
 impl std::fmt::Display for DeclarationBody {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -275,8 +256,8 @@ impl From<&Declaration> for DeclarationView {
             rendered: declaration.body().to_string().into(),
             digest: declaration.digest().digest().to_string().into(),
             // Doc text is not part of a declaration; it rides the
-            // position-carrying sidecar (decision 0061), so the driver that
-            // holds the sidecar fills this in.
+            // position-carrying sidecar, so the driver that holds the
+            // sidecar fills this in.
             documentation: Box::from(""),
         }
     }
@@ -290,11 +271,10 @@ pub enum DeclarationError {
     DuplicateName { module: Box<str>, name: Box<str> },
     /// The name is empty or contains the coordinate separator.
     InvalidName { module: Box<str>, name: Box<str> },
-    /// An alias whose target reaches itself. Referencing an alias yields its
-    /// target expanded, so a recursive one has no finite canonical form:
-    /// expansion is its only semantics and it does not terminate. A nominal or
-    /// a sum may recurse, because its occurrence inside its own body is a cut
-    /// rather than an expansion.
+    /// An alias whose target reaches itself. Expansion is an alias's only
+    /// semantics, so a recursive one has no finite canonical form and does
+    /// not terminate. A nominal or a sum may recurse, because its occurrence
+    /// inside its own body is a cut rather than an expansion.
     RecursiveAlias { module: Box<str>, name: Box<str> },
 }
 
@@ -320,12 +300,11 @@ impl std::fmt::Display for DeclarationError {
 
 impl std::error::Error for DeclarationError {}
 
-/// A module's declarations, keyed by declared name.
-///
-/// Registration order is not content: two tables holding the same declarations
-/// in different orders derive the same digest per declaration, which is what
-/// keeps a reordering from moving a rule's revision. Entries are held in sorted
-/// order so iteration is deterministic without an ordered map.
+/// A module's declarations, keyed by declared name and held in sorted order,
+/// so iteration is deterministic. Registration order is not content: two
+/// tables holding the same declarations in different orders derive the same
+/// digest per declaration, which is what keeps a reordering from moving a
+/// rule's revision.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeclarationTable {
     module: Box<str>,
@@ -356,11 +335,10 @@ impl DeclarationTable {
     /// Declare a sum over `constructors`, sorted by constructor name.
     ///
     /// # Errors
-    /// [`DeclarationError::DuplicateName`] when the module already declares the
-    /// name, and — reported under the same variant, with the constructor as the
-    /// name — when two constructors share one. There is no free sum constructor
-    /// to refuse a repeat any more, so this is where constructors are sorted and
-    /// a repeat is caught.
+    /// [`DeclarationError::DuplicateName`] when the module already declares
+    /// the name, or when two constructors share one (reported under the same
+    /// variant, with the constructor as the name; this is where sorting and
+    /// the repeat check happen).
     pub fn sum(
         &mut self,
         name: &str,
@@ -508,7 +486,7 @@ mod tests {
 
     #[test]
     fn two_modules_declaring_one_short_name_are_two_declarations() {
-        // The table's key is the pair, so this is not a collision (0047).
+        // The table's key is the pair, so this is not a collision.
         let mut xylem = DeclarationTable::new("xylem");
         let mut phloem = DeclarationTable::new("phloem");
         let one = xylem.nominal("Source", Type::Blob).unwrap();
@@ -523,7 +501,7 @@ mod tests {
     #[test]
     fn registration_order_does_not_move_a_digest() {
         // The claim the revision derivation rests on: reordering a table is not
-        // a change to any declaration in it (0047).
+        // a change to any declaration in it.
         let mut ascending = table();
         ascending.nominal("A", Type::Blob).unwrap();
         ascending.nominal("B", Type::Text).unwrap();
@@ -646,8 +624,9 @@ mod tests {
 
     #[test]
     fn a_recursive_nominals_digest_is_finite_and_distinguishes_its_shape() {
-        // The cut is what makes this terminate at all; that it also discriminates
-        // is what keeps a recursive declaration's revision honest.
+        // The cut is what makes the canonical form terminate; that it also
+        // discriminates shapes keeps a recursive declaration's revision
+        // meaningful.
         let build = |body: Type| {
             let mut table = table();
             table.nominal("Tree", body).unwrap();
@@ -693,7 +672,7 @@ mod tests {
             .alias("Headers", Type::List(Box::new(Type::Blob)))
             .unwrap();
         // An alias has no spelling at a use site, so referencing it is
-        // indistinguishable from writing the target (0047).
+        // indistinguishable from writing the target.
         assert_eq!(alias, Type::List(Box::new(Type::Blob)));
     }
 

@@ -1,8 +1,7 @@
 //! Typed semantic IR for the pith kernel: values, types, effects, rules.
 //!
-//! Pure data; evaluation lives in `pith-engine`. Splitting data from behavior
-//! lets a future alternate engine, test harness, or doc generator reuse this
-//! IR without pulling in the scheduler.
+//! Pure data; evaluation lives in `pith-engine`, which keeps this IR usable
+//! by a test harness or doc generator without the scheduler.
 
 pub mod action;
 mod action_codec;

@@ -1,4 +1,4 @@
-//! The five identity types of the pith kernel (decisions 0005, 0013).
+//! The identity types of the pith kernel.
 //!
 //! Each identity is a distinct type, so a `ContentId` does not type-check where
 //! a `SemanticId` is wanted.
@@ -25,7 +25,7 @@ define_arena!(
     ExternalArena,
     ExternalBrand,
     "External identity: an identifier assigned by an external system. Can change while the \
-     underlying object persists (decision 0013)."
+     underlying object persists."
 );
 
 define_arena!(
@@ -33,7 +33,7 @@ define_arena!(
     ManagedObjectArena,
     ManagedObjectBrand,
     "Managed-object identity: a durable external object a deployment owns and mutates across \
-     observations and platform re-creation (decision 0013)."
+     observations and platform re-creation."
 );
 
 /// Length in bytes of every blake3-derived digest in the kernel. The single
@@ -277,10 +277,10 @@ impl ActionSpecDigest {
 
     /// Restore a digest read back from a persistence adapter.
     ///
-    /// Derivation is the only way to *establish* this identity; restoration
-    /// asserts one that was already derived and then stored. Adapters
-    /// implementing durable engine state (decision 0024) need it because a
-    /// stored record holds the digest, not the manifest that produced it.
+    /// Derivation establishes this identity; restoration asserts one already
+    /// derived and stored. Adapters implementing durable engine state need it
+    /// because a stored record holds the digest, not the manifest that
+    /// produced it.
     pub const fn from_digest(digest: ContentDigest) -> Self {
         Self(digest)
     }
@@ -296,7 +296,7 @@ impl std::fmt::Debug for ActionSpecDigest {
     }
 }
 
-/// Stable identity of a semantic rule declaration (decision 0023).
+/// Stable identity of a semantic rule declaration.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RuleIdentity(ContentDigest);
 
@@ -327,7 +327,7 @@ impl std::fmt::Debug for RuleIdentity {
     }
 }
 
-/// Cache-invalidating revision of a rule's executable semantics (decision 0023).
+/// Cache-invalidating revision of a rule's executable semantics.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RuleRevision {
     rule_identity: RuleIdentity,
@@ -405,14 +405,13 @@ impl std::fmt::Debug for PureComputationDigest {
 }
 
 /// Stable digest of one declaration: its coordinate, its kind, and the canonical
-/// encoding of its body (decision 0047).
+/// encoding of its body.
 ///
-/// What it covers is chosen so that it moves for a change a reader can observe
-/// and not otherwise. A doc-comment edit, the declaration's position in its
-/// module's table, and formatting are all outside it; the representation type of
-/// a nominal, the constructor set of a sum, and a constructor payload's type are
-/// all inside it. That asymmetry is the Dhall 1.17.0 lesson: a digest whose basis
-/// includes what no reader can see breaks compatibility for nothing.
+/// The basis covers what a reader can observe: formatting, doc comments, and
+/// position in the module's table are outside it; a nominal's representation
+/// type, a sum's constructor set, and a constructor payload's type are inside
+/// it. The Dhall 1.17.0 lesson: digesting what no reader can see breaks
+/// compatibility for nothing.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct DeclarationDigest(ContentDigest);
 
@@ -439,13 +438,12 @@ impl std::fmt::Debug for DeclarationDigest {
     }
 }
 
-/// Stable digest of a represented rule body's canonical encoding (decision
-/// 0062).
+/// Stable digest of a represented rule body's canonical encoding.
 ///
 /// This is the revision half of a represented rule: the digest that moves when
 /// the elaborated body moves. The domain's version segment is the body-encoding
-/// version 0038's unresolved section asks for — a change to evaluator semantics
-/// is a domain bump, never a silent basis change.
+/// version: a change to evaluator semantics is a domain bump, never a silent
+/// basis change.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct BodyIrDigest(ContentDigest);
 
@@ -500,12 +498,13 @@ impl std::fmt::Debug for ModuleAbiDigest {
 }
 
 /// Stable digest of a canonical action rule application: the request that was
-/// asked for and the contract the rule planned from it (decision 0031).
+/// asked for and the contract the rule planned from it.
 ///
-/// The request half of action identity. What the executor resolved — the
-/// platform it ran on, the confinement it installed, the content it produced —
-/// is knowable only after execution, so decision 0031 tests those facts when a
-/// recorded attempt is considered for reuse and keeps them out of this digest.
+/// The request half of action identity. What the executor resolved (the
+/// platform it ran on, the confinement it installed, the content it
+/// produced) is knowable only after execution, so those facts are checked
+/// when a recorded attempt is considered for reuse and kept out of this
+/// digest.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ActionComputationDigest(ContentDigest);
 
@@ -533,12 +532,12 @@ impl std::fmt::Debug for ActionComputationDigest {
 }
 
 /// Stable digest of a canonical observation rule application: the request that
-/// was asked for and the subject the rule derived from it (decision 0060).
+/// was asked for and the subject the rule derived from it.
 ///
-/// The request half of observation identity, on 0031's split. The world half —
-/// the revision the observer attested when it looked — is knowable only after
-/// observing, so decision 0060 tests it when a recorded attempt is considered
-/// for reuse and keeps it out of this digest.
+/// The request half of observation identity, split from the world half. The
+/// world half (the revision the observer attested when it looked) is knowable
+/// only after observing, so it is checked when a recorded attempt is
+/// considered for reuse and kept out of this digest.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ObservationComputationDigest(ContentDigest);
 

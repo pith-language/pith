@@ -1,4 +1,4 @@
-//! The closed effect-category model (decisions 0019, 0022).
+//! The closed effect-category model.
 
 mod private {
     pub trait Sealed {}
@@ -20,23 +20,23 @@ pub trait EffectCategory: private::Sealed + 'static {
     const CACHEABLE_AS_RESULT: bool;
 }
 
-/// Computes from immutable values. Terminating by construction (0018); caches
+/// Computes from immutable values. Terminating by construction; caches
 /// indefinitely under its computation identity.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Pure;
 
 /// Bounded external work with declared inputs, outputs, platform, and
 /// capabilities. Cacheable by content identity when the executor honors the
-/// declared contract (A-6).
+/// declared contract.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Action;
 
 /// Reads external state, recording source, revision, and freshness. Not
-/// cacheable across revisions; carries a revision pin (0012).
+/// cacheable across revisions; carries a revision pin.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Observation;
 
-/// Changes external state. Not cacheable as a result (0019).
+/// Changes external state. Not cacheable as a result.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Mutation;
 

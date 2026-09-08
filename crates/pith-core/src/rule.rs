@@ -40,7 +40,7 @@ impl std::fmt::Display for Interface {
 }
 
 /// A request for a typed result. `label` exists only for diagnostics and
-/// provenance; selection uses `interface` exclusively (decision 0015).
+/// provenance; selection uses `interface` exclusively.
 #[derive(Clone, Debug)]
 pub struct Request<K: EffectCategory = Pure> {
     pub label: Box<str>,
@@ -62,7 +62,7 @@ pub struct Rule<K: EffectCategory = Pure> {
     effect: PhantomData<fn() -> K>,
 }
 
-/// The implementation tier a rule's body runs on (decision 0038). Host rules
+/// The implementation tier a rule's body runs on. Host rules
 /// keep the author-maintained [`BodyRevision`]; represented rules derive their
 /// revision from the body's canonical encoding.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -110,14 +110,11 @@ impl PureComputationKey {
     }
 }
 
-/// Persistent identity for an action rule application (decision 0031).
-///
-/// The request half of action identity: which rule, at which revision, was
-/// applied to which inputs, and what contract it planned from them. The
-/// execution half — resolved platform, installed confinement, produced content
-/// — is knowable only after the action has run, and a key computable only
-/// after running would have nothing to find. Decision 0031 tests those facts
-/// against a recorded attempt when reuse is considered.
+/// Persistent identity for an action rule application: which rule, at which
+/// revision, was applied to which inputs, and what contract it planned from
+/// them. Execution facts (resolved platform, confinement, produced content)
+/// are knowable only after running; when reuse is considered they are tested
+/// against a recorded attempt.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ActionComputationKey {
     pub rule_identity: RuleIdentity,
@@ -129,12 +126,9 @@ pub struct ActionComputationKey {
 
 impl ActionComputationKey {
     /// `spec_digest` is the digest of the contract `rule` planned from
-    /// `request`, which the caller has already computed to validate the plan.
-    ///
-    /// The key commits to it and to the request inputs. An action rule body
-    /// plans a contract from its inputs and completes a result from those same
-    /// inputs and the execution, so two requests that plan one contract can
-    /// still complete to different results.
+    /// `request`, which the caller computed to validate the plan. An action
+    /// body completes its result from the inputs as well as from the
+    /// execution, so the key commits to the inputs too.
     pub fn new(
         rule: &Rule<Action>,
         request: &Request<Action>,
@@ -150,11 +144,9 @@ impl ActionComputationKey {
     }
 
     /// The same key, derived from material a durable record holds rather than
-    /// from a live [`Rule`] and [`Request`].
-    ///
-    /// Decision 0033 has an action computation retain the interface and inputs
-    /// its key was built over, so a store can rebuild the key it filed the
-    /// record under and check it instead of trusting the digest beside it.
+    /// from a live [`Rule`] and [`Request`]. A store can rebuild the key it
+    /// filed a record under and check it instead of trusting the digest beside
+    /// it.
     pub fn from_parts(
         rule_identity: RuleIdentity,
         rule_revision: RuleRevision,
@@ -173,10 +165,9 @@ impl ActionComputationKey {
     }
 }
 
-/// Cache-invalidating identity of one observation rule application (decision
-/// 0060), on the split 0031 fixed for actions: the request half is a key, and
-/// the world half — the revision an observer attested — is tested when a
-/// recorded attempt is considered for reuse.
+/// Cache-invalidating identity of one observation rule application, on the
+/// same split the action key uses: the world half, the revision an observer
+/// attested, is tested when a recorded attempt is considered for reuse.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ObservationComputationKey {
     pub rule_identity: RuleIdentity,
@@ -187,9 +178,9 @@ pub struct ObservationComputationKey {
 }
 
 impl ObservationComputationKey {
-    /// `subject` is the value naming what is observed, which the observation
-    /// rule derived from `request`'s inputs the way an action rule plans a
-    /// contract. The key commits to it and to the request inputs.
+    /// `subject` names what is observed, derived from `request`'s inputs the
+    /// way an action rule plans a contract. The key commits to it and to the
+    /// request inputs.
     pub fn new(rule: &Rule<Observation>, request: &Request<Observation>, subject: &Value) -> Self {
         Self::from_parts(
             rule.identity,
@@ -350,12 +341,12 @@ impl<K: EffectCategory> Rule<K> {
 
 impl Rule<Pure> {
     /// Construct a represented rule whose revision derives from its body's
-    /// canonical encoding (decisions 0038, 0062): the digest domain's version
-    /// is the body-encoding version, so a change to evaluator semantics moves
-    /// the domain rather than the body bytes.
+    /// canonical encoding. The digest domain's version is the body-encoding
+    /// version, so a change to evaluator semantics moves the domain rather
+    /// than the body bytes.
     ///
-    /// The body is not re-validated here. Registration is the boundary that
-    /// validates; a rule built this way carries only the digest.
+    /// The body is not validated here; registration is the boundary that
+    /// validates.
     pub fn represented(
         module: &str,
         label: &str,
@@ -459,13 +450,8 @@ pub enum SelectOutcome {
 }
 
 /// The registered rules of one effect category, indexed by the interface they
-/// provide (decision 0057).
-///
-/// The arena is the population and the index is a view of it, so the table owns
-/// both and is the only way to add a rule. There is no accessor handing out a
-/// mutable rule: an interface that could be edited in place would leave the
-/// index naming a bucket the rule no longer belongs to, and registration is the
-/// one event either structure has to observe.
+/// provide. There is no mutable rule accessor: an interface edited in place
+/// would leave the index naming a bucket the rule no longer belongs to.
 pub struct RuleTable<K: EffectCategory = Pure> {
     rules: RuleArena<Rule<K>>,
     by_interface: IndexMap<Interface, SmallVec<[RuleId; 2]>>,
@@ -508,13 +494,7 @@ impl<K: EffectCategory> RuleTable<K> {
     }
 
     /// Select the rules providing the request's interface, independent of
-    /// registration order (decision 0015).
-    ///
-    /// The index keys on the interface under the same `Eq` the scan this
-    /// replaced evaluated per rule, so a bucket holds exactly the rules that
-    /// scan would have kept. Ordering the candidates is left to the ambiguous
-    /// branch, which is a failure path: a run that reports `E-1102` is about to
-    /// stop, and the ordinary outcome allocates nothing.
+    /// registration order.
     #[must_use]
     pub fn select(&self, request: &Request<K>) -> SelectOutcome {
         let Some(candidates) = self.by_interface.get(&request.interface) else {
@@ -1076,10 +1056,9 @@ mod derived_revisions {
 
     #[test]
     fn a_changed_representation_moves_the_revision_with_no_author_edit() {
-        // The reason decision 0047's last section exists. Before it, a rule's
-        // revision was a hand-written constant, so editing a nominal type's
-        // representation moved nothing and a cached result computed under the old
-        // one was still served.
+        // The revision is derived rather than hand-written, so editing a
+        // representation moves it; a stale constant would keep serving results
+        // computed under the old representation.
         let over_blob = revision_of(interface_over(
             declared_nominal("m", "CSource", Type::Blob),
             Type::Unit,
@@ -1093,14 +1072,12 @@ mod derived_revisions {
 
     #[test]
     fn an_unrelated_declaration_does_not_move_a_revision() {
-        // The other half of the granularity claim: the old constant moved every
-        // rule in a library at once, and a derived revision moves only the rules
-        // whose interface reaches what changed.
+        // A derived revision moves only the rules whose interface reaches what
+        // changed.
         let mut table = DeclarationTable::new("m");
         let source = table.nominal("CSource", Type::Blob).unwrap();
         let before = revision_of(interface_over(source.clone(), Type::Unit));
 
-        // Declaring something else, and changing what it is, is invisible here.
         let mut other = DeclarationTable::new("m");
         other.nominal("CSource", Type::Blob).unwrap();
         other.nominal("Unrelated", Type::Text).unwrap();
@@ -1129,8 +1106,9 @@ mod derived_revisions {
 
     #[test]
     fn a_declared_rules_identity_is_its_coordinate_and_survives_a_revision_move() {
-        // 0023's two halves, at the rule layer: the coordinate is stable across a
-        // representation change, the revision is not.
+        // Identity and revision are two halves, at the rule layer: the
+        // coordinate is stable across a representation change, the revision is
+        // not.
         let over_blob = Rule::<Pure>::declared(
             "m",
             "compile",
@@ -1155,10 +1133,8 @@ mod derived_revisions {
 
     #[test]
     fn a_body_revision_moves_the_revision_and_nothing_else() {
-        // The half the interface cannot see (decision 0023). Without it a host
-        // rule whose body changes while its interface holds still has no way to
-        // invalidate, which is what deleting the per-library constants would have
-        // cost if the derivation had been the only input.
+        // The half the interface cannot see: without it a body change under a
+        // stable interface could not invalidate.
         let interface = interface_over(declared_nominal("m", "CSource", Type::Blob), Type::Unit);
         let at = |body: u32| {
             Rule::<Pure>::declared(
@@ -1171,7 +1147,8 @@ mod derived_revisions {
         };
         assert_ne!(at(1).revision, at(2).revision);
         assert_eq!(at(1).revision, at(1).revision);
-        // The coordinate is not the revision: bumping a body leaves identity put.
+        // The coordinate is not the revision: a body bump leaves identity
+        // unchanged.
         assert_eq!(at(1).identity, at(2).identity);
     }
 
@@ -1197,8 +1174,7 @@ mod derived_revisions {
 
     #[test]
     fn a_body_revision_does_not_leak_across_rules() {
-        // Per rule, not per library: the defect the retired constants had in the
-        // other direction, where one edit moved every rule beside it.
+        // Per rule, not per library.
         let interface = interface_over(Type::Unit, Type::Unit);
         let bumped = Rule::<Pure>::declared(
             "m",
@@ -1222,9 +1198,8 @@ mod derived_revisions {
 
     #[test]
     fn a_represented_rule_derives_its_revision_from_its_body() {
-        // 0038's revision half: formatting and binder spelling cannot move a
-        // digest — there are no binder names to spell — and a change to the
-        // elaborated body must. The coordinate keeps 0023's identity half.
+        // Formatting cannot move a body digest: there are no binder names to
+        // spell. A change to the elaborated body must move it.
         let interface = interface_over(Type::Int, Type::Int);
         let body = |constant: i64| {
             crate::RuleBody::new(crate::BodyExpr::Let {

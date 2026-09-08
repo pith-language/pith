@@ -1,15 +1,9 @@
-//! Property tests for the canonical codecs in `pith-core`.
-//!
-//! Two contracts are fuzzed:
-//! 1. encode/decode round-trips for `Type`, `Value`, and `ActionSpec` storage;
-//! 2. decoding arbitrary bytes never panics — persistence adapters decode
-//!    untrusted stored input through these readers, so malformed bytes must
-//!    become an error rather than an index, allocation, or panic.
-//!
-//! The storage codec does not call `ActionSpec::validate`, so the round-trip
-//! strategy is free to produce contracts with arbitrary (possibly invalid)
-//! strings; the digest invariants over *valid* contracts are covered in
-//! `fuzz_action_spec.rs`.
+//! Property tests for the canonical codecs in `pith-core`: encode/decode
+//! round-trips for `Type`, `Value`, and `ActionSpec` storage, and decoding
+//! arbitrary bytes without panicking (persistence adapters decode untrusted
+//! stored input through these readers). The storage codec does not call
+//! `ActionSpec::validate`, so its strategy may produce invalid contracts and
+//! the digest invariants over valid contracts are separate.
 
 use pith_core::{
     ActionInput, ActionOutput, ActionProgram, ActionSpec, CanonicalDecodeError,
@@ -58,9 +52,6 @@ fn type_strategy() -> impl Strategy<Value = Type> {
         Just(Type::Blob),
         declaration_name().prop_map(|name| declared_nominal(&name, Type::Blob)),
         leaf_type_strategy().prop_map(|element| Type::List(Box::new(element))),
-        // Field names come from the fixed ascending alphabet above, so the
-        // slice already satisfies the closed-record shape and goes straight
-        // into the variant.
         proptest::collection::vec(leaf_type_strategy(), 0..3)
             .prop_map(|payloads| Type::Record(record_fields(payloads).into())),
         (
@@ -77,9 +68,8 @@ fn type_strategy() -> impl Strategy<Value = Type> {
     ]
 }
 
-/// Non-recursive types, so `type_strategy` stays finite: a list's element type
-/// and a record's field type are drawn from here, never from `type_strategy`
-/// itself.
+/// Non-recursive types, so `type_strategy` stays finite: list elements and
+/// record fields are drawn from here, never from `type_strategy`.
 fn leaf_type_strategy() -> impl Strategy<Value = Type> {
     prop_oneof![
         Just(Type::Unit),
@@ -89,12 +79,11 @@ fn leaf_type_strategy() -> impl Strategy<Value = Type> {
         Just(Type::Bytes),
         Just(Type::Blob),
         declaration_name().prop_map(|name| declared_nominal(&name, Type::Blob)),
-        // The recursion cut, so the generated population reaches the tag rather
-        // than only the hand-written fixtures (decision 0047).
+        // The recursion cut, so generation covers the tag itself, not only the
+        // hand-written fixtures below.
         Just(Type::Cut),
         // A nominal over something other than `Blob`, so the declared
-        // representation varies and the codec has to carry it rather than
-        // guessing.
+        // representation varies and the codec has to carry it.
         declaration_name()
             .prop_map(|name| declared_nominal(&name, Type::List(Box::new(Type::Text)))),
         // A recursive nominal, whose body reaches its own cut.
@@ -123,10 +112,10 @@ fn declared_sum(name: &str, constructors: [SumConstructor; 1]) -> Type {
     }
 }
 
-/// Integers on both sides of the boundary the type used to stop at: a machine
-/// integer, and a product of several of them, whose magnitude runs to hundreds
-/// of bits. The generated population is what holds the codec's minimal-magnitude
-/// rule against lengths no `i64` can produce (decision 0055).
+/// Integers across the whole range the type admits: a machine integer, and a
+/// product of several of them, whose magnitude runs to hundreds of bits. This
+/// population exercises the codec's minimal-magnitude rule at lengths no
+/// `i64` can produce.
 fn int_strategy() -> impl Strategy<Value = Int> {
     prop_oneof![
         any::<i64>().prop_map(Int::from),
@@ -185,9 +174,8 @@ fn value_strategy() -> impl Strategy<Value = Value> {
     ]
 }
 
-/// Valid absolute host paths for a host-path program (decision 0030). Built
-/// from a fixed alphabet so every generated path passes `is_valid_host_path`:
-/// absolute, NUL-free, no traversal components.
+/// Valid absolute host paths, built from a fixed alphabet so every generated
+/// path passes `is_valid_host_path`: absolute, NUL-free, no traversal.
 fn executable_path_strategy() -> impl Strategy<Value = Box<str>> {
     let components = ["a", "bin", "tool", "nix", "store", "gcc", "x86_64"];
     proptest::collection::vec(0u8..(components.len() as u8), 1..4).prop_map(move |indices| {
@@ -203,7 +191,7 @@ fn executable_path_strategy() -> impl Strategy<Value = Box<str>> {
 }
 
 /// Both program variants, so the round trip covers the tagged sum and not only
-/// the host-path arm (decision 0036).
+/// the host-path arm.
 fn program_strategy() -> impl Strategy<Value = ActionProgram> {
     prop_oneof![
         executable_path_strategy().prop_map(ActionProgram::HostPath),
@@ -364,8 +352,6 @@ proptest! {
 
     #[test]
     fn decoding_arbitrary_bytes_as_a_type_never_panics(bytes in bounded_bytes(256)) {
-        // The reader is fed untrusted stored bytes; it must return an error
-        // rather than panic or index out of bounds.
         let result = Type::decode_canonical(&bytes);
         prop_assert!(result.is_ok() || result.is_err());
     }
@@ -383,15 +369,11 @@ proptest! {
     }
 }
 
-/// The property above bounds its input at 256 bytes, which caps nominal nesting
-/// at about 28 levels and cannot reach the depth that overflows the stack. A
-/// stored row is not bounded that way: `Nominal` and `List` are the calculus's
-/// recursive constructors, so a long run of either tag recurses once per tag,
-/// and before the depth limit a few megabytes of them aborted the process
-/// instead of returning an error. That is not a panic a property test can
-/// catch, since a stack overflow is not unwindable — it is the one failure mode
-/// the "decoding arbitrary bytes never panics" invariant at the top of this
-/// file most needs to exclude, so it is asserted directly.
+/// The generated properties cap input size, which caps nesting far below the
+/// depth that overflows the stack, and a stack overflow is not a panic a
+/// property test can catch: the process aborts rather than unwinds. Before
+/// the depth limit, a few megabytes of recursive tags aborted the process
+/// instead of returning an error, so the limit is asserted directly.
 #[test]
 fn decoding_deeply_nested_nominal_values_fails_rather_than_overflowing() {
     // Each level is the nominal tag plus an empty name: one recursion per nine
@@ -432,8 +414,7 @@ fn decoding_deeply_nested_lists_fails_rather_than_overflowing() {
     )
 }
 
-/// The limit refuses a chain one level past it and accepts one at it, so it
-/// bounds rather than forbids.
+/// A chain exactly at the limit decodes; one level past it is refused.
 #[test]
 fn nesting_is_accepted_up_to_the_limit() {
     fn nest(levels: u32) -> Value {

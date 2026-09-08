@@ -1,12 +1,11 @@
-//! The canonical encoding of a represented rule body (decisions 0038, 0062).
+//! The canonical encoding of a represented rule body.
 //!
-//! The body is a grammar beside `Value` and `Type` with its own tag namespace
-//! and version gate, not a rider on `RECORD_ENCODING_VERSION`: bodies change
-//! at their own rate, and 0023 asks for the version to ride a digest domain
-//! so a semantic change is a domain bump rather than a silent basis change.
-//! The discipline is the canonical codec's — length-prefixed, depth-bounded,
-//! tag-numbered — with embedded values and types carried as length-prefixed
-//! payloads of the existing encodings.
+//! A grammar beside `Value` and `Type`, with its own tag namespace and
+//! version gate: bodies change at their own rate, and a semantic change is a
+//! digest-domain bump rather than a silent change of basis under
+//! `RECORD_ENCODING_VERSION`. The discipline is the canonical codec's
+//! (length-prefixed, depth-bounded, tag-numbered), with embedded values and
+//! types carried as length-prefixed payloads of the existing encodings.
 
 use crate::body::{BodyExpr, BodyRequest, MAX_BODY_DEPTH, MatchArm, RuleBody};
 use crate::codec::CanonicalReader;
@@ -16,10 +15,10 @@ use crate::value::{RecordField, Type, Value};
 use crate::value_codec::{CanonicalDecodeError, decode_type_payload, encode_type_payload};
 
 /// Version of the represented-body encoding, pinned at 1 until the first
-/// release (decision 0048). A grammar change under this gate is answered by
-/// discarding and rebuilding, and a change to evaluator semantics — anything
-/// that would move what a body means without moving these bytes — is a
-/// `pith:body-ir` domain bump instead.
+/// release. A grammar change under this gate is answered by discarding and
+/// rebuilding; a change to evaluator semantics, anything that would move what
+/// a body means without moving these bytes, is a `pith:body-ir` domain bump
+/// instead.
 pub const BODY_ENCODING_VERSION: u8 = 1;
 
 const TAG_LITERAL: u8 = 0;

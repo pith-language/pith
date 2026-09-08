@@ -87,8 +87,8 @@ impl SourceFile {
     }
 
     /// The span of a slice of this file's text. The slice must come from
-    /// [`SourceFile::source_text`] — a slice of some other string, including
-    /// the one this file was built from, yields a meaningless span, silently.
+    /// [`SourceFile::source_text`]; a slice of any other string, including
+    /// the one the file was built from, yields a silently meaningless span.
     pub fn span_of(&self, slice: &str) -> Span {
         let text = self.text.as_ptr() as usize;
         let start = (slice.as_ptr() as usize).saturating_sub(text);
@@ -104,9 +104,9 @@ impl SourceFile {
         }
     }
 
-    /// The file's lines in order, numbered from 1, with `\n` and a preceding
-    /// `\r` stripped from the text and excluded from the span — the same
-    /// line split `str::lines` performs, with the positions kept.
+    /// The file's lines in order, numbered from 1. Text and span both
+    /// exclude the `\n` and a preceding `\r`: the same split `str::lines`
+    /// performs, with the positions kept.
     pub fn lines(&self) -> Lines<'_> {
         Lines {
             inner: self.text.split_inclusive('\n'),
@@ -175,7 +175,7 @@ impl SourceId {
 }
 
 /// A stable diagnostic code. JSON consumers depend on these being stable across
-/// releases; never renumber, only add (requirement K-11).
+/// releases; never renumber, only add.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct StableCode(pub u32);
 
@@ -202,9 +202,9 @@ impl StableCode {
     }
 
     /// Reserve a code in the stable 3000-based frontend namespace, which the
-    /// language surface's lexer, parser, and elaborator occupy. Codes are
-    /// allocated by the frontend crates that own the diagnostics, never
-    /// renumbered, only appended, on the same terms as the engine namespace.
+    /// language surface's lexer, parser, and elaborator occupy. Frontend
+    /// crates allocate their own codes there, appended never renumbered, on
+    /// the same terms as the engine namespace.
     #[doc(hidden)]
     #[allow(
         clippy::arithmetic_side_effects,
@@ -216,67 +216,63 @@ impl StableCode {
 }
 
 /// Named engine diagnostic codes. The discriminant is the stable `n` in
-/// `E-{1000 + n}`; never renumber, only append (requirement K-11).
-///
-/// This is the single source of truth for engine codes: every diagnostic the
-/// kernel emits names its variant here, so the code, its number, and a label
-/// for the variant live together.
+/// `E-{1000 + n}`; never renumber, only append. Every diagnostic the kernel
+/// emits names its variant here, so code, number, and label live together.
 #[repr(u32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum EngineCode {
-    /// `E-1101` — no rule provides the requested interface.
+    /// `E-1101`: no rule provides the requested interface.
     NoRuleForInterface = 101,
-    /// `E-1102` — more than one rule provides the interface; ambiguity is never ranked.
+    /// `E-1102`: more than one rule provides the interface; ambiguity is never ranked.
     AmbiguousRule = 102,
-    /// `E-1103` — a request's inputs do not match its declared interface.
+    /// `E-1103`: a request's inputs do not match its declared interface.
     RequestInputsMismatch = 103,
-    /// `E-1104` — a rule or action returned a value of the wrong type.
+    /// `E-1104`: a rule or action returned a value of the wrong type.
     ResultTypeMismatch = 104,
-    /// `E-1105` — a declared action contract is invalid.
+    /// `E-1105`: a declared action contract is invalid.
     InvalidActionSpec = 105,
-    /// `E-1203` — the dependency graph contains a cycle.
+    /// `E-1203`: the dependency graph contains a cycle.
     DependencyCycle = 203,
-    /// `E-1204` — an engine-internal invariant was violated.
+    /// `E-1204`: an engine-internal invariant was violated.
     InternalInvariant = 204,
-    /// `E-1205` — requested content is not available in the local store.
+    /// `E-1205`: requested content is not available in the local store.
     ContentUnavailable = 205,
-    /// `E-1206` — an effectful step appeared in a pure-only evaluation.
+    /// `E-1206`: an effectful step appeared in a pure-only evaluation.
     EffectfulStepInPure = 206,
-    /// `E-1207` — the content store returned an error.
+    /// `E-1207`: the content store returned an error.
     StoreError = 207,
-    /// `E-1208` — the executor reported use of an undeclared capability.
+    /// `E-1208`: the executor reported use of an undeclared capability.
     UndeclaredCapabilityUse = 208,
-    /// `E-1209` — the executor reported an output outside the declared contract
+    /// `E-1209`: the executor reported an output outside the declared contract
     /// or with the wrong kind.
     UndeclaredOutput = 209,
-    /// `E-1210` — the executor did not produce a declared output.
+    /// `E-1210`: the executor did not produce a declared output.
     MissingDeclaredOutput = 210,
-    /// `E-1212` — the executor did not report a concrete platform, or reported
+    /// `E-1212`: the executor did not report a concrete platform, or reported
     /// one outside the declared requirement.
     PlatformMismatch = 212,
-    /// `E-1213` — the action policy denied the planned action.
+    /// `E-1213`: the action policy denied the planned action.
     PolicyDenied = 213,
-    /// `E-1214` — an attempt was left `Pending` when its owner stopped, and was
-    /// marked cancelled on reopen rather than resumed. Not a fault: it records
-    /// why the attempt has no result, not that computing one would fail.
+    /// `E-1214`: an attempt left `Pending` when its owner stopped, marked
+    /// cancelled on reopen rather than resumed. Not a fault; it records why
+    /// the attempt has no result.
     InterruptedAttempt = 214,
-    /// `E-1215` — the caller cancelled the run. Not a fault: the work that was
-    /// in flight is recorded as cancelled, and re-running it is reasonable.
+    /// `E-1215`: the caller cancelled the run. Not a fault; the in-flight
+    /// work is recorded as cancelled, and re-running it is reasonable.
     RunCancelled = 215,
-    /// `E-1216` — the run exceeded a bound its caller declared: a wall-clock
-    /// deadline or a step budget. Not a fault of any computation the run was
-    /// merely holding, and re-running under a larger bound is reasonable; the
-    /// action that exceeded a wall clock did run and produced nothing within
-    /// the authority it was given, so its own attempt is a failure carrying
-    /// this code.
+    /// `E-1216`: the run exceeded a caller-declared bound, a wall-clock
+    /// deadline or a step budget. Not a fault of the computations the run
+    /// was holding; re-running under a larger bound is reasonable. An action
+    /// that exceeded a wall clock produced nothing within the authority it
+    /// was given, so that attempt is a failure carrying this code.
     RunBoundExceeded = 216,
-    /// `E-1217` — a rule body requested an observation and the engine has no
-    /// observer configured. The observation effect cannot be served by the
-    /// engine itself; a host supplies the adapter (decision 0060).
+    /// `E-1217`: a rule body requested an observation and no observer is
+    /// configured. The engine cannot serve the observation itself; a host
+    /// supplies the adapter.
     ObserverMissing = 217,
-    /// `E-1218` — a represented rule body produced a declared value failure.
+    /// `E-1218`: a represented rule body produced a declared value failure.
     RepresentedBodyFailed = 218,
-    /// `E-1219` — action planning was requested for an entry whose pure
+    /// `E-1219`: action planning was requested for an entry whose pure
     /// evaluation completed without reaching an action.
     EntryHasNoAction = 219,
 }
@@ -295,14 +291,14 @@ pub enum Severity {
     Note,
 }
 
-/// A single diagnostic with typed context. Rendered at the CLI boundary via
-/// miette; libraries emit `Diag`, the binary decides how to show it.
+/// A single diagnostic with typed context. Libraries emit `Diag`; the
+/// binary decides how to show it (miette at the CLI boundary).
 ///
-/// A diagnostic that knows the text it talks about carries it in `source`,
-/// and its span and its notes' spans index that text. One produced away from
-/// any text — engine evaluation, durable reads — carries none, and renders
-/// without a snippet. The source is context for whoever renders it; it is
-/// not part of the diagnostic's identity and does not persist.
+/// `source`, when present, is the text the span and the notes' spans
+/// index. A diagnostic produced away from any text, engine evaluation or
+/// durable reads, carries none and renders without a snippet. The source
+/// is context for whoever renders it; it is not part of the diagnostic's
+/// identity and does not persist.
 #[derive(Clone, Debug)]
 pub struct Diag {
     pub severity: Severity,
@@ -507,9 +503,9 @@ mod tests {
 
     #[test]
     fn engine_code_discriminants_are_stable() {
-        // K-11 stability: these numbers are the public contract. The match
-        // names every variant with no wildcard, so a new variant fails to
-        // compile until its number is pinned here.
+        // These numbers are the public contract. The match names every
+        // variant with no wildcard, so a new variant fails to compile until
+        // its number is pinned here.
         for code in [
             EngineCode::NoRuleForInterface,
             EngineCode::AmbiguousRule,

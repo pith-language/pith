@@ -1,9 +1,9 @@
 //! Canonical length-prefixed encoding for stable manifests.
 //!
-//! Every digest in the kernel hashes a canonical byte manifest. Variable-length
-//! fields are encoded as a little-endian `u64` length followed by the raw bytes,
-//! so two manifests that differ only by field boundaries cannot collide. This
-//! is the single implementation of that primitive for `pith-core`; both
+//! Every digest in the kernel hashes a canonical byte manifest.
+//! Variable-length fields are a little-endian `u64` length followed by the
+//! raw bytes, so two manifests that differ only by field boundaries cannot
+//! collide.
 
 /// Append a little-endian `u64` length to `manifest`.
 pub fn encode_length(manifest: &mut Vec<u8>, length: usize) {

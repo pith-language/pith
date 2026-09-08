@@ -1,4 +1,4 @@
-//! Values and types in the typed semantic IR (decision 0017).
+//! Values and types in the typed semantic IR.
 //!
 //! `pith-core` does not depend on serde. DTO projections live in
 //! `pith_output::dto`; the `From` impls in this module are the projection
@@ -17,10 +17,9 @@ define_arena!(ValueId, ValueArena, ValueBrand);
 pub enum Value {
     Unit,
     Bool(bool),
-    /// An integer of arbitrary precision (decision 0055). Addition,
-    /// subtraction, and multiplication are closed over it, which is what makes
-    /// arithmetic total and lets 0018's termination construction cover it
-    /// without an overflow case.
+    /// An integer of arbitrary precision. Addition, subtraction, and
+    /// multiplication are closed over it, so arithmetic is total with no
+    /// overflow case.
     Int(Int),
     Text(Box<str>),
     /// Raw bytes computed or materialized by a rule. Distinct from [`Value::Blob`],
@@ -29,33 +28,27 @@ pub enum Value {
     /// A reference to content-addressed storage by identity. Carries no bytes;
     /// a rule that needs the bytes requests them via the engine.
     Blob(ContentId),
-    /// A value of a declared nominal type (decision 0026). The name identifies
-    /// the declaration; the representation is the underlying value. A nominal
-    /// value is not interchangeable with its representation: a `MachineId` over
-    /// `Text` is a distinct type from `Text`.
+    /// A value of a declared nominal type: `name` identifies the declaration,
+    /// `representation` is the underlying value. Not interchangeable with its
+    /// representation: a `MachineId` over `Text` is a distinct type from
+    /// `Text`.
     Nominal {
         name: Box<str>,
         representation: Box<Value>,
     },
-    /// An ordered sequence of values, the landed slice of the `List<T>`
-    /// constructor 0026 names in the calculus constructor set. Homogeneous in
-    /// use: the request and result checks in this crate treat a list as
-    /// inhabiting `List<T>` when every element inhabits `T`, and an empty
-    /// list as inhabiting every `List<T>`.
+    /// An ordered sequence of values. Checked as homogeneous: a list inhabits
+    /// `List<T>` when every element inhabits `T`, and an empty list inhabits
+    /// every `List<T>`.
     List(Box<[Value]>),
-    /// Named fields, the landed slice of the closed record constructor 0026
-    /// names in the calculus constructor set. Closed: a record inhabits a
-    /// record type only when the field sets are equal, with no width or depth
-    /// subtyping and no optional fields. Construction sorts the fields by
-    /// name, which is the canonical order 0026 fixes for the encoding.
+    /// Named fields. Closed: a record inhabits a record type only when the
+    /// field sets are equal, no width or depth subtyping, no optional fields.
+    /// Construction sorts the fields by name, the canonical order the encoding
+    /// uses.
     Record(Box<[RecordField<Value>]>),
-    /// One constructor of a declared sum, the landed slice of the sum
-    /// constructor 0026 names in the calculus constructor set. The value
-    /// carries the sum's name the way [`Value::Nominal`] carries its own —
-    /// the declaration site that would resolve the name does not exist yet —
-    /// plus the constructor it selects and that constructor's payload. It
-    /// cannot recover the sibling constructors, which is the sum half of the
-    /// `value_type` asymmetry documented on [`Value::is_type`].
+    /// One constructor of a declared sum: the sum's name (carried because no
+    /// declaration site exists to resolve it against, as in [`Value::Nominal`]),
+    /// the selected constructor, and its payload. Sibling constructors are not
+    /// recoverable; see the asymmetry documented on [`Value::is_type`].
     Sum {
         type_name: Box<str>,
         constructor: Box<str>,
@@ -79,9 +72,8 @@ pub struct SumConstructor {
     pub payload: Option<Type>,
 }
 
-/// A closed set of named things — a record's fields, a sum's constructors —
-/// was built with one name twice. The second entry would be unreachable by
-/// name.
+/// A closed set of named things (record fields, sum constructors) was built
+/// with one name twice; the second entry would be unreachable by name.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DuplicateNameError {
     pub name: Box<str>,
@@ -95,9 +87,8 @@ impl std::fmt::Display for DuplicateNameError {
 
 impl std::error::Error for DuplicateNameError {}
 
-/// Sort a closed set of named entries into canonical name order, refusing a
-/// name used twice: canonical order is strictly ascending, so a duplicate
-/// would also be unencodable.
+/// Sort named entries into canonical name order, refusing a name used twice.
+/// Canonical order is strictly ascending, so a duplicate is unencodable too.
 fn sorted_by_unique_name<T>(
     entries: impl Into<Box<[T]>>,
     name: impl Fn(&T) -> &str,
@@ -125,12 +116,11 @@ impl Value {
             Self::Text(_) => Type::Text,
             Self::Bytes(_) => Type::Bytes,
             Self::Blob(_) => Type::Blob,
-            // A value's name is a string, not a table lookup, so the best a
-            // value can do is synthesize the declaration its own content
-            // supports: the module split off the coordinate spelling, and the
-            // representation's best-effort type as the declared representation.
-            // For a fully determined representation the synthesis is the
-            // declared one (decision 0047).
+            // A value's name is a string, not a table lookup, so the nominal
+            // arm synthesizes the declaration its own content supports: the
+            // coordinate from the name, the representation's best-effort type
+            // as the declared representation. For a fully determined
+            // representation the synthesis is the declared type.
             Self::Nominal {
                 name,
                 representation,
@@ -170,31 +160,24 @@ impl Value {
         }
     }
 
-    /// Whether this value inhabits `expected`. Use it at request-input and
-    /// result-type checks; `value_type` is the best-effort type for diagnostics
-    /// and the two agree everywhere except where a value cannot know its own
-    /// whole type, which happens from both directions. an empty list inhabits
-    /// every `List<T>` while `value_type` must pick one element type (`Unit`,
-    /// when there is no element to ask). a sum value knows the constructor it
-    /// selected but cannot recover its sibling constructors, so it inhabits
-    /// every declared sum that contains that constructor with a matching
-    /// payload, while `value_type` names only the singleton sum it can honestly
-    /// construct. a nominal value matches its own name only; its
-    /// representation does not match the representation's type (decision
-    /// 0026).
+    /// Whether this value inhabits `expected`; use it for the request-input
+    /// and result-type checks. `value_type` is best-effort, for diagnostics.
+    /// The two agree except where a value cannot know its whole type: an empty
+    /// list inhabits every `List<T>` while `value_type` must pick one element
+    /// type (`Unit`, with no element to ask), and a sum value inhabits every
+    /// declared sum containing its constructor with a matching payload while
+    /// `value_type` names only the singleton sum it can construct. A nominal
+    /// value matches its own name only, never its representation's type.
     #[must_use]
     pub fn is_type(&self, expected: &Type) -> bool {
         self.inhabits(expected, None)
     }
 
-    /// [`Self::is_type`] with the enclosing declaration a [`Type::Cut`] resolves
-    /// to. `None` at the top level, where a cut has nothing to resolve against.
-    ///
-    /// Threading the enclosing reference rather than taking a table keeps the
-    /// public check a function of its two arguments (decision 0047). Recursion
-    /// terminates on the value: each step through a cut consumes one level of a
-    /// finite value, so checking costs time proportional to the value rather than
-    /// to the type.
+    /// [`Self::is_type`] with the enclosing declaration a [`Type::Cut`]
+    /// resolves to; `None` at the top level, where a cut has nothing to
+    /// resolve against. Termination is on the value: each step through a cut
+    /// consumes one level of a finite value, so the check costs time
+    /// proportional to the value.
     fn inhabits(&self, expected: &Type, enclosing: Option<&Type>) -> bool {
         if let Type::Cut = expected {
             return match enclosing {
@@ -209,13 +192,11 @@ impl Value {
             | (Self::Text(_), Type::Text)
             | (Self::Bytes(_), Type::Bytes)
             | (Self::Blob(_), Type::Blob) => true,
-            // Two checks in order, which is what closes the representation
-            // hole (decision 0047): the value names the declaration's
+            // Two checks in order: the value names the declaration's
             // coordinate, and its representation inhabits the declared
-            // representation type. A value naming `xylem.Object` while holding
-            // a `Text` is refused at the same gate that already checked the
-            // name. The declaration becomes the enclosing one, so a cut inside
-            // its representation resolves back to it.
+            // representation type, so a value naming `xylem.Object` while
+            // holding a `Text` is refused. The declaration becomes the
+            // enclosing one, so a cut inside it resolves back.
             (
                 Self::Nominal {
                     name,
@@ -231,8 +212,7 @@ impl Value {
                 .all(|value| value.inhabits(element, enclosing)),
             (Self::Record(fields), Type::Record(declared)) => {
                 // Both sides carry their fields sorted by name, so one walk
-                // decides: a closed record matches its own field set exactly,
-                // with no width or depth subtyping (0026).
+                // decides.
                 fields.len() == declared.len()
                     && fields.iter().zip(declared.iter()).all(|(field, expected)| {
                         field.name == expected.name
@@ -321,9 +301,8 @@ impl From<&Value> for ValueRepr {
         match v {
             Value::Unit => ValueRepr::Unit,
             Value::Bool(b) => ValueRepr::Bool { b: *b },
-            // A JSON number cannot carry an arbitrary-precision integer without
-            // a reader's float parser rounding it, so the projection renders the
-            // decimal (decision 0055).
+            // A JSON number cannot carry an arbitrary-precision integer
+            // without float rounding, so the projection renders the decimal.
             Value::Int(n) => ValueRepr::Int {
                 decimal: n.to_string().into_boxed_str(),
             },
@@ -363,15 +342,10 @@ impl From<&Value> for ValueRepr {
     }
 }
 
-/// A use-site reference to a declared nominal type, carrying the declaration
-/// (decision 0047).
-///
-/// The declaration travels in the type rather than being resolved through an
-/// ambient table, which is what keeps [`Value::is_type`] a total function of its
-/// two arguments and keeps a decoded type able to check as well as a constructed
-/// one. The cost is bytes; pre-release those are cheaper than the correctness
-/// risk of a checker whose answer depends on which table the reader happens to
-/// hold.
+/// A use-site reference to a declared nominal type, carrying the declaration.
+/// The declaration travels in the type rather than through an ambient table,
+/// so [`Value::is_type`] stays a function of its two arguments and a decoded
+/// type checks as well as a constructed one.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NominalType {
     pub coordinate: Coordinate,
@@ -395,36 +369,26 @@ pub enum Type {
     Blob,
     /// A declared nominal type. Carries its declaration, so `is_type` verifies
     /// that a value naming this coordinate also holds a representation the
-    /// declaration admits — the check decision 0026 promised "when the
-    /// declaration lands."
+    /// declaration admits.
     Nominal(Box<NominalType>),
     /// The type of a [`Value::List`] whose elements inhabit the element type.
-    /// Type application is reified (0026): `List<Int>` and `List<Text>` are
+    /// Type application is reified: `List<Int>` and `List<Text>` are
     /// distinct types and distinct interface participants.
     List(Box<Type>),
-    /// The closed record constructor of the 0026 calculus: named fields,
-    /// sorted by name at construction, which is the canonical order the
+    /// Named fields, sorted by name at construction: the canonical order the
     /// encoding writes and the only order the decoder accepts.
     Record(Box<[RecordField<Type>]>),
-    /// The declared sum constructor of the 0026 calculus: a declared name over
-    /// a fixed set of constructors, each optionally carrying a typed payload,
-    /// sorted by constructor name at construction. Not a record with a tag
-    /// field and not a polymorphic variant — 0026 rejects both and gives the
-    /// reasons.
+    /// A declared name over a fixed set of constructors, each optionally
+    /// carrying a typed payload, sorted by constructor name at construction.
+    /// Not a record with a tag field or a polymorphic variant.
     Sum(Box<SumType>),
     /// The recursion cut: an occurrence of the declaration currently being
-    /// declared, inside its own body (decision 0047).
-    ///
-    /// `xylem.Tree = Node(List<Tree>) | Leaf(Int)` has a finite canonical form
-    /// because the inner `Tree` is this, rather than the whole declaration
-    /// expanded again. Only *direct* self-reference is spellable, so mutual
-    /// recursion between two declarations is unconstructible rather than
-    /// refused — the cut names its enclosing declaration and has no way to name
-    /// another.
-    ///
-    /// A cut outside a declaration body inhabits nothing: there is no enclosing
-    /// declaration to resolve it against, and `is_type` answers `false` rather
-    /// than guessing.
+    /// declared, inside its own body. `xylem.Tree = Node(List<Tree>) |
+    /// Leaf(Int)` is finite because the inner `Tree` is this cut, not the
+    /// declaration expanded again. Only direct self-reference is spellable, so
+    /// mutual recursion is unconstructible rather than refused: the cut names
+    /// its enclosing declaration and has no way to name another. A cut outside
+    /// a declaration body inhabits nothing; `is_type` answers `false`.
     Cut,
 }
 
@@ -440,11 +404,9 @@ impl Type {
         )?))
     }
 
-    /// The use-site type of `declaration`.
-    ///
-    /// A nominal or a sum yields a reference carrying its declaration; an alias
-    /// yields its target, expanded, because an alias has no spelling of its own
-    /// (decision 0047).
+    /// The use-site type of `declaration`: a nominal or sum reference
+    /// carrying its declaration, or an alias expanded to its target, since an
+    /// alias has no spelling of its own.
     #[must_use]
     pub fn of_declaration(declaration: &Declaration) -> Self {
         match declaration.body() {
@@ -460,12 +422,10 @@ impl Type {
         }
     }
 
-    /// Whether this type reaches a [`Type::Cut`], which is what makes an alias
-    /// recursive and therefore unexpandable (decision 0047).
-    ///
-    /// The walk stops at a nominal or a sum reference: a cut inside one of those
-    /// belongs to *that* declaration and is finite there, so it says nothing
-    /// about whether this type expands forever.
+    /// Whether this type reaches a [`Type::Cut`], which makes an alias
+    /// recursive and therefore unexpandable. The walk stops at a nominal or
+    /// sum reference: a cut inside one belongs to that declaration and is
+    /// finite there.
     #[must_use]
     pub fn reaches_cut(&self) -> bool {
         match self {
@@ -486,11 +446,6 @@ impl Type {
 
 /// A nominal type declared in a throwaway single-entry table, for tests and
 /// doctests that need a declaration and not a module.
-///
-/// There is deliberately no public shortcut past the table: a declaration
-/// reference exists only because a table admitted the name, which is what makes
-/// the duplicate and recursive-alias refusals real rather than advisory
-/// (decision 0047).
 #[cfg(test)]
 pub(crate) fn declared_nominal(module: &str, name: &str, representation: Type) -> Type {
     let mut table = crate::declaration::DeclarationTable::new(module);
@@ -514,10 +469,8 @@ pub(crate) fn declared_sum(
     }
 }
 
-/// Sort a constructor set into canonical name order, refusing a repeat.
-///
-/// Used by [`crate::declaration::DeclarationTable::sum`], which is where a sum's
-/// constructors are fixed now that a sum type carries its declaration.
+/// Sort a constructor set into canonical name order, refusing a repeat. Used
+/// by [`crate::declaration::DeclarationTable::sum`].
 ///
 /// # Errors
 /// [`DuplicateNameError`] when two constructors share a name.
@@ -600,10 +553,7 @@ impl From<&Type> for TypeRepr {
             Type::Bytes => TypeRepr::Bytes,
             Type::Blob => TypeRepr::Blob,
             // The projection carries the coordinate's spelling rather than the
-            // declaration. A rendered type is for a reader, and the declared
-            // representation is the checker's business — decision 0047 puts the
-            // body in the type so `is_type` needs no table, not so every
-            // diagnostic repeats it.
+            // declaration: a rendered type is for a reader.
             Type::Nominal(declared) => TypeRepr::Nominal {
                 name: declared.coordinate.spelling().into(),
             },
@@ -681,8 +631,6 @@ mod tests {
         let t = declared_nominal("test", "Machine", Type::Blob);
         let repr: TypeRepr = (&t).into();
         match repr {
-            // The projection carries the coordinate's spelling, so a reader of
-            // a rendered type sees which module declared it (decision 0047).
             TypeRepr::Nominal { name } => assert_eq!(name.as_ref(), "test.Machine"),
             _ => unreachable!(),
         }
@@ -690,9 +638,8 @@ mod tests {
 
     #[test]
     fn an_arbitrary_precision_integer_does_not_widen_the_value_it_lives_in() {
-        // The magnitude is inline for the range the type used to hold, and the
-        // sum variant's three fields are wider than that, so no value in the
-        // engine grew when the integer stopped being an `i64` (decision 0055).
+        // The magnitude is inline for the 64-bit range, so the integer variant
+        // stays no wider than the widest variant.
         assert!(
             size_of::<Int>() <= size_of::<(Box<str>, Box<str>, Option<Box<Value>>)>(),
             "an integer is now the variant that decides how big every value is"
@@ -723,8 +670,8 @@ mod tests {
 
     #[test]
     fn is_type_agrees_with_value_type() {
-        // is_type must accept exactly the type value_type would return, and
-        // reject every other type. Cover every variant pairing.
+        // is_type must accept exactly the type value_type returns and reject
+        // every other type.
         let values = [
             (Value::Unit, Type::Unit),
             (Value::Bool(true), Type::Bool),
@@ -812,10 +759,9 @@ mod tests {
 
     #[test]
     fn a_list_is_typed_by_its_elements() {
-        // 0026 reifies type application: List<Text> and List<Int> are distinct
-        // types, so a list of one element type does not inhabit another. A
-        // nominal element keeps its identity inside the list, which is what
-        // keeps two list-consuming rules from collapsing onto one interface.
+        // Type application is reified: a list of one element type does not
+        // inhabit another, and a nominal element keeps its identity inside
+        // the list.
         let texts = Value::List(vec![Value::Text("a".into())].into_boxed_slice());
         let objects = Value::List(
             vec![Value::Nominal {
@@ -844,9 +790,8 @@ mod tests {
     #[test]
     fn an_empty_list_inhabits_every_list_type() {
         // value_type must pick one element type when there is no element to
-        // ask, so an empty list would otherwise be rejected at request-input
-        // and result checks against any concrete List<T>. is_type is the
-        // check those sites use, and it accepts it.
+        // ask, so the request-input and result checks use is_type, which
+        // accepts the empty list.
         let empty = Value::List(vec![].into_boxed_slice());
         assert!(empty.is_type(&Type::List(Box::new(Type::Text))));
         assert!(empty.is_type(&Type::List(Box::new(Type::Int))));
@@ -855,9 +800,6 @@ mod tests {
 
     #[test]
     fn nominal_value_is_not_interchangeable_with_its_representation() {
-        // Decision 0026: a nominal value matches its own name only. It does not
-        // match the representation's type, and a different nominal name is a
-        // different type.
         let machine_id = Value::Nominal {
             name: "test.MachineId".into(),
             representation: Box::new(Value::Text("m-1".into())),
@@ -869,9 +811,8 @@ mod tests {
 
     #[test]
     fn record_construction_orders_fields_and_rejects_duplicates() {
-        // Canonical order is name order (0026), so construction order cannot
-        // reach equality, hashing, or the encoding. A repeated name has no
-        // meaning in a closed record.
+        // Name order is canonical, so construction order cannot reach
+        // equality or the encoding.
         let first = Value::record([
             RecordField {
                 name: "b".into(),
@@ -928,9 +869,8 @@ mod tests {
 
     #[test]
     fn a_record_matches_only_its_own_field_set() {
-        // Closed records: no width subtyping in either direction and no depth
-        // subtyping on a field (0026). A nominal payload keeps its identity
-        // inside a record field the way it does inside a list.
+        // Closed records: no width or depth subtyping; a nominal payload keeps
+        // its identity inside a record field.
         let value = Value::record([
             RecordField {
                 name: "name".into(),
@@ -993,11 +933,10 @@ mod tests {
 
     #[test]
     fn a_record_inherits_the_asymmetry_of_its_fields() {
-        // The agreement test's record pairing uses fully-determined payloads
-        // — Text, Int — which is the one case where agreement holds. Nested
-        // ambiguity breaks it, so the matrix's claim cannot include these
-        // values. What holds everywhere is reflexivity: is_type accepts each
-        // value against its own value_type.
+        // The agreement test's record pairing uses fully determined payloads
+        // (Text, Int), the one case where agreement holds. Nested ambiguity
+        // breaks it. What holds everywhere is reflexivity: is_type accepts
+        // each value against its own value_type.
         let source_sum = declared_sum(
             "test",
             "Source",
@@ -1113,11 +1052,10 @@ mod tests {
 
     #[test]
     fn a_sum_value_inhabits_the_declared_sums_that_contain_its_constructor() {
-        // A sum value knows its own constructor and payload but not its
-        // siblings, so inhabitation is membership: the declared name must
-        // match, the constructor must be in the declared set, and the payload
-        // must be present exactly when the declaration carries one and inhabit
-        // the declared payload type.
+        // A sum value cannot know its siblings, so inhabitation is membership:
+        // the declared name and constructor must match, and the payload must
+        // be present exactly when the declaration carries one and inhabit its
+        // type.
         let source = declared_sum(
             "test",
             "Source",
@@ -1234,8 +1172,8 @@ mod tests {
         );
         assert_eq!(first, second);
 
-        // A repeated constructor is refused where a sum is now declared: the
-        // table, not a free constructor (decision 0047).
+        // A repeated constructor is refused where a sum is declared: the
+        // table, not a free constructor.
         let duplicate = crate::declaration::DeclarationTable::new("test").sum(
             "Source",
             [
@@ -1262,11 +1200,9 @@ mod tests {
     fn a_sum_value_names_the_singleton_it_can_and_inhabits_the_declaration() {
         // The mirror of the empty-list asymmetry: `value_type` cannot recover
         // the sibling constructors, so it names the singleton sum holding only
-        // the selected constructor — a type the value does inhabit, since the
-        // singleton contains that constructor with a matching payload — while
-        // `is_type` accepts the declared type as well. Request-input checking
-        // compares with `is_type`, so the singleton is a diagnostic, never a
-        // gate.
+        // the selected constructor, which the value does inhabit. `is_type`
+        // also accepts the declared type, and request-input checking uses
+        // `is_type`, so the singleton is a diagnostic, never a gate.
         let declared = declared_sum(
             "test",
             "Source",
@@ -1312,10 +1248,9 @@ mod declaration_checks {
 
     #[test]
     fn a_wrong_representation_no_longer_inhabits_a_nominal_type() {
-        // The hole decision 0047 exists to close. Before the declaration
-        // landed, `Type::Nominal` carried a bare name and matched any value
-        // carrying the same string, so a `Text` masquerading as content
-        // identity passed every check the kernel ran.
+        // `Type::Nominal` carries its declaration, so a value must hold a
+        // representation the declaration admits; a bare name comparison would
+        // let a `Text` masquerade as content identity.
         let mut table = DeclarationTable::new("xylem");
         let object = table.nominal("Object", Type::Blob).unwrap();
 
@@ -1342,7 +1277,7 @@ mod declaration_checks {
     #[test]
     fn a_recursive_declaration_checks_a_value_in_time_proportional_to_the_value() {
         // `test.Tree` over `List<Tree>`: the inner occurrence is the cut, so
-        // the type is finite and a value of it terminates (0047).
+        // the type is finite and a value of it terminates.
         let mut table = DeclarationTable::new("test");
         let tree = table
             .nominal("Tree", Type::List(Box::new(Type::Cut)))
@@ -1367,8 +1302,7 @@ mod declaration_checks {
         };
         assert!(nested.is_type(&tree));
 
-        // A wrong representation at depth is still refused, so the cut carries
-        // the check down rather than waving it through.
+        // A wrong representation at depth is still refused.
         let corrupt = Value::Nominal {
             name: "test.Tree".into(),
             representation: Box::new(Value::List([Value::Text("not a tree".into())].into())),
@@ -1382,8 +1316,8 @@ mod declaration_checks {
         // answers false rather than guessing.
         assert!(!Value::Unit.is_type(&Type::Cut));
         assert!(!Value::List([Value::Unit].into()).is_type(&Type::List(Box::new(Type::Cut))));
-        // An *empty* list still inhabits every `List<T>`, cut included, which is
-        // the documented empty-list asymmetry rather than a cut resolving.
+        // An empty list still inhabits every `List<T>`, cut included: the
+        // empty-list asymmetry, not a cut resolving.
         assert!(Value::List([].into()).is_type(&Type::List(Box::new(Type::Cut))));
     }
 
@@ -1401,7 +1335,7 @@ mod declaration_checks {
     #[test]
     fn every_value_still_inhabits_its_own_value_type() {
         // Reflexivity, which the synthesized best-effort declaration has to
-        // preserve for a nominal (0047).
+        // preserve for a nominal.
         for value in [
             Value::Unit,
             Value::Nominal {

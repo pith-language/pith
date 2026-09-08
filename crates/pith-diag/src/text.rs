@@ -1,11 +1,8 @@
 //! Tokenizing line-oriented text: bare and quoted tokens, bracketed
-//! groups, comments — every token carrying the span of its written
-//! spelling in the line it was read from.
-//!
-//! The module knows no format of its own. It is the shared reading half
-//! of wire formats that render one fact per line: the caller defines the
-//! keywords and the fields, and every refusal here selects the offending
-//! token so the caller can attach it to the source it holds.
+//! groups, comments, every token carrying the span of its written
+//! spelling. The module knows no format of its own; the caller defines the
+//! keywords and fields, and every refusal names the offending token so the
+//! caller can attach it to the source it holds.
 
 use std::fmt::Write as _;
 
@@ -26,7 +23,6 @@ impl Token {
         self.text == word
     }
 
-    /// The token's resolved text.
     #[must_use]
     pub fn spelling(&self) -> &str {
         &self.text
@@ -83,9 +79,8 @@ pub fn is_bare(text: &str) -> bool {
 /// quoting honored inside it; an unquoted `#` ends the line as a comment.
 ///
 /// # Errors
-/// Returns a [`Refusal`] spanning from the offending token's start
-/// through the end of the line, because every way a token fails leaves
-/// the rest of the line suspect.
+/// A [`Refusal`] from the offending token's start through the end of the
+/// line: any failure leaves the rest of the line suspect.
 pub fn tokenize(line: &str, base: ByteOffset) -> Result<Vec<Token>, Refusal> {
     let mut tokens = Vec::new();
     let mut rest = line;

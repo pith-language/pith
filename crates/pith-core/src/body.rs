@@ -1,17 +1,10 @@
-//! The represented rule body: a pure rule's computation as data (decisions
-//! 0038, 0062).
+//! The represented rule body: a pure rule's computation as data.
 //!
-//! A host rule's body is Rust the kernel cannot read; a represented body is
-//! this module's expression tree, elaborated and closed: typechecked against
-//! its rule's interface, name-resolved into de Bruijn indices, and carrying
-//! nothing a digest must not survive — no spans, no labels, no binder names.
-//! The constructor set is fixed by decision 0062 and closed under 0038's
-//! amendment rule: a new constructor arrives by record, not by addition.
-//!
-//! Totality is a property of the set rather than a check the validator runs:
-//! there is no recursion constructor, repetition is a structural fold over a
-//! finite list, and every primitive is total. A body can fail — `Fail` and
-//! `TextOfBytes` are deterministic value failures — but it cannot diverge.
+//! A host rule's body is Rust the kernel cannot read, so a represented body
+//! is an expression tree, typechecked against its rule's interface, carrying
+//! nothing a digest must not survive: no spans, labels, or binder names.
+//! Every primitive is total and there is no recursion, so a body can fail
+//! (`Fail`, `TextOfBytes`) but cannot diverge.
 
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, OnceLock};
@@ -21,18 +14,15 @@ use pith_ids::BodyIrDigest;
 use crate::rule::Interface;
 use crate::value::{NominalType, RecordField, SumType, Type, Value};
 
-/// How deeply a body may nest. Bounded so that validating and decoding a body
-/// a file delivered cannot overflow the stack, on the same terms the value
-/// codec bounds nominal nesting.
+/// How deeply a body may nest, so validating or decoding a body a file
+/// delivered cannot overflow the stack. Bounds it the way the value codec
+/// bounds nominal nesting.
 pub const MAX_BODY_DEPTH: u32 = 128;
 
-/// A pure rule's body. The expression is checked against a rule's interface by
-/// [`Self::validate`]; the inputs are the deepest binders and the expression's
-/// type must be the interface's output.
-///
-/// The canonical digest is computed once and shared by every clone of the
-/// body: registration digests the same body its declaration already digested,
-/// and the expression is immutable, so the memo cannot go stale.
+/// A pure rule's body: the expression is checked against a rule's interface by
+/// [`Self::validate`], with the inputs as the deepest binders. The digest is
+/// computed once and shared by every clone of the body; the expression is
+/// immutable, so the memo cannot go stale.
 #[derive(Clone, Debug)]
 pub struct RuleBody {
     expression: BodyExpr,
@@ -69,7 +59,7 @@ impl RuleBody {
 
     /// The body's revision half: a domain-separated digest over its canonical
     /// encoding, under the digest domain whose version is the body-encoding
-    /// version (decisions 0038, 0062).
+    /// version.
     #[must_use]
     pub fn digest(&self) -> BodyIrDigest {
         *self
@@ -77,9 +67,9 @@ impl RuleBody {
             .get_or_init(|| BodyIrDigest::of_manifest(&self.encode_canonical()))
     }
 
-    /// Check the body against `interface`: every binder is resolved, every
-    /// expression is typed, every match is exhaustive, and the expression
-    /// inhabits the interface's output type.
+    /// Check the body against `interface`: binders resolved, expressions
+    /// typed, matches exhaustive, and the expression inhabits the interface's
+    /// output type.
     ///
     /// # Errors
     /// [`BodyError`] naming the first refusal.
@@ -104,15 +94,13 @@ impl RuleBody {
 ///
 /// Binders are de Bruijn indices: `Bound(0)` is the most recently bound value.
 /// A body's inputs are bound in interface order before it runs, so the last
-/// input is `Bound(0)`. A request's resumption binds its output at `Bound(0)`;
-/// `NeedAll` binds one binder per request in request order, so the first
-/// request's result is `Bound(0)`.
+/// input is `Bound(0)`. A resumption binds its request's output at `Bound(0)`;
+/// `NeedAll` binds one binder per request in request order.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum BodyExpr {
-    /// An embedded value. Construction that must name a declaration — a sum
-    /// constructor, a nominal wrapper, an empty list — belongs to the
-    /// constructors below, which carry the annotation a literal cannot
-    /// recover.
+    /// An embedded value. Construction that must name a declaration (a sum
+    /// constructor, a nominal wrapper, an empty list) uses the constructors
+    /// below, which carry the annotation a literal cannot recover.
     Literal(Value),
     /// The binder `index` steps out from the innermost.
     Bound(usize),
@@ -121,9 +109,9 @@ pub enum BodyExpr {
         bound: Box<BodyExpr>,
         rest: Box<BodyExpr>,
     },
-    /// Fail the body with `message`, which inhabits `Text`. The evaluator
-    /// wraps the message in the represented-body diagnostic; the construct
-    /// inhabits every type, the way a value-level failure must.
+    /// Fail the body with `message`, which inhabits `Text`. The construct
+    /// inhabits every type, as a value-level failure must; the evaluator wraps
+    /// the message in the represented-body diagnostic.
     Fail { message: Box<BodyExpr> },
     /// Build a record from named field expressions, in canonical name order.
     Record {
@@ -134,9 +122,9 @@ pub enum BodyExpr {
         record: Box<BodyExpr>,
         name: Box<str>,
     },
-    /// Build one constructor of a declared sum. The declaration travels in the
-    /// expression rather than being resolved through a table, on the ground
-    /// 0047 fixed for types.
+    /// Build one constructor of a declared sum. The declaration travels in
+    /// the expression, as it does in a type, rather than being resolved
+    /// through a table.
     MakeSum {
         declared: SumType,
         constructor: Box<str>,
@@ -169,11 +157,10 @@ pub enum BodyExpr {
         tail: Box<BodyExpr>,
     },
     /// Structural case on a list: `empty` when it holds nothing, `cons` with
-    /// the head at `Bound(0)` and the tail at `Bound(1)`. Grouping and
-    /// first-match have no total spelling under folds alone — a fold's
-    /// accumulator starts at a value, and the value a data-dependent start
-    /// would need does not exist — so the two list constructors get the
-    /// eliminator the sum constructors already have.
+    /// the head at `Bound(0)` and the tail at `Bound(1)`. A fold cannot spell
+    /// grouping or first-match totally (its accumulator start cannot be
+    /// data-dependent), so lists get the eliminator the sum constructors
+    /// already have.
     MatchList {
         list: Box<BodyExpr>,
         empty: Box<BodyExpr>,
@@ -193,8 +180,7 @@ pub enum BodyExpr {
         step: Box<BodyExpr>,
     },
     /// Sort a list by the canonical encoding of the key each element maps to.
-    /// The sort is stable, so equal keys keep their source order and the
-    /// result is a function of the input alone.
+    /// The sort is stable, so the result is a function of the input alone.
     SortBy {
         list: Box<BodyExpr>,
         key: Box<BodyExpr>,
@@ -210,8 +196,8 @@ pub enum BodyExpr {
         left: Box<BodyExpr>,
         right: Box<BodyExpr>,
     },
-    /// The three total integer operations (decision 0055). Division stays out
-    /// until a consumer can answer its zero case.
+    /// The total integer operations. Division stays out until a consumer can
+    /// answer its zero case.
     IntAdd {
         left: Box<BodyExpr>,
         right: Box<BodyExpr>,
@@ -225,27 +211,21 @@ pub enum BodyExpr {
         right: Box<BodyExpr>,
     },
     /// Render any value as text, the diagnostic rendering: integers in
-    /// decimal, blobs by their digest. This is how a body names what it
-    /// refuses.
+    /// decimal, blobs by their digest.
     Describe { value: Box<BodyExpr> },
     /// Concatenate two texts.
     TextConcat {
         left: Box<BodyExpr>,
         right: Box<BodyExpr>,
     },
-    /// Decode bytes as UTF-8 text. Invalid bytes fail the body; the failure
-    /// is a value, deterministic in the bytes, not a divergence.
+    /// Decode bytes as UTF-8 text. Invalid bytes fail the body with a value
+    /// deterministic in the bytes.
     TextOfBytes { bytes: Box<BodyExpr> },
     /// Split `text` on every occurrence of `separator`, keeping empty fields:
-    /// adjacent separators produce empty fields, and an empty text produces
-    /// one empty field, so appending the parts back with the separator
-    /// re-joins the text exactly. An empty separator never matches, and the
-    /// result is the whole text as one field. Every edge is decided rather
-    /// than refused, which is what totality asks of a primitive no input can
-    /// escape (decision 0064). The text-splitting constructor 0062 named as
-    /// unwritten: a delimiter walk is a split whose parts are split again,
-    /// and a prefix strip is a split whose second part is taken when there
-    /// is one.
+    /// adjacent separators produce empty fields, an empty text produces one
+    /// empty field, and an empty separator never matches, yielding the whole
+    /// text as one field. Every edge is decided, as totality asks of a
+    /// primitive no input can escape.
     TextBreak {
         text: Box<BodyExpr>,
         separator: Box<BodyExpr>,
@@ -253,11 +233,9 @@ pub enum BodyExpr {
     /// Join a list of text with `separator` between adjacent fields: an empty
     /// list joins to the empty text, a single field joins to itself, and the
     /// separator appears neither before the first field nor after the last.
-    /// The join side of [`BodyExpr::TextBreak`]'s round trip — splitting a
-    /// text and joining its fields re-joins it exactly when the separator is
-    /// non-empty (decision 0064). A primitive rather than a fold of
-    /// concatenations, because an accumulating fold re-copies its result at
-    /// every step, and totality asks for the total cost too.
+    /// The join half of [`BodyExpr::TextBreak`]'s round trip. A primitive
+    /// rather than a fold of concatenations, which re-copy their result at
+    /// every step.
     TextJoin {
         list: Box<BodyExpr>,
         separator: Box<BodyExpr>,
@@ -267,19 +245,18 @@ pub enum BodyExpr {
         request: BodyRequest,
         resume: Box<BodyExpr>,
     },
-    /// Request a batch of pure computations that do not depend on one another
-    /// (decision 0029), and continue under one binder per request in request
-    /// order. The batch is fixed by the body, so its requests may name
-    /// different interfaces.
+    /// Request a batch of independent pure computations, continuing under one
+    /// binder per request in request order. The batch is fixed by the body, so
+    /// its requests may name different interfaces.
     NeedAll {
         requests: Box<[BodyRequest]>,
         resume: Box<BodyExpr>,
     },
-    /// Request one computation per element of `source`, with the declared
-    /// independence of a batch (decision 0029). The interface is fixed by the
-    /// body and the count is data: the fan-out shape a body cannot spell as a
-    /// static batch. `request` is built with the element at `Bound(0)`; the
-    /// resumption binds the results list in source order.
+    /// Request one computation per element of `source`, with a batch's
+    /// declared independence: the interface is fixed by the body and the
+    /// count is data, the fan-out shape a static batch cannot spell.
+    /// `request` is built with the element at `Bound(0)`; the resumption
+    /// binds the results list in source order.
     NeedEach {
         source: Box<BodyExpr>,
         request: BodyRequest,
@@ -291,13 +268,13 @@ pub enum BodyExpr {
         resume: Box<BodyExpr>,
     },
     /// Request an action computation. The action rule that serves the request
-    /// stays host-tier; what is represented is this body's request and its
+    /// stays host-tier; represented here are the request and its
     /// continuation.
     NeedAction {
         request: BodyRequest,
         resume: Box<BodyExpr>,
     },
-    /// Request an observation (decision 0060).
+    /// Request an observation.
     NeedObservation {
         request: BodyRequest,
         resume: Box<BodyExpr>,
@@ -335,10 +312,10 @@ pub struct MatchArm {
     pub body: Box<BodyExpr>,
 }
 
-/// One request a yield construct makes: the interface selection reads and the
-/// inputs it consumes. The interface is written in the body — there is no
-/// ambient rule table to resolve against — so a request is self-describing
-/// data the way a type reference is (decision 0047).
+/// One request a yield construct makes: the interface to serve it and the
+/// inputs it consumes. The interface is written in the body (there is no
+/// ambient rule table to resolve against), so a request is self-describing
+/// data the way a type reference is.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct BodyRequest {
     pub interface: Interface,
@@ -346,8 +323,8 @@ pub struct BodyRequest {
 }
 
 /// The type an expression synthesizes. `Fail` inhabits every type, so
-/// synthesis has a bottom element and the places that must compare types
-/// unify through it rather than refusing it.
+/// synthesis has a bottom element and type comparisons unify through it
+/// rather than refusing it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Inferred {
     Bottom,
@@ -1041,8 +1018,8 @@ mod tests {
             inputs: Box::new([Type::Int, Type::Text]),
             output: Type::Int,
         };
-        // Two inputs, bound in interface order: the last input is `Bound(0)`,
-        // so the first input is one step further out.
+        // Two inputs bound in interface order: the last is `Bound(0)`, so
+        // the first is one step further out.
         let body = RuleBody::new(BodyExpr::Bound(1));
         assert_eq!(body.validate(&interface), Ok(()));
         assert_eq!(passthrough(interface.clone()).validate(&interface), Ok(()));
@@ -1373,10 +1350,10 @@ mod tests {
             inputs: Box::new([objects.clone()]),
             output: report,
         };
-        // The batch's requests are built before any result exists — that is
-        // what declaring their independence means — so each sees only the
-        // input at Bound(0). The resume runs under [second result, first
-        // result, input]: Bound(0) is the first request's result.
+        // The batch's requests are built before any result exists, so each
+        // sees only the input at Bound(0). The resume runs under [second
+        // result, first result, input]: Bound(0) is the first request's
+        // result.
         let body = RuleBody::new(BodyExpr::NeedAll {
             requests: Box::new([
                 BodyRequest {
@@ -1452,8 +1429,9 @@ mod tests {
         });
         assert_eq!(body.validate(&interface), Ok(()));
 
-        // A step whose own operands check but whose type is not the
-        // accumulator's: the fold's accumulator rule, not the operands'.
+        // A step whose operands check but whose result is not the
+        // accumulator's type: the fold's accumulator rule, not the
+        // operands'.
         let swapped = RuleBody::new(BodyExpr::Fold {
             source: Box::new(BodyExpr::Bound(0)),
             init: Box::new(BodyExpr::Literal(Value::Text("".into()))),

@@ -1,19 +1,9 @@
 //! Admission as a conjunction of claims: the first clause that fails is
-//! the refusal, and every clause names both of its sides.
-//!
-//! The machinery is one run and one envelope. A domain declares its clause
-//! vocabulary — one variant per claim an admission can refuse with — and
-//! the vocabulary is the whole separation: a checker written against one
-//! vocabulary has no way to raise another's clause, because no other
-//! clause type fits the refusal it returns.
+//! the refusal. Each domain declares its own clause vocabulary, so a
+//! checker written against one vocabulary cannot raise another's clause.
 
-/// The refusal of an admission: the one clause that failed.
-///
-/// `Clause` is the domain's vocabulary, one variant per claim, so this is
-/// one refusal type with a clause per claim rather than a boolean any
-/// check could have set. A refusal never summarizes: the clause carries
-/// both the side that was bound or requested and the side that was
-/// offered, so a diagnostic renders it without reconstructing either.
+/// The refusal of an admission: the one clause that failed. The clause
+/// carries both sides, so a diagnostic renders it without reconstruction.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Refusal<Clause> {
     pub clause: Clause,
@@ -27,15 +17,12 @@ impl<Clause: std::fmt::Display> std::fmt::Display for Refusal<Clause> {
 
 impl<Clause: std::fmt::Display + std::fmt::Debug> std::error::Error for Refusal<Clause> {}
 
-/// Runs `claims` in order and returns the first refusal.
-///
-/// Each item is one claim already decided — `Ok(())` when the offered side
-/// satisfied the bound side, the claim's clause when it did not — so the
-/// order of the items is the order of the clauses, and the first failure is
-/// the answer rather than the most recent one.
+/// Runs `claims` in order and returns the first refusal. Each item is an
+/// already-decided claim: `Ok(())` when it holds, the clause when it does
+/// not.
 ///
 /// # Errors
-/// Returns the first failing claim, wrapped in the refusal that names it.
+/// [`Refusal`] wrapping the first failing claim.
 pub fn admit<Clause>(
     claims: impl IntoIterator<Item = Result<(), Clause>>,
 ) -> Result<(), Refusal<Clause>> {

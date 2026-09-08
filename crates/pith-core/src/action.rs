@@ -1,4 +1,4 @@
-//! Declared action contracts (requirements A-1 and A-2).
+//! Declared action contracts.
 //!
 //! An [`ActionSpec`] is inert data. Planning one performs no external work;
 //! executors in `pith-engine` are responsible for enforcing the contract.
@@ -13,20 +13,18 @@ use pith_output::dto::{
 mod manifest;
 mod validation;
 
-/// The Blob/Tree discriminator on its own. Used where a phase names the kind
+/// The Blob/Tree discriminator on its own: used where a phase names the kind
 /// without yet carrying payload (a declared action output), and as the return
-/// of [`Content::kind`]. This is the single source of truth for the two
-/// top-level content variants.
+/// of [`Content::kind`].
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum OutputKind {
     Blob,
     Tree,
 }
 
-/// Top-level content: a blob or a tree. The discriminator is the single source
-/// of truth for "is this a Blob or a Tree"; each phase specializes `Blob` and
-/// `Tree` to the payload it carries (a `ContentId`, materialized bytes, a
-/// captured tree, …). Two phases never re-spell the Blob/Tree distinction.
+/// Top-level content: a blob or a tree. The Blob/Tree distinction is spelled
+/// once, here; each phase specializes the payload the variants carry (a
+/// `ContentId`, materialized bytes, a captured tree, …).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Content<Blob, Tree> {
     Blob(Blob),
@@ -34,7 +32,7 @@ pub enum Content<Blob, Tree> {
 }
 
 impl<Blob, Tree> Content<Blob, Tree> {
-    /// The discriminant, discarding the payload. Lets a caller compare a
+    /// The discriminant, discarding the payload, so a caller can compare a
     /// content-carrying value against a declared [`OutputKind`] without the
     /// kind being stored redundantly alongside the content.
     #[must_use]
@@ -53,9 +51,8 @@ pub struct ActionInput {
     pub content: ActionInputContent,
 }
 
-/// Declared action input content: a blob or tree identified by content
-/// identity. A specialization of [`Content`] where both variants carry a
-/// [`ContentId`].
+/// Declared action input content: [`Content`] specialized so both variants
+/// carry a [`ContentId`].
 pub type ActionInputContent = Content<ContentId, ContentId>;
 
 /// One path the executor must capture after successful execution.
@@ -100,50 +97,45 @@ pub enum NetworkPolicy {
 
 /// How an action's exit status is read.
 ///
-/// A compiler that exits nonzero wrote no object, so the action failed and there
-/// is nothing to capture. A test that exits nonzero produced a verdict, and a
-/// verdict is a result. Nothing about the two invocations tells them apart from
-/// outside, and decision 0032 bars wrapping the program in something that could
-/// report the difference, so the contract states it. Decision 0003 puts what an
-/// action claims in the contract; this is that rule applied to how it ends.
+/// Nothing outside tells a compiler's nonzero exit (no object, the action
+/// failed) apart from a test's nonzero exit (a verdict, which is a result),
+/// and the program is never wrapped in anything that could report the
+/// difference, so the contract states the reading.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ExitStatusContract {
-    /// A nonzero exit, or a death by signal, fails the action. The default, and
-    /// the right reading for every tool whose output is its purpose.
+    /// A nonzero exit, or a death by signal, fails the action. The default,
+    /// and the reading for every tool whose output is its purpose.
     SuccessRequired,
-    /// However the program ended is a fact the rule reads. The action succeeds
-    /// as long as the executor ran it and captured what was declared, and
-    /// `ActionRule::complete` decides what the status means.
+    /// However the program ended is a fact the rule reads: the action
+    /// succeeds as long as the executor ran it and captured what was
+    /// declared, and `ActionRule::complete` decides what the status means.
     Reported,
 }
 
 /// The program an action runs.
 ///
-/// The two variants are two of the identity kinds decision 0005 separates, and
-/// the type is what keeps them apart. A host path is an external identity: it
-/// names a thing outside the engine, and what those bytes are is a fact about
-/// the host rather than something the contract states. A [`ContentId`] is a
-/// content identity the engine owns. Encoding the second as a path would put a
-/// content identity in a field typed for an external one, which is the
-/// substitution 0005 has a type system to prevent.
+/// The two variants are two identity kinds a single type keeps apart. A host
+/// path is an external identity: it names a thing outside the engine, and
+/// what its bytes are is a fact about the host rather than the contract. A
+/// [`ContentId`] is a content identity the engine owns.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ActionProgram {
-    /// An absolute host path the executor `execve`s directly, with the rest of
-    /// the program's installation declared in [`ActionSpec::toolchain`]. This is
-    /// how a toolchain enters a contract (decision 0030): a compiler is not one
-    /// file, so naming its bytes would be a claim the contract cannot keep.
+    /// An absolute host path the executor `execve`s directly, with the rest
+    /// of the program's installation declared in [`ActionSpec::toolchain`]:
+    /// a compiler is not one file, so naming its bytes would be a claim the
+    /// contract cannot keep.
     HostPath(Box<str>),
-    /// Content the graph produced, which the executor stages inside the scratch
-    /// root and runs from there. A build product is one file, and its bytes are
-    /// what a contract can name. The identity reaches the contract digest, so
-    /// an action that runs a rebuilt program is a different action, which is
-    /// what 0031's request-side key needs to distinguish the two.
+    /// Content the graph produced, which the executor stages inside the
+    /// scratch root and runs from there. Its [`ContentId`] reaches the
+    /// contract digest, so an action that runs a rebuilt program is a
+    /// different action, which a request-side key needs to distinguish.
     Content(ContentId),
 }
 
 impl ActionProgram {
     /// The host path this program runs from, when it has one. `None` for a
-    /// content program, whose path exists only once an executor has staged it.
+    /// content program, whose path exists only once an executor has staged
+    /// it.
     #[must_use]
     pub fn host_path(&self) -> Option<&str> {
         match self {
@@ -170,10 +162,9 @@ pub struct ActionSpec {
     /// content it stages and runs. See [`ActionProgram`].
     pub executable: ActionProgram,
     /// Host filesystem paths the action may read to find the rest of its
-    /// toolchain. For a nix toolchain these are the top-level `/nix/store/...`
+    /// toolchain: for a nix toolchain, the top-level `/nix/store/...`
     /// directories returned by `nix path-info -r` over the executable's store
-    /// path. The executor adds one landlock `PathBeneath` rule per path. See
-    /// decision 0030.
+    /// path. The executor adds one landlock `PathBeneath` rule per path.
     pub toolchain: Box<[Box<str>]>,
     /// Ordered command arguments. The executable itself is not repeated here.
     pub arguments: Box<[Box<str>]>,
@@ -311,10 +302,9 @@ mod tests {
 
     #[test]
     fn content_kind_reports_the_discriminant_not_the_payload() {
-        // The discriminator is the single source of truth for Blob-vs-Tree
-        // across every phase. Whatever the payload, kind() must report the
-        // variant — this is what lets validate_execution compare a produced
-        // Content against a declared OutputKind without a redundant kind field.
+        // kind() reports the variant whatever the payload, which is what lets
+        // validate_execution compare a produced Content against a declared
+        // OutputKind without a redundant kind field.
         let blob: ActionInputContent = Content::Blob(ContentId::of_blob(b"x"));
         let tree: ActionInputContent = Content::Tree(ContentId::of_tree(b"manifest"));
         assert_eq!(blob.kind(), OutputKind::Blob);

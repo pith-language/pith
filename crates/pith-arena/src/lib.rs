@@ -1,7 +1,7 @@
 //! Brand-typed arena indices and interners.
 //!
 //! Category brands prevent type substitution, and private owner tokens reject
-//! ids from another arena instance (decisions 0005, 0021).
+//! ids from another arena instance.
 
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};

@@ -48,11 +48,8 @@ fn line_col_reports_one_based_line_and_column_for_first_line() {
 #[test]
 fn line_col_advances_across_newlines() {
     let file = SourceFile::new(SourceId::from_raw(0), "f", "ab\ncd\nef");
-    // offset 0 -> line 1 col 1
     assert_eq!(file.line_col(ByteOffset(0)), (1, 1));
-    // offset 3 -> 'c' on line 2 col 1
     assert_eq!(file.line_col(ByteOffset(3)), (2, 1));
-    // offset 6 -> 'e' on line 3 col 1
     assert_eq!(file.line_col(ByteOffset(6)), (3, 1));
 }
 

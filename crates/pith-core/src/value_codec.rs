@@ -8,21 +8,16 @@ use crate::{
     manifest::{encode_bytes, encode_length, encode_str},
 };
 
-/// Version of the stored `Type`/`Value` encoding.
-///
-/// Pinned at 1 until the first release (decision 0048), on the same terms as the
-/// contract encoding and the record encoding: no released reader exists, so a
-/// grammar change is answered by discarding and rebuilding rather than by a
-/// migration. Four constructors have landed under that rule — `Nominal`, `List`,
-/// `Record`, `Sum` — each taking a reserved tag, so no existing byte sequence
-/// changed meaning and a foreign stream is still refused by the version byte.
+/// Version of the stored `Type`/`Value` encoding. Pinned at 1 until the first
+/// release: no released reader exists, so a grammar change is answered by
+/// discarding and rebuilding rather than by a migration. New variants take
+/// reserved tags, so existing byte sequences keep their meaning and a foreign
+/// stream is still refused by the version byte.
 pub const ENCODING_VERSION: u8 = 1;
 
-/// Discriminant tags for `Type`/`Value` variants. `Type` and `Value`
-/// deliberately share numbering for their overlapping variants so a value and
-/// its type encode under the same tag; `Nominal` is shared: a nominal type
-/// encodes its name, a nominal value encodes its name and representation. These
-/// tags are already part of the stable pure-computation digest format.
+/// Discriminant tags for `Type`/`Value` variants. Overlapping variants share
+/// numbering, so a value and its type encode under the same tag. The tags are
+/// part of the pure-computation digest format.
 pub(crate) const TAG_UNIT: u8 = 0;
 pub(crate) const TAG_BOOL: u8 = 1;
 pub(crate) const TAG_INT: u8 = 2;
@@ -33,9 +28,8 @@ pub(crate) const TAG_NOMINAL: u8 = 6;
 pub(crate) const TAG_LIST: u8 = 7;
 pub(crate) const TAG_RECORD: u8 = 8;
 pub(crate) const TAG_SUM: u8 = 9;
-/// The recursion cut (decision 0047). A type-only tag: a value never carries a
-/// cut, because a cut is a position inside a declaration's body and a value
-/// carries its declaration's name instead.
+/// The recursion cut. A type-only tag: a cut is a position inside a
+/// declaration's body, and a value carries its declaration's name instead.
 pub(crate) const TAG_CUT: u8 = 10;
 
 pub(crate) fn encode_type_payload(encoded: &mut Vec<u8>, value_type: &Type) {
@@ -80,22 +74,15 @@ pub(crate) fn encode_type_payload(encoded: &mut Vec<u8>, value_type: &Type) {
 }
 
 /// A sign byte, then the magnitude big-endian with no leading zero, behind the
-/// length prefix every variable-width payload in this encoding carries
-/// (decision 0055).
-///
-/// Big-endian magnitudes are CBOR's choice for its bignums and Java's for
-/// `BigInteger.toByteArray`, and the byte order is the only part of this a
-/// reader has to agree on; the length prefix is what makes the payload
-/// self-delimiting the way `Text` and `Bytes` already are.
+/// length prefix every variable-width payload in this encoding carries.
 fn encode_integer(encoded: &mut Vec<u8>, value: &Int) {
     encoded.push(u8::from(value.is_negative()));
     encode_bytes(encoded, &value.magnitude_bytes());
 }
 
 /// Refuses every spelling of a value except the one [`encode_integer`] writes:
-/// a leading zero byte and a negative zero both name a value that already has an
-/// encoding, and admitting them would put two byte strings under one integer and
-/// two computation keys under one value.
+/// a leading zero byte or a negative zero would put two byte strings under one
+/// integer and two computation keys under one value.
 fn decode_integer(decoder: &mut CanonicalReader) -> Result<Int, CanonicalDecodeError> {
     let negative = decoder.read_bool()?;
     let magnitude = decoder.read_bytes()?;
@@ -103,8 +90,7 @@ fn decode_integer(decoder: &mut CanonicalReader) -> Result<Int, CanonicalDecodeE
         .ok_or(CanonicalDecodeError::NonCanonicalInteger)
 }
 
-/// A presence byte then the payload when present, for the optionally-typed
-/// payloads a sum carries in both grammars.
+/// A presence byte, then the payload when present.
 fn encode_optional<T>(
     encoded: &mut Vec<u8>,
     payload: Option<&T>,
@@ -131,12 +117,10 @@ fn decode_optional<T>(
     }
 }
 
-/// Records are the one shape `Type` and `Value` build the same way — named
-/// fields, one payload each — so both grammars share the field machinery.
-/// Fields are written in name order whatever order the in-memory slice holds,
-/// because name order is the canonical order 0026 fixes; the decoder accepts
-/// that order only, so two records that differ by construction order cannot
-/// encode differently.
+/// Shared by the `Type` and `Value` grammars, which build records the same
+/// way. Fields are written in name order whatever order the in-memory slice
+/// holds, and the decoder accepts that order only, so two records that differ
+/// by construction order cannot encode differently.
 fn encode_record_fields<T>(
     encoded: &mut Vec<u8>,
     fields: &[RecordField<T>],
@@ -370,9 +354,9 @@ impl Type {
     /// Decode one type from Pith's versioned canonical wire format.
     ///
     /// # Errors
-    /// Returns an error for unsupported versions, unknown type tags, truncated
-    /// or trailing data, invalid UTF-8, and lengths not representable on the
-    /// current platform.
+    /// [`CanonicalDecodeError`] for an unsupported version, unknown tags,
+    /// truncated or trailing data, invalid UTF-8, or an unrepresentable
+    /// length.
     pub fn decode_canonical(encoded: &[u8]) -> Result<Self, CanonicalDecodeError> {
         let mut decoder = CanonicalReader::new(encoded);
         decoder.read_version(ENCODING_VERSION)?;
@@ -388,8 +372,8 @@ pub(crate) fn decode_type_payload(
     decode_type_at_depth(decoder, 0)
 }
 
-/// `List` made `Type` recursive, so decoding one type payload now nests the
-/// same way a value payload does and is bounded by the same limit.
+/// A type payload nests the same way a value payload does (`Type` is
+/// recursive through `List`) and is bounded by the same limit.
 fn decode_type_at_depth(
     decoder: &mut CanonicalReader,
     depth: u32,
@@ -469,9 +453,8 @@ impl Interface {
     /// Encode this interface in the current version of Pith's canonical wire
     /// format.
     ///
-    /// A durable action computation retains the interface its request was made
-    /// against (decision 0033), because revalidating a consumer's action edge
-    /// re-selects a rule from it.
+    /// A durable action computation retains the interface its request was
+    /// made against: revalidating an action edge re-selects a rule from it.
     #[must_use]
     pub fn encode_canonical(&self) -> Vec<u8> {
         let mut encoded = vec![ENCODING_VERSION];
@@ -486,9 +469,9 @@ impl Interface {
     /// Decode one interface from Pith's versioned canonical wire format.
     ///
     /// # Errors
-    /// Returns an error for unsupported versions, unknown type tags, truncated
-    /// or trailing data, invalid UTF-8, and lengths not representable on the
-    /// current platform.
+    /// [`CanonicalDecodeError`] for an unsupported version, unknown tags,
+    /// truncated or trailing data, invalid UTF-8, or an unrepresentable
+    /// length.
     pub fn decode_canonical(encoded: &[u8]) -> Result<Self, CanonicalDecodeError> {
         let mut decoder = CanonicalReader::new(encoded);
         decoder.read_version(ENCODING_VERSION)?;
@@ -511,9 +494,9 @@ impl Value {
     /// Decode one value from Pith's versioned canonical wire format.
     ///
     /// # Errors
-    /// Returns an error for unsupported versions, unknown value tags, malformed
-    /// booleans, truncated or trailing data, invalid UTF-8, and lengths not
-    /// representable on the current platform.
+    /// [`CanonicalDecodeError`] for an unsupported version, unknown tags,
+    /// malformed booleans, truncated or trailing data, invalid UTF-8, or an
+    /// unrepresentable length.
     pub fn decode_canonical(encoded: &[u8]) -> Result<Self, CanonicalDecodeError> {
         let mut decoder = CanonicalReader::new(encoded);
         decoder.read_version(ENCODING_VERSION)?;
@@ -525,19 +508,11 @@ impl Value {
 
 /// How deeply the recursive constructors may nest before decoding refuses.
 ///
-/// `Nominal` values, `List` values, `List` types, `Record` values, `Record`
-/// types, `Sum` values, and `Sum` types recurse during decoding, so they are
-/// the things that can make it recurse without bound. The decoder
-/// reads bytes an adapter hands it, and those bytes are whatever the database
-/// holds: a row of repeated `TAG_NOMINAL`, `TAG_LIST`, `TAG_RECORD`, or
-/// `TAG_SUM` recurses once per byte and overflows the stack, which aborts the
-/// process rather than returning the adapter error decision 0024 requires of
-/// corrupt state. Bounding the depth turns that into an ordinary decode
-/// failure.
-///
-/// The limit is far above any real value. A nominal over a nominal is legal and
-/// occasionally useful; a chain dozens deep is not something the calculus in
-/// decision 0026 describes writing.
+/// Stored bytes are untrusted input: a row of repeated recursive tags
+/// (`TAG_NOMINAL`, `TAG_LIST`, `TAG_RECORD`, `TAG_SUM`) recurses once per
+/// byte and would overflow the stack, aborting the process. The bound turns
+/// that into an ordinary decode failure. The limit is far above anything a
+/// real program writes.
 pub const MAX_NOMINAL_NESTING: u32 = 32;
 
 fn decode_value_payload(
@@ -663,7 +638,7 @@ mod tests {
             Value::Bool(true),
             Value::int(i64::MIN),
             Value::int(i64::MAX),
-            // Past the range the type used to stop at, from both ends.
+            // Past the `i64` range, from both ends.
             Value::Int(Int::from(i64::MIN).multiplied(&Int::from(i64::MIN))),
             Value::Int(Int::from(i64::MIN).multiplied(&Int::from(i64::MAX))),
             Value::Text("Pith \u{03bb}".into()),
@@ -722,9 +697,9 @@ mod tests {
             (Type::Bytes, &[0x01, 0x04]),
             (Type::Blob, &[0x01, 0x05]),
             (
-                // A nominal type now carries its declaration: the module, the
-                // declared name, then the representation's own payload
-                // (decision 0047). The trailing 0x05 is TAG_BLOB.
+                // A nominal type carries its declaration: the module, the
+                // declared name, then the representation's own payload.
+                // The trailing 0x05 is TAG_BLOB.
                 declared_nominal("test", "N", Type::Blob),
                 &[
                     0x01, 0x06, //
@@ -798,7 +773,7 @@ mod tests {
             (Value::Bool(true), &[0x01, 0x01, 0x01]),
             // An integer carries a sign byte then its magnitude, big-endian
             // behind the same u64 length prefix `Text` and `Bytes` use, with no
-            // leading zero byte (decision 0055). Zero is the empty magnitude,
+            // leading zero byte. Zero is the empty magnitude,
             // which is the one place the sign byte and the length agree that
             // there is nothing to read.
             (
@@ -820,8 +795,7 @@ mod tests {
                 ],
             ),
             (
-                // Beyond the range the type used to hold: 2^64, whose magnitude
-                // is nine bytes and which no `i64` fixture could have written.
+                // 2^64: a nine-byte magnitude no `i64` fixture could write.
                 Value::Int(Int::from(4_294_967_296u64).multiplied(&Int::from(4_294_967_296u64))),
                 &[
                     0x01, 0x02, 0x00, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //
@@ -853,9 +827,8 @@ mod tests {
                     name: "test.N".into(),
                     representation: Box::new(Value::Unit),
                 },
-                // A nominal value carries a name, not a declaration: the value
-                // is data and the type is the side that can check
-                // (decision 0047). The name is the coordinate's spelling.
+                // A nominal value carries a name, not a declaration; the name
+                // is the coordinate's spelling.
                 &[
                     0x01, 0x06, //
                     0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //
@@ -908,9 +881,8 @@ mod tests {
                     constructor: "a".into(),
                     payload: Some(Box::new(Value::Text("hi".into()))),
                 },
-                // A sum value names its declaration the way a nominal value
-                // does, with the coordinate's spelling; the constructor set is
-                // the type's business and is not repeated here.
+                // A sum value names its declaration with the coordinate's
+                // spelling; the constructor set is not repeated here.
                 &[
                     0x01, 0x09, //
                     0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //
@@ -1018,10 +990,8 @@ mod tests {
 
     #[test]
     fn record_encoding_is_name_ordered_whatever_order_the_value_holds() {
-        // 0026 fixes name order as the canonical order, so the encoder writes
-        // it even for a slice built out of order, and the decoder refuses
-        // anything else — which also refuses a duplicate name — so two records
-        // that differ only by construction order cannot encode differently.
+        // The encoder writes name order even for a slice built out of order,
+        // and the decoder refuses anything else, duplicates included.
         let sorted = Value::record([
             RecordField {
                 name: "a".into(),
@@ -1284,9 +1254,8 @@ mod declaration_codec {
 
     #[test]
     fn a_nominal_carrying_a_declaration_round_trips_with_its_representation() {
-        // The encoding grew a body, so the decoder has to rebuild one — and a
-        // decoded type has to check as well as a constructed one, which is the
-        // whole reason decision 0047 puts the declaration in the type.
+        // A decoded type has to check as well as a constructed one, which is
+        // why the declaration travels in the type.
         let mut table = DeclarationTable::new("m");
         for (name, representation) in [
             ("OverBlob", Type::Blob),
@@ -1322,8 +1291,8 @@ mod declaration_codec {
             .nominal("Tree", Type::List(Box::new(Type::Cut)))
             .unwrap();
         round_trip_type(&tree);
-        // And the decoded form still checks a nested value, so the cut survived
-        // as a cut rather than as an expansion.
+        // The decoded form still checks a nested value: the cut survived as a
+        // cut.
         let decoded = Type::decode_canonical(&tree.encode_canonical()).unwrap();
         let leaf = Value::Nominal {
             name: "m.Tree".into(),
@@ -1365,9 +1334,8 @@ mod declaration_codec {
 
     #[test]
     fn a_value_stream_carrying_the_cut_tag_is_refused() {
-        // `Cut` is a type-only construct: a value carries its declaration's name,
-        // never a position inside a body. The value decoder must not accept the
-        // tag rather than silently producing something.
+        // `Cut` is a type-only construct: a value carries its declaration's
+        // name, never a position inside a body.
         let encoded = vec![ENCODING_VERSION, TAG_CUT];
         assert_eq!(
             Value::decode_canonical(&encoded),
@@ -1377,8 +1345,8 @@ mod declaration_codec {
 
     #[test]
     fn a_deeply_nested_nominal_declaration_is_refused_rather_than_overflowing() {
-        // The nominal decode path recurses now that it carries a representation,
-        // so it needs the same depth bound `List` and `Sum` already had.
+        // The nominal decode path recurses (it carries a representation), so
+        // it needs the same depth bound as `List` and `Sum`.
         let mut representation = Type::Unit;
         for _ in 0..(MAX_NOMINAL_NESTING.saturating_add(2)) {
             let mut table = DeclarationTable::new("m");
