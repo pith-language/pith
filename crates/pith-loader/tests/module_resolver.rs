@@ -1,12 +1,7 @@
 //! The module resolver domain, registered and driven through the same
-//! engine API a peer domain uses.
-//!
-//! These tests hold slice 2's registration claim: resolution is a pure
-//! rule — `modules.resolve` over four declared inputs — bound onto the
-//! engine through its public registration call, so dependency selection is
-//! a computation the engine can explain and reuse rather than a subroutine
-//! beside it. The search performs no I/O; every input is a value, and the
-//! answers are functions of those values alone.
+//! engine API a peer domain uses: resolution is the pure rule
+//! `modules.resolve`. The search performs no I/O; every answer is a
+//! function of its value inputs alone.
 
 use pith_engine::{Engine, MemoryEngineStateStore};
 use pith_hir::{ManifestVersion, ModuleSubject, VersionBound, VersionRange};
@@ -87,7 +82,7 @@ fn constraint(spelling: &str, range: VersionRange, attribution: &str) -> ModuleC
 }
 
 /// The diamond fixture: two consumers bound to one shared subject through
-/// overlapping ranges, with three shared releases available.
+/// overlapping ranges.
 fn diamond() -> (Vec<ModuleConstraint>, ModuleUniverse) {
     (
         vec![
@@ -362,8 +357,7 @@ fn the_rule_is_modules_resolve_and_its_revision_is_derived() {
         (rule.coordinate.module.as_ref(), rule.label.as_ref()),
         ("modules", "resolve"),
     );
-    // The revision derives from the interface rather than being authored,
-    // so every registration of this rule keys the engine identically.
+    // Two separately built rules carry the same revision digest.
     assert_eq!(
         resolver_rule().revision.digest(),
         resolver_rule().revision.digest()

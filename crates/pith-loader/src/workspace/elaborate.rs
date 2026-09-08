@@ -1,9 +1,6 @@
 //! Elaboration of a resolved workspace: every module of the closure under
-//! its own bindings.
-//!
-//! One traversal produces one outcome per module; `check` and `elaborate`
-//! are two projections of it rather than two walks that could disagree
-//! about dependency order or about what a module may name.
+//! its own bindings. One traversal produces one outcome per module;
+//! `check` and `elaborate` are projections of that single pass.
 
 use pith_diag::Diag;
 use pith_hir::ModuleSubject;
@@ -23,20 +20,15 @@ impl ElaboratedWorkspace {
     }
 }
 
-/// One traversal's result: every module of the closure paired with what the
-/// pass made of it.
+/// Each module of the closure paired with the outcome the pass produced.
 pub type WorkspacePass<'workspace> = Closure<(&'workspace ResolvedModule, Outcome)>;
 
-/// What one traversal made of one module.
-///
-/// The three states are distinct facts, not degrees of failure: the module
-/// elaborated, it was attempted and refused, or it was never attempted
-/// because something it binds did not elaborate. Only the first carries an
-/// ABI, and only the second carries a refusal of its own — a blocked module
-/// has nothing to answer for.
+/// What the pass made of one module: it elaborated, it was attempted and
+/// refused, or it was never attempted because a binding's dependency did
+/// not elaborate. Only the elaborated state carries an ABI; only the
+/// refused state carries diagnostics of its own.
 pub enum Outcome {
-    /// Boxed so a pass over a large closure carries one pointer per
-    /// refused or blocked module rather than a module-sized hole.
+    /// Boxed so the outcome stays pointer-sized regardless of module size.
     Elaborated(Box<LoadedModule>),
     Refused(Box<[Diag]>),
     Blocked,
@@ -52,7 +44,7 @@ impl Outcome {
     }
 
     /// The diagnostics this module produced: a refusal's own, or the
-    /// warnings an elaborated module carried out with it.
+    /// warnings an elaborated module carried with it.
     #[must_use]
     pub fn diagnostics(&self) -> &[Diag] {
         match self {
@@ -83,11 +75,10 @@ impl Outcome {
 /// Why a workspace did not elaborate.
 #[derive(Debug)]
 pub enum ElaborateError {
-    /// Every parse and elaboration diagnostic collected, each attached to
-    /// its source.
+    /// Every parse and elaboration diagnostic collected.
     Diagnostics(Box<[Diag]>),
-    /// The builtin module table is invalid: a kernel invariant, not a
-    /// property of the workspace.
+    /// The builtin module table itself is invalid: a kernel invariant, not
+    /// a property of the workspace.
     Builtins(pith_core::DeclarationError),
 }
 
@@ -107,8 +98,8 @@ impl Workspace {
     /// each under the bindings its own manifest declared.
     ///
     /// # Errors
-    /// Returns [`ElaborateError::Builtins`] when the builtin table is
-    /// invalid. A module's own refusal is an outcome, not an error.
+    /// [`ElaborateError`] when the builtin table is invalid; a module's own
+    /// refusal is an outcome, not an error.
     pub fn attempt(&self) -> Result<WorkspacePass<'_>, ElaborateError> {
         self.try_scan(|module, resolved| {
             let Some(environment) = binding_environment(module, resolved)? else {
@@ -124,9 +115,8 @@ impl Workspace {
     /// Elaborate every module of the selected closure.
     ///
     /// # Errors
-    /// Returns [`ElaborateError::Diagnostics`] with every refusal the pass
-    /// collected, or [`ElaborateError::Builtins`] when the builtin table is
-    /// invalid.
+    /// [`ElaborateError`] with every collected refusal, or when the builtin
+    /// table is invalid.
     pub fn elaborate(&self) -> Result<ElaboratedWorkspace, ElaborateError> {
         let pass = self.attempt()?;
         let refusals = pass
@@ -141,12 +131,12 @@ impl Workspace {
             .map_err(ElaborateError::Diagnostics)
     }
 
-    /// Elaborate tolerantly: report every module's outcome rather than
+    /// Elaborate tolerantly: report every module's outcome instead of
     /// raising the first refusal.
     ///
     /// # Errors
-    /// Returns [`ElaborateError::Builtins`] when the builtin table is
-    /// invalid; diagnostic outcomes are values, not errors.
+    /// [`ElaborateError`] when the builtin table is invalid; diagnostic
+    /// outcomes are values, not errors.
     pub fn check(&self) -> Result<WorkspaceCheck, ElaborateError> {
         let pass = self.attempt()?;
         Ok(WorkspaceCheck {
@@ -164,8 +154,7 @@ impl Workspace {
     }
 }
 
-/// One module of the closure, elaborated under the environment its own
-/// manifest declared.
+/// Elaborate one module under the environment its own manifest declared.
 fn elaborate_one(
     module: &ResolvedModule,
     environment: &crate::ImportEnv,
@@ -175,12 +164,9 @@ fn elaborate_one(
     crate::load::elaborate_module(parsed, environment)
 }
 
-/// The environment a module elaborates under: its own `use` clauses and
-/// nothing else, resolved against the dependencies that precede it.
-///
-/// `None` when a binding did not elaborate. Attempting the module anyway
-/// would report the consumer for its dependency's refusal, at a name that
-/// is missing only because something upstream failed.
+/// The environment a module elaborates under: its own `use` clauses
+/// resolved against its dependencies. `None` when a dependency did not
+/// elaborate, so the consumer is not blamed for an upstream refusal.
 fn binding_environment(
     module: &ResolvedModule,
     resolved: &[(&ResolvedModule, Outcome)],

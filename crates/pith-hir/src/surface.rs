@@ -111,8 +111,8 @@ pub enum SurfaceRuleBody {
 }
 
 /// A module-private definition: annotated, earlier-in-file-only,
-/// non-recursive, and elaborating to a request against its own annotation —
-/// a first-order call, not an inlined expansion.
+/// non-recursive, and elaborating to a request against its own annotation
+/// (a first-order call, not an inlined expansion).
 pub struct SurfaceLocal {
     pub name: Box<str>,
     pub name_span: Span,

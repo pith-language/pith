@@ -3,8 +3,8 @@
 //! takes part in no canonical encoding.
 //!
 //! The spelling is split the way the grammar is: this file holds the module
-//! and its items, and one sibling file per tier below — layout, names,
-//! types, requests, and expressions.
+//! and its items, and one sibling file per tier below (layout, names, types,
+//! requests, expressions).
 
 mod expression;
 mod items;
@@ -72,9 +72,9 @@ impl ModuleEvent<'_> {
 }
 
 impl<'a> Printer<'a> {
-    /// Top-level items and comments remain in source order. This keeps comments
-    /// attached to the text they describe without requiring a token-preserving
-    /// concrete syntax tree.
+    /// Top-level items and comments print in source order, which keeps
+    /// comments attached to the text they describe without requiring a
+    /// token-preserving concrete syntax tree.
     fn module(&mut self) {
         let mut events = Vec::new();
         events.extend(self.surface.comments.iter().map(ModuleEvent::Comment));

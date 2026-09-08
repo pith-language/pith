@@ -1,12 +1,7 @@
 //! The frontend's dependency closure: no kernel crate links a first-party
-//! domain.
-//!
-//! The compiler and query drivers reach module resolution and the frontend
-//! through this crate, so a manifest that grew `phloem`, `xylem`, or
-//! `stele` here would smuggle a package, build, or system domain into the
-//! driver as a shortcut — the seam slice 2 exists to prevent. The domain
-//! set is derived from the crates directory, so a domain added later is
-//! covered without editing a list here.
+//! domain, which the compiler and query drivers would otherwise reach
+//! through this crate. The domain set is derived from the crates directory,
+//! so a domain added later is covered without editing a list here.
 
 use std::path::{Path, PathBuf};
 
@@ -33,7 +28,7 @@ fn crate_directories(root: &Path) -> Vec<PathBuf> {
 }
 
 /// The first-party domains: crate directories that are not kernel crates.
-/// Derived, so a fourth domain is covered by this test on arrival.
+/// Derived, so a new domain is covered without editing this test.
 fn domains(root: &Path) -> Vec<String> {
     crate_directories(root)
         .into_iter()
@@ -44,7 +39,7 @@ fn domains(root: &Path) -> Vec<String> {
 
 /// The dependency names a manifest links: the `[dependencies]` and
 /// `[build-dependencies]` tables, never the `[dev-dependencies]` a test
-/// fixture reaches for. Linking is the claim; a fixture is not a link.
+/// fixture reaches for.
 fn linked_dependencies(manifest: &str) -> Vec<String> {
     let mut linked = Vec::new();
     let mut in_link_table = false;

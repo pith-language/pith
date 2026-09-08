@@ -220,7 +220,7 @@ impl EntryDeclaration {
 
     /// The rule label the entry's body registers under: the entry's name in
     /// the module's `entry` namespace. The query surface reads registrations
-    /// back through this spelling, so the convention has one definition.
+    /// back through this spelling.
     #[must_use]
     pub fn rule_label(&self) -> String {
         format!("entry.{}", self.name)
@@ -238,8 +238,8 @@ impl EntryDeclaration {
     }
 
     /// The request a run of this entry issues. Its label is prose for
-    /// diagnostics, deliberately not the [`Self::rule_label`] spelling the
-    /// body registers under.
+    /// diagnostics, not the [`Self::rule_label`] spelling the body
+    /// registers under.
     #[must_use]
     pub fn request(&self) -> Request<Pure> {
         Request::new(
@@ -251,8 +251,7 @@ impl EntryDeclaration {
     }
 
     /// # Errors
-    /// Returns [`BodyError`] if the elaborated body no longer checks against
-    /// the entry interface.
+    /// [`BodyError`] when the body does not check against the entry interface.
     pub fn register<S>(&self, engine: &mut Engine<S>) -> Result<RuleId, BodyError>
     where
         S: EngineStateReader + ?Sized,
@@ -300,7 +299,7 @@ impl<K> RepresentedRuleDeclaration<K> {
 
 impl RepresentedRuleDeclaration<Pure> {
     /// # Errors
-    /// Returns [`BodyError`] when the body does not check against the interface.
+    /// [`BodyError`] when the body does not check against the interface.
     pub fn register<S>(&self, engine: &mut Engine<S>) -> Result<RuleId, BodyError>
     where
         S: EngineStateReader + ?Sized,

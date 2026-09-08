@@ -11,11 +11,10 @@ use super::{
 };
 use pith_loader::interface_of_request;
 
-/// The exact case 0063's unresolved section deferred to the notation: editing
-/// a rule's body text moves `bodies-of` while the interface surface and its
-/// ABI digest stay byte-identical, the `interface-of` computation itself is
-/// reusable across the edit, and a dependent whose imports name that surface
-/// reuses its attempt.
+/// Editing a rule's body text moves `bodies-of` while the interface surface
+/// and its ABI digest stay byte-identical; `interface-of` stays reusable
+/// across the edit, and a dependent whose imports name that surface reuses
+/// its attempt.
 #[test]
 fn a_body_edit_moves_bodies_and_leaves_the_interface_surface_byte_identical() {
     let mut driver = Driver::new(MemoryEngineStateStore::default());
@@ -32,8 +31,7 @@ fn a_body_edit_moves_bodies_and_leaves_the_interface_surface_byte_identical() {
     };
     assert_eq!(first.source, EvaluationSource::Computed);
 
-    // The dependent evaluates against the original surface, so an attempt
-    // exists for the edit to be measured against.
+    // Seeds the attempt the later edit is measured against.
     let beta_blob = driver.publish(BETA.as_bytes());
     let before = match bodies_of(
         &mut driver.engine,

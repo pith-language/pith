@@ -480,8 +480,8 @@ impl Parser<'_> {
 
     /// `domain <domain> from <registry>`: the whole routing rule, written
     /// once per domain. Duplicates are a load-time refusal, because a user
-    /// binding and a project binding for one domain is the collision 0069
-    /// resolves by precedence rather than by parse order.
+    /// binding and a project binding for one domain is a collision resolved
+    /// by precedence rather than by parse order.
     fn domain_clause(&mut self) -> Option<ManifestDomain> {
         let keyword = self.take();
         if self.peek().kind != TokenKind::Ident {

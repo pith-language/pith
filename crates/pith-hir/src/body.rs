@@ -11,8 +11,8 @@ define_arena!(
     "An id for one expression node in a parsed module body's arena."
 );
 
-/// One pure expression between yields. Requests are a separate type and can
-/// therefore appear only in checking positions.
+/// One pure expression between yields. Requests are a separate type, so they
+/// can appear only in checking positions.
 #[derive(Clone, Debug)]
 pub enum SurfaceExpr {
     Literal {
@@ -37,8 +37,8 @@ pub enum SurfaceExpr {
         span: Span,
     },
     /// A declared name applied to arguments: a nominal wrapping its
-    /// representation, a sum constructor, or a builtin. Which one it is
-    /// decided by name resolution, not by the spelling.
+    /// representation, a sum constructor, or a builtin; name resolution
+    /// decides which, not the spelling.
     Construct {
         name: Box<str>,
         arguments: Box<[SurfaceExprId]>,
@@ -136,8 +136,8 @@ pub enum SurfaceRequest {
     },
 }
 
-/// A pure rule request inside a heterogeneous batch. Other request forms are
-/// excluded because the body IR batches rule requests only.
+/// A pure rule request inside a heterogeneous batch: the body IR batches
+/// rule requests only.
 #[derive(Clone, Debug)]
 pub struct SurfaceBatchMember {
     pub head: Option<SurfaceTypeId>,
@@ -174,8 +174,8 @@ pub enum SurfaceClause {
 }
 
 /// What a checking position holds: an expression, or the request it yields
-/// to. The separation is what makes the checking-position rule a property of
-/// the grammar rather than a convention the parser remembers to check.
+/// to. The separation makes the checking-position rule a property of the
+/// grammar rather than a convention the parser remembers to check.
 pub enum SurfaceValue {
     Expression(SurfaceExprId),
     Request(SurfaceRequest),

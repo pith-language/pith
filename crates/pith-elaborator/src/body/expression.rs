@@ -867,7 +867,7 @@ fn expression_span(expr: &SurfaceExpr) -> Span {
 
 /// The text up to the first occurrence of `separator`, the whole text when it
 /// never occurs: the head of the split, whose first field is exactly that.
-/// The case's empty arm never runs — a split yields at least one field — and
+/// The case's empty arm never runs (a split yields at least one field) and
 /// carries the empty text the result type demands.
 fn text_before(source: BodyExpr, separator: BodyExpr) -> BodyExpr {
     BodyExpr::MatchList {
@@ -976,9 +976,9 @@ fn strip_prefix(source: BodyExpr, prefix: BodyExpr) -> BodyExpr {
                     left: Box::new(BodyExpr::Bound(0)),
                     right: Box::new(BodyExpr::Literal(Value::Text("".into()))),
                 }),
-                // head(0) tail(1) pair(2): the tail rejoins with the
-                // separator carried out of the pair, read at the fold's own
-                // scope.
+                // Cons arm scope: head at Bound(0), tail at Bound(1), the
+                // let-bound pair at Bound(2). The tail rejoins with the
+                // separator carried out of the pair.
                 then: Box::new(join_fields(
                     BodyExpr::Bound(1),
                     field_of(BodyExpr::Bound(2), "separator"),

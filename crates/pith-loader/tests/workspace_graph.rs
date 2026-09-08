@@ -1,17 +1,7 @@
 //! The frontend graph tier, reached through a resolved workspace rather
-//! than through hand-built inputs.
-//!
-//! `edits.rs` compares two direct elaborations and finds equal semantic
-//! outputs. That is a weaker claim than the one M-12 measured: equal
-//! outputs are not a reusable lookup, and a frontend that recomputed
-//! everything would satisfy it. These tests ask the engine, so the evidence
-//! is the evaluation's own source.
-//!
-//! The runtime half of the same edit — a changed called result
-//! revalidating rather than serving stale — is measured end to end by
-//! `pith-cli`'s `an_edited_dependency_body_revalidates_the_entry`. Frontend
-//! reuse and runtime revalidation are separate properties, so they stay
-//! separate witnesses.
+//! than hand-built inputs. Where `edits.rs` checks equal outputs, these
+//! tests read the engine's evaluation source: the claim is a reusable
+//! lookup.
 
 use std::fs;
 use std::path::Path;
@@ -70,9 +60,8 @@ fn load(directory: &Path) -> TestResult<Workspace> {
     )
 }
 
-/// What one projection recorded about the two modules: the inputs each
-/// module's frontend computations are asked under, and the interface the
-/// dependency published.
+/// What one projection records: the inputs each module's frontend
+/// computations are asked under, and the interface the dependency published.
 struct Projected {
     dependency: FrontendInputs,
     root: FrontendInputs,
@@ -109,7 +98,7 @@ fn subjects(workspace: &Workspace) -> Vec<&ResolvedModule> {
     workspace.modules().collect()
 }
 
-/// The M-12 cutoff, over the loader a person actually reaches: editing a
+/// The reuse cutoff through the public workspace path: editing a
 /// dependency's rule body moves that module's `bodies-of` and leaves its
 /// consumer's reusable, because the consumer's inputs name the dependency's
 /// published surface and the body edit did not move it.
@@ -168,9 +157,9 @@ fn a_dependency_body_edit_leaves_the_consumer_bodies_reusable() -> TestResult {
     Ok(())
 }
 
-/// The control that keeps the cutoff from being vacuous: a public
-/// representation edit moves the dependency's ABI and surface, so the
-/// consumer's inputs move with them and its `bodies-of` recomputes.
+/// The control: a public representation edit moves the dependency's ABI and
+/// surface, so the consumer's inputs move with them and its `bodies-of`
+/// recomputes.
 #[test]
 fn a_public_representation_edit_moves_the_consumer_inputs() -> TestResult {
     let directory = tempfile::tempdir()?;
@@ -214,9 +203,9 @@ fn a_public_representation_edit_moves_the_consumer_inputs() -> TestResult {
 
 /// The projection is a function of the resolved workspace: the same bytes
 /// in the same module-relative places project to the same inputs, wherever
-/// the checkout lives. This is [`Workspace`]'s relocation property carried
-/// through to the graph tier's keys, which is where it has to hold for a
-/// dependency acquired from anywhere to reuse a local one's computations.
+/// the checkout lives. [`Workspace`]'s relocation property carried through
+/// to the graph tier's keys, which is where a dependency acquired from
+/// anywhere reuses a local one's computations.
 #[test]
 fn relocation_leaves_the_projected_inputs_identical() -> TestResult {
     let first_directory = tempfile::tempdir()?;

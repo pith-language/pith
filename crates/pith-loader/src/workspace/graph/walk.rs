@@ -218,7 +218,7 @@ impl<S: ModuleStore> Resolution<S> {
     }
 
     /// A dependency's registry bindings and domain routes are diagnosed and
-    /// carry no authority. Both are consumer configuration under 0069: a
+    /// carry no authority. Both are consumer configuration: a
     /// module that is a root in its own checkout keeps them, and they stop
     /// meaning anything the moment something else selects it.
     fn refuse_supplied_authority(&mut self, view: &Manifest, source: &Arc<SourceFile>) {

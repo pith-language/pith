@@ -19,8 +19,8 @@ use layer::{Domain, Layer, Registry};
 pub use merge::BindingPolicy;
 pub use provenance::{BindingOrigin, BindingOverride, BindingSite};
 
-/// A registry selected by consumer configuration for one subject.
-/// Its fields cannot be constructed from a dependency's registry clause.
+/// A registry selected by consumer configuration for one subject. Its
+/// fields cannot be constructed from a dependency's registry clause.
 pub struct RegistryRoute<'a> {
     subject: &'a ModuleSubject,
     binding: &'a Registry,

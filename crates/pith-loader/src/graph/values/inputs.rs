@@ -65,7 +65,7 @@ impl std::error::Error for FrontendInputError {}
 
 impl FrontendSource {
     /// # Errors
-    /// Returns [`FrontendInputError::DuplicateSourcePath`] for repeated paths.
+    /// [`FrontendInputError::DuplicateSourcePath`] for repeated paths.
     pub fn new(
         module: impl Into<Box<str>>,
         files: impl IntoIterator<Item = (Box<str>, ContentId)>,
@@ -128,10 +128,9 @@ impl FrontendImport {
 
 impl FrontendImportEnv {
     /// # Errors
-    /// Returns [`FrontendInputError::DuplicateImportBinding`] for repeated
-    /// bindings, and [`FrontendInputError::ConflictingImportAbis`] when one
-    /// subject arrives with two different ABI digests — the environment
-    /// binds a subject to one ABI, whichever bindings reach it.
+    /// [`FrontendInputError`] for repeated bindings, or when one subject
+    /// arrives with two different ABI digests: the environment binds a
+    /// subject to one ABI, whichever bindings reach it.
     pub fn new(
         entries: impl IntoIterator<Item = FrontendImport>,
     ) -> Result<Self, FrontendInputError> {

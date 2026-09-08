@@ -134,9 +134,9 @@ fn collect_declarations<'a>(
     declarations
 }
 
-/// The DFS color a declaration carries while the topological order and the
-/// cycle diagnosis share one pass's state: `Done` marks a node provably
-/// outside any cycle, `InStack` marks the current DFS path.
+/// DFS color shared by the topological order and the cycle diagnosis:
+/// `Done` marks a node provably outside any cycle, `InStack` marks the
+/// current DFS path.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum VisitState {
     Unvisited,

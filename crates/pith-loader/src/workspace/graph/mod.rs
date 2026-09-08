@@ -1,13 +1,8 @@
 //! Validation and resolution over the acquired manifests: membership,
 //! identity, cycles, and source sets. Every refusal here names the clause
-//! that caused it, in the manifest that caused it — which is what separates
+//! that caused it, in the manifest that caused it; this is what separates
 //! this half from [`super::acquire`], where failures carry no span of their
 //! own and are attached by the caller that reached for the file.
-//!
-//! The state lives in [`Resolution`]; the phases that move it are one file
-//! each: [`members`] validates the root's workspace list, [`walk`] resolves
-//! the dependency closure, and [`sources`] acquires each resolved module's
-//! source set.
 
 mod bootstrap;
 mod claims;

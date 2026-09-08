@@ -1,5 +1,4 @@
-//! The declared range sum: the five constructors a manifest writes, and
-//! their codec.
+//! The declared range sum and its codec.
 
 use pith_core::{SumConstructor, Type, Value};
 use pith_diag::PithResult;
@@ -39,7 +38,7 @@ fn bound_from_value(value: &Value) -> PithResult<VersionBound> {
     })
 }
 
-/// The declared range sum: the five constructors the manifest writes.
+/// The declared range sum the manifest writes.
 #[must_use]
 pub fn range_type() -> Type {
     sum_type(

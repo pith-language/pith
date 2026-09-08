@@ -1,5 +1,5 @@
 //! The answer codecs: a solve's selections, trail, derivation, and the
-//! four-outcome resolution sum.
+//! resolution sum.
 
 use pith_core::{Int, SumConstructor, Type, Value};
 use pith_diag::PithResult;
@@ -16,7 +16,7 @@ const UNSATISFIABLE: &str = "Unsatisfiable";
 const UNDERDETERMINED: &str = "Underdetermined";
 const BUDGET_EXHAUSTED: &str = "BudgetExhausted";
 
-/// The selection record type: `{domain, name, version}` — the lock-entry
+/// The selection record type: `{domain, name, version}`, the lock-entry
 /// shape.
 #[must_use]
 pub fn selection_type() -> Type {
@@ -96,7 +96,7 @@ pub fn derivation_value(derivation: &Derivation) -> Value {
     ])
 }
 
-/// The declared resolution sum: the four outcomes the protocol settled.
+/// The declared resolution sum.
 #[must_use]
 pub fn resolution_type() -> Type {
     sum_type(

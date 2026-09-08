@@ -41,7 +41,7 @@ impl LoadedModule {
     }
 
     /// The module's files, mapping every elaborated span back to the file
-    /// that owns it — one file in standalone mode, a sorted set in manifest
+    /// that owns it: one file in standalone mode, a sorted set in manifest
     /// mode.
     #[must_use]
     pub const fn files(&self) -> &ModuleFiles {

@@ -1,17 +1,8 @@
 //! The module resolver domain: a pure rule over an acquired universe,
-//! registered on the same engine API a peer domain uses.
-//!
-//! Resolution is a computation under 0040 — constraints, universe,
-//! preference, and budget in; one of four answers out — and the module
-//! domain supplies its own vocabulary for it rather than linking the
-//! package resolver's. The compiler and query drivers link this crate and
-//! register the resolver through the public engine call, so dependency
-//! selection is a computation the engine can explain, reuse, and replay
-//! rather than a subroutine running beside it.
-//!
-//! Acquiring the universe is a caller-side effect. Nothing in this module
-//! reads a file, a socket, or a clock: removing network access changes
-//! whether a universe could be acquired, never a solved answer.
+//! registered on the engine API like any peer domain. Acquiring the
+//! universe is a caller-side effect: nothing here reads a file, a socket,
+//! or a clock, so network access changes whether a universe can be
+//! acquired, never a solved answer.
 
 mod model;
 mod search;
@@ -32,13 +23,11 @@ pub use model::{
 pub use search::{SolveRequest, resolve as solve};
 pub use values::{MODULES_MODULE, selections_from_value};
 
-/// The resolver's semantic version: bumped when the solve's meaning
-/// changes, which moves the derived rule revision and with it the
-/// identity a lock records.
+/// Bumped when the solve's meaning changes: moves the rule revision, and
+/// with it the identity a lock records.
 const RESOLVER_SEMANTIC_VERSION: u32 = 1;
 
-/// Registers the module resolver on an engine, through the same public
-/// call a peer domain's extension trait uses.
+/// Registers the module resolver on an engine as a normal pure rule.
 pub trait RegisterModuleResolver {
     fn register_module_resolver(&mut self);
 }
@@ -49,8 +38,8 @@ impl RegisterModuleResolver for Engine {
     }
 }
 
-/// The resolver rule: `modules.resolve` over the four protocol inputs,
-/// ready for the engine's own `register_rule` call.
+/// The resolver rule: `modules.resolve` over the protocol inputs, ready for
+/// the engine's own `register_rule` call.
 #[must_use]
 pub fn resolver_rule() -> Rule<Pure> {
     let identity = RuleIdentity::of_module_declaration(values::MODULES_MODULE, "resolve");
@@ -66,9 +55,7 @@ pub fn resolver_rule() -> Rule<Pure> {
 
 /// The resolver's revision digest as lowercase hex, for the lock header
 /// that records which resolver produced a selection. Read off the rule so
-/// the lock records the revision the engine actually keys on; the revision
-/// derives from the interface, so a change to any resolver declaration
-/// moves it.
+/// the lock records the revision the engine keys on.
 #[must_use]
 pub fn resolver_revision_hex() -> Box<str> {
     resolver_rule().revision.digest().to_string().into()
@@ -87,8 +74,8 @@ fn resolve_interface() -> Interface {
 }
 
 /// The revision manifest: the resolver's semantic version, the crate's
-/// version, the body encoding, and the canonical interface, each of which
-/// moving the answer moves the revision.
+/// version, the body encoding, and the canonical interface. Any of these
+/// changing moves the revision.
 fn resolver_revision_manifest() -> Vec<u8> {
     let mut manifest = RESOLVER_SEMANTIC_VERSION.to_le_bytes().to_vec();
     encode_str(&mut manifest, env!("CARGO_PKG_VERSION"));
@@ -97,7 +84,7 @@ fn resolver_revision_manifest() -> Vec<u8> {
     manifest
 }
 
-/// A resolve request over the four protocol inputs, as values.
+/// A resolve request over the protocol inputs, as values.
 #[must_use]
 pub fn resolve_request(
     constraints: &[ModuleConstraint],
@@ -144,7 +131,7 @@ impl PureRuleFrame for ModuleSolveFrame {
     }
 }
 
-/// Decodes the request's four inputs and runs the search.
+/// Decodes the request's inputs and runs the search.
 fn solve_from_values(inputs: &[Value]) -> PithResult<Value> {
     let [constraints, universe, preference, budget] = inputs else {
         return Err(unreadable(&format!(

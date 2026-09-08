@@ -1,8 +1,5 @@
-//! Alias environments are module-local.
-//!
-//! 0067 makes an alias a scoping name inside one module and a subject the
-//! thing that crosses a boundary. Two properties follow, and neither is
-//! implied by the loader resolving a closure: one alias may mean different
+//! Alias environments are module-local: an alias scopes inside one module,
+//! a subject is what crosses a boundary. One alias may mean different
 //! subjects in different modules, and a module may not name a subject its
 //! own manifest did not bind, however its dependencies reached it.
 
@@ -29,8 +26,8 @@ fn module(directory: &Path, manifest: &str, sources: &[(&str, &str)]) -> TestRes
     Ok(())
 }
 
-/// Root and its dependency both bind the alias `helper`, to different
-/// subjects, and each names a declaration only its own binding provides.
+/// Root and its dependency both bind `helper`, to different subjects; each
+/// names a declaration only its own binding provides.
 fn shadowed_alias(directory: &Path) -> TestResult {
     module(
         directory,
@@ -74,10 +71,7 @@ fn one_alias_means_different_subjects_in_different_modules() -> TestResult {
         .elaborate()
         .map_err(|error| -> Box<dyn std::error::Error> { error.to_string().into() })?;
 
-    // Each module elaborated, so each resolved `helper` against its own
-    // manifest: the root's rule names `helper.Alpha` and the dependency's
-    // names `helper.Beta`, and neither declaration exists in the other's
-    // binding.
+    // Each module resolved `helper` against its own manifest.
     let imports = |spelling: &str| {
         elaborated
             .modules()

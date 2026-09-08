@@ -1,6 +1,6 @@
 //! The manifest document: a module's declared subject, its workspace
-//! membership, and its path dependencies. The manifest is not a module — it
-//! imports nothing and computes nothing — so it has no arenas and no request
+//! membership, and its path dependencies. The manifest is not a module (it
+//! imports nothing and computes nothing), so it has no arenas and no request
 //! grammar, only clauses with spans.
 
 use std::fmt;
@@ -109,11 +109,8 @@ impl ManifestUse {
     }
 }
 
-/// Where a dependency's content comes from.
-///
-/// The variants are the four source kinds M-14 admits, and they are a sum
-/// rather than a string plus optional fields so that a route missing what
-/// its kind requires — a git revision, an archive digest — has no value.
+/// Where a dependency's content comes from. A route missing what its kind
+/// requires (a git revision, an archive digest) has no value.
 #[derive(Clone)]
 pub enum DependencySource {
     /// The subject's configured registry: the default when a clause writes
@@ -168,7 +165,7 @@ impl DependencySource {
     }
 
     /// Whether the route selects among versions. Only a registry does; the
-    /// other three name one module, so a range on them constrains nothing.
+    /// others name one module, so a range on them constrains nothing.
     #[must_use]
     pub const fn resolves_versions(&self) -> bool {
         matches!(self, Self::Registry { .. })
@@ -182,7 +179,7 @@ impl DependencySource {
 pub struct ManifestRegistry {
     pub name: Box<str>,
     pub name_span: Span,
-    /// Where the index is read from. A hint under 0069: overridable, and
+    /// Where the index is read from. A hint: overridable, and
     /// outside every identity.
     pub locator: Box<str>,
     pub locator_span: Span,
@@ -273,8 +270,8 @@ pub struct VersionBound {
 
 /// Which versions of a subject a `use` clause admits.
 ///
-/// These are 0040's range constructors, so the manifest grammar and the
-/// resolver protocol share one model rather than translating between two.
+/// These are the resolver's range constructors, so the manifest grammar and
+/// the resolver protocol share one model rather than translating between two.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum VersionRange {
     Any,
@@ -298,7 +295,7 @@ impl VersionRange {
     /// Whether `version` is inside the range, under the ordering a
     /// manifest version carries with it.
     ///
-    /// Two spellings that compare equal are one version under 0070, so a
+    /// Two spellings that compare equal are one version, so a
     /// range holding `1.2` admits `1.2.0`.
     #[must_use]
     pub fn satisfies(&self, version: &ManifestVersion) -> bool {
@@ -573,13 +570,11 @@ impl fmt::Display for SegmentError {
 }
 
 /// A manifest version: dotted integer segments under the `numeric-segments`
-/// scheme, where a missing trailing segment compares as zero.
-///
-/// That comparison decides the type's identity. `1.2` and `1.2.0` order
-/// equal, so under 0070 they are one version, and equality here is over the
-/// canonical form — the segments with trailing zeros removed — rather than
-/// over the spelling. The spelling is retained for printing, so formatting a
-/// manifest never silently rewrites a version a person wrote.
+/// scheme, where a missing trailing segment compares as zero. `1.2` and
+/// `1.2.0` order equal, so they are one version: identity is over the
+/// canonical form (the segments with trailing zeros removed), not the
+/// spelling. The spelling is retained for printing, so formatting a manifest
+/// never silently rewrites a version a person wrote.
 #[derive(Clone, Debug)]
 pub struct ManifestVersion {
     segments: Box<[u64]>,

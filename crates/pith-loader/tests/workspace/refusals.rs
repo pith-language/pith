@@ -1,6 +1,6 @@
 //! The loader's refusal table: membership, identity, cycles, source-tree
-//! shape, and authority — each at its own diagnostic code, pointed at the
-//! manifest that caused it.
+//! shape, and authority, each at its own diagnostic code and pointed at
+//! the manifest that caused it.
 
 use std::fs;
 use std::path::Path;
@@ -195,7 +195,8 @@ fn the_builtin_alias_stays_bound_to_the_builtin_module() -> TestResult {
 
 /// A fifo spelling a source name is refused rather than opened: reading one
 /// blocks, and a loader that tried would hang. A symlink replacing the
-/// whole `src/` directory is the implicit external tree the slice refuses.
+/// whole `src/` directory is refused too: it smuggles in an implicit
+/// external tree.
 #[cfg(unix)]
 #[test]
 fn special_files_and_a_symlinked_source_root_are_refused() -> TestResult {
@@ -209,7 +210,6 @@ fn special_files_and_a_symlinked_source_root_are_refused() -> TestResult {
     let diagnostics = load_err(&directory);
     assert!(has_code(&diagnostics, FrontendCode::IrregularSource));
 
-    // A fresh fixture whose src/ is a link to another tree.
     let root = tempfile::tempdir()?;
     let elsewhere = root.path().join("elsewhere");
     module(
@@ -231,14 +231,12 @@ fn special_files_and_a_symlinked_source_root_are_refused() -> TestResult {
         "a symlinked src/ passed: {diagnostics:?}"
     );
 
-    // src/ as a regular file is the same refusal.
     let plain = root.path().join("plain");
     module(
         &plain,
         "module example/plain 0.1.0",
         &[("main.pi", "nominal T = Text\n")],
     )?;
-    // Rewrite: the single source file becomes src itself.
     let src_file = plain.join("src");
     fs::remove_dir_all(&src_file)?;
     fs::write(&src_file, "nominal T = Text\n")?;
@@ -247,7 +245,7 @@ fn special_files_and_a_symlinked_source_root_are_refused() -> TestResult {
 }
 
 /// A manifest that is not a regular file is refused before anything reads
-/// it — the same hang, one directory up.
+/// it: the same hang, one directory up.
 #[cfg(unix)]
 #[test]
 fn a_manifest_that_is_not_a_regular_file_is_refused() -> TestResult {
@@ -269,9 +267,9 @@ fn a_manifest_that_is_not_a_regular_file_is_refused() -> TestResult {
     Ok(())
 }
 
-/// 0069's authority boundary, at the load side. A dependency's routing
-/// clauses parse — it is a root in its own checkout — and stop carrying
-/// authority the moment something else selects it.
+/// The authority boundary, at the load side: a dependency's routing clauses
+/// parse (it is a root in its own checkout) and stop carrying authority the
+/// moment something else selects it.
 #[test]
 fn a_dependency_declaring_routing_is_diagnosed_and_carries_no_authority() -> TestResult {
     let root = tempfile::tempdir()?;

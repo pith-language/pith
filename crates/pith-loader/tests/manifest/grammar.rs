@@ -1,5 +1,5 @@
-//! The manifest grammar: clause shapes, the four sources, ranges, registry
-//! bindings, and each refusal at parse, at its own code.
+//! The manifest grammar: clause shapes, sources, ranges, registry bindings,
+//! and refusals.
 
 use std::sync::Arc;
 
@@ -164,9 +164,8 @@ fn the_four_dependency_sources_parse() {
     );
 }
 
-/// A range is written out, and each spelling means one thing. There is no
-/// caret or tilde: 0070 refuses a sigil whose meaning a reader has to look
-/// up.
+/// Each written range spelling means one constructor. No caret or tilde: the
+/// grammar refuses a sigil whose meaning a reader must look up.
 #[test]
 fn every_written_range_spelling_parses_to_its_constructor() {
     let version = |segments: &[u64]| {
@@ -228,9 +227,9 @@ fn every_written_range_spelling_parses_to_its_constructor() {
     assert_eq!(range(""), VersionRange::Any);
 }
 
-/// 0070's version identity: two spellings that compare equal are one
-/// version. The written segments survive for printing, so formatting never
-/// rewrites what a person typed.
+/// Version identity: two spellings that compare equal are one version. The
+/// written segments survive for printing, so formatting never rewrites what
+/// a person typed.
 #[test]
 fn two_spellings_of_one_version_are_one_version() {
     let parsed = |text: &str| {
@@ -255,9 +254,9 @@ fn two_spellings_of_one_version_are_one_version() {
     assert_ne!(short, parsed("1.2.1"));
 }
 
-/// Registry bindings and domain routes are consumer configuration. They
-/// parse in any manifest — a dependency is a root in its own checkout — and
-/// 0069 makes them authority only in a root's.
+/// Registry bindings and domain routes are consumer configuration: they
+/// parse in any manifest (a dependency is a root in its own checkout) but
+/// carry authority only in a root's.
 #[test]
 fn registry_bindings_and_domain_routes_parse() {
     let manifest = parse_ok(
@@ -287,7 +286,7 @@ fn registry_bindings_and_domain_routes_parse() {
     ));
 }
 
-/// Each refusal 0069 and 0070 place at parse, at its own code.
+/// Each source and range refusal the grammar places at parse, at its own code.
 #[test]
 fn the_parse_time_source_and_range_refusals_are_distinct() {
     assert!(
@@ -352,9 +351,7 @@ fn the_parse_time_source_and_range_refusals_are_distinct() {
     );
 }
 
-/// The grammar admits three routes nothing acquires yet. They parse, so a
-/// manifest can be written and formatted against the settled spelling, and
-/// the loader refuses each by name until its slice lands.
+/// A registry-routed clause with a range and no path parses.
 #[test]
 fn unacquirable_sources_parse_and_refuse_at_load() {
     let manifest = parse_ok("module a/b 0.1.0\nuse g = c/d >= 1.0\n");

@@ -1,13 +1,9 @@
-//! The module solve: a pure, deterministic backtracking search over an
-//! acquired universe.
-//!
-//! The search performs no I/O — its inputs are values, so removing network
-//! access changes whether a universe could be acquired, never a solved
-//! answer. Subjects are decided in canonical order, candidates in the
-//! preference's order, and two candidates a preference cannot rank are
-//! refused as underdetermined rather than broken by iteration order. A
-//! search limit is never evidence of unsatisfiability: exhaustion is its
-//! own outcome.
+//! The module solve: a deterministic backtracking search over an acquired
+//! universe, with no I/O (its inputs are values). Subjects are decided in
+//! canonical order, candidates in the preference's order; two candidates
+//! the preference cannot rank are underdetermined rather than ordered by
+//! iteration. Exhausting the budget is its own outcome, not evidence of
+//! unsatisfiability.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -18,8 +14,7 @@ use super::model::{
     ModuleUniverse, Preference, TrailEntry,
 };
 
-/// One solve: what was declared, what was acquired, which end of the
-/// ordering to prefer, and how many candidate decisions may be attempted.
+/// One solve request.
 pub struct SolveRequest {
     pub constraints: Box<[ModuleConstraint]>,
     pub universe: ModuleUniverse,
@@ -27,10 +22,9 @@ pub struct SolveRequest {
     pub budget: u64,
 }
 
-/// How one branch of the search ended. A dead end carries its depth — the
-/// decisions taken when it failed — so a failing search reports its deepest
-/// branch, which names the subject that actually failed rather than the
-/// last one tried.
+/// How one branch of the search ended. A dead end carries the depth at
+/// which it failed, so a failing search reports the branch that actually
+/// failed, not the last one tried.
 enum Step {
     Done,
     DeadEnd {
@@ -44,8 +38,7 @@ enum Step {
     Exhausted,
 }
 
-/// The search state: candidates by subject, the constraints accumulated by
-/// the current branch, and what the branch decided.
+/// The search state for one solve.
 struct Search<'a> {
     candidates: BTreeMap<ModuleSubject, Vec<&'a ModuleCandidate>>,
     constraints: Vec<ModuleConstraint>,
@@ -56,7 +49,6 @@ struct Search<'a> {
     chosen: BTreeMap<ModuleSubject, &'a ModuleCandidate>,
 }
 
-/// Runs the search and returns its answer.
 #[must_use]
 pub fn resolve(request: &SolveRequest) -> ModuleResolution {
     let universe = request.universe.content_id();
@@ -94,8 +86,8 @@ pub fn resolve(request: &SolveRequest) -> ModuleResolution {
     }
 }
 
-/// The universe's candidates keyed by subject, each list in the canonical
-/// order the universe already holds.
+/// Candidates keyed by subject, each list in the canonical order the
+/// universe holds.
 fn candidates_by_subject(
     universe: &ModuleUniverse,
 ) -> BTreeMap<ModuleSubject, Vec<&ModuleCandidate>> {
@@ -109,8 +101,8 @@ fn candidates_by_subject(
     by_subject
 }
 
-/// Constraints in one canonical order — subject, range, attribution,
-/// without duplicates — so construction order never reaches the answer.
+/// Constraints sorted by subject, range, attribution, with duplicates
+/// removed, so construction order never reaches the answer.
 fn canonical_constraints(constraints: &[ModuleConstraint]) -> Vec<ModuleConstraint> {
     let mut constraints = constraints.to_vec();
     constraints.sort_by(|left, right| {
@@ -124,7 +116,7 @@ fn canonical_constraints(constraints: &[ModuleConstraint]) -> Vec<ModuleConstrai
 }
 
 impl<'a> Search<'a> {
-    /// Decide every constrained subject, or fail the way the search fails.
+    /// Decide every constrained subject, or report how the branch failed.
     fn descend(&mut self) -> Step {
         let Some(subject) = self.next_subject() else {
             return Step::Done;
@@ -167,8 +159,8 @@ impl<'a> Search<'a> {
             }
         }
         match deepest {
-            // A child's dead end is deeper than this subject's own, and
-            // names the branch that actually failed.
+            // A child's dead end is deeper than this subject's own and
+            // names the branch that failed.
             Some((_, derivation)) => Step::DeadEnd {
                 depth: self.chosen.len(),
                 derivation,
@@ -194,9 +186,9 @@ impl<'a> Search<'a> {
         self.candidates.get(subject).map_or(0, Vec::len)
     }
 
-    /// The candidates for `subject` that every constraint on it admits, or
-    /// `None` when the universe holds none: an absent candidate is a dead
-    /// end at this subject, not a quiet success.
+    /// Candidates for `subject` that every constraint on it admits, or
+    /// `None` when the universe holds no candidates for it at all: a dead
+    /// end here, distinct from an empty admitted set.
     fn admitted_of(&self, subject: &ModuleSubject) -> Option<Vec<&'a ModuleCandidate>> {
         let available = self.candidates.get(subject)?;
         Some(
@@ -237,7 +229,7 @@ impl<'a> Search<'a> {
 
     /// Whether the candidate about to be tried ties with its successor
     /// under the preference: two realizations of one version the ordering
-    /// cannot rank, refused rather than broken by iteration order.
+    /// cannot rank, refused rather than resolved by iteration order.
     fn tie_ahead(
         &self,
         subject: &ModuleSubject,
@@ -251,8 +243,8 @@ impl<'a> Search<'a> {
         })
     }
 
-    /// Take one candidate's decision: record the trail entry, decide the
-    /// subject, and add its requirements as constraints. Returns how many
+    /// Commit one candidate: record the trail entry, decide the subject,
+    /// and add its requirements as constraints. Returns how many
     /// constraints were added, for the matching uncommit.
     fn commit(&mut self, subject: ModuleSubject, candidate: &'a ModuleCandidate) -> usize {
         let considered = self.candidates.get(&subject).map_or(0, Vec::len);
@@ -350,8 +342,8 @@ fn candidate_identity(candidate: &ModuleCandidate) -> Box<str> {
     .into()
 }
 
-/// Whose requirement a constraint came from: the candidate that declared
-/// it, by subject and version.
+/// Whose requirement a constraint came from: the declaring candidate, by
+/// subject and version.
 fn requires_attribution(candidate: &ModuleCandidate) -> Box<str> {
     format!(
         "{} {}",

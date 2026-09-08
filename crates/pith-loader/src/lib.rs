@@ -1,7 +1,6 @@
 //! The module-linkage boundary: `.pi` text in, declarations and rules out,
 //! bound onto an engine through its public registration calls. The kernel
-//! never resolves imports (decisions 0061, 0038); this crate is where module
-//! and interface linkage lives.
+//! never resolves imports; module and interface linkage lives here.
 
 mod bind;
 mod graph;

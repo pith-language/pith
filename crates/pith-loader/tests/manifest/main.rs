@@ -1,13 +1,7 @@
-//! The manifest document's grammar: subjects, versions, workspaces, the four
+//! The manifest document's grammar: subjects, versions, workspaces, the
 //! dependency sources and their ranges, registry bindings and domain routes,
-//! the wrong-document refusals in both directions, and the canonical
-//! spelling `pith fmt` writes for a manifest.
-//!
-//! Every spelling 0069 and 0070 write out appears here as a fixture, because
-//! both records fix a grammar before the code that consumes it exists, and a
-//! record's example that does not parse is a record nobody can implement
-//! against. The grammar and its refusals are [`grammar`]; the canonical
-//! spelling is [`formatting`]. Both share the parse helpers here.
+//! wrong-document refusals, and the canonical spelling `pith fmt` writes.
+//! [`grammar`] pins the refusals, [`formatting`] the canonical spelling.
 
 mod formatting;
 mod grammar;

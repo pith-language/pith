@@ -14,8 +14,7 @@ use super::Reading;
 use crate::workspace::graph::{at, sourceless};
 
 impl Reading<'_> {
-    /// The second and third checks live here: every domain key set is
-    /// signed by the root, and no generation moved backwards.
+    /// The key-set checks over every domain directory.
     pub(crate) fn domains(&mut self, root: &Public) -> BTreeMap<Box<str>, DomainKeys> {
         let mut domains = BTreeMap::new();
         let Some(children) = self.sorted_children(&self.directory.join(DOMAINS_DIRECTORY), true)

@@ -21,7 +21,7 @@ use crate::ModuleRequirement;
 
 impl Line {
     /// # Errors
-    /// Returns [`Malformed`] naming the field that is not a line.
+    /// [`Malformed`] naming what is not a line.
     pub fn parse(text: &str, base: ByteOffset) -> Result<Self, Malformed> {
         let tokens = tokenize(text, base)?;
         let first = tokens.first().ok_or_else(|| Malformed {
@@ -45,8 +45,7 @@ impl KeySet {
     /// Parses a key-set document, line by line from its first byte.
     ///
     /// # Errors
-    /// Returns [`Malformed`] naming the first line that is not the
-    /// document's shape.
+    /// [`Malformed`] naming the first line that is not the document's shape.
     pub fn parse(text: &str, base: ByteOffset) -> Result<Self, Malformed> {
         let mut lines = field_lines(text, base)?.into_iter();
         let (keyword, value, span) = lines.next().ok_or_else(|| ends_before(base, GENERATION))?;
@@ -205,7 +204,7 @@ fn release(tokens: &[Token]) -> Result<Release, Malformed> {
     ))
 }
 
-/// One `requires <subject> <range>` clause, advancing `position past it.
+/// One `requires <subject> <range>` clause, advancing `position` past it.
 fn requirement(tokens: &[Token], position: &mut usize) -> Option<ModuleRequirement> {
     let subject = tokens.get(position.saturating_add(1))?;
     let range = tokens.get(position.saturating_add(2))?;

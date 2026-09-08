@@ -40,7 +40,7 @@ pub fn constraint_value(constraint: &ModuleConstraint) -> Value {
 /// Decodes a constraint from `value`.
 ///
 /// # Errors
-/// Returns a diagnostic when `value` is not a constraint record.
+/// A diagnostic when `value` is not a constraint record.
 pub fn constraint_from_value(value: &Value) -> PithResult<ModuleConstraint> {
     Ok(ModuleConstraint {
         subject: subject_of(value)?,

@@ -1,18 +1,13 @@
-//! The module resolver's own vocabulary: constraints over module subjects,
+//! The module resolver's vocabulary: constraints over module subjects,
 //! candidates from an acquired universe, and the answer a solve returns.
-//!
-//! The shapes mirror the protocol the package resolver settled — a
-//! constraint set, a candidate universe, a four-way answer — over module
-//! vocabulary: typed segment versions rather than scheme-carried
-//! spellings, no feature coordinates, one selected version per subject.
+//! Module vocabulary throughout: typed segment versions, no feature
+//! coordinates, one selected version per subject.
 
 use pith_hir::{ManifestVersion, ModuleSubject, VersionRange};
 use pith_ids::{ContentId, DigestDomain};
 
 /// One hard constraint: which versions of one subject a clause admits, and
-/// who declared it. The attribution is what a failure derivation and a
-/// decision trail name; an unattributed constraint is unspeakable in an
-/// explanation.
+/// who declared it. The attribution is what a derivation or trail names.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModuleConstraint {
     pub subject: ModuleSubject,
@@ -28,8 +23,8 @@ pub struct ModuleRequirement {
 }
 
 /// One release of one subject, as an acquired universe carries it: the
-/// version, what it requires, and where its bytes may be fetched from. The
-/// origin is a locator hint — it never enters the candidate's identity.
+/// version, what it requires, and where its bytes may be fetched from.
+/// The origin is a locator hint; it never enters the candidate's identity.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModuleCandidate {
     pub subject: ModuleSubject,
@@ -39,11 +34,9 @@ pub struct ModuleCandidate {
 }
 
 /// The universe a solve runs over, in one canonical order whatever order
-/// it was assembled in.
-///
-/// The canonical order is subject, then version, then origin, and an
-/// exactly repeated candidate is one candidate: construction order is
-/// caller policy and must not reach the answer or the computation key.
+/// it was assembled in: subject, then version, then origin, with exact
+/// duplicates collapsed. Construction order is caller policy and must not
+/// reach the answer or the computation key.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModuleUniverse {
     candidates: Box<[ModuleCandidate]>,
@@ -66,7 +59,7 @@ impl ModuleUniverse {
     }
 
     /// The universe's measured identity: what a lock records and what an
-    /// invalidation explanation names when the index moves.
+    /// invalidation explanation names.
     #[must_use]
     pub fn content_id(&self) -> ContentId {
         const UNIVERSE_DOMAIN: DigestDomain = DigestDomain::new("module-candidate-universe", 1);
@@ -103,9 +96,8 @@ fn encode_candidate(encoded: &mut Vec<u8>, candidate: &ModuleCandidate) {
     encoded.push(0);
 }
 
-/// The selection the solver made for one subject: the lock-entry shape.
-/// The origin that produced it is the candidate's; a selection records the
-/// version a person can point at.
+/// The selection the solver made for one subject (the lock-entry shape):
+/// the version a person can point at; the origin stays the candidate's.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModuleSelection {
     pub subject: ModuleSubject,
@@ -131,10 +123,7 @@ pub struct Derivation {
     pub candidates: usize,
 }
 
-/// A solve's answer, in the four outcomes the resolver protocol settled:
-/// a solution, a proof-shaped refusal, an ambiguity a caller must resolve,
-/// and a budget that ran out before either. Exhaustion is never evidence
-/// of unsatisfiability.
+/// A solve's answer. Exhaustion is never evidence of unsatisfiability.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ModuleResolution {
     Solved {
@@ -174,7 +163,7 @@ impl Preference {
     }
 
     /// # Errors
-    /// Returns [`UnknownPreference`] when `name` is neither written name.
+    /// [`UnknownPreference`] when `name` is not a written name.
     pub fn from_name(name: &str) -> Result<Self, UnknownPreference> {
         match name {
             "newest" => Ok(Self::Newest),

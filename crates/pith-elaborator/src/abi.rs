@@ -14,8 +14,8 @@ pub struct RuleSignature {
 
 /// The imported subject/ABI pairs a module elaborated against, in the one
 /// canonical form both the ABI digest and the interface surface encode:
-/// sorted by subject, one entry per subject — whichever aliases reached
-/// it. A subject arriving with two different digests is refused;
+/// sorted by subject, one entry per subject (whichever aliases reached
+/// it). A subject arriving with two different digests is refused;
 /// canonicalization does not resolve conflicts, callers do.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ImportedAbis {

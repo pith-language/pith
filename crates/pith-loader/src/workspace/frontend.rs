@@ -1,17 +1,9 @@
-//! A resolved workspace projected onto the frontend graph tier.
-//!
-//! [`super::Workspace`] answers what a module is: its subject, its source
-//! set, and the subjects its manifest bound. `interface-of`, `bodies-of`
-//! and `index-of` ask for the same module by content identity, under an
+//! A resolved workspace projected onto the frontend graph tier:
+//! [`super::Workspace`]'s modules re-asked by content identity, under an
 //! import environment naming what each dependency published. This module is
-//! the one place that translation happens, so a source acquired from
-//! anywhere reaches the graph tier through one projection rather than one
-//! per source kind.
-//!
-//! Nothing here re-derives a module's identity. A file's content identity
-//! comes from the store that will serve it, and a dependency's ABI comes
-//! from the surface that dependency published — never from a second
-//! computation that could disagree.
+//! the one place that translation happens, and nothing here re-derives a
+//! module's identity: a file's content identity comes from the store that
+//! will serve it, and a dependency's ABI from the surface it published.
 
 use pith_core::{Pure, Request};
 use pith_diag::DiagnosticSink;
@@ -117,9 +109,9 @@ pub enum ProjectionError {
         subject: Box<str>,
         diagnostics: DiagnosticSink,
     },
-    /// `interface-of` returned a value the surface cannot be read out of.
-    /// The rule's declared output shape and this reader disagree, which is
-    /// a defect in the graph tier rather than in the workspace.
+    /// `interface-of` returned a value the surface cannot be read out of:
+    /// the rule's declared output shape and this reader disagree, a defect
+    /// in the graph tier rather than in the workspace.
     MalformedInterface { subject: Box<str> },
     /// A `use` clause named a subject the closure did not resolve, so no
     /// interface was published for it.
@@ -152,12 +144,11 @@ impl std::error::Error for ProjectionError {}
 
 impl super::Workspace {
     /// Project every module of the closure onto the frontend graph tier,
-    /// publishing each module's sources and its elaborated surface into
-    /// `engine`'s content store on the way.
-    ///
-    /// Dependency order is what makes this one pass: a module is projected
-    /// only after every subject it binds has published an interface, so no
-    /// import environment is ever assembled from a placeholder.
+    /// publishing each module's sources and elaborated surface into
+    /// `engine`'s content store on the way. Dependency order makes this one
+    /// pass: a module is projected only after every subject it binds has
+    /// published an interface, so no import environment is assembled from a
+    /// placeholder.
     ///
     /// # Errors
     /// Returns [`ProjectionError`] for a store failure, non-canonical

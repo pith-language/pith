@@ -1,9 +1,6 @@
 //! Written-body notation, request forms, local definitions, entries, and
-//! metadata blocks.
-//!
-//! [`bodies`] holds the represented bodies and their evaluation, [`requests`]
-//! the request forms and the positions that check them, and [`declarations`]
-//! the module-level surface. All three load through the helpers here.
+//! metadata blocks. [`bodies`], [`requests`], and [`declarations`] load
+//! through the helpers here.
 
 mod bodies;
 mod declarations;

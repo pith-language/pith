@@ -100,14 +100,12 @@ pub fn parse_module(source: &ModuleSource) -> ParsedModule {
     }
 }
 
-/// The canonical spelling of `source`'s module: what `pith fmt` writes, and
+/// The canonical spelling of `source`'s module: what `pith fmt` writes and
 /// what the digest-stability property is measured over.
 ///
 /// # Errors
-///
-/// Returns the parse diagnostics when the source does not parse. A module
-/// that does not parse has no canonical spelling, and recovering one would
-/// be a second parser with different recovery rules.
+/// The parse diagnostics when the source does not parse, since a module
+/// that does not parse has no canonical spelling.
 pub fn format_module(source: &ModuleSource) -> Result<String, Box<[Diag]>> {
     let ParsedModule {
         surface,

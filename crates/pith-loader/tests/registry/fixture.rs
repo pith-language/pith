@@ -37,7 +37,7 @@ pub(crate) fn pinned_key() -> RootKey {
         .unwrap_or_else(|_| unreachable!("the fixture's root key spelling parses"))
 }
 
-/// The two modules every fixture publishes: a dependency and a root that
+/// The project every fixture stages: a dependency and a root that
 /// imports it.
 pub(crate) fn staged_project(
     staging: &Path,
@@ -72,8 +72,7 @@ pub(crate) fn boxed(message: String) -> Box<dyn std::error::Error> {
     message.into()
 }
 
-/// A registry serving the two published modules under the enrolled
-/// publisher key.
+/// A registry serving the staged modules under the enrolled publisher key.
 pub(crate) fn serving_registry() -> TestResult<tempfile::TempDir> {
     serving_registry_with(|host, staging| {
         host.enroll(

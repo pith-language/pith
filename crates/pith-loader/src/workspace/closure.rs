@@ -1,9 +1,7 @@
 //! A selected dependency closure, in the order elaboration walks it.
 //!
-//! The root is a field rather than the last element of a list, so asking a
-//! closure for its root is total. A resolution that produced no root
-//! produced no closure, and that is expressed once here instead of at every
-//! place a caller reaches for one.
+//! The root is a field, not the last element of a list, so asking for it is
+//! total: a resolution that produced no root produced no closure.
 
 /// Every module of a selected closure: the dependencies, each preceding its
 /// own consumers, and the root the closure was selected for.

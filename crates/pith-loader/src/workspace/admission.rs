@@ -1,16 +1,8 @@
-//! The admission of an acquired module source.
-//!
-//! Acquisition reads bytes; admission decides whether those bytes are the
-//! module the route asked for. The decision runs through the same
-//! machinery a binary substitution admits under — one clause per claim,
-//! the first failure the refusal, both sides named — so a refused source
-//! and a refused substitution are the same refusal type over different
-//! clause vocabularies, and neither checker can raise the other's clause.
-//!
-//! The clauses here are the ones the acquired manifest itself can settle.
-//! The registry's evidence clauses — content identity, witness, policy —
-//! join this admission when the registry client arrives, over the same
-//! envelope.
+//! Admission of an acquired module source: acquisition reads bytes, and
+//! admission decides whether they are the module the route asked for. The
+//! decision runs through the same machinery a binary substitution admits
+//! under, so both produce the same refusal type over their own clause
+//! vocabularies, and neither checker can raise the other's clause.
 
 use pith_hir::{Manifest, ManifestVersion, ModuleSubject, VersionRange};
 
@@ -25,8 +17,7 @@ pub enum Clause {
     },
     /// The manifest's version falls outside the range the route wrote. A
     /// path dependency carries no range, so this clause holds trivially
-    /// there; a version-resolving route is admitted only at a version its
-    /// clause admits.
+    /// there.
     Version {
         range: VersionRange,
         offered: ManifestVersion,
@@ -52,8 +43,7 @@ impl std::fmt::Display for Clause {
     }
 }
 
-/// The module-source admission's refusal: the shared refusal over this
-/// mechanism's clauses.
+/// The module-source admission's refusal, over this mechanism's clauses.
 pub type Refusal = pith_constraint::Refusal<Clause>;
 
 /// What a route asked of the module it names.

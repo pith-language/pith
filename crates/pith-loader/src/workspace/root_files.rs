@@ -10,8 +10,7 @@ use super::acquire::{AcquireFailure, LocalDirectory, LocalFiles, ModuleStore};
 use super::module::{ModuleFile, SourceSet};
 
 /// The files `fmt` writes: the root manifest and the root module's own
-/// source set. Nothing else is read — no dependency route is resolved, no
-/// member validated — because the canonical spelling of these files is a
+/// source set. Nothing else is read, since their canonical spelling is a
 /// function of these files alone.
 pub struct RootFiles {
     directory: PathBuf,
@@ -41,9 +40,9 @@ impl RootFiles {
     /// Acquire the root manifest and its own source files.
     ///
     /// # Errors
-    /// Returns the manifest's parse diagnostics, and the acquisition
-    /// refusals for its source tree — symlinked, irregular, or unreadable
-    /// files — each attached to the manifest that owns the tree.
+    /// The manifest's parse diagnostics, and acquisition refusals for its
+    /// source tree (symlinked, irregular, or unreadable files), each
+    /// attached to the manifest that owns the tree.
     pub fn acquire(root_manifest: &Path) -> Result<Self, Box<[Diag]>> {
         let directory = root_directory(root_manifest)?;
         let location = LocalDirectory::new(directory.clone());

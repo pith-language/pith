@@ -1,5 +1,5 @@
-//! The manifest's canonical spelling: what `pith fmt` writes, and the
-//! round trips that keep it honest.
+//! The manifest's canonical spelling: what `pith fmt` writes, and its round
+//! trips.
 
 use pith_diag::SourceId;
 use pith_loader::{ManifestSource, format_manifest};
@@ -25,9 +25,9 @@ fn formatting_a_manifest_is_canonical_and_idempotent() {
     assert_eq!(twice, once, "formatting formatted text moved it");
 }
 
-/// The printer's contract over every clause the records added: printed text
-/// re-parses to the same manifest, printing twice moves nothing, and a
-/// version keeps the spelling it was written in.
+/// The printer's contract over every clause: printed text re-parses to the
+/// same manifest, printing twice moves nothing, and a version keeps the
+/// spelling it was written in.
 #[test]
 fn formatting_covers_every_clause_and_round_trips() {
     let written = "\n\
@@ -68,8 +68,8 @@ fn formatting_covers_every_clause_and_round_trips() {
         format_manifest(&printed).unwrap_or_else(|diagnostics| unreachable!("{diagnostics:?}"));
     assert_eq!(twice, once, "formatting formatted text moved it");
 
-    // The re-parse holds the same clauses, which is the half an equal string
-    // does not prove on its own.
+    // The re-parse holds the same clauses, which an equal string alone does
+    // not prove.
     let reparsed = parse_ok(&once);
     assert_eq!(reparsed.registries.len(), 1);
     assert_eq!(reparsed.domains.len(), 1);

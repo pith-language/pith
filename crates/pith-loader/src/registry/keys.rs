@@ -13,8 +13,7 @@ pub const ALGORITHM: &str = "ed25519";
 pub const KEY_HEX_LEN: usize = ed25519_dalek::PUBLIC_KEY_LENGTH * 2;
 pub const SIGNATURE_HEX_LEN: usize = ed25519_dalek::SIGNATURE_LENGTH * 2;
 
-/// A key that signs: the private half a root or a publisher holds, never
-/// the client that verifies one.
+/// A key that signs: the private half a root or a publisher holds.
 #[derive(Clone)]
 pub struct Signing(SigningKey);
 
@@ -63,9 +62,8 @@ impl PartialOrd for Public {
 
 impl Public {
     /// # Errors
-    /// Returns [`SpellingError`] when the spelling is not
-    /// `ed25519:` followed by the right length of hexadecimal naming a
-    /// key.
+    /// [`SpellingError`] when the spelling is not `ed25519:` plus the
+    /// right length of hex naming a key.
     pub fn parse(spelling: &str) -> Result<Self, SpellingError> {
         let hex = key_material(spelling, KEY_HEX_LEN)?;
         let mut bytes = [0; ed25519_dalek::PUBLIC_KEY_LENGTH];
@@ -95,12 +93,10 @@ impl Public {
         self.0.verify(contents, &signature.0).is_ok()
     }
 
-    /// The pinned key, refused when its algorithm is not one this client
-    /// can interpret: an unknown scheme is a refusal, not a guess.
+    /// The pinned key. An unknown algorithm is a refusal, not a guess.
     ///
     /// # Errors
-    /// Returns [`SpellingError`] when the pinned key is not an ed25519
-    /// spelling.
+    /// [`SpellingError`] when the pinned key is not an ed25519 spelling.
     pub fn of_pinned(pinned: &pith_hir::RootKey) -> Result<Self, SpellingError> {
         Self::parse(&pinned.to_string())
     }
@@ -123,8 +119,8 @@ impl Detached {
     }
 
     /// # Errors
-    /// Returns [`SpellingError`] when the spelling is not `ed25519:` plus
-    /// the right length of hexadecimal.
+    /// [`SpellingError`] when the spelling is not `ed25519:` plus the
+    /// right length of hex.
     pub fn parse(spelling: &str) -> Result<Self, SpellingError> {
         let hex = key_material(spelling, SIGNATURE_HEX_LEN)?;
         let mut bytes = [0; ed25519_dalek::SIGNATURE_LENGTH];
@@ -143,7 +139,7 @@ impl std::fmt::Debug for Detached {
     }
 }
 
-/// Why a spelling names neither a key nor a signature: it is not
+/// A spelling that names neither a key nor a signature: it is not
 /// `algorithm:` followed by the right length of hexadecimal for the thing
 /// being read.
 #[derive(Debug, PartialEq, Eq)]

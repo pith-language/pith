@@ -1,14 +1,7 @@
 //! One admission mechanism, distinct claims: a refused module source and a
-//! refused binary substitution are the same refusal type over different
-//! clause vocabularies, and no check can set another's clause.
-//!
-//! The sameness is structural: both refusals inhabit the shared
-//! `pith_constraint::Refusal` envelope, which is the only type the render
-//! helper below accepts — it type-checks with both because both are that
-//! type. The separation is structural too: each mechanism's checker
-//! refuses with its own clause vocabulary, so a clause that does not fit
-//! cannot be constructed there. T-5's separate claims stay separate
-//! because the type, not a convention, holds them apart.
+//! refused binary substitution share the `pith_constraint::Refusal`
+//! envelope but carry each mechanism's own clause vocabulary, so no check
+//! can construct another's clause. Pins T-5.
 
 use phloem::identity::{DomainIdentity, PackageIdentity, PackageVersion};
 use phloem::lock::{LockEntry, Origin};
@@ -29,7 +22,7 @@ fn renders<C: std::fmt::Display>(refusal: &Refusal<C>) -> String {
     refusal.to_string()
 }
 
-/// A module source that declares another subject than the route named.
+/// A module source declaring a subject other than the route names.
 fn refused_source() -> Refusal<AdmissionClause> {
     let parsed = parse_manifest(&ManifestSource::new(
         pith_diag::SourceId::from_raw(0),
@@ -89,8 +82,6 @@ fn a_refused_source_and_a_refused_substitution_share_the_refusal_type() -> TestR
     let substitution_refusal = phloem::substitution::admit(&admission, &offer, tampered)
         .expect_err("bytes measuring other than the claim refuse");
 
-    // One envelope, different clauses: the helper accepts both because
-    // both are `Refusal<_>`, and the clauses they carry differ.
     let source_text = renders(&source_refusal);
     let substitution_text = renders(&substitution_refusal);
     assert!(

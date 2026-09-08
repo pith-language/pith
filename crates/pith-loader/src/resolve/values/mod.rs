@@ -1,15 +1,8 @@
 //! The module resolver's value layer: the types a resolve request carries
-//! and the codecs between them and the resolver's own vocabulary.
-//!
-//! Types are structural and named by coordinate — `modules.Range`,
-//! `modules.Constraint`, `modules.Resolution` — so registering the
-//! resolver loads no module surface first: its bootstrap declarations are
-//! this module, and nothing resolves the module system's own source to
-//! reach them.
-//!
-//! The record, nominal, and sum construction helpers live here once; the
-//! codec modules below share them so one field-name spelling cannot drift
-//! between a type and its codec.
+//! and the codecs between them and the resolver's own vocabulary. Types are
+//! structural and named by coordinate, so registering the resolver loads no
+//! module surface first. Codec modules share the construction helpers here
+//! so a field-name spelling cannot drift between a type and its codec.
 
 mod answer;
 mod candidate;

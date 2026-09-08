@@ -1,10 +1,7 @@
 //! The local workspace loader: the resolved graph of a two-module project,
-//! the diamond and its single load, member isolation, and the refusal table
-//! — each refusal checked for its specific diagnostic code and the manifest
-//! it points at.
-//!
-//! What a resolved workspace holds is [`resolution`]; what it refuses is
-//! [`refusals`]. Both build on the fixture helpers here.
+//! the diamond and its single load, member isolation, and the refusal
+//! table. [`resolution`] holds what a resolved workspace contains,
+//! [`refusals`] what it refuses.
 
 mod refusals;
 mod resolution;

@@ -130,9 +130,8 @@ fn a_public_representation_edit_invalidates_the_consumer() -> TestResult {
     )?;
 
     // One tolerant pass reports both halves: the dependency elaborates with
-    // a moved ABI, and the consumer no longer elaborates — its entry
-    // constructs the imported nominal with a text literal the new
-    // representation refuses, and the refusal names the consumer's file.
+    // a moved ABI, and the consumer's entry refuses, constructing the
+    // imported nominal with a literal the new representation rejects.
     let workspace = Workspace::load(&root.path().join("module.pi")).map_err(
         |diagnostics| -> Box<dyn std::error::Error> {
             format!("the fixture resolves: {diagnostics:?}").into()

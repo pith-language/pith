@@ -1,11 +1,8 @@
 //! The registry as a module store: a verified index in, admitted source
-//! sets out.
-//!
-//! This store serves exact selections — the one release the index carries
-//! for a subject — because choosing among versions is the resolver's
-//! computation, not a store's. A manifest that disagrees with what its
-//! entry caches and bytes that measure against what the entry pins are
-//! both refused here, not discovered by elaboration.
+//! sets out. It serves exact selections (the one release the index carries
+//! for a subject); choosing among versions is the resolver's computation.
+//! A manifest that disagrees with its cached entry, or bytes that miss the
+//! pinned tree, are refused here, not discovered by elaboration.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -28,10 +25,9 @@ pub struct RegistryStore {
     manifests: BTreeMap<Location, Box<str>>,
 }
 
-/// Where a registry route arrives: the subject, its selected version, the
-/// revision the entry pins, and the root key whose trust chain admitted
-/// it — the spelling two routes to one registry must agree on, with the
-/// local configuration name absent.
+/// Where a registry route arrives: subject, selected version, pinned
+/// revision, admitting root key. Two routes to one registry must spell
+/// this the same, so no local configuration name enters it.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Location {
     root: Box<str>,
@@ -55,8 +51,8 @@ impl RegistryStore {
     /// against the state `prior` admits.
     ///
     /// # Errors
-    /// Returns every refusal the index earned; nothing is served from an
-    /// index that failed any check.
+    /// Every refusal the index earned; nothing is served from an index
+    /// that failed any check.
     pub fn open(
         directory: PathBuf,
         pinned: &RootKey,
@@ -74,11 +70,11 @@ impl RegistryStore {
     }
 
     /// The location of the one release the index carries for `subject`:
-    /// the entry point for a root this registry serves, which no route
-    /// selected and whose root key no clause pinned.
+    /// the entry point for a root no route selected and whose key no
+    /// clause pinned.
     ///
     /// # Errors
-    /// Returns why `subject` names nothing this store serves exactly.
+    /// Why `subject` names nothing this store serves exactly.
     pub fn locate_subject(&self, subject: &ModuleSubject) -> Result<Location, AcquireFailure> {
         let release = self.checked_selection(subject)?;
         Ok(self.location_of(subject, release))
@@ -257,7 +253,7 @@ impl ModuleStore for RegistryStore {
 }
 
 /// The manifest a revision served, checked field by field against the
-/// fields the entry caches. A disagreement is a wrong cache, named with
+/// entry's cached fields. A disagreement is a wrong cache, named with
 /// both sides, never reconciled.
 fn check_cached_fields(
     release: &Release,
@@ -270,9 +266,8 @@ fn check_cached_fields(
         text.to_string(),
     ));
     let Ok(manifest) = parsed.validated() else {
-        // An unparsable manifest is reported by the loader under the
-        // store's own file identity; the cache check has nothing to
-        // compare against.
+        // An unparsable manifest is reported by the loader under the store's
+        // own file identity; the cache check has nothing to compare against.
         return Ok(());
     };
     if manifest.subject() != &location.subject {

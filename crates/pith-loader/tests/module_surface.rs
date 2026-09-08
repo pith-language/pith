@@ -273,11 +273,11 @@ fn two_aliases_for_one_subject_produce_one_decodable_surface() {
     );
 
     // The imports half is the canonical set: one entry per imported
-    // subject, whichever aliases reached it — the same form the ABI takes.
+    // subject, whichever aliases reached it, the same form the ABI takes.
     let expected = [(dependency.module().into(), dependency.abi_digest())];
     assert_eq!(twice.interface_surface().imports(), &expected);
     assert_eq!(once.interface_surface().imports(), &expected);
-    // And the ABI agrees: a second binding for one subject, changing no
+    // The ABI agrees: a second binding for one subject, changing no
     // declarations, leaves the digest alone.
     assert_eq!(
         twice.abi_digest(),

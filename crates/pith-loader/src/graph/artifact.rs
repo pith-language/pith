@@ -111,8 +111,8 @@ impl InterfaceSurface {
     }
 
     /// # Errors
-    /// Returns a decode error for a foreign version, truncated or trailing
-    /// bytes, or a payload that does not decode.
+    /// A decode error for a foreign version, truncated or trailing bytes,
+    /// or a payload that does not decode.
     pub fn decode(encoded: &[u8]) -> Result<Self, CanonicalDecodeError> {
         let mut reader = CanonicalReader::new(encoded);
         reader.read_version(INTERFACE_SURFACE_VERSION)?;

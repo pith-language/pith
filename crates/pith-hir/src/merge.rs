@@ -38,7 +38,7 @@ impl ModuleFiles {
     }
 
     /// The file a merged span landed in, with the span rebased to that
-    /// file's own offsets — the attribution every position sidecar and
+    /// file's own offsets: the attribution every position sidecar and
     /// diagnostic needs when one module holds several files.
     pub fn file_of(&self, span: Span) -> (&Arc<SourceFile>, Span) {
         let position = self.position_of(span);

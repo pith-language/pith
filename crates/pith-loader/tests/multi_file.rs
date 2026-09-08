@@ -1,7 +1,7 @@
 //! The direct loader over a multi-file module: the merged span space
 //! elaborates as one module, and every position and diagnostic attributes
-//! to the file that owns it — the boundary concatenating source strings
-//! would erase.
+//! to the file that owns it, which concatenating source strings would
+//! erase.
 
 use pith_loader::{
     FrontendCode, ImportEnv, ModuleFile, SourceSet, elaborate_module, parse_module_sources,
@@ -105,9 +105,7 @@ fn a_duplicate_declaration_across_files_is_refused_at_the_later_file() -> TestRe
 #[test]
 fn the_source_set_order_is_canonical_by_construction() {
     // The set sorts at acquisition, so the same files elaborate the same
-    // merged module whatever order a directory enumeration produced. The
-    // artifact identity of the permuted spellings is therefore equal by
-    // construction rather than by re-sorting here.
+    // merged module whatever order a directory enumeration produced.
     let files = [
         ("src/b.pi", "nominal B = Text\n"),
         ("src/a.pi", "nominal A = Text\n"),

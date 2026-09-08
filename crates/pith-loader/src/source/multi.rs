@@ -11,8 +11,8 @@ use super::module::ParsedModule;
 
 /// Parse a module's whole source set into one module: files merge in the
 /// set's canonical order, positions attribute back to the file that owns
-/// them, and the artifact identity covers the set — path and text together,
-/// so a rename or a move is not the same module bytes.
+/// them, and the artifact identity covers path and text together, so a
+/// rename or a move is not the same module bytes.
 #[must_use]
 pub fn parse_module_sources(module: &str, sources: &crate::SourceSet) -> ParsedModule {
     let mut parsed = Vec::new();

@@ -1,16 +1,9 @@
 //! The workspace loader: explicit manifests in, a validated dependency
-//! graph out. Loading begins from the supplied root — no upward search, no
-//! ambient configuration — and the result carries declared subjects,
-//! canonical source sets, and per-module bindings, in dependency order.
-//! Whether a module elaborates is not this loader's question; it resolves
-//! routes and refuses ambiguity, and elaboration consumes the result.
-//!
-//! Acquisition is [`acquire`]'s question and elaboration is
-//! [`elaborate`]'s; this module only sequences them. Every store a route
-//! can name serves the same [`ModuleStore`] surface, so a registry, a git
-//! revision, and a local directory reach the same resolution with the same
-//! diagnostic file identity — by implementing the trait, never by growing
-//! a second path beside it.
+//! graph out. Loading begins from the supplied root (no upward search, no
+//! ambient configuration), resolves routes, and refuses ambiguity; whether
+//! a module elaborates is not this loader's question. Acquisition is
+//! [`acquire`]'s and elaboration is [`elaborate`]'s, and every store a
+//! route can name serves the same [`ModuleStore`] surface.
 
 pub(crate) mod acquire;
 mod admission;
@@ -49,11 +42,9 @@ pub use routing::{
 };
 
 /// The store a workspace resolves against: where a route leads, and what
-/// bytes live there.
-///
-/// The trait is public so the source kinds that do not exist yet — a
-/// registry client, a git checkout, an archive — feed the same loading
-/// path the local filesystem does.
+/// bytes live there. Public so source kinds that do not exist yet (a
+/// registry client, a git checkout, an archive) feed the same loading path
+/// the local filesystem does.
 pub use acquire::ModuleStore;
 
 /// A resolved workspace: the root module and its selected dependency
@@ -65,10 +56,8 @@ impl Workspace {
     /// local filesystem.
     ///
     /// # Errors
-    /// Returns every acquisition failure and validation refusal, each
-    /// attached to the clause or file that caused it: duplicate members and
-    /// subjects, missing manifests, cycles, nested workspaces, symlinked or
-    /// empty source sets, and every manifest that does not parse.
+    /// Returns every acquisition failure and validation refusal, attached
+    /// to the clause or file that caused it.
     pub fn load(root_manifest: &Path) -> Result<Self, Box<[Diag]>> {
         let directory = LocalDirectory::new(root_files::root_directory(root_manifest)?);
         Self::resolve(LocalFiles, &directory)
@@ -85,10 +74,12 @@ impl Workspace {
             .map(WorkspaceResolution::into_workspace)
     }
 
-    /// Resolves with explicitly supplied user authority and retains project override evidence.
+    /// Resolve with explicitly supplied user bindings and a binding policy;
+    /// the result retains the binding overrides its caller must report.
     ///
     /// # Errors
-    /// Returns configuration, acquisition, or manifest refusals with their sources.
+    /// Returns configuration, acquisition, or manifest refusals with their
+    /// sources.
     pub fn resolve_configured<S: ModuleStore>(
         store: S,
         root: &S::Location,

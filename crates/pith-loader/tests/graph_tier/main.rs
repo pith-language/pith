@@ -1,11 +1,8 @@
 //! The frontend graph tier: the surface artifact, the bodies the cutoff
-//! reuses, and the canonical order of the tier's inputs.
-//!
-//! [`interface`] holds the surface artifact's round trips and the canonical
-//! input order; [`bodies`] holds the cutoff — a body edit moving `bodies-of`
-//! while the interface and every dependent's key stay put. Both drive the
-//! tier through the `Driver` here, which registers the frontend rules the
-//! way a caller would.
+//! reuses, and the canonical order of the tier's inputs. [`interface`]
+//! holds the surface round trips and canonical input order; [`bodies`]
+//! holds the cutoff, a body edit moving `bodies-of` while the interface
+//! and every dependent's key stay put.
 
 mod bodies;
 mod interface;
@@ -44,9 +41,7 @@ pure rule \"renamed-objects-of\"(List<Blob>) -> List<Object> = host
 
 /// The same declaration with a represented body where `host` was: a semantic
 /// edit the interface surface cannot see, because a body rides no interface
-/// and no declaration digest. This is the cutoff witness M-12 waited for —
-/// 0063's unresolved section names it, and M-13's notation is what makes the
-/// edit expressible.
+/// and no declaration digest.
 const ALPHA_BODY_EDIT: &str = "\
 -- Documents the object type a dependent elaborates against.
 nominal Object = Blob

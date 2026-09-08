@@ -46,7 +46,7 @@ impl<'a> Reading<'a> {
         }
     }
 
-    /// The first check: the index names the root key the consumer pinned.
+    /// Checks that the index names the root key the consumer pinned.
     pub(crate) fn root(&mut self, pinned: &RootKey) -> Option<Public> {
         if std::fs::read_dir(self.directory).is_err() {
             self.diagnostics.push(sourceless(

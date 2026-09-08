@@ -1,4 +1,4 @@
-//! The four checks, each refused at its own boundary, with the rotation
+//! The checks, each refused at its own boundary, with the rotation
 //! and rollback fixtures around them.
 
 use std::collections::BTreeSet;

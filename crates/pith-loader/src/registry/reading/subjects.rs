@@ -20,9 +20,8 @@ use crate::workspace::graph::{at, sourceless};
 type Assertion<'a> = (&'a Public, &'a str, &'a Detached);
 
 impl Reading<'_> {
-    /// The remaining checks: every line is signed by a key its domain
-    /// enrolled, no version appears twice, and every line the consumer
-    /// previously admitted is still there, unchanged, before any new one.
+    /// The subject-line checks, over every domain and subject the index
+    /// carries.
     pub(crate) fn subjects(
         &mut self,
         domains: &BTreeMap<Box<str>, DomainKeys>,
@@ -225,9 +224,9 @@ impl Reading<'_> {
         }
     }
 
-    /// The fourth check: the lines the consumer previously admitted for
-    /// this subject are a prefix of the lines it just read, because new
-    /// entries append and nothing else.
+    /// The append-only check: the lines the consumer previously admitted
+    /// for this subject are a prefix of the lines it just read, because
+    /// new entries append and nothing else.
     fn append_only(&mut self, subject: &ModuleSubject, source: &Arc<SourceFile>, current: &[Line]) {
         let Some(prior) = self.prior.subjects.get(subject) else {
             return;

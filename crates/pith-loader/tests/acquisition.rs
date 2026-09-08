@@ -1,15 +1,8 @@
 //! Acquisition is one path: the store a route names feeds the same
-//! resolution, admission, elaboration, and frontend projection that the
-//! local filesystem does.
-//!
-//! The fixture store here stands where the registry client arrives in a
-//! later slice: it serves modules by subject from memory, which is the
-//! registry's shape — a registry serves by subject because a `use` clause
-//! selects one, and the route alone names nothing. Loading the same module
-//! bytes through the local store and through this one must produce equal
-//! semantic artifacts, with only the provenance differing, and a
-//! registry-routed clause's written range reaches the admission decision
-//! through the same path a local source's subject agreement does.
+//! resolution, admission, and elaboration the local filesystem does. The
+//! fixture store stands in for the registry client; equal module bytes
+//! through both stores must produce equal semantic artifacts, provenance
+//! aside.
 
 mod common;
 
@@ -39,13 +32,13 @@ fn local_project(directory: &Path) -> TestResult {
     Ok(())
 }
 
-/// The root manifest with its dependency routed at a registry: the same
-/// clause with the default source, and a range the release satisfies.
+/// The root manifest with its dependency routed at a registry: same clause,
+/// registry source, and a range the release satisfies.
 const REGISTRY_ROOT: &str = "module example/root 0.1.0\nregistry fixture = \"memory:fixture\" root \"ed25519:A\"\ndomain example from fixture\nuse dep = example/dep >= 1.2\n";
 
-/// A store serving modules by subject, the registry's shape. The manifest
-/// label carries the store's identity, which is the diagnostic file
-/// identity a refused or unparsable module carries.
+/// A store serving modules by subject, the registry's shape. Manifest
+/// labels carry the store's identity, which is the diagnostic identity a
+/// refused or unparsable module reports.
 #[derive(Clone)]
 struct RegistryFixture {
     modules: BTreeMap<Box<str>, FixtureModule>,
@@ -58,8 +51,7 @@ struct FixtureModule {
 }
 
 /// A fixture location: the subject it serves. Two routes to one subject
-/// produce one location, which is what lets resolution load the diamond
-/// once without knowing what a registry is.
+/// produce one location, so a shared module loads once.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct FixtureLocation(Box<str>);
 
@@ -206,8 +198,8 @@ fn the_same_module_bytes_through_two_stores_produce_equal_semantic_artifacts() -
         );
     }
 
-    // Provenance is the one thing that moved, and it is not a semantic
-    // key: the same module carries each store's location as its origin.
+    // Provenance differs and is not a semantic key: each store's location
+    // becomes the module's origin.
     let local_dep = module_of(&local, "example/dep");
     let acquired_dep = module_of(&acquired, "example/dep");
     assert_ne!(local_dep.origin(), acquired_dep.origin());

@@ -1,6 +1,6 @@
 //! The directory host: the registry side of a directory tree. It writes
 //! what publication derives and keeps the trees its revisions name.
-//! Nothing here verifies — that is [`super::trust`]'s half — so a host
+//! Nothing here verifies; that is [`super::trust`]'s half, so a host
 //! cannot vouch for its own index.
 
 use std::collections::BTreeSet;
@@ -34,11 +34,11 @@ impl Host {
         &self.directory
     }
 
-    /// Writes the root file naming `root`'s public half. The first call
-    /// on an empty directory creates the layout.
+    /// Writes the root file naming `root`'s public half; the first call on
+    /// an empty directory creates the layout.
     ///
     /// # Errors
-    /// Returns the filesystem failure.
+    /// The filesystem failure.
     pub fn initialize(&self, root: &Signing) -> io::Result<()> {
         std::fs::create_dir_all(self.directory.join(DOMAINS_DIRECTORY))?;
         std::fs::create_dir_all(self.directory.join(INDEX_DIRECTORY))?;
@@ -50,11 +50,11 @@ impl Host {
     }
 
     /// Writes a domain's key set at `generation`, signed by `root`. A
-    /// later call with a higher generation rotates the set; the caller
-    /// owns the number because only the caller knows what changed.
+    /// higher generation rotates the set; the caller owns the number
+    /// because only it knows what changed.
     ///
     /// # Errors
-    /// Returns the filesystem failure.
+    /// The filesystem failure.
     pub fn enroll(
         &self,
         root: &Signing,
@@ -71,12 +71,12 @@ impl Host {
         )
     }
 
-    /// Stores a draft's tree under its measured revision — content the
-    /// revision's own identity addresses — and appends the signed release
-    /// line for the host to admit at `admitted`.
+    /// Stores a draft's tree under its measured revision (addressed by
+    /// the revision's own identity) and appends the signed release line
+    /// for the host to admit at `admitted`.
     ///
     /// # Errors
-    /// Returns the filesystem failure.
+    /// The filesystem failure.
     pub fn publish(&self, draft: &Draft, publisher: &Signing, admitted: u64) -> io::Result<()> {
         self.store_tree(draft)?;
         let release = draft.release(publisher, admitted);
@@ -86,7 +86,7 @@ impl Host {
     /// Appends a signed withdrawal line standing against `version`.
     ///
     /// # Errors
-    /// Returns the filesystem failure.
+    /// The filesystem failure.
     pub fn withdraw(
         &self,
         subject: &ModuleSubject,

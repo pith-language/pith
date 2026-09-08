@@ -1,4 +1,4 @@
-//! The request forms: the five constructs, the types that check them, and
+//! The request forms: the constructs, the types that check them, and
 //! the positions where a request may appear.
 
 use pith_core::Value;

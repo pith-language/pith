@@ -1,5 +1,5 @@
 //! The answer codecs: the interface surface, the bodies, and the index the
-//! three graph rules produce.
+//! graph rules produce.
 
 use pith_core::{Interface, Type, Value};
 use pith_ids::ModuleAbiDigest;

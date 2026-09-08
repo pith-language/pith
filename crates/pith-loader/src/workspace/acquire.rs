@@ -1,16 +1,8 @@
-//! The boundary between acquiring a module and deciding what it means.
-//!
-//! [`ModuleStore`] is everything resolution needs from the world: where a
-//! declared route leads, the manifest text there, and the source files that
-//! location owns. [`super::graph`] holds the other half — membership,
-//! identity, cycles — and it names no filesystem, so every validation
-//! refusal is a function of what was acquired rather than of how.
-//!
-//! The split exists for the source kinds that do not exist yet. A registry,
-//! a git revision, and an archive each reach the same resolution as a local
-//! directory, with the same diagnostic file identity and the same frontend
-//! inputs, by implementing this trait rather than by growing a second path
-//! beside it.
+//! The boundary between acquiring a module and deciding what it means:
+//! [`ModuleStore`] is everything resolution needs from the world (where a
+//! declared route leads, the manifest text there, the source files that
+//! location owns). [`super::graph`] holds the other half and names no
+//! filesystem, so validation refusals are a function of what was acquired.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -40,25 +32,22 @@ pub struct AcquiredSource {
     pub text: Box<str>,
 }
 
-/// Why a store could not produce what a route asked for.
-///
-/// One failure type with a clause per cause, so a caller that must attach a
-/// span picks the diagnostic from the clause rather than from a message it
-/// has to interpret.
+/// Why a store could not produce what a route asked for: one clause per
+/// cause, so a caller attaching a span reads the diagnostic off the variant
+/// instead of parsing a message.
 pub enum AcquireFailure {
     /// The route names a source kind this store does not serve.
     Unsupported { kind: &'static str },
     /// The location could not be reached, listed, or read.
     Unreadable { message: Box<str> },
-    /// A symlink inside a module's tree. Following it would let a module
+    /// A symlink inside a module's tree: following it would let a module
     /// silently own content its manifest does not claim.
     Symlink { path: Box<str> },
-    /// Something that is not a regular file where one was required. Reading
-    /// a fifo blocks, so this is refused before the read rather than after.
+    /// Not a regular file where one was required. Reading a fifo blocks, so
+    /// this is refused before the read rather than after.
     Irregular { path: Box<str> },
-    /// A store with its own trust boundaries refused the route: the code
-    /// names which boundary, so the refusal lands as itself rather than
-    /// as a generic unreadable source.
+    /// A store with its own trust boundary refused the route; the code names
+    /// which boundary.
     Refused {
         code: FrontendCode,
         message: Box<str>,
@@ -72,8 +61,8 @@ impl AcquireFailure {
         }
     }
 
-    /// The code this refusal lands as, when it names its own boundary;
-    /// a caller with no better code falls back to its generic one.
+    /// The code this refusal names for itself, if any; a caller with no
+    /// better code falls back to its generic one.
     #[must_use]
     pub(crate) const fn diagnostic_code(&self) -> Option<FrontendCode> {
         match self {
@@ -85,9 +74,9 @@ impl AcquireFailure {
         }
     }
 
-    /// The failure as a sentence, for the caller that attaches the span:
-    /// an acquisition failure carries no source of its own, because only
-    /// the clause that reached for the file knows where to point.
+    /// The failure as a sentence, for the caller attaching the span: an
+    /// acquisition failure carries no span of its own, because only the
+    /// clause that reached for the file knows where to point.
     #[must_use]
     pub fn describe(&self) -> Box<str> {
         match self {
@@ -111,11 +100,10 @@ impl AcquireFailure {
 
 /// What resolution is asking a store to reach.
 ///
-/// The split is the registry's requirement: a `use` clause selects a
-/// subject and then names a route, and a registry serves by subject — the
-/// route alone names nothing there — while a workspace member is a
-/// directory whose subject its own manifest declares. A store that cannot
-/// serve a variant says so; there is no fallback route.
+/// The subject/route split is the registry's requirement: a registry serves
+/// by subject, the route alone naming nothing there, while a workspace
+/// member is a directory whose subject its own manifest declares. A store
+/// that cannot serve a variant says so; there is no fallback route.
 pub enum Route<'a> {
     Registry(super::routing::RegistryRoute<'a>),
     Path {
@@ -152,25 +140,25 @@ impl Route<'_> {
 
 /// Where a module's bytes come from.
 ///
-/// A store's `Location` is its own canonical name for a module: two routes
-/// reaching one module produce equal locations, which is what lets
-/// resolution detect a diamond and a cycle without knowing what a route is.
-/// A location never becomes a semantic key — under 0067 a module's identity
-/// is its declared subject and its module-relative source set, so where the
-/// bytes came from cannot enter a digest.
+/// A store's `Location` is its canonical name for a module: routes reaching
+/// the same module produce equal locations, which is how resolution detects
+/// a diamond and a cycle without knowing what a route is. A location never
+/// becomes a semantic key: identity is the declared subject plus the
+/// module-relative source set, so where the bytes came from cannot enter a
+/// digest.
 pub trait ModuleStore {
     type Location: Clone + Ord + std::fmt::Display;
 
-    /// The canonical source selected by `route`, relative to the manifest at `base`.
-    /// Every route is located before reuse. Locations must distinguish selected
-    /// revisions, subpaths, archive content, and registries; equivalent mirrors
-    /// and registry aliases produce equal locations. The adapter validates source
-    /// references here: request spelling alone is not proof of source identity.
+    /// The canonical location selected by `route`, relative to the manifest
+    /// at `base`. Every route is located before reuse. Locations must
+    /// distinguish selected revisions, subpaths, archive content, and
+    /// registries; equivalent mirrors and registry aliases produce equal
+    /// locations. Source references are validated here: request spelling
+    /// alone is not proof of source identity.
     ///
     /// # Errors
-    /// Returns [`AcquireFailure::Unsupported`] for a route this store does
-    /// not serve, or [`AcquireFailure::Unreadable`] when the route names
-    /// nothing this store can reach.
+    /// [`AcquireFailure`] when the store does not serve the route or cannot
+    /// reach what it names.
     fn locate(
         &self,
         base: &Self::Location,
@@ -325,17 +313,15 @@ fn walk(
                 files.insert(format!("{prefix}{name}").into(), entry.path());
             }
         } else if name.ends_with(SOURCE_SUFFIX) {
-            // Not a directory, not a symlink, not a regular file: a fifo, a
-            // socket, or a device spelling a source name.
             return Err(irregular(&entry.path()));
         }
     }
     Ok(())
 }
 
-/// A path about to be read must name a regular file. Anything else — a
-/// symlink, a fifo, a device — either hides an external tree or blocks the
-/// read; neither is a manifest.
+/// A path about to be read must name a regular file: anything else (a
+/// symlink, a fifo, a device) either hides an external tree or blocks the
+/// read.
 pub(crate) fn require_regular(path: &Path, what: &str) -> Result<(), AcquireFailure> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| AcquireFailure::unreadable("inspect", path, &error))?;

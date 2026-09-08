@@ -1,4 +1,4 @@
-//! The five request constructs, and the checking position that holds either
+//! The request constructs, and the checking position that holds either
 //! a request or an expression.
 
 use pith_hir::{

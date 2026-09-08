@@ -87,8 +87,8 @@ impl ImportEnv {
     }
 
     /// Insert a loaded module under the alias its consumer's manifest bound.
-    /// The binding files it for scoping; the subject — the loaded module's
-    /// declared identity — is what crosses the ABI boundary.
+    /// The binding files it for scoping; the subject (the loaded module's
+    /// declared identity) is what crosses the ABI boundary.
     pub fn insert_alias(&mut self, alias: impl Into<Box<str>>, loaded: &LoadedModule) {
         self.inner.insert(
             alias,

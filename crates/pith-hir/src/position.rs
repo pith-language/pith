@@ -93,8 +93,8 @@ impl ReferenceSite {
     }
 
     /// The file the reference is written in. The span is local to it: a
-    /// site carries its own attribution, so a module of several files never
-    /// presents one file's offsets under another file's name.
+    /// module of several files never presents one file's offsets under
+    /// another file's name.
     #[must_use]
     pub fn source(&self) -> &Arc<SourceFile> {
         &self.source
@@ -205,10 +205,9 @@ impl PositionSidecar {
     }
 }
 
-/// The running furthest reach within one file: at each position, the end of
-/// the entry that reaches furthest so far in that entry's own file. The
-/// reach resets at file boundaries, so a lookup can only be answered by an
-/// entry of the file it named.
+/// The running furthest reach within one file: at each position, the furthest
+/// end so far in that entry's own file. The reach resets at file boundaries,
+/// so a lookup is answered only by an entry of the file it named.
 fn prefix_reach(ends: impl Iterator<Item = (u32, ByteOffset)>) -> Box<[(u32, ByteOffset, usize)]> {
     let mut reach = Vec::new();
     let mut best: Option<(ByteOffset, usize)> = None;

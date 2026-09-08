@@ -1,10 +1,8 @@
 //! A version range in its written spelling: `*`, `=1.2`, `>=1.2`, `>1.2`,
 //! `<=2.0`, `<2.0`, or a comma-joined lower and upper edge such as
-//! `>=1.2,<2.0`.
-//!
-//! Each edge carries its own inclusivity, so the manifest's closed
-//! constructor set reads and writes without loss, and a range is always
-//! one token wide.
+//! `>=1.2,<2.0`. Each edge carries its own inclusivity, so the manifest's
+//! closed constructor set reads and writes without loss, and a range is
+//! always one token wide.
 
 use pith_hir::{ManifestVersion, VersionBound, VersionRange};
 

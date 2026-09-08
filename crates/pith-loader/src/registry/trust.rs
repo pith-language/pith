@@ -34,7 +34,7 @@ impl Record {
     }
 }
 
-/// An index that passed the four checks.
+/// An index that passed the client's checks.
 #[derive(Debug)]
 pub struct Verified {
     root: Public,
@@ -42,7 +42,7 @@ pub struct Verified {
 }
 
 impl Verified {
-    /// The root key every key set was verified against — the trust claim
+    /// The root key every key set was verified against: the trust claim
     /// two routes to one registry must agree on.
     #[must_use]
     pub const fn root(&self) -> &Public {
@@ -88,8 +88,7 @@ impl Subject {
 /// state `prior` admits.
 ///
 /// # Errors
-/// Returns every refusal the index earned, each attached to the file and
-/// line that caused it.
+/// Every refusal the index earned, attached to its file and line.
 pub fn read(
     directory: &Path,
     pinned: &RootKey,

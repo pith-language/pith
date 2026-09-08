@@ -1,12 +1,8 @@
 //! The index's documents, canonically rendered: a release line, a
-//! withdrawal line, and a domain's key-set document.
-//!
-//! A signature covers the canonical rendering of a document's values —
-//! everything before the `sig` field — so equal values verify equal and
-//! any edited value does not. The registry's admission time follows the
-//! signature, asserted by the host rather than the publisher and never
-//! covered by either. The parsers that read these back live in
-//! [`super::parse`].
+//! withdrawal line, and a domain's key-set document. A signature covers
+//! the canonical rendering of a document's values (everything before the
+//! `sig` field); the registry's admission time follows it, asserted by
+//! the host and covered by neither signature. Parsers live in [`super::parse`].
 
 mod key_set;
 mod release;

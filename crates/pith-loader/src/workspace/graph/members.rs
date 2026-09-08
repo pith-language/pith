@@ -13,8 +13,8 @@ use super::{Resolution, at, view_of};
 impl<S: ModuleStore> Resolution<S> {
     /// Validate the workspace members the root lists: each names a manifest
     /// directory, uniquely, declaring no workspace of its own and no subject
-    /// another location declared. Member sources are not acquired — only
-    /// the selected dependency closure reaches source acquisition.
+    /// another location declared. Member sources are not acquired; only the
+    /// selected dependency closure reaches source acquisition.
     pub(super) fn validate_members(
         &mut self,
         root_location: &S::Location,

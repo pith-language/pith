@@ -17,8 +17,8 @@ use pith_hir::{
     SurfaceStatement, SurfaceTypeId, SurfaceValue, SurfaceValueField, SurfaceWrittenBody,
 };
 
-/// Names resolved without a module declaration. The text builtins (decision
-/// 0064) and the list helpers are total composites over the represented
+/// Names resolved without a module declaration. The text builtins
+/// and the list helpers are total composites over the represented
 /// constructors; `fail` is the refusing body's only spelling.
 pub const BUILTIN_NAMES: &[&str] = &[
     "module",
@@ -51,12 +51,8 @@ enum Found {
     Projected(Type),
 }
 
-/// One written body's elaboration state. `types` holds every type the body's
-/// annotations and request heads name, resolved against the module's
-/// declarations before the body elaborates, so name resolution inside the
-/// body sees only finished types.
-/// Where a request's resumption continues: the statements after it, the
-/// body's tail, and the span diagnostics name.
+/// Where a request's resumption continues: the statements after it, and
+/// the body's tail.
 struct Resume<'statements> {
     rest: std::slice::Iter<'statements, SurfaceStatement>,
     tail: Option<&'statements SurfaceValue>,
@@ -82,14 +78,17 @@ pub(crate) struct Bodies<'a> {
     site: &'a BodySite<'a>,
     locals: &'a [(&'a str, Type)],
     deferred: &'a [&'a str],
+    /// Every type the body's annotations and request heads name, resolved
+    /// against the module's declarations before the body elaborates, so name
+    /// resolution inside the body sees only finished types.
     types: &'a BTreeMap<SurfaceTypeId, Type>,
     own_interface: &'a Interface,
     forbid_self_request: bool,
     diagnostics: &'a mut Vec<Diag>,
     binders: Vec<Binder>,
     /// What the body's tail must inhabit when it is an expression: the rule's
-    /// output or the definition's annotation. `fail` needs it — a refusal
-    /// inhabits the checking position's type, and the tail is checked with no
+    /// output or the definition's annotation. `fail` needs it, since a refusal
+    /// inhabits the checking position's type and the tail is checked with no
     /// expectation flowing in.
     tail_expected: Option<Type>,
 }
@@ -539,11 +538,11 @@ impl<'a> Bodies<'a> {
             inputs: payloads.into(),
             output,
         };
-        // The refusal is a pure-cycle refusal: a pure rule requesting its own
-        // interface would wait on itself. The same interface over the action
-        // table is the wrapper pattern — an entry planning an action whose
-        // contract shares its inputs — and the two tables are what keep it
-        // from waiting on itself.
+        // A self-request is only refused on the pure side: a pure rule
+        // requesting its own interface would wait on itself. The same
+        // interface over the action table is the wrapper pattern, an entry
+        // planning an action whose contract shares its inputs, and the
+        // separate action table keeps it from waiting on itself.
         if category == RuleCategory::Pure
             && self.forbid_self_request
             && &interface == self.own_interface

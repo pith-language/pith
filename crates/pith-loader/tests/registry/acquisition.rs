@@ -13,7 +13,7 @@ use pith_loader::registry::{Host, Record, RegistryStore};
 fn an_entry_whose_cached_fields_disagree_with_the_pinned_revision_refuses() -> TestResult {
     let registry = serving_registry()?;
     // Replace the stored manifest at the revision the entry pins: the
-    // index is untouched, so the four checks pass and the disagreement is
+    // index is untouched, so the checks pass and the disagreement is
     // the consumer's to find.
     let dep_index = registry.path().join("index/example/dep");
     let text = fs::read_to_string(&dep_index)?;

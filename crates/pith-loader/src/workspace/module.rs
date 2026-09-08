@@ -1,5 +1,4 @@
-//! The per-module results of resolution: what a module declared, where
-//! its bytes came from, and the source files it owns.
+//! The per-module results of resolution.
 
 use pith_hir::{Manifest, ModuleSubject};
 use pith_ids::ContentId;
@@ -10,7 +9,7 @@ pub struct ResolvedModule {
     pub(super) subject: ModuleSubject,
     /// The store location the module was acquired from, rendered: for
     /// diagnostics only. Routes detect duplicates on it, but a location
-    /// never becomes a semantic key — a module's identity is its declared
+    /// never becomes a semantic key: a module's identity is its declared
     /// subject and its module-relative source set.
     pub(super) origin: Box<str>,
     pub(super) manifest: Manifest,
@@ -64,10 +63,9 @@ impl SourceSet {
         }
     }
 
-    /// A source set, sorted into canonical module-relative order whatever
-    /// order it was given in: the merged span space of a module is a
-    /// function of its file set, never of a directory enumeration. A path
-    /// appearing twice is refused — one path names one file.
+    /// Sorted into canonical module-relative order whatever order it was
+    /// given in: the merged span space of a module is a function of its file
+    /// set, never of a directory enumeration. A repeated path is refused.
     ///
     /// # Errors
     /// Returns [`crate::FrontendInputError::DuplicateSourcePath`] for a

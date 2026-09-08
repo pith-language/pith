@@ -59,14 +59,13 @@ impl ParsedManifestFile {
         &self.diagnostics
     }
 
-    /// The validated manifest: present only when the parse reported
-    /// nothing and declared its module clause. Both failure halves are
-    /// already diagnosed by the diagnostics this file carries.
+    /// The validated manifest: present only when the parse reported nothing
+    /// and declared its module clause; the diagnostics this file carries
+    /// already say why neither held.
     ///
     /// # Errors
-    /// Returns [`InvalidManifest::Diagnostics`] when the parse reported
-    /// anything, [`InvalidManifest::MissingModule`] when no module clause
-    /// survived.
+    /// Returns [`InvalidManifest`] when the parse reported diagnostics or no
+    /// module clause survived.
     pub fn validated(&self) -> Result<pith_hir::Manifest, InvalidManifest> {
         if !self.diagnostics.is_empty() {
             return Err(InvalidManifest::Diagnostics);
@@ -99,8 +98,8 @@ pub fn parse_manifest(source: &ManifestSource) -> ParsedManifestFile {
 ///
 /// # Errors
 ///
-/// Returns the parse diagnostics when the manifest does not parse, for the
-/// same reason `format_module` does.
+/// Returns the parse diagnostics when the manifest does not parse, as
+/// `format_module` does.
 pub fn format_manifest(source: &ManifestSource) -> Result<String, Box<[Diag]>> {
     let ParsedManifestFile {
         source,

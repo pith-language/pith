@@ -24,9 +24,8 @@ impl Measured {
 }
 
 /// Measures a module tree from its manifest text and its module-relative
-/// sources. The map's canonical order is the measurement's order, so equal
-/// trees measure equal whatever order their bytes were assembled in, and
-/// one path names one file because a map holds no duplicates.
+/// sources, in the map's canonical order, so equal trees measure equal
+/// whatever order their bytes were assembled in.
 #[must_use]
 pub fn measure(manifest: &str, sources: &BTreeMap<Box<str>, Box<str>>) -> Measured {
     const TREE_DOMAIN: DigestDomain = DigestDomain::new("module-tree", 1);

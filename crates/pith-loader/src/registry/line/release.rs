@@ -41,8 +41,7 @@ impl Release {
         self.tree
     }
 
-    /// The key the line names as its signer, so a refusal can name the
-    /// key and the set it is absent from.
+    /// The key the line names as its signer.
     #[must_use]
     pub const fn signer(&self) -> &Public {
         &self.signer
@@ -106,9 +105,8 @@ impl Release {
         }
     }
 
-    /// The release those claims describe, signed: the signature covers the
-    /// canonical rendering of everything but itself and the admission
-    /// time, which arrive after it.
+    /// The release those claims describe, signed: the signature covers
+    /// everything but itself and the admission time, which arrive after it.
     #[must_use]
     pub fn signed(
         version: ManifestVersion,

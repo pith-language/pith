@@ -1,6 +1,6 @@
 //! The expression grammar: literals, names, records, lists, the control
-//! forms, and the binary operators under the precedence the parser's three
-//! tiers fix.
+//! forms, and the binary operators under the precedence the parser's tiers
+//! fix.
 
 use pith_core::Value;
 use pith_hir::{SurfaceArm, SurfaceExpr, SurfaceExprId, SurfaceOperator, SurfaceValueField};

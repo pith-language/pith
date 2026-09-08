@@ -1,8 +1,5 @@
-//! Design probes for module distribution: executable answers to two
+//! Design probes for module distribution: executable measurements of the
 //! assumptions the registry and compatibility records rest on.
-//!
-//! These are measurements, not regressions of a chosen behavior. Each names
-//! the claim it settles so a record can cite it.
 
 use std::fs;
 use std::path::Path;
@@ -80,14 +77,11 @@ fn redact(haystack: &[u8], needle: &[u8]) -> Vec<u8> {
 }
 
 /// A published ABI is a claim about one dependency context, not about the
-/// module's source.
-///
-/// The consumer's own bytes never change here. Only its dependency's public
-/// surface moves, and the consumer's ABI moves with it — because a module's
-/// ABI covers the imported subject/ABI pairs it elaborated against. A registry
-/// carrying one ABI per released version therefore cannot mean "the ABI under
-/// every resolution its requirements admit"; it means "the ABI under the
-/// context this release recorded".
+/// module's source: the consumer's own bytes never change here, yet its ABI
+/// moves with the dependency's public surface, because a module's ABI
+/// covers the imported subject/ABI pairs it elaborated against. A registry
+/// carrying one ABI per release therefore means "the ABI under the context
+/// this release recorded".
 #[test]
 fn an_unchanged_consumer_gets_a_new_abi_when_its_dependency_surface_moves() -> TestResult {
     let root = tempfile::tempdir()?;
@@ -101,7 +95,7 @@ fn an_unchanged_consumer_gets_a_new_abi_when_its_dependency_surface_moves() -> T
     drop(before);
 
     // A public addition to the dependency that adds no competing provider:
-    // a new nominal, not a new rule. The consumer's source is untouched.
+    // a new nominal, not a new rule.
     file(
         &root.path().join("dep/src/types.pi"),
         "nominal Message = Text\nnominal Other = Text\n",
@@ -130,19 +124,20 @@ fn an_unchanged_consumer_gets_a_new_abi_when_its_dependency_surface_moves() -> T
         "the consumer's recorded imported ABIs did not move"
     );
 
-    // The consumer's *interface surface* is context-dependent too, and this is
-    // the sharper half of the finding: the surface a registry would publish for
-    // an unedited module is not stable across dependency contexts.
+    // The consumer's interface surface is context-dependent too: the surface
+    // a registry would publish for an unedited module is not stable across
+    // dependency contexts.
     let root_surface_after = module(&after, "example/root").interface_surface().encode();
     assert_ne!(
         root_surface_before, root_surface_after,
         "the consumer's interface surface did not follow its dependency's ABI"
     );
 
-    // And what moved is exactly the dependency's ABI digest, embedded in the
-    // consumer's surface. So `pith diff` cannot attribute a surface difference
-    // to the edited module without first subtracting the imported-ABI region:
-    // two surfaces of byte-identical source differ whenever their contexts do.
+    // What moved is exactly the dependency's ABI digest embedded in the
+    // consumer's surface, so `pith diff` cannot attribute a surface
+    // difference to the edited module without subtracting the imported-ABI
+    // region: two surfaces of byte-identical source differ whenever their
+    // contexts do.
     let dep_abi_after = module(&after, "example/dep").abi_digest();
     assert!(
         contains(&root_surface_before, dep_abi_before.digest().as_bytes()),
@@ -162,11 +157,8 @@ fn an_unchanged_consumer_gets_a_new_abi_when_its_dependency_surface_moves() -> T
 }
 
 /// The same probe from the other side: a dependency edit that does not touch
-/// its public surface leaves the consumer's ABI alone.
-///
-/// Without this, the assertion above would be satisfied by an ABI that moves
-/// on any dependency edit at all, which would make published surfaces useless
-/// rather than context-dependent.
+/// its public surface leaves the consumer's ABI alone, so the probe above is
+/// not satisfied by an ABI that moves on any dependency edit.
 #[test]
 fn a_dependency_body_edit_leaves_the_consumer_abi_alone() -> TestResult {
     let root = tempfile::tempdir()?;

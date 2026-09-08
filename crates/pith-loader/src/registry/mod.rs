@@ -1,10 +1,7 @@
-//! The module registry: a signed, append-only, metadata-only index.
-//!
-//! An entry names the revision a released version was measured from and
-//! the digest it measured to; the trees those revisions name live beside
-//! the index, in the serving host. `line` renders and `parse` reads the
-//! documents, `trust` reads an index as a client, `publish` and `host`
-//! are the registry's side, and `store` serves what passed.
+//! The module registry: a signed, append-only, metadata-only index. An
+//! entry names the revision a released version was measured from and the
+//! digest it measured to; the trees those revisions name live beside the
+//! index, in the serving host.
 
 mod host;
 mod keys;
