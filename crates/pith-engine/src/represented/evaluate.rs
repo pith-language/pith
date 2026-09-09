@@ -194,9 +194,8 @@ pub(super) fn evaluate(expression: BodyExpr, environment: Environment) -> Evalua
                 let (Ok(text), Ok(separator)) = (expect_text(text), expect_text(separator)) else {
                     return internal("validated text break received a non-text value");
                 };
-                // An empty separator never matches (decision 0064), and
-                // Rust's `str::split` panics on one, so the decree and the
-                // guard coincide.
+                // An empty separator never matches anything, and Rust's
+                // `str::split` panics on one, so handle the empty case first.
                 let parts: Vec<Value> = if separator.is_empty() {
                     vec![Value::Text(text)]
                 } else {

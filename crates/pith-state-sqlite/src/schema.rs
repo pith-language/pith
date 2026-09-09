@@ -163,7 +163,7 @@ pub const CREATE_SCHEMA: &str = "
     -- The reusable index. `published` is the database's publication
     -- sequence, so latest reads as latest published: two attempts of one
     -- action key can complete in either order of their creation, and the
-    -- admission test of 0031 serves the most recently recorded attempt.
+    -- admission test serves the most recently recorded attempt.
     create table if not exists reusable_index (
         computation integer primary key references computations (id),
         attempt integer not null references attempts (id),

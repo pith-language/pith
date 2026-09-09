@@ -25,9 +25,8 @@ fn durable_reuse_is_valid_until_a_dependency_result_identity_changes() {
     );
 
     // Simulate `leaf` being recomputed under a new attempt whose durable result
-    // identity changed (e.g. a new revision produced different bytes). Publish a
-    // second completed attempt for the leaf's key directly through the shared
-    // store, so it becomes the latest reusable attempt.
+    // identity changed (a new revision producing different bytes), by publishing
+    // a second completed attempt for the leaf's key directly through the store.
     let leaf_computation = leaf_dependency_of(&engine, root_evaluation.computation);
     let leaf_key = pure_key_of(&engine, leaf_computation);
     let original_leaf_attempt = durable_id(&engine, leaf_computation);
@@ -82,8 +81,8 @@ fn durable_reuse_remains_valid_when_a_dependency_result_is_canonically_equal() {
     );
 
     // Publish a second leaf attempt under a new id but with an equal result.
-    // Decision 0024: downstream propagation stops even though a new attempt
-    // records the changed upstream provenance.
+    // Downstream propagation stops even though a new attempt records the
+    // changed upstream provenance.
     let leaf_computation = leaf_dependency_of(&engine, root_evaluation.computation);
     let leaf_key = pure_key_of(&engine, leaf_computation);
     let equal_leaf = engine

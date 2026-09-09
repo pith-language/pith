@@ -183,8 +183,8 @@ fn action_output_bytes_are_imported_by_the_engine() {
 fn missing_action_input_is_rejected_before_executor_call() {
     let mut engine = Engine::new();
     // The declared input is deliberately not stored; the engine must reject the
-    // action before the executor runs. The executable is a host path (0030) and
-    // needs no store entry.
+    // action before the executor runs. The executable is a host path and needs
+    // no store entry.
     let action_interface = interface(&[Type::Int], Type::Blob);
     let root_interface = interface(&[], Type::Blob);
     engine.register_action_rule(

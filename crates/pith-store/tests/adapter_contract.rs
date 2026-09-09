@@ -1,4 +1,4 @@
-//! Cross-adapter acceptance tests for immutable content storage (A-3/A-4).
+//! Cross-adapter acceptance tests for immutable content storage.
 
 use std::fs;
 

@@ -1,12 +1,10 @@
 //! Building an invalidation chain over the recorded dependency graph.
 //!
-//! Both adapters share this walk. Each has its own way to read an attempt (an
-//! in-memory map, a `SELECT`), so they supply an [`AttemptLookup`] the way they
-//! do for [`validate_publication`](super::validate::validate_publication). The
-//! chain follows the single dependency the attempt's own
-//! [`DurableReuseReason`] names, so the explanation
-//! matches the reuse decision the attempt was published with rather than
-//! re-deriving one.
+//! Both adapters share this walk; each supplies an [`AttemptLookup`], the way
+//! it does for [`validate_publication`](super::validate::validate_publication).
+//! The chain follows the single dependency the attempt's own
+//! [`DurableReuseReason`] names, so the explanation matches the reuse decision
+//! the attempt was published with.
 
 use std::sync::Arc;
 
@@ -34,10 +32,8 @@ pub fn explain_invalidation(
     build(lookup, attempt)
 }
 
-/// The recursive step. Visited is carried by reference so a cycle in the
-/// recorded graph (which the publication validator rejects, but a lookup that
-/// races with a concurrent writer could in principle surface) terminates
-/// rather than overflows the stack.
+/// The recursive step: each level follows the one dependency the attempt's
+/// reason names.
 fn build(
     lookup: &impl AttemptLookup,
     attempt_id: DurableAttemptId,
@@ -68,10 +64,9 @@ fn build(
     )?))
 }
 
-/// Resolve `reason` against the attempt's recorded dependency list. A reason
-/// that names a specific dependency edge recurses into that dependency's
-/// explanation; a reason that does not (`ActionCachingDisabled`,
-/// `DependencyMissing`) becomes a leaf.
+/// Resolve `reason` against the attempt's recorded dependency list: a reason
+/// that names a dependency recurses into that dependency's explanation; one
+/// that does not becomes a leaf.
 fn explain_node(
     lookup: &impl AttemptLookup,
     attempt: DurableAttemptId,
@@ -122,8 +117,8 @@ fn named_dependency(reason: &DurableReuseReason) -> Option<DurableAttemptId> {
     }
 }
 
-/// The target attempt of a dependency edge, if it has one. `Blob` and
-/// `CapabilityUse` edges name no attempt and cannot anchor a chain.
+/// The target attempt of a dependency edge, if it has one; an edge without an
+/// attempt cannot anchor a chain.
 fn edge_target(edge: &DurableDependency) -> Option<DurableAttemptId> {
     match edge {
         DurableDependency::Pure { attempt, .. }
@@ -133,13 +128,9 @@ fn edge_target(edge: &DurableDependency) -> Option<DurableAttemptId> {
     }
 }
 
-/// Read the latest completed reusable attempt for `computation` from the
-/// adapter and explain it. Adapters that keep a reusable index call this with
-/// the index result; the engine reuses it for the live-graph mirror by reading
-/// the durable attempt of an arena computation.
-///
-/// `Ok(None)` when there is no reusable-completed attempt for the key, or when
-/// that attempt is `Reusable` (nothing to explain).
+/// Explain the latest attempt a caller resolved for a computation, typically
+/// from its reusable index. `Ok(None)` when no attempt was supplied or the
+/// attempt is not a completed non-reusable one (there is nothing to explain).
 ///
 /// # Errors
 /// Returns an adapter error only when `lookup` fails.

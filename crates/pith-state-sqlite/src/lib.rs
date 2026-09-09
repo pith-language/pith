@@ -1,9 +1,9 @@
 //! SQLite-backed durable engine state.
 //!
 //! `pith-engine` owns the [`EngineStateStore`] interface and the durable record
-//! types; this crate is one implementation of that interface and nothing else.
-//! No sqlite or diesel type appears in a kernel signature, and the engine does
-//! not depend on this crate — a host chooses it.
+//! types; this crate is one implementation of that interface. No sqlite or
+//! diesel type appears in a kernel signature, and the engine does not depend
+//! on this crate: a host chooses it.
 //!
 //! Records are stored as normalized relations. A completed pure result and a
 //! declared action contract keep the canonical bytes `pith-core` produced,

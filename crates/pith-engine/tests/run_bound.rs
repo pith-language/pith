@@ -1,11 +1,11 @@
 //! A run's declared ceiling: the wall clock at the scheduling boundaries and
-//! in the child, the step budget inside the step machine (decision 0059).
+//! in the child, the step budget inside the step machine.
 //!
-//! The four shapes here are the four ways a bound stops a run: a body that
-//! yields fresh requests forever, a deadline already spent, a deadline with
-//! real work still in front of it, and an action whose executor refused at its
-//! own deadline. The control is an ordinary run under a generous bound, which
-//! the bound must not touch.
+//! The shapes here are the ways a bound stops a run: a body that yields fresh
+//! requests forever, a deadline already spent, a deadline with real work still
+//! in front of it, and an action whose executor refused at its own deadline.
+//! The control is an ordinary run under a generous bound, which the bound must
+//! not touch.
 
 use std::time::{Duration, Instant};
 
@@ -95,8 +95,8 @@ fn bound_code_of(diagnostics: &pith_diag::DiagnosticSink) -> Vec<StableCode> {
 }
 
 /// A body that yields a fresh request forever. Every request is distinct, so
-/// the cycle predicate cannot refuse the chain (decision 0050) — this is the
-/// shape the step budget exists to bound.
+/// the cycle predicate cannot refuse the chain; this is the shape the step
+/// budget exists to bound.
 struct SpinRule {
     target: Interface,
 }
@@ -242,9 +242,8 @@ impl pith_engine::ActionRule for UnitActionRule {
 }
 
 /// Refuses with the bound's code, standing in for a first-party executor whose
-/// child was killed at the deadline (decision 0059): the run's own clock is
-/// far away, so what is measured here is the engine's classification of the
-/// refusal, not the clock.
+/// child was killed at the deadline. The run's own clock is far away, so this
+/// measures the engine's classification of the refusal, not the clock.
 struct TimedOutExecutor;
 
 #[async_trait::async_trait]
@@ -378,10 +377,9 @@ fn a_timed_out_action_fails_itself_and_cancels_what_was_waiting_on_it() {
         "a stopped run left work pending: {states:?}"
     );
     // The action ran and produced nothing within the authority it was given,
-    // so its attempt is a failure carrying the bound's code — re-running it
+    // so its attempt is a failure carrying the bound's code: re-running it
     // needs more authority, and the record says so. The chain that was merely
-    // waiting on it is cancelled: nothing about that work is known to be
-    // wrong (decision 0059).
+    // waiting on it is cancelled; nothing about that work is known to be wrong.
     assert!(
         states
             .iter()

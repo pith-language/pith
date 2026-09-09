@@ -261,7 +261,7 @@ fn text_join_rejoins_the_fields_a_split_produced() {
     let signature = interface([list_of_text.clone()], Type::Text);
 
     // Adjacent empty fields stay observable, and the separator never
-    // surrounds the join (decision 0064's round trip).
+    // surrounds the join.
     let fields = Value::List(Box::new([
         Value::Text("a".into()),
         Value::Text("".into()),

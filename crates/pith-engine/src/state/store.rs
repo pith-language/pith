@@ -340,9 +340,8 @@ pub trait EngineStateReader: Send + Sync {
 /// Persistence boundary for durable engine attempts and reusable pure results.
 ///
 /// The writing half: an engine evaluating a graph holds one of these, and a
-/// read-only reader holds only the [`EngineStateReader`] half. Reads arrive
-/// through the supertrait, so read-write implies read-only as a lattice and
-/// not as a convention.
+/// read-only reader holds only the [`EngineStateReader`] half, since reads
+/// arrive through the supertrait.
 pub trait EngineStateStore: EngineStateReader {
     /// Create a new attempt in the `Pending` state.
     ///
@@ -383,10 +382,8 @@ pub trait EngineStateStore: EngineStateReader {
     /// Atomically replace `Pending` with `Cancelled`, including available edges,
     /// diagnostics, and provenance.
     ///
-    /// Cancellation is a distinct terminal state, not a flavour of failure: the
-    /// attempt was stopped before it could produce a result, and nothing about
-    /// the computation itself is known to be wrong. A reader can tell "this
-    /// cannot work" from "this did not get to run."
+    /// Cancellation is a distinct terminal state, not a flavour of failure: a
+    /// reader can tell "this cannot work" from "this did not get to run."
     ///
     /// # Errors
     /// Returns an error when the attempt is missing, already terminal, has an

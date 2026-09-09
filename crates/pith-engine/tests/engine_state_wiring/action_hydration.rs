@@ -39,11 +39,10 @@ fn hydrates_a_completed_pure_result_into_a_fresh_engine() {
     );
 }
 
-/// A second engine over the same durable substrate hydrates the consumer of the
-/// first engine's action (decision 0033), so neither the consumer's rule body
-/// nor the action runs. Revalidating the recorded action edge re-plans it and
-/// finds the recorded attempt still admissible; nothing below the consumer is
-/// allocated, because there is nothing left to ask.
+/// A second engine over the same durable substrate hydrates the consumer of
+/// the first engine's action, so neither the consumer's rule body nor the
+/// action runs. Revalidating the recorded action edge re-plans it and finds
+/// the recorded attempt still admissible.
 #[test]
 fn hydrates_a_consumer_of_an_action_into_a_fresh_engine() {
     let state = SharedEngineStateStore::default();
@@ -78,8 +77,8 @@ fn hydrates_a_consumer_of_an_action_into_a_fresh_engine() {
 
     assert_eq!(hydrated.source, EvaluationSource::Hydrated);
     assert_eq!(hydrated.value, computed.value);
-    // On the terms 0024 set for pure hydration, the node is mapped onto the
-    // attempt it was loaded from and records no new one.
+    // Under pure hydration the node is mapped onto the attempt it was loaded
+    // from and records no new one.
     assert_eq!(durable_id(&second, hydrated.computation), original_root);
     assert_eq!(second.query().computations().count(), 1);
 }
@@ -87,7 +86,7 @@ fn hydrates_a_consumer_of_an_action_into_a_fresh_engine() {
 /// The action half of the same substrate, reached when the consumer cannot be
 /// served. The second engine registers the consumer at a later revision, so its
 /// pure key differs and its body runs; the `NeedAction` step it reaches is then
-/// answered from the reusable action index (decision 0031).
+/// answered from the reusable action index.
 #[test]
 fn hydrates_a_completed_action_when_its_consumer_must_rerun() {
     let state = SharedEngineStateStore::default();

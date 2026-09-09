@@ -125,7 +125,7 @@ pub(super) fn translate_reuse_reason(
 }
 
 /// Errors name attempts by the identifiers of the store that produced them, so
-/// they are translated before comparison for the same reason records are.
+/// they are translated before comparison.
 pub(super) fn translate_error(
     error: &EngineStateError,
     translation: &Translation,
@@ -205,8 +205,7 @@ pub(super) fn translate_error(
 
 /// Rewrite an invalidation explanation into the model's identifier space. The
 /// explanation carries attempt ids at the root, inside each dependency edge,
-/// and recursively in the child; all three are translated so a subject and the
-/// model can be compared directly.
+/// and recursively in the child; all three are translated.
 pub(super) fn translate_explanation(
     explanation: &InvalidationExplanation,
     translation: &Translation,
@@ -232,9 +231,9 @@ fn translate_reason(reason: &InvalidationReason, translation: &Translation) -> I
     }
 }
 
-/// Translate a single dependency edge — the one-element case of
-/// [`translate_dependencies`], which the explanation carries one edge at a
-/// time. Mirrors that function's per-variant rewrite so the two cannot drift.
+/// Translate a single dependency edge, the one-element case of
+/// [`translate_dependencies`] (the explanation carries one edge at a time).
+/// Mirrors that function's per-variant rewrite so the two cannot drift.
 fn translate_single_edge(edge: &DurableDependency, translation: &Translation) -> DurableDependency {
     match edge {
         DurableDependency::Pure {

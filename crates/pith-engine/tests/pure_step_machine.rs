@@ -591,11 +591,11 @@ fn computation_ids_do_not_cross_engine_instances() {
 
 #[test]
 fn the_same_request_twice_in_sequence_is_reuse_and_not_a_cycle() {
-    // The property the cycle predicate's bookkeeping has to get right
-    // (decision 0050): a frame's digest is live only while its own frame is on
-    // the stack. Two sibling requests for one value are ordinary reuse, and the
-    // cycle check runs before the reuse lookup, so a digest left behind by the
-    // first would refuse the second.
+    // The property the cycle predicate's bookkeeping has to get right: a
+    // frame's digest is live only while its own frame is on the stack. Two
+    // sibling requests for one value are ordinary reuse, and the cycle check
+    // runs before the reuse lookup, so a digest left behind by the first would
+    // refuse the second.
     let mut engine = Engine::new();
     let root = interface(&[Type::Bool], Type::Int);
     let leaf = interface(&[Type::Int], Type::Int);

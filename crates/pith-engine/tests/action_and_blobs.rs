@@ -1,6 +1,5 @@
 //! Tests that the engine crosses the sync/async boundary: pure rules that
-//! depend on content-addressed blobs and on action results (decisions 0021,
-//! 0022).
+//! depend on content-addressed blobs and on action results.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
@@ -102,9 +101,8 @@ impl ActionRule for DoubleAction {
     }
 }
 
-/// `DoubleAction` with its planned argument taken from state the rule holds.
-/// Delegating keeps one description of the contract, so the two rules differ
-/// only in where the argument comes from.
+/// `DoubleAction` with its planned argument taken from state the rule holds;
+/// it delegates so the two rules differ only in where the argument comes from.
 struct HeldStateAction {
     argument: Arc<AtomicI64>,
 }
@@ -442,13 +440,10 @@ fn fixture_platform() -> ExecutionPlatform {
     }
 }
 
-/// A synthetic executor-emitted diagnostic. The code is deliberately not a
-/// named `EngineCode`: it stands in for an opaque code supplied by an executor
-/// adapter, which the engine must pass through unchanged.
 fn fixture_engine() -> Engine {
     let mut engine = Engine::with_content_store(MemoryContentStore::default());
-    // The executable is a host path now (decision 0030), so only the declared
-    // input blob needs to be in the store for the fixture action to materialize.
+    // The executable is a host path, so only the declared input blob needs to
+    // be in the store for the fixture action to materialize.
     assert_eq!(
         put_fixture_blob(&mut engine, b"fixture input"),
         double_input()

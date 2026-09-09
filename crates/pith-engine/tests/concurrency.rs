@@ -1,13 +1,10 @@
-//! Tests that independent work actually overlaps (decision 0022).
+//! Tests that independent work actually overlaps.
 //!
-//! Concurrency needs something to be concurrent about, and the step machine
-//! only ever yields one request at a time. Two constructs create independent
-//! work: `PureStep::NeedAll`, which declares that a batch of requests do not
-//! depend on one another, and `Engine::run_many`, which drives several roots.
-//! These tests cover both, and the overlap assertions measure it rather than
-//! inferring it from wall time: the executor holds each action at a barrier
-//! that only releases once every participant has arrived, so an engine that ran
-//! its actions one at a time could not get past it.
+//! The step machine yields one request at a time, so overlap needs a construct
+//! that declares independence: `PureStep::NeedAll` and `Engine::run_many`, both
+//! covered here. Overlap is measured, not inferred from wall time: the executor
+//! holds each action at a barrier released only when every participant arrives,
+//! so an engine that ran its actions one at a time could not get past it.
 
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -43,20 +40,17 @@ use constant_rule_support::ConstantRule;
 use diagnostic::fixture_error;
 use runtime_support::runtime;
 
-/// How long an action waits at the barrier before giving up. Only a regression
-/// reaches it: with real overlap every participant arrives immediately. The
-/// timeout exists so a serialized engine fails the test instead of hanging it.
+/// How long an action waits at the barrier before giving up; only a serialized
+/// engine reaches it, and then the test fails instead of hanging.
 const BARRIER_TIMEOUT: Duration = Duration::from_secs(10);
 
 // ---------------------------------------------------------------------------
 // Pure rules
 
-/// Completes immediately with a constant. Used where a test needs distinct
-/// values it can check the order of.
 /// Requests a batch of pure results at once, then sums them. A sum says
-/// nothing about the order they arrived in, which is the point here — these
-/// tests are about whether the batch ran concurrently and completed. Order is
-/// checked separately, by [`OrderedAllRule`].
+/// nothing about the order the results arrived in, which is the point here:
+/// these tests are about whether the batch ran concurrently and completed.
+/// Order is checked separately, by [`OrderedAllRule`].
 struct SumAllRule {
     dependencies: Box<[Request<Pure>]>,
 }
@@ -142,9 +136,8 @@ impl PureRuleFrame for OrderedAllFrame {
 
 /// Plans a contract that declares nothing but its executable and returns twice
 /// its input count. Rules are selected by interface, so arity is what tells the
-/// fixtures apart; making the result a function of arity keeps each leaf's
-/// expected value readable. The action is deliberately trivial: these tests are
-/// about scheduling, not about what an action computes.
+/// fixtures apart, and deriving the result from arity keeps each leaf's
+/// expected value readable.
 struct ArityAction;
 
 impl ActionRule for ArityAction {
@@ -190,9 +183,9 @@ impl BarrierExecutor {
 
 /// Let `engine` run `actions` at once, and return a barrier of the same width.
 ///
-/// The two numbers have to agree. The engine's default bound is the host's core
-/// count, so without this a barrier wider than the host's cores would never
-/// release and the test would measure the machine rather than the engine.
+/// The numbers must agree: the engine's default bound is the host's core count,
+/// so a wider barrier would never release and the test would measure the
+/// machine rather than the engine.
 fn barrier_across(engine: &mut Engine, actions: usize) -> BarrierExecutor {
     allow_actions(engine, actions);
     BarrierExecutor::expecting(actions)
@@ -282,8 +275,8 @@ fn fixture_executable() -> &'static str {
 }
 
 fn fixture_engine() -> Engine {
-    // The executable is a host path (decision 0030) and the concurrency fixture
-    // action declares no inputs, so the store starts empty.
+    // The executable is a host path and the concurrency fixture action
+    // declares no inputs, so the store starts empty.
     Engine::with_content_store(MemoryContentStore::default())
 }
 

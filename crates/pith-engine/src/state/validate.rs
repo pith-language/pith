@@ -1,14 +1,12 @@
 //! Publication invariants for durable engine state.
 //!
-//! Every adapter enforces the same rules, so this is where they live. An
-//! adapter that validated independently would let two stores disagree about
-//! which graphs are representable, and the engine's mapping would then be
-//! correct against one store and wrong against another.
-//!
-//! The rules are decision 0024's: only completed attempts enter the reusable
-//! index, a complete attempt cannot depend on a failed one, a denied action
-//! cannot complete or retain a report, capability-use edges match the executor
-//! report, and a pure attempt's reuse decision follows from its dependencies.
+//! Every adapter enforces the same rules, so this is where they live: an
+//! adapter validating independently could disagree about which graphs are
+//! representable. The rules: only reusable completions enter the reusable
+//! index, a complete attempt cannot depend on a failed or cancelled one, a
+//! denied action cannot complete or retain a report, capability-use edges
+//! match the executor report, and a pure attempt's reuse decision follows from
+//! its dependencies.
 
 use std::sync::Arc;
 
@@ -63,9 +61,8 @@ impl TerminalAttemptState {
     }
 
     /// Whether this publication earns a place in the reusable index: a
-    /// completed attempt whose recorded decision is `Reusable`. Which index it
-    /// lands in follows from the computation, since decision 0031 gives action
-    /// applications an index of their own.
+    /// completed attempt whose recorded decision is `Reusable`. Action
+    /// applications have an index of their own.
     #[must_use]
     pub const fn is_reusable(&self) -> bool {
         matches!(
@@ -81,8 +78,8 @@ impl TerminalAttemptState {
 /// How an adapter resolves a referenced attempt during validation.
 ///
 /// A dependency edge names an attempt the adapter already stores, so
-/// validation has to read it back. Adapters differ in how — an in-memory map,
-/// a `SELECT` inside the publishing transaction — so they supply the lookup.
+/// validation has to read it back. Adapters differ in how (an in-memory map,
+/// a `SELECT` inside the publishing transaction), so they supply the lookup.
 pub trait AttemptLookup {
     /// # Errors
     /// Returns an adapter error when the record cannot be read.
@@ -275,7 +272,7 @@ fn validate_observation_computation_digest(
 }
 
 /// An action computation's stored digest has to be the one its own retained
-/// material produces. The record holds the key's preimage (decision 0033), so
+/// material produces. The record holds the key's preimage, so
 /// the digest beside it is checkable rather than something an adapter asserts.
 fn validate_action_computation_digest(
     attempt: DurableAttemptId,
@@ -307,9 +304,9 @@ fn validate_action_computation_digest(
 }
 
 /// The capability requirements a completed attempt records. An action carries
-/// what its own contract declares; a pure computation carries the union of what
-/// its dependencies carry, which is the propagation the arena does over live
-/// nodes and a hydrated node has no subgraph to redo (decision 0033).
+/// what its own contract declares; a pure computation carries the union of
+/// what its dependencies carry, mirroring the propagation the arena does over
+/// live nodes.
 fn validate_capability_requirements(
     attempt: DurableAttemptId,
     computation: &DurableComputation,
@@ -444,7 +441,7 @@ fn validate_reuse_decision(
     ) {
         return Ok(());
     }
-    // An action edge no longer stops reuse on its own (decision 0033): the
+    // An action edge does not stop reuse on its own: the
     // consumer revalidates it by re-planning the recorded request, so the only
     // edge that blocks a completed attempt is one that is not itself reusable.
     let expected = match first_non_reusable_dependency {

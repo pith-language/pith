@@ -1,21 +1,17 @@
-//! The set of in-flight evaluation chains (decision 0022).
+//! The set of in-flight evaluation chains.
 //!
-//! A *chain* is one depth-first stack of [`EvalFrame`]s — exactly what the
-//! engine drove before this module existed. What is new is that there can be
-//! more than one at a time: [`PureStep::NeedAll`](super::PureStep::NeedAll)
-//! opens a fan-out *group* whose requests each become their own chain, and
+//! A *chain* is one depth-first stack of [`EvalFrame`]s. There can be more
+//! than one at a time: [`PureStep::NeedAll`](super::PureStep::NeedAll) opens a
+//! fan-out *group* whose requests each become their own chain, and
 //! [`Engine::run_many`](super::Engine::run_many) starts one chain per root
 //! request.
 //!
-//! Chains are the unit of concurrency. A chain runs synchronously, on the same
-//! step machine as before, until it completes or parks — on a fan-out group, or
-//! on an action whose executor has not returned. Only parked chains yield, so
-//! the invariant the driver relies on (a chain's stack does not change under
-//! it) holds by construction: a parked chain is not stepped, and a running
-//! chain never awaits.
+//! A chain runs synchronously until it completes or parks, on a fan-out group
+//! or on an action whose executor has not returned. Only parked chains yield,
+//! so a chain's stack never changes under a running chain: a parked chain is
+//! not stepped, and a running chain never awaits.
 //!
-//! This module owns chain bookkeeping only. It never touches the arena, so it
-//! can be reasoned about without the graph.
+//! This module owns chain bookkeeping only and never touches the arena.
 
 use std::collections::VecDeque;
 
@@ -41,22 +37,18 @@ enum ChainSink {
 struct Chain {
     stack: Vec<EvalFrame>,
     /// The computation digests of the frames in `stack`, for the cycle
-    /// predicate (decision 0050). Maintained by [`Scheduler::push_frame`] and
-    /// [`Scheduler::pop_frame`], which are the only ways the stack's membership
-    /// changes; `stack_mut` hands out the stack for resumption edits, which
-    /// change no frame's identity.
-    ///
-    /// `IndexSet` rather than `HashSet` because decision 0021 forbids
-    /// nondeterministic iteration order in crate source, and this set is
-    /// iterated when a cycle diagnostic names the frames it found.
+    /// predicate. Maintained by [`Scheduler::push_frame`] and
+    /// [`Scheduler::pop_frame`]; `stack_mut` hands out the stack only for
+    /// resumption edits, which change no frame's identity. An `IndexSet`
+    /// because the cycle diagnostic iterates it and the named order must be
+    /// deterministic.
     active: IndexSet<PureComputationDigest>,
     sink: ChainSink,
 }
 
 impl Chain {
-    /// A chain over one root frame, with `active` seeded from it. The two chain
-    /// origins — a run's roots and a fan-out group's slots — both start this way,
-    /// so seeding lives here rather than at each site.
+    /// A chain over one root frame, with `active` seeded from it. Both chain
+    /// origins (a run's roots and a fan-out group's slots) start here.
     fn new(frame: EvalFrame, sink: ChainSink) -> Self {
         let active = std::iter::once(frame.key_digest).collect();
         Self {
@@ -106,7 +98,7 @@ impl Scheduler {
         self.ready.pop_front()
     }
 
-    /// The frame `chain` is currently evaluating — the one that requested
+    /// The frame `chain` is currently evaluating, the one that requested
     /// whatever the chain is about to do.
     pub(super) fn top(&self, chain: ChainId) -> PithResult<&EvalFrame> {
         match self
@@ -140,9 +132,9 @@ impl Scheduler {
     /// Pop the completed top frame of `chain`, retiring its digest.
     ///
     /// The digest leaves `active` here rather than at completion, so a request
-    /// that reappears *beside* an earlier one — two siblings needing the same
-    /// value in sequence — is reuse and not a cycle. Only a request that
-    /// reappears while its own frame is still on the stack is circular.
+    /// that reappears beside an earlier one (two siblings needing the same
+    /// value in sequence) is reuse, not a cycle. Only a request that reappears
+    /// while its own frame is still on the stack is circular.
     pub(super) fn pop_frame(&mut self, chain: ChainId) -> PithResult<()> {
         let Some(chain) = self.chains.get_mut(chain).and_then(Option::as_mut) else {
             return Err(internal_diag(InternalInvariant::SchedulerLostChain));
@@ -197,7 +189,7 @@ impl Scheduler {
         chain
     }
 
-    /// Fill a slot whose value was already known — a reused result needs no
+    /// Fill a slot whose value was already known: a reused result needs no
     /// chain of its own. Resumes the parent if this was the last slot.
     pub(super) fn fill_group_slot(
         &mut self,
@@ -272,7 +264,7 @@ impl Scheduler {
     /// evaluated under `chain`, or `None` if there is no cycle.
     ///
     /// The scope is the chain's own stack plus every ancestor chain's, because
-    /// a fan-out child is evaluated *within* the frame that requested it: a
+    /// a fan-out child is evaluated within the frame that requested it: a
     /// request that reappears below a `NeedAll` is as circular as one that
     /// reappears below a `Need`.
     pub(super) fn cycle_chain(
@@ -297,10 +289,9 @@ impl Scheduler {
 
     /// Whether `digest` names a frame already live anywhere in `chain`'s scope.
     ///
-    /// One set lookup per chain in the lineage, where comparing frames took one
-    /// deep structural comparison per *frame* — and a chain's frames are where
-    /// the depth is, since `Need` pushes onto the requesting chain rather than
-    /// opening a new one (decision 0050).
+    /// One set lookup per chain in the lineage instead of a structural
+    /// comparison per frame, and a chain's frames are where the depth is:
+    /// `Need` pushes onto the requesting chain rather than opening a new one.
     fn digest_is_live(&self, chain: ChainId, digest: PureComputationDigest) -> bool {
         let mut current = Some(chain);
         while let Some(id) = current {
@@ -320,7 +311,7 @@ impl Scheduler {
     ///
     /// The walk cannot stop short of a root: a chain's parent is parked until
     /// the group completes, a group is retired only when every slot is filled,
-    /// and a chain is retired only when it is driven — which a parked chain is
+    /// and a chain is retired only when it is driven, which a parked chain is
     /// not. So while any child is live, every ancestor of it is too.
     fn scope(&self, chain: ChainId) -> Vec<&EvalFrame> {
         let mut lineage = vec![chain];

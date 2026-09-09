@@ -14,12 +14,11 @@ use smallvec::SmallVec;
 pub enum PureStep {
     /// Request the result of another pure rule.
     Need(Request<Pure>),
-    /// Request several pure results that do not depend on one another. This is
-    /// the only way a rule body can say "these are independent": a body that
-    /// yields [`PureStep::Need`] twice has told the engine the second request
-    /// may depend on the first result, so the two must be ordered. The engine
-    /// evaluates the requests here as separate chains and resumes with
-    /// [`Resumption::Many`], one value per request in the order given.
+    /// Request several pure results that do not depend on one another: the only
+    /// way a body can declare independence, since two sequential
+    /// [`PureStep::Need`] steps may order on each other. The engine evaluates
+    /// the requests as separate chains and resumes with [`Resumption::Many`],
+    /// one value per request in the order given.
     NeedAll(Box<[Request<Pure>]>),
     /// Request the bytes of a content-addressed blob. The engine fetches the
     /// blob from its content store and resumes with `Value::Bytes`.
@@ -30,10 +29,10 @@ pub enum PureStep {
     /// Request the result of an observation rule. The engine derives the
     /// subject, gives it to the host's observer, and resumes with the observed
     /// value; the revision the observer attested is recorded beside the
-    /// attempt as its freshness (decision 0060). The resumption is
+    /// attempt as its freshness. The resumption is
     /// [`Resumption::One`]: a plan's pin set is a projection of the recorded
     /// graph, so the revision reaches bodies only if the observer embeds it in
-    /// the value (0012, 0060).
+    /// the value.
     NeedObservation(Request<Observation>),
     /// Finish the rule body with a final value.
     Complete(Value),
@@ -53,8 +52,6 @@ pub enum Resumption {
 
 impl Resumption {
     /// The single value this resumption carries, or `None` if it is a batch.
-    /// A body that never yields [`PureStep::NeedAll`] can read its input with
-    /// this instead of matching on a shape it cannot receive.
     pub fn one(self) -> Option<Value> {
         match self {
             Self::One(value) => Some(value),
@@ -143,7 +140,7 @@ pub struct EntryActionPlan {
 
 /// Declared contract, authorization, and executor reports retained as action provenance.
 pub struct ActionRecord {
-    /// The reusable index key for this rule application (decision 0031).
+    /// The reusable index key for this rule application.
     pub key: ActionComputationKey,
     pub spec_digest: ActionSpecDigest,
     pub spec: ActionSpec,
@@ -154,26 +151,26 @@ pub struct ActionRecord {
     pub imported_report: Option<crate::ExecutionReport>,
 }
 
-/// The observation attempt's identity and freshness, retained as provenance
-/// (decision 0060). The key is the request half of observation identity; the
+/// The observation attempt's identity and freshness, retained as provenance.
+/// The key is the request half of observation identity; the
 /// attested revision is the world half, re-attested when a later run considers
 /// this attempt for reuse.
 #[derive(Clone, Debug)]
 pub struct ObservationRecord {
-    /// The reusable index key for this rule application (decision 0060).
+    /// The reusable index key for this rule application.
     pub key: ObservationComputationKey,
     /// The subject the rule derived, what the observer was asked about.
     pub subject: Value,
     /// Who observed, so a record attested by one observer is not admitted by
-    /// another (0031's split applied to observations).
+    /// another.
     pub observer: crate::ObserverIdentity,
     /// The revision the observer attested when it looked.
     pub revision: Value,
 }
 
-/// Lifecycle of one allocated computation attempt. The three terminal states
-/// are distinct on purpose: an ordinary evaluation failure must not stand in
-/// for cancellation, and cancellation must not be read as a failure.
+/// Lifecycle of one allocated computation attempt. `Failed` and `Cancelled`
+/// are distinct: an ordinary evaluation failure must not stand in for
+/// cancellation, and cancellation must not be read as a failure.
 #[derive(Clone, Debug)]
 pub enum AttemptState {
     Pending,
@@ -181,7 +178,6 @@ pub enum AttemptState {
         result: Value,
         reuse: ReuseDecision,
     },
-    /// The computation ran and could not produce its result.
     Failed {
         diagnostics: Box<[Diag]>,
     },
@@ -222,12 +218,11 @@ pub enum ReuseDecision {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReuseReason {
     /// This engine has action caching switched off, so the completed action was
-    /// not indexed (decision 0031).
+    /// not indexed.
     ActionCachingDisabled,
     /// A pure computation depends on an action. A pure computation key does not
     /// carry the identity of the action rule that will be selected, so a result
-    /// recorded before that rule was revised could be served after it
-    /// (decision 0031).
+    /// recorded before that rule was revised could be served after it.
     EffectfulDependency {
         computation: ComputationId,
     },
@@ -268,7 +263,7 @@ pub enum EvaluationSource {
     /// A completed computation already in this engine's arena was reused.
     Reused,
     /// A completed attempt recorded by a previous engine instance was
-    /// revalidated and loaded from engine state (decision 0024). The rule body
+    /// revalidated and loaded from engine state. The rule body
     /// did not run here, and this instance's arena holds no subgraph for it:
     /// its recorded dependency set lives on the durable attempt, reachable
     /// through [`crate::EngineQuery::durable_attempt_of`].
@@ -286,11 +281,11 @@ pub(crate) struct EvalFrame {
     pub(crate) computation: ComputationId,
     pub(crate) rule: RuleId,
     /// The digest half of this application's computation key. The scheduler
-    /// indexes a chain's live frames by it so a cycle is a set lookup rather
-    /// than a walk (decision 0050). The digest alone, because it already covers
-    /// the rule identity, revision, interface, and inputs the walk compared by
-    /// hand, and carrying the whole key would grow every frame by 64 bytes it
-    /// has no other use for.
+    /// indexes a chain's live frames by it, so a cycle is a set lookup rather
+    /// than a walk; the digest alone already covers the rule identity,
+    /// revision, interface, and inputs that distinguish one application from
+    /// another, and carrying the whole key would grow every frame by 64 bytes
+    /// it has no other use for.
     pub(crate) key_digest: PureComputationDigest,
     pub(crate) request: Request<Pure>,
     pub(crate) body: Box<dyn PureRuleFrame>,
@@ -299,12 +294,12 @@ pub(crate) struct EvalFrame {
 
 /// Why a completed computation is not reusable, as a chain over the live arena
 /// graph. The live-graph mirror of the durable
-/// [`InvalidationExplanation`](crate::state::InvalidationExplanation), keyed on
-/// [`ComputationId`] (arena handles) rather than `DurableAttemptId`.
+/// [`InvalidationExplanation`](crate::state::InvalidationExplanation), keyed
+/// on [`ComputationId`] (arena handles) rather than `DurableAttemptId`.
 ///
 /// Does not derive `PartialEq`/`Eq` because [`DependencyEdge`] carries a
-/// [`Request`] that does not implement them; the durable
-/// side, which is what the conformance suite compares, does.
+/// [`Request`] that does not implement them; the durable side, which is what
+/// the conformance suite compares, does.
 #[derive(Clone, Debug)]
 pub struct LiveInvalidationExplanation {
     pub computation: ComputationId,

@@ -240,9 +240,8 @@ pub fn attempts_for_computation(
         .load(connection)?)
 }
 
-/// The newest attempt row under one computation, whatever its status. The
-/// read the whole history would answer with its last record, served from one
-/// indexed row instead.
+/// The newest attempt row under one computation, whatever its status: what a
+/// full-history read would end with, from one indexed row.
 pub fn latest_attempt_row(
     connection: &mut SqliteConnection,
     computation: i64,
@@ -421,12 +420,10 @@ pub fn reusable_attempt_row(
 
 /// The latest published reusable attempt for one action key.
 ///
-/// An action computation row is never shared — it carries the authorization of
-/// its own attempt — so one key can have many rows, each with its own index
-/// entry. "Latest" is latest published, not newest attempt identifier: two
-/// attempts of one key can complete in either order of their creation, and
-/// the reference model serves whichever publication came last, so the
-/// adapter orders by the publication sequence.
+/// An action computation row is never shared (it carries the authorization of
+/// its own attempt), so one key can hold many rows. "Latest" is latest
+/// published, not newest attempt identifier: completion order need not match
+/// creation order, and the reference model serves the last publication.
 pub fn reusable_action_attempt_row(
     connection: &mut SqliteConnection,
     key: ActionComputationKey,
@@ -458,9 +455,9 @@ pub fn publish_reusable(
 ) -> Result<(), Failure> {
     // Publication order uses `max + 1` so republishing a computation moves it
     // to the end. The process mutex serializes local writers; concurrent
-    // writable processes are unsupported. Supporting them requires allocating
-    // the sequence inside the insertion statement or enforcing a unique
-    // sequence catching a collision.
+    // writable processes are unsupported. Supporting them means allocating
+    // the sequence in the insert statement itself, or enforcing a unique
+    // sequence and retrying a collision.
     let published: i64 = reusable_index::table
         .select(diesel::dsl::max(reusable_index::published))
         .first::<Option<i64>>(connection)?

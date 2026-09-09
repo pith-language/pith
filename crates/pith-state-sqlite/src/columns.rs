@@ -1,10 +1,8 @@
-//! Storage types for the kernel's identities and fieldless enums.
-//!
-//! Each digest-bearing identity gets its own column type, so a rule identity
-//! cannot be bound where a content identity belongs even though both are 32
-//! bytes. Each enum's integer code is written once and read back through the
-//! same table, so adding a variant fails to compile rather than storing a code
-//! nothing reads.
+//! Storage types for the kernel's identities and fieldless enums. Each
+//! digest-bearing identity gets its own column type, so a rule identity
+//! cannot be bound where a content identity belongs. Each enum's integer
+//! codes are written and read through the same table, so adding a variant
+//! without a code fails to compile.
 
 use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql, FromSqlRow};

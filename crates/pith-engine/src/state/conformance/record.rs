@@ -142,7 +142,7 @@ pub(super) fn materialize(
         .collect()
 }
 
-/// The capability requirements a completed record carries (decision 0033):
+/// The capability requirements a completed record carries:
 /// an action's own declared contract, or the union of what the dependencies of
 /// a pure computation carry. Derived rather than generated, because shared
 /// validation rederives it the same way.
@@ -238,19 +238,18 @@ pub(super) fn reuse_decision(
         let entry = tracked.get(position)?;
         (entry.terminal != Some(TerminalKind::CompleteReusable)).then_some(position)
     });
-    // An action edge no longer refuses reuse on its own (decision 0033), so the
-    // only edge that does is one that is not itself reusable. This mirrors
-    // `state::validate::validate_reuse_decision`, which is the derivation both
-    // adapters are held to.
+    // An action edge does not refuse reuse on its own, so the only refusing
+    // edge is one that is not itself reusable. This mirrors
+    // `state::validate::validate_reuse_decision`.
     let honest = match first_non_reusable {
         Some(tracked) => ReuseOutcome::NotReusable(Refusal::DependencyNotReusable { tracked }),
         None => ReuseOutcome::Reusable,
     };
     match (corrupt, honest) {
         (false, honest) => honest,
-        // Refusing to index is sound for an action, so the corrupt flag reaches
-        // a second valid decision here, which both adapters must accept. This
-        // is the generated path that records `ActionCachingDisabled`.
+        // Refusing to index is sound for an action, so the corrupt flag yields
+        // a second valid decision both adapters must accept. This is the
+        // generated path that records `ActionCachingDisabled`.
         (true, ReuseOutcome::Reusable)
             if matches!(computation, DurableComputation::Action { .. }) =>
         {

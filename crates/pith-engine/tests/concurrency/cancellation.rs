@@ -59,8 +59,8 @@ fn cancelled_work_is_recorded_as_cancelled_rather_than_failed() {
         "the run should have allocated computations"
     );
     assert_no_pending_attempts(&engine);
-    // Nothing was wrong with any of this work; it was stopped. Recording it as
-    // failed would tell a later reader not to bother re-running it.
+    // Nothing was wrong with this work; it was stopped. Recording it as failed
+    // would tell a later reader not to re-run it.
     assert!(
         states
             .iter()
@@ -96,8 +96,8 @@ fn cancelled_attempts_are_published_as_cancelled() {
         )
         .expect("the runtime drives the run");
 
-    // The arena state and the durable record must agree: a reader that only has
-    // the database has to see the same thing the graph does.
+    // The arena state and the durable record must agree: a reader with only
+    // the database has to see what the graph sees.
     let mut cancelled = 0_usize;
     for (computation, node) in engine.query().computations() {
         let Some(attempt) = engine.durable_attempt_for(computation) else {

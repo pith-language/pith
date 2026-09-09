@@ -33,7 +33,7 @@ fn action_dependency_publishes_a_reusable_action_and_a_reusable_parent() {
 
     // An action's only edges are capability use, which never blocks reuse.
     assert_eq!(action_completion.reuse, DurableReuseDecision::Reusable);
-    // A completed action retains the imported report (decision 0024).
+    // A completed action retains the imported report.
     match &action_completion.provenance {
         DurableProvenance::Action(DurableActionProvenance::Imported { imported_report }) => {
             assert_eq!(imported_report.executor.as_ref(), "fixture");
@@ -49,8 +49,8 @@ fn action_dependency_publishes_a_reusable_action_and_a_reusable_parent() {
         }]
     );
 
-    // The parent enters the index too (decision 0033), and the gap its key
-    // leaves is closed when it is read back.
+    // The parent enters the index too, and the gap its key leaves is closed
+    // when it is read back.
     let parent_record = completed_record(store, durable_id(&engine, evaluation.computation));
     assert_eq!(parent_record.reuse, DurableReuseDecision::Reusable);
     assert_eq!(

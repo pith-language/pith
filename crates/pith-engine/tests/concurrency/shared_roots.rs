@@ -21,8 +21,8 @@ fn running_no_requests_produces_no_evaluations() {
 fn roots_that_share_a_dependency_still_evaluate() {
     // `run_many` documents its roots as independent, but nothing stops a caller
     // passing two that reach the same computation. Neither sees the other's
-    // result — the shared computation has not completed when the second root is
-    // prepared — so it is evaluated twice. Wasteful, and it must still be
+    // result (the shared computation has not completed when the second root is
+    // prepared), so it is evaluated twice. Wasteful, and it must still be
     // correct: two chains publishing the same computation key concurrently is
     // exactly the case that would corrupt a reusable index that assumed one.
     let mut engine = fixture_engine();

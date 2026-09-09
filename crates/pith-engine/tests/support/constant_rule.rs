@@ -2,6 +2,8 @@ use pith_core::Value;
 use pith_diag::PithResult;
 use pith_engine::{PureRule, PureRuleFrame, PureStep, Resumption};
 
+/// Completes immediately with a constant; used where a test needs distinct
+/// values it can check the order of.
 pub struct ConstantRule(pub Value);
 
 impl PureRule for ConstantRule {

@@ -1,11 +1,9 @@
 //! The action lifecycle: plan, authorize, materialize, execute, import,
-//! validate, and record provenance for declared actions.
+//! validate, and record provenance.
 //!
-//! Nothing here awaits. The lifecycle is split at the executor call (decision
-//! 0022) into [`Engine::begin_action`], which plans and materializes, and
-//! [`Engine::finish_action`], which imports and validates. Both need
-//! `&mut Engine`; the call between them needs neither, which is what lets the
-//! driver park the requesting chain and run other work meanwhile.
+//! The lifecycle is split at the executor call into [`Engine::begin_action`]
+//! and [`Engine::finish_action`]. Both need `&mut Engine`; the executor call
+//! between them needs neither, so the driver can run other work in the gap.
 
 mod content;
 
@@ -31,9 +29,8 @@ use crate::graph::diagnostics::{
 use crate::policy::ActionAuthorization;
 use crate::state::EngineStateReader;
 
-/// Metadata copied out of the selected action rule for the duration of one
-/// execution. Bundling these keeps [`Engine::finish_action`]'s argument list
-/// small.
+/// Rule metadata held for the duration of one action execution, bundled to
+/// keep [`Engine::finish_action`]'s argument list small.
 pub(super) struct ActionRuleMeta {
     rule: RuleId,
     declared_output: Type,
@@ -41,16 +38,15 @@ pub(super) struct ActionRuleMeta {
     label: Box<str>,
 }
 
-/// What [`Engine::begin_action`] leaves behind. Splitting the action lifecycle
-/// here is what lets independent actions overlap: everything before this point
-/// needs `&mut Engine`, the executor call that follows needs neither, and
-/// [`Engine::finish_action`] takes `&mut Engine` again. The scheduler parks the
-/// requesting chain across the gap and drives other chains meanwhile.
+/// What [`Engine::begin_action`] leaves behind. Everything before the executor
+/// call needs `&mut Engine`; the call itself needs neither, so the scheduler
+/// can park the requesting chain and run other work meanwhile.
 pub(super) enum ActionStart {
-    /// The action never got a computation node; nothing to record.
+    /// The action failed to start. The caller gets no computation id and only
+    /// propagates the diagnostics.
     PlanningFailed(DiagnosticSink),
-    /// The node exists and is already marked failed — policy denied the action
-    /// or its inputs could not be materialized — so no executor runs. The
+    /// The node exists and is already marked failed: policy denied the action,
+    /// or its inputs could not be materialized, so no executor runs. The
     /// caller still records the dependency edge before propagating.
     Refused {
         computation: ComputationId,
@@ -59,7 +55,7 @@ pub(super) enum ActionStart {
     /// Ready to hand to an executor.
     Ready(Box<PreparedAction>),
     /// A completed attempt for this exact rule application was found and
-    /// admitted, so no executor runs (decision 0031). The caller records the
+    /// admitted, so no executor runs. The caller records the
     /// dependency edge and resumes its chain with the recorded result.
     Reused(Evaluation),
 }
@@ -104,8 +100,8 @@ impl Engine {
         request: &Request<Action>,
         context: &super::reuse::ReuseContext<'_>,
     ) -> ActionStart {
-        // Only a run reaches an action. The pure driver rejects the step that
-        // would ask for one, so a context without a policy cannot get here.
+        // Only a run reaches an action: the pure driver rejects the step that
+        // would ask for one.
         let Some((policy, environment)) = context.run() else {
             return ActionStart::PlanningFailed(internal_diag(
                 InternalInvariant::ActionStartedOutsideARun,
@@ -157,7 +153,8 @@ impl Engine {
             return ActionStart::PlanningFailed(diagnostics);
         }
 
-        // Up to and including materialization: no report exists on failure yet.
+        // Failures up to and including materialization leave no executor
+        // report, so there is nothing to retain as provenance.
         if let Some(diagnostics) = denial {
             return ActionStart::Refused {
                 computation,
@@ -324,7 +321,7 @@ impl Engine {
             self.index_action_computation(key, computation);
         }
         // Scheduling boundary: publish the durable action completion. The
-        // arena node is terminal, so the publish reads its final state.
+        // arena node is terminal, so the publish reads final state.
         self.publish_action_completion(computation)?;
 
         Ok(value)
@@ -337,10 +334,8 @@ impl Engine {
             .unwrap_or_default()
     }
 
-    /// Give up on an action that was still running when its run ended. Its
-    /// executor result will never be read, so it is recorded as cancelled: the
-    /// action was stopped, and nothing was learned about whether it would have
-    /// worked.
+    /// Give up on an action still running when its run ended. Its executor
+    /// result will never be read, so it is recorded as cancelled.
     pub(super) fn cancel_action(
         &mut self,
         computation: ComputationId,
@@ -350,8 +345,6 @@ impl Engine {
     }
 
     /// Record a failed action computation and return the diagnostics unchanged.
-    /// Centralizing the cleanup here keeps the failure tail at one line per site
-    /// instead of repeating the mark-and-publish pair six times.
     fn fail_action(
         &mut self,
         computation: ComputationId,
@@ -370,9 +363,8 @@ impl Engine {
         if let Some(node) = self.computations.get_mut(computation) {
             node.state = reason.attempt_state(diagnostics.iter().cloned().collect());
         }
-        // Scheduling boundary: publish the durable record. Best-effort with
-        // respect to the returned diagnostics — publication must not mask the
-        // diagnostics that caused it.
+        // Scheduling boundary: publish the durable record. Best effort, so
+        // publication cannot mask the diagnostics that caused it.
         let _ = self.publish_action_stop(computation, diagnostics, reason);
     }
 

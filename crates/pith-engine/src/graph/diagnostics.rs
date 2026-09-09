@@ -1,8 +1,5 @@
-//! Diagnostic constructors for the graph evaluator.
-//!
-//! Every engine diagnostic is built here so the code, its message shape, and
-//! its [`EngineCode`] stay in one place. The pure evaluator and the action
-//! pipeline both call these instead of constructing `Diag`s inline.
+//! Diagnostic constructors for the graph evaluator, so every engine
+//! diagnostic has one code, message shape, and [`EngineCode`] home.
 
 use pith_core::{ActionSpec, PlatformRequirement, Type, Value};
 use pith_diag::{Diag, DiagnosticSink, EngineCode, PithResult, Span};
@@ -10,9 +7,7 @@ use pith_ids::ContentId;
 
 use crate::ExecutionPlatform;
 
-/// Wrap a single diagnostic in a sink. Most engine error paths emit exactly
-/// one diagnostic; this is the boilerplate that turns a `Diag` into the
-/// `PithResult` they return.
+/// Wrap a single diagnostic in a sink; most engine error paths emit exactly one.
 pub(super) fn one_diag(diag: Diag) -> DiagnosticSink {
     let mut sink = DiagnosticSink::new();
     sink.push(diag);
@@ -27,113 +22,75 @@ pub(super) fn cycle_diag(chain: &[&str], span: Span) -> DiagnosticSink {
     ))
 }
 
-/// An engine-internal invariant that should be unreachable by construction.
-/// Enumerating them makes the set of "impossible" states inspectable and
-/// compile-checked: adding or removing one is a visible event, and a typo in a
-/// free-text message cannot silently change which invariant fired.
+/// An engine-internal invariant that should be unreachable. Enumerating them
+/// as a type keeps the set compile-checked and ties each diagnostic to a
+/// distinct variant.
 pub(super) enum InternalInvariant {
-    /// The parent frame of a dependency request was missing from the stack.
     PureLostRequestingFrame,
-    /// The parent computation of a dependency request was missing from the arena.
     PureLostParentComputation,
-    /// A completed computation's node was missing from the arena.
     PureLostComputationNode,
-    /// The metadata of a selected pure rule was missing.
     PureLostSelectedRuleMetadata,
-    /// The step machine had no frame to step.
     PureLostRootFrame,
-    /// A frame completed but the stack was empty.
     PureCompletedWithoutFrame,
-    /// A capability-bearing dependency's computation was missing.
     PureLostCapabilityComputation,
-    /// The body of a selected pure rule was missing.
     SelectedRuleHasNoBody,
-    /// The metadata of a selected rule was missing.
     SelectedRuleHasNoMetadata,
-    /// The body of a selected action rule was missing.
     SelectedActionRuleHasNoBody,
-    /// The metadata of a selected action rule was missing.
     SelectedActionRuleHasNoMetadata,
-    /// The body of a selected observation rule was missing.
     SelectedObservationRuleHasNoBody,
-    /// The metadata of a selected observation rule was missing.
     SelectedObservationRuleHasNoMetadata,
-    /// The computation node of an in-flight action was missing.
     ActionLostComputationNode,
-    /// The action record on an in-flight action computation was missing.
     ActionLostActionRecord,
-    /// The computation node of an observation attempt was missing.
     ObservationLostComputationNode,
-    /// A completed observation node had no observation record.
     ObservationLostObservationRecord,
-    /// A tree file entry materialized as a tree instead of a blob.
     TreeFileMaterializedAsTree,
-    /// A durable publication was requested for an attempt that is not Complete.
     DurablePublicationForNonCompleteAttempt,
-    /// A durable publication was requested for an attempt that is not Failed.
     DurablePublicationForNonFailedAttempt,
-    /// A completed action's durable provenance needs an imported report.
     CompletedActionMissingImportedReport,
-    /// A computation has no durable attempt id recorded for it.
     DurableAttemptMissingForComputation,
-    /// A pure durable dependency edge targeted a non-pure computation.
     DurablePureEdgeTargetNotPure,
-    /// An observation dependency edge targeted a non-observation computation.
     DurableObservationEdgeTargetNotObservation,
-    /// A completed observation has no recorded observer revision.
     CompletedObservationMissingRevision,
-    /// A recorded observation request could not be decoded.
     RecordedObservationRequestUndecodable(pith_core::CanonicalDecodeError),
-    /// A recorded observation subject could not be decoded.
     RecordedObservationSubjectUndecodable(pith_core::CanonicalDecodeError),
-    /// A recorded observation revision could not be decoded.
     RecordedObservationRevisionUndecodable(pith_core::CanonicalDecodeError),
-    /// The engine-state adapter rejected a publication (adapter validation or
-    /// commit failure). The store's validation is a safety net; reaching this
-    /// means the engine's mapping fed it inconsistent data.
+    /// The engine-state adapter rejected a publication. Store validation is a
+    /// safety net, so reaching this means the engine's mapping produced
+    /// inconsistent data.
     EngineStateStoreError(crate::state::EngineStateError),
-    /// An engine-state read failed. Decision 0024 treats adapter failure as an
-    /// error, never a cache miss: a broken database must not silently degrade
-    /// into "recompute everything".
+    /// An adapter read failure is an error, never a cache miss: a broken
+    /// database must not silently degrade into recomputing everything.
     EngineStateReadFailed(crate::state::EngineStateError),
-    /// The reusable index returned an attempt that is not `Complete`. Only
-    /// completed attempts may enter the index (decision 0024).
+    /// Only completed attempts may enter the reusable index.
     ReusableIndexEntryNotComplete,
-    /// The reusable index returned an attempt belonging to another computation.
     ReusableIndexEntryKeyMismatch,
-    /// The reusable index returned a completed attempt whose reuse decision is
-    /// not `Reusable`.
     ReusableIndexEntryNotReusable,
-    /// An action was started by an evaluation that carries no policy and no
-    /// executor. The pure driver rejects the step that asks for one, so only a
-    /// run reaches the action pipeline.
+    /// Only a run reaches the action pipeline; the pure driver rejects the
+    /// step that would ask for one.
     ActionStartedOutsideARun,
-    /// An action dependency edge resolved to an attempt that is not an action
-    /// computation. The store rejects such publications, so an edge that
-    /// reaches revalidation naming one has been corrupted since.
+    /// The store rejects such publications, so an edge like this reaching
+    /// revalidation means corruption after the fact.
     DurableActionEdgeTargetNotAction,
-    /// A recorded action request could not be decoded. Its inputs were
-    /// validated when they entered the store, so this means the retained
-    /// encoding is unreadable under the current semantic encoding version.
+    /// Inputs were validated when they entered the store, so this means the
+    /// retained encoding is unreadable under the current semantic encoding
+    /// version.
     RecordedActionRequestUndecodable(pith_core::CanonicalDecodeError),
-    /// A completed attempt's recorded dependency resolved to an attempt that is
-    /// not itself complete. The store rejects such publications.
+    /// The store rejects such publications, so this means corruption after
+    /// the fact.
     DurableDependencyAttemptNotComplete,
-    /// A retained durable result could not be decoded. Its bytes were validated
-    /// when they entered the store, so this means the retained encoding is
-    /// unreadable under the current semantic encoding version.
+    /// Retained bytes were validated when they entered the store, so this
+    /// means the encoding is unreadable under the current semantic encoding
+    /// version.
     HydratedResultUndecodable(pith_core::CanonicalDecodeError),
-    /// A hydrated result does not inhabit the requested interface's output
-    /// type. The computation key covers the interface, so a decoded value of
-    /// another type contradicts the key it was indexed under.
-    HydratedResultTypeMismatch { expected: Type, actual: Type },
-    /// The scheduler was asked for an evaluation chain it no longer holds.
+    /// The computation key covers the interface, so a value of another type
+    /// contradicts the key the result was indexed under.
+    HydratedResultTypeMismatch {
+        expected: Type,
+        actual: Type,
+    },
     SchedulerLostChain,
-    /// A completed chain named a fan-out group the scheduler no longer holds.
     SchedulerLostGroup,
-    /// A fan-out group completed but the frame that opened it was gone.
     SchedulerLostFanOutFrame,
-    /// A root chain completed but its result slot was gone.
     SchedulerLostRootSlot,
 }
 
@@ -299,9 +256,8 @@ pub(super) fn observer_missing_diag(span: Span) -> DiagnosticSink {
     ))
 }
 
-/// The diagnostic a cancelled run carries. Not a fault: it reports that the
-/// caller stopped the work, which is why the attempts it stopped are recorded
-/// as cancelled rather than failed.
+/// The diagnostic a cancelled run carries: the caller stopped the work, which
+/// is why the attempts it stopped record as cancelled rather than failed.
 pub(super) fn cancelled_diag() -> DiagnosticSink {
     one_diag(Diag::engine(
         EngineCode::RunCancelled,
@@ -310,10 +266,9 @@ pub(super) fn cancelled_diag() -> DiagnosticSink {
     ))
 }
 
-/// The diagnostic a run that passed its declared wall clock carries, checked
-/// at a scheduling boundary. Stopped, not broken: nothing about the work in
-/// flight is known to be wrong, which is why the attempts it stops are
-/// recorded as cancelled rather than failed (decision 0059).
+/// The diagnostic a run carries after passing its declared wall clock, checked
+/// at a scheduling boundary. The stopped work is not known to be wrong, so its
+/// attempts record as cancelled rather than failed.
 pub(super) fn wall_bound_diag() -> DiagnosticSink {
     one_diag(Diag::engine(
         EngineCode::RunBoundExceeded,
@@ -323,9 +278,9 @@ pub(super) fn wall_bound_diag() -> DiagnosticSink {
     ))
 }
 
-/// The diagnostic a run that spent its declared step budget carries, raised
-/// from inside the step machine where the budget ran out. Names the request
-/// whose body was stepping, which is the runaway (decision 0059).
+/// The diagnostic a run carries after spending its declared step budget,
+/// raised inside the step machine where the budget ran out. Names the request
+/// that was stepping.
 pub(super) fn step_budget_diag(budget: u64, label: &str) -> DiagnosticSink {
     one_diag(Diag::engine(
         EngineCode::RunBoundExceeded,
@@ -338,8 +293,7 @@ pub(super) fn step_budget_diag(budget: u64, label: &str) -> DiagnosticSink {
 }
 
 /// Whether `diagnostics` carries the bound's code, so the driver records what
-/// a bound stopped as cancelled while an ordinary failure stays failed
-/// (decision 0059).
+/// a bound stopped as cancelled while an ordinary failure stays failed.
 pub(super) fn is_bound_stop(diagnostics: &pith_diag::DiagnosticSink) -> bool {
     let code = pith_diag::StableCode::from(EngineCode::RunBoundExceeded);
     diagnostics.iter().any(|diag| diag.code == code)
@@ -417,9 +371,7 @@ mod tests {
     use super::*;
 
     /// Every internal-invariant diagnostic must carry the InternalInvariant
-    /// code and a non-empty message. The exhaustive match already forces a
-    /// message arm per variant at compile time; this guards that the arm is
-    /// not accidentally emptied and that the code routing stays correct.
+    /// code and a non-empty message.
     #[test]
     fn every_internal_invariant_carries_the_right_code_and_message() {
         let invariants = [

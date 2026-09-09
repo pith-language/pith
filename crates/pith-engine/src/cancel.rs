@@ -1,10 +1,10 @@
-//! The caller's side of cancellation (decision 0022).
+//! The caller's side of cancellation.
 //!
-//! The engine polls for cancellation at scheduling boundaries rather than being
-//! pushed to. That keeps the async runtime out of this signature the same way
+//! The engine polls at scheduling boundaries rather than being pushed to.
+//! That keeps the async runtime out of this signature, the way
 //! [`Runtime`](crate::Runtime) keeps it out of evaluation: a host backs this
-//! with whatever it already has — an `AtomicBool` a signal handler sets, a flag
-//! behind a mutex, a channel it drains — and the engine never names a
+//! with whatever it already has (an `AtomicBool` a signal handler sets, a
+//! flag behind a mutex, a channel it drains), and the engine never names a
 //! concurrency primitive it would then be committed to.
 
 /// A caller's standing request to stop a run.

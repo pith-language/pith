@@ -1,4 +1,4 @@
-//! The async runtime trait (decision 0022). tokio sits behind it; the engine
+//! The async runtime trait. tokio sits behind it; the engine
 //! never names tokio in a public signature.
 
 use std::future::Future;
@@ -18,12 +18,11 @@ pub struct RuntimeError(pub Box<str>);
 
 /// A multi-threaded tokio runtime, owned by whoever built it.
 ///
-/// The caller holds it rather than the crate holding one globally: a run drives
-/// every action it started on this runtime, so the runtime outliving a single
-/// `run` call is load-bearing, and a process-wide one would make that lifetime
-/// implicit, unconfigurable, and impossible to tear down. Owning it also keeps
-/// the adapter boundary honest — the runtime is a thing the host supplies, the
-/// same as a content store or an executor.
+/// The caller holds it rather than the crate holding one globally: a run
+/// drives every action it started on this runtime, so the runtime must outlive
+/// the `run` call, and a process-wide one would make that lifetime implicit,
+/// unconfigurable, and impossible to tear down. The runtime is a thing the
+/// host supplies, like a content store or an executor.
 pub struct TokioRuntime {
     runtime: tokio::runtime::Runtime,
 }

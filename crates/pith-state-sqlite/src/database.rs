@@ -41,18 +41,16 @@ pub(super) fn open_in_memory() -> Result<SqliteConnection, SqliteStateError> {
     Ok(connection)
 }
 
-/// Open the database at `path` for reading only.
+/// Open the database at `path` for reading only. The connection is sqlite
+/// `mode=ro`, so nothing in this process can write the file even by mistake:
+/// no schema is built, an incompatible database is refused rather than moved
+/// aside (moving it is a write), and pending attempts stay pending (marking
+/// them failed is the writable open's recovery; a reader is not the owner).
 ///
-/// The connection is sqlite `mode=ro`, so nothing in this process can write
-/// the database file even by mistake: no schema is built, an incompatible
-/// database is refused rather than moved aside (moving it aside is a write),
-/// and pending attempts are left pending (marking them failed is the writable
-/// open's recovery, and a reader is not the owner).
-///
-/// One caveat the WAL mode forces: reading a WAL database needs the shared
-/// memory file, which sqlite may create beside the database even for a
-/// read-only connection. The database itself is never written; the directory
-/// may gain a `-shm` side file.
+/// WAL caveat: reading a WAL database needs the shared memory file, which
+/// sqlite may create beside the database even for a read-only connection.
+/// The database itself is never written; the directory may gain a `-shm`
+/// side file.
 pub(super) fn open_read_only(path: &Path) -> Result<SqliteConnection, SqliteStateError> {
     let mut connection = establish_read_only(path)?;
     verify_readable(&mut connection, path)?;
@@ -61,9 +59,9 @@ pub(super) fn open_read_only(path: &Path) -> Result<SqliteConnection, SqliteStat
 
 fn establish_read_only(path: &Path) -> Result<SqliteConnection, SqliteStateError> {
     let mut connection = SqliteConnection::establish(&read_only_url(path)?)?;
-    // Belt and braces: the connection is already `mode=ro`, and this stops a
-    // future read helper that happens to write from succeeding on a database
-    // opened through some other route.
+    // Redundant with `mode=ro`, but stops a future read helper that happens
+    // to write from succeeding on a connection opened through some other
+    // route.
     connection.batch_execute("pragma query_only = true;")?;
     Ok(connection)
 }

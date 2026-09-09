@@ -1,5 +1,5 @@
 //! Reuse of completed computations from the live arena and durable engine
-//! state (decisions 0024, 0031, and 0033).
+//! state.
 
 mod action;
 mod pure;
@@ -15,8 +15,7 @@ use crate::action::ExecutorIdentity;
 use crate::graph::diagnostics::{InternalInvariant, internal_diag};
 use crate::policy::ActionPolicy;
 
-/// What revalidating a recorded action edge needs from the run considering it
-/// (decision 0033).
+/// What revalidating a recorded action edge needs from the run considering it.
 pub enum ReuseContext<'a> {
     PureOnly,
     Run {

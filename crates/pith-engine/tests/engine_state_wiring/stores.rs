@@ -44,8 +44,8 @@ impl ContentStore for SharedContentStore {
     }
 }
 
-/// A store adapter whose `create_pending_attempt` always fails. Used to
-/// exercise the error-hygiene path where the live engine cannot create a
+/// A store adapter whose `create_pending_attempt` always fails. Exercises the
+/// error-hygiene path where the live engine cannot create a
 /// durable attempt: the arena must not be left with an orphaned `Pending` node.
 pub struct CreateFailingStore {
     pub inner: MemoryEngineStateStore,
@@ -150,8 +150,8 @@ impl EngineStateStore for CreateFailingStore {
     }
 }
 
-/// A store adapter whose reusable-index read always fails. Decision 0024 treats
-/// adapter failure as an error rather than a cache miss, so a broken adapter
+/// A store adapter whose reusable-index read always fails. Adapter failure is
+/// treated as an error rather than a cache miss, so a broken adapter
 /// must surface diagnostics instead of silently degrading into "recompute".
 #[derive(Default)]
 pub struct ReadFailingStore {
@@ -256,10 +256,10 @@ impl EngineStateStore for ReadFailingStore {
     }
 }
 
-/// One durable substrate behind several [`Engine`] instances, which is how
-/// decision 0024 describes a single process owning the writable engine
-/// database. Hydration is not observable within one instance — the arena index
-/// answers first — so these tests need a store that outlives an engine.
+/// One durable substrate behind several [`Engine`] instances, modeling a single
+/// process owning the writable engine database. Hydration is not observable
+/// within one instance (the arena index answers first), so these tests need a
+/// store that outlives an engine.
 #[derive(Clone, Default)]
 pub struct SharedEngineStateStore(Arc<std::sync::Mutex<MemoryEngineStateStore>>);
 

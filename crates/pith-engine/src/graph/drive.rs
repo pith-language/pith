@@ -1,16 +1,13 @@
-//! The two drivers that turn ready chains into progress (decision 0022).
+//! The two drivers that turn ready chains into progress. Both loop over the
+//! scheduler's ready chains and hand each to [`Engine::advance_chain`]; they
+//! differ in what they do with a chain that stopped for an effect: the pure
+//! driver rejects it, the run driver serves it (blobs inline, actions through
+//! the executor, so actions of independent chains overlap).
 //!
-//! Both loop over the scheduler's ready chains and hand each to
-//! [`Engine::advance_chain`]. They differ only in what they do with a chain
-//! that stopped for an effect: the pure driver rejects it, and the run driver
-//! serves it — reading blob bytes inline, and handing actions to the executor
-//! so that actions belonging to independent chains overlap.
-//!
-//! Overlap is bounded. A chain that stops for an action joins a queue, and the
-//! run driver starts from that queue only while fewer than
-//! [`Engine::action_concurrency`] actions are running. The queue holds requests,
-//! not invocations: an action waiting for a slot has not been planned, has no
-//! computation node, and has materialized nothing.
+//! Overlap is bounded: the run driver starts queued actions only while fewer
+//! than [`Engine::action_concurrency`] actions run. The queue holds requests,
+//! not invocations: a queued action has not been planned, has no computation
+//! node, and has materialized nothing.
 
 use std::collections::VecDeque;
 use std::future::Future;
@@ -33,9 +30,9 @@ use crate::bound::{RunBound, StepBudget};
 use crate::cancel::CancelSignal;
 use crate::policy::ActionPolicy;
 
-/// Why a run stopped early, carried so the driver can record the work it was
-/// holding under the right terminal state. An ordinary `?` on a diagnostic is
-/// a failure; cancellation is constructed deliberately.
+/// Why a run stopped early, carried so the work it held records under the
+/// right terminal state. A plain `?` on a diagnostic is a failure;
+/// cancellation is constructed deliberately.
 struct RunAbort {
     reason: StopReason,
     diagnostics: pith_diag::DiagnosticSink,
@@ -44,9 +41,9 @@ struct RunAbort {
 impl From<pith_diag::DiagnosticSink> for RunAbort {
     fn from(diagnostics: pith_diag::DiagnosticSink) -> Self {
         // A diagnostic the bound produced stops the run the way cancellation
-        // does: the work being held is stopped, not broken. The action that
-        // exceeded a wall clock is the exception — it was recorded failed
-        // where it ran, before this conversion sees it (decision 0059).
+        // does: the work being held is stopped, not broken. One exception:
+        // the action that exceeded a wall clock was already recorded failed
+        // where it ran, before this conversion sees it.
         let reason = if is_bound_stop(&diagnostics) {
             StopReason::Cancelled
         } else {
@@ -69,7 +66,7 @@ struct StartedActions<'a> {
 
 /// One action handed to an executor, with everything the engine needs to finish
 /// it when the executor returns. The requesting chain is parked meanwhile, so
-/// other chains — including ones with actions of their own — keep running.
+/// other chains keep running.
 struct InFlightAction<'a> {
     chain: ChainId,
     computation: ComputationId,
@@ -80,9 +77,9 @@ struct InFlightAction<'a> {
 }
 
 /// Wait for the first in-flight action to finish, reporting its index. Each
-/// pending execution registers its waker, so the driver wakes as soon as any of
-/// them makes progress; the rescan costs the number of actions running at once,
-/// which is the width of the graph rather than its size.
+/// pending execution registers its waker, so the driver wakes as soon as any
+/// makes progress; the rescan costs the number of actions in flight, not the
+/// size of the graph.
 async fn first_finished(
     actions: &mut [InFlightAction<'_>],
 ) -> (usize, PithResult<CapturedActionExecution>) {
@@ -112,7 +109,7 @@ fn bound_abort() -> RunAbort {
 }
 
 /// What one action's start needs from its run: the reuse context it plans
-/// under and the bound its deadline descends from (decision 0059).
+/// under and the bound its deadline descends from.
 struct Serving<'a> {
     context: &'a ReuseContext<'a>,
     bound: RunBound,
@@ -121,8 +118,8 @@ struct Serving<'a> {
 impl Engine {
     /// Evaluate an entry's pure prefix, admitting blobs, and stop at the first
     /// action request with its selected contract. No action is executed. Live
-    /// frames are recorded cancelled because the caller deliberately paused
-    /// them at the effect boundary.
+    /// frames record as cancelled: the caller paused them deliberately at the
+    /// effect boundary.
     ///
     /// # Errors
     /// Returns pure-evaluation, content, action-selection, or planner
@@ -255,9 +252,9 @@ impl Engine {
 
     /// Drive every chain to completion, serving the effects they stop for.
     ///
-    /// A run that ends early — cancelled, past its bound, or aborted by a
-    /// diagnostic — leaves chains parked and actions in flight. Both are
-    /// recorded here, under the terminal state that matches why the run ended,
+    /// A run that ends early (cancelled, past its bound, or aborted by a
+    /// diagnostic) leaves chains parked and actions in flight. Both are
+    /// recorded here under the terminal state that matches why the run ended,
     /// before the diagnostics propagate.
     pub(super) async fn drive_run<P: ActionPolicy, E: Executor, C: CancelSignal>(
         &mut self,
@@ -274,9 +271,9 @@ impl Engine {
         else {
             return Ok(());
         };
-        // An action still running was stopped, not broken: dropping its future
-        // is what ends it, and nothing was learned about whether it would have
-        // succeeded. That is cancellation whatever ended the run.
+        // An action still running is cancelled whatever ended the run:
+        // dropping its future ends it, and nothing was learned about the
+        // outcome.
         for action in started.in_flight {
             self.cancel_action(action.computation, &abort.diagnostics);
         }
@@ -293,9 +290,9 @@ impl Engine {
         bound: &RunBound,
         started: &mut StartedActions<'a>,
     ) -> Result<(), RunAbort> {
-        // Revalidating a recorded action edge re-plans the request behind it and
-        // shows the contract to this run's policy (decision 0033), so the reuse
-        // path needs both for as long as the run lasts.
+        // Revalidating a recorded action edge re-plans the request behind it
+        // and shows the contract to this run's policy, so the reuse path
+        // needs both for as long as the run lasts.
         let environment = executor.identity();
         let context = ReuseContext::Run {
             policy,
@@ -370,10 +367,10 @@ impl Engine {
             // Checked after the await as well as before stepping a chain: an
             // action can be the only thing a long run is doing, and a caller
             // that cancelled while it ran should not wait for the next one.
-            // The bound's deadline is checked here for the same reason, and
-            // covers an executor that ignored the deadline it was handed —
-            // a first-party executor kills the child at it and refuses, which
-            // arrives as the bound's diagnostic (decision 0059).
+            // The deadline is checked here for the same reason, and covers an
+            // executor that ignored the deadline it was handed: a first-party
+            // executor kills the child at it and refuses, which arrives as the
+            // bound's diagnostic.
             if cancel.is_cancelled() {
                 self.cancel_action(finished.computation, &cancelled_diag());
                 return Err(cancelled_abort());

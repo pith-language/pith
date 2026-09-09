@@ -11,11 +11,10 @@ const TAG_TREE: u8 = 2;
 const TAG_SYMLINK: u8 = 3;
 
 /// A tree entry's content, generic over the file payload `F` and the recursive
-/// tree payload `T`. The three variants — `File`, `Tree`, `Symlink` — are the
-/// single source of truth for the entry shape; the canonical store form, the
-/// engine's materialized form, and the engine's captured form are all
-/// instantiations of this enum, differing only in what `File` carries and what
-/// `Tree` recurses on. `Symlink` is identical across all phases.
+/// tree payload `T`. The canonical store form, the engine's materialized form,
+/// and the engine's captured form are all instantiations of this enum,
+/// differing in what `File` carries and what `Tree` recurses on; `Symlink` is
+/// identical across all phases.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum TreeEntryContent<F, T> {
     File(F),

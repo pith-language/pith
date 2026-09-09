@@ -1,7 +1,6 @@
-//! The arena dependency graph and the engine's evaluation entry points
-//! (decisions 0021, 0022).
+//! The arena dependency graph and the engine's evaluation entry points.
 //!
-//! The evaluator is split across three modules along the seam 0022 describes:
+//! The evaluator is split across three modules along the sync/async seam:
 //! `scheduler` holds the set of in-flight evaluation chains and touches no
 //! arena state, `eval` is the synchronous core that runs a chain on the step
 //! machine, and `drive` is the shell that serves the effects a chain stops
@@ -60,11 +59,9 @@ use reuse::{ActionComputationIndex, ObservationComputationIndex, PureComputation
 pub struct Engine<S: EngineStateReader + ?Sized = dyn EngineStateStore> {
     pub(crate) rules: RuleTable<Pure>,
     pub(crate) bodies: IndexMap<RuleId, Box<dyn PureRule>>,
-    /// The revision each pure rule identity is registered at, indexed off
-    /// `rules` so revalidating a recorded pure edge does not scan the arena
-    /// (decision 0049). `None` marks an identity two rules registered at
-    /// different revisions: the map cannot answer for it, and revalidation
-    /// treats that as invalid rather than picking one.
+    /// Revision per registered pure rule identity. `None` when two rules share
+    /// an identity at different revisions: revalidation then invalidates rather
+    /// than picking one. Indexed off `rules` to avoid an arena scan.
     pub(crate) pure_rule_revisions: IndexMap<RuleIdentity, Option<RuleRevision>>,
     pub(crate) action_rules: RuleTable<Action>,
     pub(crate) action_bodies: IndexMap<RuleId, Box<dyn ActionRule>>,
@@ -78,7 +75,7 @@ pub struct Engine<S: EngineStateReader + ?Sized = dyn EngineStateStore> {
     /// Durable engine metadata. Arena handles never cross this boundary; the
     /// process-local `durable_attempts` side-table maps computation nodes to
     /// their durable attempt identifiers. Store calls happen only at engine
-    /// scheduling boundaries (decision 0024, "adapter boundaries").
+    /// scheduling boundaries.
     pub(crate) state_store: Box<S>,
     pub(crate) durable_attempts: IndexMap<ComputationId, DurableAttemptId>,
     action_concurrency: NonZeroUsize,
@@ -89,11 +86,9 @@ pub struct Engine<S: EngineStateReader + ?Sized = dyn EngineStateStore> {
 
 /// How many actions a run keeps in flight when the caller does not say.
 ///
-/// The bound is over actions rather than chains because an action is what costs
-/// a materialized invocation and a child process; a parked chain is a stack
-/// (decision 0029, "unresolved"). One action per available core is the same
-/// default every build tool converges on, and it is derived from the host rather
-/// than written down, so it needs no revising when the host changes.
+/// The bound is over actions, not chains: an action costs a materialized
+/// invocation and a child process, a parked chain is a stack. One per
+/// available core is the default every build tool converges on.
 fn default_action_concurrency() -> NonZeroUsize {
     std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN)
 }
@@ -118,7 +113,7 @@ impl Engine {
     }
 
     /// Whether a completed action may be recorded as reusable and served to a
-    /// later matching request (decision 0031).
+    /// later matching request.
     #[must_use]
     pub fn action_caching(&self) -> bool {
         self.action_caching
@@ -126,29 +121,27 @@ impl Engine {
 
     /// Turn action caching off, so every action executes.
     ///
-    /// An action recorded while this is off is published
-    /// `NotReusable(ActionCachingDisabled)` and never enters the reusable
-    /// index. The reason describes this engine, not the computation. Turning
-    /// caching back on leaves those attempts where they are: a durable record
-    /// does not change its mind.
+    /// Actions recorded while this is off publish
+    /// `NotReusable(ActionCachingDisabled)` and never enter the reusable index;
+    /// the reason describes this engine, not the computation. Re-enabling
+    /// leaves those attempts where they are: a durable record does not change
+    /// its mind.
     pub fn set_action_caching(&mut self, caching: bool) {
         self.action_caching = caching;
     }
 
     /// The weakest confinement this engine accepts from a recorded action
-    /// attempt before reusing it (decision 0031). `Unverified` — the default —
-    /// accepts any recorded attempt.
+    /// attempt before reusing it. The default, `Unverified`, accepts any
+    /// recorded attempt.
     #[must_use]
     pub fn minimum_access_verification(&self) -> AccessVerification {
         self.minimum_access_verification
     }
 
     /// Refuse to reuse an action attempt that was recorded under weaker
-    /// confinement than `minimum`.
-    ///
-    /// This is a floor on reuse. An action still runs under whatever its
-    /// executor installs, and the report says which. Raising the floor makes
-    /// weakly confined results unacceptable, and they stay findable, so
+    /// confinement than `minimum`. This is a floor on reuse only: an action
+    /// still runs under whatever its executor installs, and the report says
+    /// which. Raising the floor makes weakly confined results unacceptable;
     /// lowering it again serves them.
     pub fn set_minimum_access_verification(&mut self, minimum: AccessVerification) {
         self.minimum_access_verification = minimum;
@@ -161,13 +154,13 @@ impl Engine {
     }
 
     /// Bound the actions a run keeps in flight. A fan-out wider than `limit`
-    /// still opens every chain — chains are cheap — but the actions those chains
+    /// still opens every chain (chains are cheap), but the actions those chains
     /// stop for are started `limit` at a time, so a batch of a thousand
     /// compilations materializes `limit` invocations rather than a thousand.
     ///
-    /// Raising or lowering this changes only how much of the run overlaps. The
-    /// results do not depend on it: the requests in a fan-out are declared
-    /// independent (decision 0029), so no order among them is observable.
+    /// Raising or lowering this changes only how much of the run overlaps: the
+    /// requests in a fan-out are declared independent, so no order among them
+    /// is observable.
     pub fn set_action_concurrency(&mut self, limit: NonZeroUsize) {
         self.action_concurrency = limit;
     }
@@ -175,8 +168,7 @@ impl Engine {
     /// Insert a blob into the engine's content store and return its identity.
     ///
     /// # Errors
-    /// Returns the store's error if the adapter cannot store the bytes. The
-    /// in-memory adapter is infallible; filesystem/remote adapters may fail.
+    /// Returns the store's error if the adapter cannot store the bytes.
     pub fn put_blob(&mut self, bytes: &[u8]) -> Result<ContentId, pith_store::StoreError> {
         self.store.put_blob(bytes)
     }
@@ -281,8 +273,7 @@ impl<S: EngineStateReader + ?Sized> Engine<S> {
     /// Register a validated represented pure rule.
     ///
     /// # Errors
-    /// Returns the body's type error before either metadata or executable state
-    /// enters the engine.
+    /// Returns the body's type error before any state enters the engine.
     pub fn register_represented_rule(
         &mut self,
         module: &str,
@@ -301,8 +292,7 @@ impl<S: EngineStateReader + ?Sized> Engine<S> {
     /// A recorded pure edge names the revision its dependency was computed
     /// under. If this engine's rule set disagrees, the recorded key is not the
     /// key the consumer's body would request, so the edge is stale even though
-    /// the old key's attempt is still the latest reusable one under it
-    /// (decision 0049).
+    /// the old key's attempt is still the latest reusable one under it.
     pub(crate) fn pure_rule_is_registered_at(
         &self,
         identity: RuleIdentity,
@@ -343,10 +333,9 @@ impl<S: EngineStateReader + ?Sized> Engine<S> {
 }
 
 impl Engine {
-    /// Evaluate a request on the synchronous pure step machine. Rejects
-    /// effectful steps (`NeedBlob`, `NeedAction`) with `E-1206`: this entry
-    /// point is for pure-only computations and keeps the sync core honest.
-    /// Use [`Engine::run`] to cross the sync/async boundary.
+    /// Evaluate a request on the synchronous pure step machine. Effectful
+    /// steps (`NeedBlob`, `NeedAction`) are rejected with `E-1206`; use
+    /// [`Engine::run`] to cross the sync/async boundary.
     ///
     /// # Errors
     /// `E-1101` no match, `E-1102` ambiguous, `E-1103` bad inputs, `E-1104`
@@ -397,12 +386,11 @@ impl Engine {
     /// `executor` via `runtime` after `policy` authorizes the action plan.
     ///
     /// # Errors
-    /// `Ok(Ok(_))` on success. `Ok(Err(_))` when evaluation produced
-    /// diagnostics (same codes as [`Engine::evaluate_pure`] plus `E-1205`
-    /// blob-not-available, `E-1208` through `E-1210` for executor reports
-    /// outside the declared contract, and `E-1212` for a missing or mismatched
-    /// execution platform, and `E-1213` for policy denial). `Err(_)` when the
-    /// runtime could not be driven.
+    /// `Ok(Err(_))` when evaluation produced diagnostics (the same codes as
+    /// [`Engine::evaluate_pure`], plus `E-1205` for absent content, `E-1208`
+    /// through `E-1210` for executor reports outside the declared contract,
+    /// `E-1212` for a missing or mismatched execution platform, and `E-1213`
+    /// for policy denial). `Err(_)` when the runtime could not be driven.
     pub fn run<R: Runtime, P: ActionPolicy, E: Executor>(
         &mut self,
         request: &Request<Pure>,
@@ -413,11 +401,10 @@ impl Engine {
         self.run_cancellable(request, runtime, policy, executor, &NeverCancelled)
     }
 
-    /// [`Engine::run`] under a caller-declared bound (decision 0059): a
-    /// wall-clock deadline polled at the scheduling boundaries and handed to
-    /// every action the run starts, and a step budget spent inside the step
-    /// machine. A run without a bound — every entry point that does not take
-    /// one — is unbounded.
+    /// [`Engine::run`] under a caller-declared bound: a wall-clock deadline
+    /// polled at the scheduling boundaries and handed to every action the run
+    /// starts, and a step budget spent inside the step machine. A run without
+    /// a bound (every entry point that does not take one) is unbounded.
     ///
     /// # Errors
     /// The same as [`Engine::run`], plus `E-1216` when the run exceeded its
@@ -467,7 +454,7 @@ impl Engine {
 
     /// Evaluate several requests that do not depend on one another, driving
     /// them concurrently: their actions overlap, and the results come back in
-    /// request order. This is the multi-target entry point — one root per thing
+    /// request order. This is the multi-target entry point: one root per thing
     /// the caller asked to build.
     ///
     /// A request that fails aborts the whole run, exactly as it does under

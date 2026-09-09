@@ -208,9 +208,9 @@ impl Engine {
     ///
     /// Checking the immediate edges is not enough. An edge revalidates on its
     /// own terms and stops, so a dependency two levels down whose rule was
-    /// revised leaves the edge above it intact and the consumer hydrates a
-    /// result derived from a rule body this engine no longer has (decision
-    /// 0051, completing 0049).
+    /// revised would leave the edge above it intact; the walk descends so the
+    /// consumer never hydrates a result derived from a rule body this engine
+    /// does not have.
     pub(super) fn durable_completion_is_valid(
         &self,
         completion: &CompletedAttempt,
@@ -269,8 +269,8 @@ impl Engine {
         }
     }
 
-    /// Revalidate an action edge by re-selecting and re-planning it (decision
-    /// 0033). Nothing is added to the walk: blob and action edges are recorded
+    /// Revalidate an action edge by re-selecting and re-planning it. Nothing is
+    /// added to the walk: blob and action edges are recorded
     /// on the pure computation that requested them, so an action attempt's own
     /// recorded dependencies are the capability uses its executor reported.
     fn durable_action_dependency_is_valid(
@@ -353,12 +353,11 @@ impl Engine {
         walk: &mut RecordWalk,
     ) -> PithResult<bool> {
         // The recorded key names the revision the dependency was computed
-        // under. Asking only whether that key's latest reusable attempt is
-        // still the recorded one cannot see a revision that moved: a revised
-        // rule mints a *new* key, which leaves the old key's attempt
-        // undisturbed and still latest under it, so the edge would revalidate
-        // and the consumer would hydrate a result derived from a rule body
-        // this engine no longer has (decision 0049).
+        // under. Checking only that the recorded key's latest reusable attempt
+        // is unchanged cannot see a revision that moved: a revised rule mints
+        // a new key, leaving the old key's attempt still latest under it, so
+        // the edge would revalidate and the consumer would hydrate a result
+        // derived from a rule body this engine does not have.
         if !self.pure_rule_is_registered_at(computation.rule_identity, computation.rule_revision) {
             return Ok(false);
         }
@@ -383,32 +382,24 @@ impl Engine {
         if self.run_holds_attempt(computation, latest.id) {
             return Ok(true);
         }
-        // Descend through the attempt this check accepted as current, never the
-        // superseded one the edge recorded. The two differ exactly when a
-        // dependency was recomputed to an equal result, and the superseded
-        // record's own edges may name results the current rule set has since
-        // replaced; refusing on those would throw away the early cutoff the
-        // comparison above just established, which is the property 0033 exists
-        // to preserve.
+        // Descend through the attempt accepted as current, never the superseded
+        // one the edge recorded. They differ exactly when a dependency was
+        // recomputed to an equal result; the superseded record's own edges may
+        // name results the current rule set has replaced, and refusing on
+        // those would throw away the early cutoff just established.
         walk.enqueue(latest);
         Ok(true)
     }
 
     /// Whether the attempt an edge accepted is one this run already holds live
-    /// and reusable in the arena.
+    /// and reusable in the arena. Such an attempt was established when it
+    /// entered the arena, computed here or reused and hydrated through this
+    /// check, so descending into its record would re-derive an answer the run
+    /// already has, making the walk quadratic rather than linear.
     ///
-    /// Such an attempt was established when it entered the arena: computed
-    /// here, in which case its own dependencies were established the same way,
-    /// or reused and hydrated through this very check. Descending into its
-    /// record would re-derive an answer the run already has, and doing that at
-    /// every depth of a chain is what makes the walk quadratic rather than
-    /// linear in the recorded graph.
-    ///
-    /// What the short-circuit rests on is that within one run the durable state
-    /// an arena node was established against moves only by this engine's own
-    /// publications, which is 0024's adapter-boundary rule. It stops the walk
-    /// at the live frontier, leaving it to cover exactly the part of the graph
-    /// with no arena subgraph to have covered it.
+    /// The short-circuit holds because within one run the durable state an
+    /// arena node was established against moves only by this engine's own
+    /// publications; the walk can stop at the live frontier.
     fn run_holds_attempt(
         &self,
         computation: PureComputationKey,
@@ -465,14 +456,11 @@ impl Engine {
 /// The state one revalidation pass carries while it walks the record beneath a
 /// completion.
 ///
-/// The walk is an explicit frontier rather than recursion because the recorded
-/// graph is as deep as the build is, and 0022 already made the evaluator a
-/// stack machine for that reason; a validity check that overflows on a chain
-/// the evaluator handles would be a worse bound than the one it replaces.
-///
-/// `seen` keeps a diamond from being walked once per path and bounds the pass
-/// if a store ever hands back a cyclic record. An attempt enters it when it is
-/// enqueued rather than when it is validated, which is sound because a failure
+/// An explicit frontier rather than recursion: the recorded graph is as deep as
+/// the build is, and the evaluator itself is a stack machine for the same
+/// reason. `seen` keeps a diamond from being walked once per path and bounds
+/// the pass if a store ever hands back a cyclic record; an attempt enters it
+/// when enqueued rather than when validated, which is sound because a failure
 /// anywhere abandons the whole pass.
 #[derive(Default)]
 struct RecordWalk {

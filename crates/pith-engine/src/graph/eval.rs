@@ -1,10 +1,9 @@
-//! The synchronous core: frame lifecycle and the pure steps (decision 0022).
+//! The synchronous core: frame lifecycle and the pure steps.
 //!
 //! Nothing here awaits. [`Engine::advance_chain`] is the only place the step
 //! machine is driven, and it serves exactly the steps that need nothing outside
-//! the engine. A chain that needs blob bytes or an action stops and says so,
-//! leaving the effect to a driver — which is what keeps the claim "the core is
-//! structurally pure" checkable rather than aspirational.
+//! the engine; a chain that needs blob bytes or an action stops and leaves the
+//! effect to a driver.
 
 mod run;
 
@@ -94,8 +93,7 @@ impl Engine {
     ///
     /// Each step spends one unit of `budget`. A body that yields an unbounded
     /// sequence of distinct requests steps many times between two scheduling
-    /// boundaries, so the budget is spent here rather than at the boundary
-    /// (decision 0059).
+    /// boundaries, so the budget is spent here rather than at the boundary.
     pub(super) fn advance_chain(
         &mut self,
         scheduler: &mut Scheduler,
@@ -185,7 +183,7 @@ impl Engine {
 
     /// Handle a `PureStep::NeedAll`: each request that still needs evaluating
     /// becomes a chain of its own, and the requesting chain parks until all of
-    /// them land. Two identical requests in one batch get a computation each —
+    /// them land. Two identical requests in one batch get a computation each:
     /// the reusable index dedupes across time, not within a batch.
     fn handle_pure_need_all(
         &mut self,
@@ -329,7 +327,7 @@ impl Engine {
     ///
     /// Derived once per prepared request and carried on the frame, because three
     /// things want it: the cycle predicate, the reusable index, and the durable
-    /// attempt (decision 0050).
+    /// attempt.
     fn pure_key_for(
         &self,
         rule: RuleId,
@@ -362,10 +360,9 @@ impl Engine {
         });
         self.index_pure_computation(key, computation);
         if let Err(diagnostics) = self.create_pending_pure_attempt(computation, key) {
-            // The durable attempt could not be created (only a failing adapter
-            // reaches this; the memory adapter is infallible). Mirror the action
-            // path's error hygiene: fail the orphaned arena node so it is not
-            // left Pending. No durable failure is published because no durable
+            // Only a failing adapter reaches this; the memory adapter is
+            // infallible. Fail the orphaned arena node so nothing stays
+            // Pending. No durable failure is published because no durable
             // attempt exists; the diagnostics propagate to the caller.
             self.fail_pure_orphan(computation, &diagnostics);
             return Err(diagnostics);
@@ -383,7 +380,7 @@ impl Engine {
     /// Complete `completed` with `value`: type-check the result, mark the arena
     /// node terminal, and publish the durable record. The caller pops the frame
     /// afterwards, so the frame's computation id is still valid for the store
-    /// call (decision 0024).
+    /// call.
     fn finish_frame(&mut self, completed: &EvalFrame, value: Value) -> PithResult<Evaluation> {
         let Some(rule) = self.rules.get(completed.rule) else {
             return Err(internal_diag(
@@ -459,8 +456,7 @@ impl Engine {
             if matches!(node.state, AttemptState::Pending) {
                 node.state = reason.attempt_state(diagnostics.iter().cloned().collect());
                 // Scheduling boundary: publish the durable record for this pure
-                // attempt. The store call is best-effort with respect to the
-                // returned diagnostics — publication must not mask the
+                // attempt. Best effort, so publication cannot mask the
                 // diagnostics that caused it.
                 let _ = self.publish_pure_stop(*computation);
             }
@@ -485,9 +481,8 @@ impl Engine {
         }
     }
 
-    /// Record a dependency of `parent`. Every edge the evaluator adds goes
-    /// through here, so "the requesting computation must still exist" is stated
-    /// once instead of at each edge site.
+    /// Record a dependency of `parent`, checking that the requesting
+    /// computation still exists.
     pub(super) fn record_edge(
         &mut self,
         parent: ComputationId,

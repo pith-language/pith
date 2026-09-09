@@ -1,8 +1,4 @@
 //! Translation between durable records and the rows that hold them.
-//!
-//! A completed pure result and a declared action contract keep the canonical
-//! bytes `pith-core` produced, because each carries a digest those exact bytes
-//! must reproduce. Every other field of a record is a column or a row.
 
 mod attempt;
 mod computation;
@@ -50,8 +46,8 @@ impl From<Failure> for EngineStateError {
     }
 }
 
-/// A row that cannot be read back as the record it was written from. Decision
-/// 0024: corruption is an adapter error, never a cache miss.
+/// A row that cannot be read back as the record it was written from; an
+/// adapter error, not a lookup miss.
 pub(super) fn corrupt(message: impl Into<Box<str>>) -> Failure {
     Failure::Engine(EngineStateError::Adapter {
         message: message.into(),

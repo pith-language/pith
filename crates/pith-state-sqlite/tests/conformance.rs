@@ -1,4 +1,4 @@
-//! The adapter against the reference model (decision 0025).
+//! The adapter against the reference model.
 //!
 //! The normalized schema is a second spelling of the durable record types. This
 //! is what binds the two: generated operation sequences must produce the same
@@ -24,10 +24,9 @@ proptest! {
 
 /// Two attempts of one action key, completed in the opposite of their
 /// creation order. The reusable index must serve the attempt whose
-/// publication came last — the lower identifier here — because 0031's
-/// admission test reads "latest recorded", and attempt identifiers order
-/// creation, not publication. The generated suite finds this only when a
-/// draw completes two same-key attempts out of order; this scenario is the
+/// publication came last (the lower identifier here): attempt identifiers
+/// order creation, not publication. The generated suite only finds this when
+/// a draw completes two same-key attempts out of order; this scenario is the
 /// same claim drawn deterministically.
 #[test]
 fn the_latest_reusable_action_attempt_is_the_latest_published() {

@@ -454,8 +454,7 @@ pub struct CompletedAttempt {
 
 /// What an attempt that stopped without a result retains. `Failed` and
 /// `Cancelled` differ in *why* the attempt stopped, not in what is kept, so
-/// they share this record rather than carrying two structures that would have
-/// to be changed together.
+/// they share this record.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoppedAttempt {
     pub dependencies: Box<[DurableDependency]>,
@@ -469,11 +468,11 @@ pub enum DurableAttemptState {
     Complete(CompletedAttempt),
     /// The attempt ran and could not produce its result.
     Failed(StoppedAttempt),
-    /// The attempt was stopped before it could produce a result — the run it
+    /// The attempt was stopped before it could produce a result: the run it
     /// belonged to was cancelled, or a sibling's failure ended that run while
     /// this attempt was still in flight. Distinct from `Failed` because nothing
-    /// about the computation itself is known to be wrong: re-running it is
-    /// reasonable, where re-running a failure is not.
+    /// about the computation itself is known to be wrong, so re-running it is
+    /// reasonable where re-running a failure is not.
     Cancelled(StoppedAttempt),
 }
 
@@ -508,11 +507,10 @@ impl DurableAttemptState {
 /// and the live mirror [`crate::EngineQuery::explain_invalidation`].
 ///
 /// The chain follows the single dependency each [`DurableReuseReason`] names.
-/// When reuse is blocked by more than one dependency simultaneously, the
-/// explanation records the first such edge the store reports (the validator at
-/// `state::validate` derives its `first_non_reusable_dependency` the same way),
-/// so the explanation matches the reuse decision the attempt was published with
-/// rather than re-deriving a different one.
+/// When several dependencies block reuse, the first edge the store reports is
+/// recorded (`state::validate` derives its `first_non_reusable_dependency` the
+/// same way), so the explanation matches the reuse decision the attempt was
+/// published with.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InvalidationExplanation {
     pub attempt: DurableAttemptId,

@@ -1,27 +1,23 @@
-//! A run's declared ceiling (decision 0059).
+//! A run's declared ceiling: a wall clock over the run and over each action it
+//! starts, plus a step budget over pure steps.
 //!
-//! The bound is the one mechanism five callers were each deferring to the next
-//! milestone: a wall clock and a step budget over a run, and the wall clock
-//! again over each action the run starts. It is declared by the caller rather
-//! than defaulted — no number is both generous enough for a real build and
-//! small enough to stop a runaway — and a run without one is unbounded, as
-//! every run was before this module existed.
+//! The caller declares the numbers rather than taking a default, since no
+//! number is both generous enough for a real build and small enough to stop a
+//! runaway. A run without a bound is unbounded.
 
 use std::time::Instant;
 
 /// The wall-clock deadline and step budget one run runs under.
 ///
 /// The deadline is polled at the engine's scheduling boundaries and handed to
-/// every action the run starts, so the executor that holds a child enforces it
-/// while the driver is asleep waiting for that child. The step budget is spent
-/// one pure step at a time, which is what bounds a body that yields an
-/// unbounded sequence of distinct requests — a shape cycle detection cannot
-/// refuse, because no request repeats.
+/// every action the run starts, so the executor holding a child enforces it
+/// while the driver waits. The step budget is spent one pure step at a time,
+/// which bounds a body that yields an unbounded sequence of distinct
+/// requests, a shape cycle detection cannot refuse because no request repeats.
 ///
-/// The bound is authority for an execution, not content of a request: it does
-/// not participate in any computation key, and an attempt recorded under a
-/// larger bound may be served to a smaller one, because reuse serves a
-/// completed attempt without running anything.
+/// Authority for an execution, not content of a request: it participates in
+/// no computation key, and an attempt recorded under a larger bound may serve
+/// a smaller one, since reuse runs nothing.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub struct RunBound {
     deadline: Option<Instant>,
@@ -29,8 +25,7 @@ pub struct RunBound {
 }
 
 impl RunBound {
-    /// The bound of a run that has neither ceiling: unbounded, as runs were
-    /// before this type existed.
+    /// The bound of a run that has neither ceiling: unbounded.
     #[must_use]
     pub const fn none() -> Self {
         Self {

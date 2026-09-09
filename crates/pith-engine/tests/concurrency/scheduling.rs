@@ -56,7 +56,7 @@ fn a_fan_out_runs_its_actions_concurrently() {
 
 /// The width of the fan-out the bounded tests build, and the bound they hold it
 /// to. Six over two is three batches: enough that a driver which started a batch
-/// and then stopped refilling would not finish.
+/// and stopped refilling would not finish.
 const BOUNDED_FAN_OUT: usize = 6;
 const ACTION_BOUND: usize = 2;
 
@@ -85,10 +85,10 @@ fn action_computations(engine: &Engine) -> usize {
 fn a_fan_out_wider_than_the_bound_runs_its_actions_in_batches() {
     let mut engine = fixture_engine();
     let root = wide_fan_out_root(&mut engine);
-    // The barrier is as wide as the bound, so it releases once the driver has
-    // filled the pipe and not before. A driver that started the whole fan-out
-    // would show a peak of six; one that started a batch and never refilled
-    // would never reach the third generation and would time out.
+    // The barrier is as wide as the bound, so it releases only once the driver
+    // has filled the pipe. A driver that started the whole fan-out would show a
+    // peak of six; one that started a batch and never refilled would never
+    // reach the third generation and would time out.
     let executor = barrier_across(&mut engine, ACTION_BOUND);
 
     let evaluation = engine

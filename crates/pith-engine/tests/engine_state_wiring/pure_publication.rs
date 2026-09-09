@@ -94,9 +94,9 @@ fn failed_pure_evaluation_publishes_a_failed_attempt_with_diagnostics() {
 fn pure_create_failure_reconciles_the_orphaned_arena_node() {
     // When the store cannot create a durable attempt (only a failing adapter
     // reaches this; the memory adapter is infallible), the pure path must not
-    // leave an orphaned `Pending` arena node behind. It mirrors the action
-    // path's error hygiene by failing the node in the arena. No durable record
-    // is published because no durable attempt exists.
+    // leave an orphaned `Pending` arena node. It fails the node in the arena,
+    // mirroring the action path's error hygiene; no durable record exists to
+    // publish.
     let mut engine = Engine::with_state_store(
         MemoryContentStore::default(),
         CreateFailingStore {
@@ -120,8 +120,8 @@ fn pure_create_failure_reconciles_the_orphaned_arena_node() {
             .iter()
             .any(|diag| diag.code == pith_diag::EngineCode::InternalInvariant.into())
     );
-    // The orphaned arena node was reconciled to a terminal state: no
-    // `Pending` computation remains.
+    // The orphaned arena node was reconciled to a terminal state: no `Pending`
+    // computation remains.
     assert!(
         engine
             .query()

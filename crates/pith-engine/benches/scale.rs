@@ -1,20 +1,14 @@
 //! Wall-clock cost of pure evaluation at sizes the test suite does not reach.
-//! Five shapes, because they stress different parts of the engine: a deep chain
-//! puts N frames on one stack, a wide sequence puts N requests through a stack
-//! two deep, a fan-out opens N chains, a reused chain revalidates a recorded
-//! subtree N times, and a crowded arena holds the requests fixed while the
-//! registered rule population grows.
+//! Five shapes stressing different parts of the engine: a deep chain (N frames
+//! on one stack), a wide sequence (N requests through a stack two deep), a
+//! fan-out (N chains), a reused chain (N revalidations of a recorded subtree),
+//! and a crowded arena (fixed request count, growing rule population).
 //!
-//! `harness = false`, so this is a plain binary and needs no benchmark
-//! framework. The numbers are coarse by design — what they exist for is
-//! answering whether a change moved the shape of the curve, which is the
-//! question no measurement in the repository could answer before decision 0050.
+//! `harness = false`: a plain binary. The numbers are coarse; what they answer
+//! is whether a change moved the shape of the curve.
 //!
 //! `cargo bench -p pith-engine`, or `just bench`.
 
-// A benchmark that cannot construct its own fixture has nothing to report, and
-// aborting loudly at setup is the honest failure. Neither appears in a
-// measured path.
 #![allow(
     clippy::expect_used,
     reason = "benchmark setup; a failure here means there is nothing to measure"
@@ -29,12 +23,11 @@ use pith_diag::{PithResult, Span};
 use pith_engine::{Engine, PureRule, PureRuleFrame, PureStep, Resumption};
 
 /// Sizes each shape is measured at. Doubling makes a superlinear curve visible
-/// without a fit: a linear shape doubles its time, a quadratic one quadruples.
+/// without a fit: linear doubles its time, quadratic quadruples.
 const SIZES: [u64; 5] = [1_000, 2_000, 4_000, 8_000, 16_000];
 
-/// Rule populations the crowded-arena shape is measured at. The request count
-/// is fixed there, so what varies is how many rules selection has to answer
-/// against.
+/// Rule populations the crowded-arena shape is measured at; its request count
+/// is fixed, so this is what selection has to answer against.
 const RULE_COUNTS: [u64; 5] = [0, 256, 1_024, 4_096, 16_384];
 
 /// Requests the crowded-arena shape runs at every rule population.
@@ -48,21 +41,20 @@ fn main() {
     for size in SIZES {
         report("wide-sequence", size, wide_sequence(size));
     }
-    // Fan-out opens one chain per request and each chain holds a stack, so it is
-    // measured over a smaller range than the other two.
+    // Fan-out opens one chain per request and each chain holds a stack, so it
+    // is measured over a smaller range than the other two.
     for size in SIZES.iter().take(3) {
         report("wide-fanout", *size, wide_fanout(*size));
     }
-    // Revalidation walks the recorded subtree beneath a reused result (decision
-    // 0051), and this shape is the worst case for it: a reuse at every depth of
-    // a chain, so the walks sum to the chain's triangle. Measured over the same
-    // smaller range as fan-out.
+    // Revalidation walks the recorded subtree beneath a reused result; a reuse
+    // at every depth of a chain is its worst case, since the walks sum to the
+    // chain's triangle. Same smaller range as fan-out.
     for size in SIZES.iter().take(3) {
         report("reused-chain", *size, reused_chain(*size));
     }
-    // Selection answers against the whole rule population, so this shape holds
-    // the requests fixed and grows the population. `ms/n` is per request, and
-    // comparable with wide-sequence at the same request count.
+    // Selection answers against the whole rule population, so the requests are
+    // held fixed while the population grows. `ms/n` is per request, comparable
+    // with wide-sequence at the same request count.
     for rules in RULE_COUNTS {
         report(
             &format!("crowded-arena r={rules}"),
@@ -79,8 +71,8 @@ fn report(shape: &str, size: u64, elapsed: Duration) {
 }
 
 /// `rule(n)` needs `rule(n - 1)` down to zero, so the chain holds `n` frames at
-/// once. This is the shape whose cycle check was quadratic: every request
-/// compared itself against every frame already on the stack.
+/// once. The cycle check used to be quadratic here: every request compared
+/// itself against every frame already on the stack.
 fn deep_chain(depth: u64) -> Duration {
     let mut engine = Engine::new();
     let signature = interface();
@@ -93,10 +85,10 @@ fn deep_chain(depth: u64) -> Duration {
     start.elapsed()
 }
 
-/// One root requests `n` distinct children one after another. Each child
-/// completes and leaves the stack before the next is requested, so the stack
-/// stays two deep and what this measures is per-request overhead without depth:
-/// rule selection, key derivation, arena allocation, and publication.
+/// One root requests `n` distinct children one after another; each completes
+/// and leaves the stack before the next is requested, so the stack stays two
+/// deep and this measures per-request overhead without depth: rule selection,
+/// key derivation, arena allocation, and publication.
 fn wide_sequence(width: u64) -> Duration {
     let mut engine = Engine::new();
     let signature = interface();
@@ -122,10 +114,10 @@ fn wide_sequence(width: u64) -> Duration {
 }
 
 /// The first request builds a chain `n` deep; each of the `n - 1` that follow
-/// finds its result already in the arena and revalidates it, which walks that
-/// result's whole recorded subtree. So the walk runs at every depth and this is
-/// where a per-pass memo would show up as the wrong bound if the walks were not
-/// each other's prefixes.
+/// finds its result already in the arena and revalidates it, walking that
+/// result's whole recorded subtree, so the walk runs at every depth. This is
+/// where a per-pass memo would show up as the wrong bound if the walks were
+/// not each other's prefixes.
 fn reused_chain(depth: u64) -> Duration {
     let mut engine = Engine::new();
     let signature = interface();
@@ -151,14 +143,14 @@ fn reused_chain(depth: u64) -> Duration {
 }
 
 /// A wide sequence of a fixed width, run while the arena holds `rules` further
-/// rules that no request ever names. Every one of them declares its own nominal
-/// output type, which is what 0015 forces a domain to do to make two rules
-/// distinguishable, so the population grows the way a domain model grows.
+/// rules no request ever names. Each declares its own nominal output type,
+/// which is what makes two rules distinguishable, so the population grows the
+/// way a domain model grows.
 ///
 /// The decoys are the cheapest population selection can be given: their inputs
-/// match the leaf's, so a structural comparison against one fails on the output
-/// constructor after a single equal `Int`. What this measures is therefore a
-/// floor on what scanning the arena costs, not a worst case.
+/// match the leaf's, so a structural comparison fails on the output constructor
+/// after a single equal `Int`. This measures a floor on the cost of scanning
+/// the arena, not a worst case.
 fn crowded_arena(rules: u64) -> Duration {
     let mut engine = Engine::new();
     let signature = interface();
@@ -386,7 +378,7 @@ fn first_int(inputs: &[Value]) -> i64 {
 }
 
 /// The sizes are `u64` so the table formats without casts; the calculus's `Int`
-/// is `i64` today, and every size here is far inside it.
+/// is `i64`, and every size here is far inside it.
 fn as_int(size: u64) -> i64 {
     i64::try_from(size).unwrap_or(i64::MAX)
 }

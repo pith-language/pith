@@ -2,7 +2,7 @@
 //!
 //! Owns the arena dependency graph, the synchronous step machine that
 //! evaluates the `Pure` fragment, and the async scheduler that drives
-//! `Action` / `Observation` / `Mutation` / `Opaque` (decisions 0021, 0022).
+//! `Action` / `Observation` / `Mutation` / `Opaque`.
 
 pub mod action;
 pub mod bound;

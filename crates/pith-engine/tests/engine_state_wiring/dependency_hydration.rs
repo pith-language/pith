@@ -2,9 +2,9 @@ use super::*;
 
 #[test]
 fn a_hydrated_computation_serves_as_a_dependency_of_a_new_computation() {
-    // The load-bearing case: a hydrated node must carry its durable identity,
-    // not just its value, so a computation built on top of it publishes an edge
-    // naming the original attempt rather than a duplicate.
+    // A hydrated node must carry its durable identity, not just its value, so
+    // a computation built on it publishes an edge naming the original attempt
+    // rather than a duplicate.
     let state = SharedEngineStateStore::default();
     let leaf = interface(&[], Type::Int);
     let root = interface(&[Type::Bool], Type::Int);
@@ -110,8 +110,8 @@ fn hydration_survives_a_dependency_recomputed_to_an_equal_result() {
     let root_attempt = durable_id(&first, first_root.computation);
     let leaf_key = pure_key_of(&first, leaf_dependency_of(&first, first_root.computation));
 
-    // A new leaf attempt with a canonically equal result. Decision 0024: the
-    // consumer is not dirty, so downstream propagation stops here.
+    // A new leaf attempt with a canonically equal result. The consumer is not
+    // dirty, so downstream propagation stops here.
     let equal_leaf = publish_reusable_attempt(&state, leaf_key, &Value::int(1));
 
     let mut second = engine_with_state(state.clone());
@@ -164,8 +164,8 @@ fn hydration_survives_a_dependency_recomputed_to_an_equal_result() {
 
 #[test]
 fn hydration_reports_an_engine_state_read_failure() {
-    // A broken adapter must not read as "nothing cached": decision 0024 makes
-    // corruption an adapter error, never a cache miss.
+    // A broken adapter must not read as "nothing cached": corruption is an
+    // adapter error, never a cache miss.
     let mut engine = engine_with_state(ReadFailingStore::default());
     let leaf = interface(&[], Type::Int);
     engine.register_rule(pure_rule("leaf", leaf.clone()), ConstantRule(Value::int(7)));
@@ -184,11 +184,11 @@ fn hydration_reports_an_engine_state_read_failure() {
 
 #[test]
 fn hydration_is_refused_when_a_dependency_rule_was_revised() {
-    // Decision 0049. A revised rule mints a *new* computation key, which leaves
-    // the old key's attempt undisturbed and still the latest reusable one under
-    // it. Asking only "is this key's latest attempt still the recorded one"
-    // therefore answers yes, and the consumer hydrates a result derived from a
-    // rule body this engine no longer has.
+    // A revised rule mints a new computation key, leaving the old key's attempt
+    // undisturbed and still its latest reusable one. A check asking only "is
+    // this key's latest attempt still the recorded one" answers yes, and the
+    // consumer hydrates a result derived from a rule body this engine no longer
+    // has.
     let state = SharedEngineStateStore::default();
     let leaf = interface(&[], Type::Int);
     let root = interface(&[Type::Bool], Type::Int);
@@ -237,11 +237,12 @@ fn hydration_is_refused_when_a_dependency_rule_was_revised() {
 
 #[test]
 fn hydration_is_refused_when_a_rule_two_levels_down_was_revised() {
-    // Decision 0051. The root's edge to the middle computation revalidates on
-    // its own terms and stops: the middle rule is unrevised, so its key is
-    // unmoved and its recorded attempt is still the latest reusable one under
-    // it. Everything 0049 checks passes, and the leaf underneath it has been
-    // revised. Only a walk into the middle attempt's own record sees it.
+    // The root's edge to the middle computation revalidates on its own terms
+    // and stops: the middle rule is unrevised, so its key is unmoved and its
+    // recorded attempt is still the latest reusable one under it. That
+    // edge-level check passes even though the leaf underneath the middle
+    // attempt has been revised; only a walk into the middle attempt's own
+    // record sees it.
     let state = SharedEngineStateStore::default();
     let leaf = interface(&[], Type::Int);
     let middle = interface(&[Type::Bool], Type::Int);
@@ -299,7 +300,7 @@ fn a_revised_leaf_recomputed_to_an_equal_result_still_hydrates_its_root() {
     // recorded middle attempt names the leaf at its old revision, and the
     // attempt that superseded it names the leaf at the new one. Descending into
     // the recorded attempt would refuse a root that is genuinely current, which
-    // is the early cutoff decision 0033 exists to preserve.
+    // is the early cutoff this walk exists to preserve.
     let state = SharedEngineStateStore::default();
     let leaf = interface(&[], Type::Int);
     let middle = interface(&[Type::Bool], Type::Int);
@@ -402,11 +403,10 @@ fn chain_root_request(root: &Interface) -> Request<Pure> {
 
 #[test]
 fn hydration_is_refused_when_a_dependency_rule_is_not_registered() {
-    // The other half of 0049's check, and the case that decides what an absent
-    // rule means for a recorded edge: refusing is not a lost optimization,
-    // because a consumer whose dependency has no rule cannot be evaluated at
-    // all. Serving it from the index would hand back a value this rule set
-    // cannot derive.
+    // The counterpart of the revision-refusal case, and the case deciding what
+    // an absent rule means for a recorded edge: a consumer whose dependency has
+    // no rule cannot be evaluated at all, so serving it from the index would
+    // hand back a value this rule set cannot derive.
     let state = SharedEngineStateStore::default();
     let leaf = interface(&[], Type::Int);
     let root = interface(&[Type::Bool], Type::Int);

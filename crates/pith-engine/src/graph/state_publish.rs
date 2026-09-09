@@ -1,16 +1,15 @@
 //! Translation from arena computation state into durable engine-state records.
 //!
 //! The live [`Engine`] publishes every computation that leaves the `Pending`
-//! state through [`crate::state::EngineStateStore`] (decision 0024). Arena
+//! state through [`crate::state::EngineStateStore`]. Arena
 //! handles never cross the boundary: the private `Engine::durable_attempts`
 //! table maps each computation node to its durable attempt identifier, and
 //! edges are translated into the typed durable records re-exported by
 //! [`crate::state`].
 //!
-//! Store calls happen only at engine scheduling boundaries (decision 0024,
-//! "adapter boundaries") — frame allocation, terminal transitions, and the
-//! reuse check. The synchronous pure evaluator's rule step never touches the
-//! store.
+//! Store calls happen only at engine scheduling boundaries: frame allocation,
+//! terminal transitions, and the reuse check. The synchronous pure evaluator's
+//! rule step never touches the store.
 
 use pith_core::{ActionComputationKey, CapabilityRequirement, PureComputationKey};
 use pith_diag::{DiagnosticSink, PithResult};
@@ -298,7 +297,7 @@ impl Engine {
 
     /// The capability requirements the arena propagated onto a node, which the
     /// completed record retains so a hydrated node does not have to re-derive
-    /// them without a subgraph (decision 0033).
+    /// them without a subgraph.
     fn node_capabilities(&self, computation: ComputationId) -> Box<[CapabilityRequirement]> {
         self.computations
             .get(computation)
@@ -457,8 +456,8 @@ impl Engine {
         Some(PureComputationKey::new(rule, request))
     }
 
-    /// The key the reusable action index is written and read under (decision
-    /// 0031). Derived from the same rule metadata `durable_action_plan` uses and
+    /// The key the reusable action index is written and read under. Derived
+    /// from the same rule metadata `durable_action_plan` uses and
     /// the digest of the contract that rule planned.
     pub(super) fn action_computation_key(
         &self,
@@ -476,7 +475,7 @@ impl Engine {
 
     /// Build a durable action plan from the selected action rule's revision and
     /// the validated spec. The rule's stable identity is derived from its
-    /// revision (decision 0023); the arena `RuleId` never crosses the boundary.
+    /// revision; the arena `RuleId` never crosses the boundary.
     pub(super) fn durable_action_plan(
         &self,
         rule: pith_core::RuleId,

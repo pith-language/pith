@@ -78,7 +78,7 @@ fn action_inputs(declaration: &str) -> [Value; 1] {
 
 /// The whole key for one of those actions, for reading the reusable index back.
 /// Derived the way the engine derives it, because publication rederives it and
-/// rejects a record whose stored digest disagrees (decision 0033).
+/// rejects a record whose stored digest disagrees.
 fn action_key(declaration: &str) -> Result<ActionComputationKey, Diag> {
     let plan = action_plan(declaration)?;
     Ok(ActionComputationKey::from_parts(
@@ -143,7 +143,7 @@ fn pure_completion(
 }
 
 /// A pure completion whose dependencies carry capability requirements, which
-/// the publication validator expects to see propagated (decision 0033).
+/// the publication validator expects to see propagated.
 fn pure_completion_requiring(
     value: Value,
     dependencies: Box<[DurableDependency]>,
@@ -390,7 +390,7 @@ fn pending_action_retains_durable_plan_authorization_and_observed_report()
         },
     )?;
     // A completed reusable action is findable under its own key, and only
-    // there (decision 0031).
+    // there.
     assert_eq!(
         store
             .latest_completed_reusable_action_attempt(action_key("action")?)?
@@ -795,9 +795,9 @@ fn captured_report_metadata_survives_output_import_failure()
 fn an_action_digest_its_request_does_not_produce_is_rejected()
 -> Result<(), Box<dyn std::error::Error>> {
     // The record retains the key's preimage, so the digest beside it is
-    // checkable (decision 0033). A record filed under a digest its own request
-    // does not produce would be findable in the index under a key that names a
-    // different rule application.
+    // checkable. A record filed under a digest its own request does not
+    // produce would be findable in the index under a key naming a different
+    // rule application.
     let store = MemoryEngineStateStore::default();
     let attempt = store.create_pending_attempt(DurableComputation::Action {
         // The digest of a different action, over this action's request.
@@ -836,9 +836,9 @@ fn an_action_digest_its_request_does_not_produce_is_rejected()
 fn capability_requirements_a_dependency_does_not_carry_are_rejected()
 -> Result<(), Box<dyn std::error::Error>> {
     // A completed attempt records what it requires so a hydrated node can
-    // restore it without the arena subgraph that propagated it (decision
-    // 0033). Recording more than the dependencies carry would grant a
-    // capability nothing in the graph asked for.
+    // restore it without the arena subgraph that propagated it. Recording more
+    // than the dependencies carry would grant a capability nothing in the
+    // graph asked for.
     let store = MemoryEngineStateStore::default();
     let dependency_key = pure_computation("capability-free", 1);
     let dependency = store.create_pending_attempt(DurableComputation::Pure(dependency_key))?;

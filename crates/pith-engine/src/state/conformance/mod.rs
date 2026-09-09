@@ -1,13 +1,12 @@
 //! Cross-adapter conformance tests for [`EngineStateStore`].
 //!
 //! Adapters choose their own representation, so a generated sequence of store
-//! operations is applied both to the adapter under test and to
-//! [`MemoryEngineStateStore`] as a reference model. Every outcome and every
-//! subsequent read must agree.
-//!
-//! Attempt identifiers are store-local. Records and errors are compared after
-//! translating the adapter's identifiers into the model's, so an adapter that
-//! allocates in a different order still conforms.
+//! operations is applied to both the adapter under test and
+//! [`MemoryEngineStateStore`] as a reference model; every outcome and every
+//! subsequent read must agree. Attempt identifiers are store-local: records
+//! and errors are compared after translating the adapter's identifiers into
+//! the model's, so an adapter that allocates in a different order still
+//! conforms.
 //!
 //! ```ignore
 //! proptest! {

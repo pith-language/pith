@@ -82,10 +82,9 @@ pub(super) fn action_computation(
     spec.capabilities = capabilities.iter().copied().map(capability).collect();
     let revision = RuleRevision::of_manifest(identity, &[rule]);
     let plan = DurableActionPlan::new(DurableRule::new(revision), spec).ok()?;
-    // The digest is derived from the retained request the way a real one is,
-    // because the publication validator rederives it (decision 0033). Distinct
-    // generated actions differ in the rule, the contract, or the input, so
-    // their keys differ without anything here arranging it.
+    // The digest is derived from the retained request like a real one, because
+    // the publication validator rederives it. Distinct generated actions
+    // differ in rule, contract, or input, so their keys differ on their own.
     let interface = Interface {
         inputs: Box::new([Type::Int]),
         output: Type::Blob,
@@ -155,7 +154,7 @@ pub(super) fn content_id(seed: u8) -> ContentId {
 }
 
 /// A host path for an action executable, varied by `seed` so distinct conformance
-/// actions get distinct identities (decision 0030: `executable` is a host path).
+/// actions get distinct identities (`executable` is a host path).
 pub(super) fn host_path(seed: u8) -> &'static str {
     const PATHS: &[&str] = &[
         "/bin/a", "/bin/b", "/bin/c", "/bin/d", "/bin/e", "/bin/f", "/bin/g", "/bin/h",

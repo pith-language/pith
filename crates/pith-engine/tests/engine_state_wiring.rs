@@ -1,8 +1,6 @@
 //! Live-engine coverage for the publish and reuse wiring to
-//! [`EngineStateStore`] (decision 0024). The conformance suite in
-//! `engine_state.rs` exercises the store through the trait directly; these
-//! tests exercise the live [`Engine`] publishing real computations and
-//! revalidating durable reuse.
+//! [`EngineStateStore`]. The conformance suite in `engine_state.rs` exercises
+//! the store trait directly; these tests exercise the live [`Engine`].
 
 use pith_core::{
     Action, ActionComputationKey, ActionInput, ActionOutput, ActionSpec, CapabilityRequirement,
@@ -270,8 +268,8 @@ fn pure_rule(label: &str, interface: Interface) -> Rule<Pure> {
     )
 }
 
-/// The same rule at a different revision, which is what decision 0023 has an
-/// author bump when the rule's semantics change.
+/// The same rule at a different revision: the revision is what an author bumps
+/// when the rule's semantics change.
 fn revised_pure_rule(label: &str, interface: Interface, revision: &[u8]) -> Rule<Pure> {
     let identity = RuleIdentity::of_module_declaration("engine-state-wiring-tests", label);
     Rule::<Pure>::new(
@@ -320,8 +318,7 @@ fn engine_with_fixtures() -> Engine {
 /// so those tests build several engines over one shared adapter.
 fn engine_with_state(state: impl EngineStateStore + 'static) -> Engine {
     let mut content = MemoryContentStore::default();
-    // The executable is a host path (decision 0030); only the declared input
-    // blob is stored.
+    // The executable is a host path; only the declared input blob is stored.
     let input = put_fixture_blob(&mut content, b"fixture input");
     assert_eq!(input, action_input());
     Engine::with_state_store(content, state)
@@ -329,7 +326,7 @@ fn engine_with_state(state: impl EngineStateStore + 'static) -> Engine {
 
 /// An engine over content *and* engine state that outlive it. Reusing an action
 /// across instances needs both: the index says which attempt, and the content
-/// store still has to hold what that attempt produced (decision 0031).
+/// store still has to hold what that attempt produced.
 fn engine_with_shared_substrate(
     state: impl EngineStateStore + 'static,
     content: SharedContentStore,
@@ -485,21 +482,8 @@ fn attempt_history_len(state: &SharedEngineStateStore, computation: PureComputat
     }
 }
 
-// ---------------------------------------------------------------------------
-// Publish path: pure computations
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Publish path: action computations
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Reuse path: durable revalidation (decision 0024)
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Hydration: durable reuse across engine instances (decision 0024)
-// ---------------------------------------------------------------------------
+// The tests live in the submodules: pure and action publication, durable
+// reuse, and hydration across engine instances.
 
 fn register_action_fixtures(
     engine: &mut Engine,

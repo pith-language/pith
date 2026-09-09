@@ -1,10 +1,8 @@
 //! Test fixture: evaluate one pure computation into a sqlite engine-state
-//! database and exit.
-//!
-//! Hydration across a *process* boundary cannot be observed from inside one
-//! process, so the cross-process test spawns this binary to be the engine that
-//! computes the result, then reads it back from a fresh engine after this
-//! process has exited.
+//! database and exit. Hydration across a process boundary cannot be observed
+//! from inside one process, so the cross-process test spawns this binary to
+//! compute the result, then reads it back from a fresh engine after this
+//! process exits.
 //!
 //! Usage: `write_leaf <database-path> <value>`
 
@@ -58,8 +56,8 @@ fn main() -> ExitCode {
 }
 
 /// The rule identity and revision are derived from the module and declaration
-/// names, so both processes name the same rule without sharing memory. That is
-/// what makes the reader's computation key equal the writer's.
+/// names, so both processes name the same rule without sharing memory, and
+/// the reader's computation key equals the writer's.
 pub fn leaf_rule() -> Rule<Pure> {
     let identity = RuleIdentity::of_module_declaration("pith-state-sqlite-fixture", "leaf");
     let revision = RuleRevision::of_manifest(identity, b"pith-state-sqlite-fixture-v1");

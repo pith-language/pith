@@ -1,4 +1,4 @@
-//! The read-only query interface over a built graph (requirement K-12).
+//! The read-only query interface over a built graph.
 
 use std::sync::Arc;
 
@@ -133,13 +133,12 @@ impl<'engine, S: EngineStateReader + ?Sized> EngineQuery<'engine, S> {
 
     /// Explain why `computation` is not reusable, as a chain over the live
     /// arena graph. `None` when the computation is unknown, not complete, or
-    /// reusable (there is nothing to explain). The live-graph mirror of the
-    /// durable [`EngineStateReader::explain_invalidation`], keyed on
+    /// reusable. The live-graph mirror of the durable
+    /// [`EngineStateReader::explain_invalidation`], keyed on
     /// [`ComputationId`] rather than `DurableAttemptId`.
     ///
     /// The chain follows the single dependency the computation's own
-    /// [`ReuseReason`] names, so the explanation
-    /// matches the reuse decision the engine computed for the node.
+    /// [`ReuseReason`] names.
     ///
     /// [`EngineStateReader::explain_invalidation`]:
     ///     crate::state::EngineStateReader::explain_invalidation

@@ -112,7 +112,7 @@ proptest! {
     ) {
         // `Tree::from_manifest` reads untrusted stored bytes; it must return
         // an error rather than index, allocate without bound, or panic. The
-        // assertion is a tautology — the real check is that the call returns.
+        // assertion is a tautology; the real check is that the call returns.
         let result = Tree::from_manifest(&bytes);
         prop_assert!(result.is_ok() || result.is_err());
     }

@@ -100,10 +100,10 @@ fn a_read_only_open_reads_what_the_writable_open_wrote() {
     );
 }
 
-/// Writes do not exist on the read-only type — they are not refused, they
-/// are absent — so the only thing a test can still assert is the lattice:
-/// the read-only store satisfies every reader bound, and the writable store
-/// does too (read-write implies read-only through the supertrait).
+/// Writes do not exist on the read-only type; they are not refused but
+/// absent. What a test can still assert is the lattice: the read-only store
+/// satisfies every reader bound, and the writable store does too (read-write
+/// implies read-only through the supertrait).
 #[test]
 fn the_read_only_store_satisfies_every_reader_bound() {
     fn accepts_reader(reader: &dyn pith_engine::state::EngineStateReader) -> bool {

@@ -28,8 +28,8 @@ pub enum InventoryKind {
 /// ignored; every other entry must be a regular file named by its digest.
 ///
 /// # Errors
-/// Returns [`StoreError`] when a directory cannot be read, a name is not a
-/// digest, or an object's size cannot be observed.
+/// [`StoreError`] when the directory cannot be read or an entry is not a
+/// digest-named regular file.
 pub(super) fn directory_inventory(
     directory: &Path,
     kind: InventoryKind,

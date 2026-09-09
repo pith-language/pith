@@ -31,10 +31,9 @@ fn an_identical_action_is_served_from_the_reusable_index() {
     let second_evaluation_result = second_runtime_result.unwrap();
     let second = second_evaluation_result.unwrap();
 
-    // The consumer is served whole (decision 0033): revalidating its action
-    // edge re-selects the rule, re-plans the recorded request, derives the key
-    // it was recorded under, and finds the attempt still admissible. Its rule
-    // body does not run a second time, and neither does the action.
+    // The consumer is served whole: revalidating its action edge re-selects
+    // the rule, re-plans the recorded request, derives the recorded key, and
+    // finds the attempt still admissible. Neither rule body nor action reruns.
     assert_eq!(first.source, EvaluationSource::Computed);
     assert_eq!(second.source, EvaluationSource::Reused);
     assert_eq!(first.computation, second.computation);
@@ -63,12 +62,11 @@ fn an_identical_action_is_served_from_the_reusable_index() {
     ));
 }
 
-/// The consumer of an action is revalidated against a re-plan, so a contract
-/// that changed for a reason the consumer's own key cannot see makes the
-/// consumer dirty (decision 0033). `HeldStateAction` plans from state it holds
-/// rather than from the request, which is the shape of a compile rule holding a
-/// header: the header is not a request input and participates in no rule
-/// revision, so only the planned contract's digest records it.
+/// A consumer is revalidated against a re-plan, so a contract change the
+/// consumer's own key cannot see still makes it dirty. `HeldStateAction` plans
+/// from state it holds rather than from the request, the shape of a compile
+/// rule holding a header: not a request input, in no rule revision, recorded
+/// only by the planned contract's digest.
 #[test]
 fn a_consumer_reruns_when_its_action_replans_a_different_contract() {
     let mut engine = fixture_engine();
@@ -100,8 +98,8 @@ fn a_consumer_reruns_when_its_action_replans_a_different_contract() {
     assert_eq!(computed.source, EvaluationSource::Computed);
     assert_eq!(executions.load(Ordering::Relaxed), 1);
 
-    // Nothing in the consumer's key changed, and nothing in the request did
-    // either. The plan is the only place the difference is visible.
+    // Nothing in the consumer's key or the request changed; the plan is the
+    // only place the difference is visible.
     held.store(22, Ordering::Relaxed);
     let rerun = engine
         .run(&root_request, &runtime(), &AllowAllActions, &executor)
@@ -282,7 +280,7 @@ fn distinct_parents_share_one_action_result() {
         .unwrap();
 
     // The action key comes from the action request and the contract it plans,
-    // so two parents asking for one action share its attempt (decision 0031).
+    // so two parents asking for one action share its attempt.
     assert_eq!(boolean_parent.source, EvaluationSource::Computed);
     assert_eq!(text_parent.source, EvaluationSource::Computed);
     assert_eq!(boolean_action, text_action);
@@ -293,7 +291,7 @@ fn distinct_parents_share_one_action_result() {
 fn an_action_below_the_confinement_floor_is_not_reused() {
     let mut engine = fixture_engine();
     // `UnverifiedCountingExecutor` reports `Unverified`, which this floor
-    // refuses (decision 0031).
+    // refuses.
     engine.set_minimum_access_verification(AccessVerification::Observed);
     let action_interface = interface(&[Type::Int], Type::Blob);
     let root_interface = interface(&[], Type::Blob);

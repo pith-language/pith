@@ -1,6 +1,6 @@
 //! The sqlite adapter against a real filesystem, including the property the
 //! in-memory adapter cannot demonstrate: a result computed by one *process*
-//! being hydrated by another (decision 0024).
+//! being hydrated by another.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -82,8 +82,8 @@ fn leaf_interface() -> Interface {
     }
 }
 
-/// Identical derivation to the fixture binary's, which is the point: two
-/// processes agree on a computation key without sharing anything but strings.
+/// Identical derivation to the fixture binary's: two processes agree on a
+/// computation key without sharing anything but strings.
 fn leaf_rule() -> Rule<Pure> {
     let identity = RuleIdentity::of_module_declaration("pith-state-sqlite-fixture", "leaf");
     let revision = RuleRevision::of_manifest(identity, b"pith-state-sqlite-fixture-v1");
@@ -220,7 +220,7 @@ fn a_dependency_changed_by_another_process_makes_the_consumer_dirty() {
     engine.register_rule(leaf_rule(), FailingRule);
 
     // The newest reusable attempt for the key is the 42 one, so that is what
-    // hydrates — the older attempt is not resurrected.
+    // hydrates; the older attempt is not resurrected.
     let evaluation = match engine.evaluate_pure(&leaf_request()) {
         Ok(evaluation) => evaluation,
         Err(error) => unreachable!("the leaf did not hydrate: {error:?}"),
@@ -274,11 +274,9 @@ fn records_survive_closing_and_reopening_the_database() {
 
 #[test]
 fn an_interrupted_pending_attempt_is_cancelled_on_reopen() {
-    // Decision 0024: after interruption, attempts left `Pending` are given a
-    // terminal state rather than resumed. Reopening the database performs that
-    // recovery, so a later reader finds a terminated attempt, not a pending
-    // one. The state is `Cancelled` because the attempt was stopped, not
-    // broken; 0022 added that distinction after 0024 was written.
+    // Attempts left `Pending` by an interruption are given a terminal state,
+    // not resumed; reopening the database performs that recovery. The state
+    // is `Cancelled` because the attempt was stopped, not broken.
     let scratch = Scratch::new("pending");
     let database = scratch.database();
 
@@ -357,8 +355,8 @@ fn an_action_attempt_round_trips_its_plan_and_provenance() {
         output: Type::Blob,
     };
     let request_inputs = [Value::Text("a.c".into())];
-    // Derived, not invented: publication rebuilds the digest from the retained
-    // request and rejects a record whose stored one disagrees (decision 0033).
+    // Derived from the retained parts: publication rebuilds the digest from
+    // the request and rejects a record whose stored digest disagrees.
     let key = ActionComputationKey::from_parts(
         identity,
         revision,
@@ -425,7 +423,6 @@ fn an_action_attempt_round_trips_its_plan_and_provenance() {
         DurableAttemptState::Complete(completion),
         "an action attempt did not survive its round trip through sqlite"
     );
-    // A reusable action is findable under its own key (decision 0031).
     match state.latest_completed_reusable_action_attempt(key) {
         Ok(Some(found)) => assert_eq!(found.id, attempt),
         Ok(None) => unreachable!("the reusable action index did not answer for its own key"),
@@ -530,9 +527,9 @@ fn a_failed_attempt_round_trips_its_diagnostics() {
 
 #[test]
 fn an_incompatible_database_is_moved_aside_and_rebuilt() {
-    // Decision 0024: before release, an incompatible metadata version causes
-    // the database to be moved aside and rebuilt. Silent reinterpretation under
-    // a different schema is forbidden.
+    // Before release an incompatible metadata version moves the database
+    // aside and rebuilds; silent reinterpretation under a different schema
+    // is forbidden.
     let scratch = Scratch::new("incompatible");
     let database = scratch.database();
 
@@ -590,10 +587,9 @@ fn an_empty_database_adopts_the_current_versions() {
     assert_eq!(state.versions(), SqliteEngineStateStore::current_versions());
 }
 
-/// Decision 0027 asks for incremental auto-vacuum at creation time, because
-/// sqlite ignores the pragma once the database holds tables and recovering it
-/// then costs a full `VACUUM`. The failure is silent, so it is asserted rather
-/// than assumed.
+/// Incremental auto-vacuum must be set at creation: sqlite ignores the pragma
+/// once the database holds tables, and changing it then costs a full
+/// `VACUUM`. The pragma fails silently, so the test asserts it.
 #[test]
 fn a_fresh_database_is_created_with_incremental_auto_vacuum() {
     use diesel::RunQueryDsl as _;

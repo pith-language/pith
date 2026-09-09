@@ -15,9 +15,8 @@ pub(super) type Selector = u16;
 const RESULT_FIELD_NAMES: [&str; 2] = ["name", "value"];
 
 /// The retained result of a generated completion. Covers the recursive value
-/// constructors — list, record, sum — beside the scalars, so an adapter's
-/// treatment of every landed constructor is compared, not just the ones the
-/// fixtures happened to use first.
+/// constructors (list, record, sum) beside the scalars, so an adapter's
+/// treatment of every landed constructor is compared.
 fn result_value() -> impl Strategy<Value = Value> {
     prop_oneof![
         2 => any::<i64>().prop_map(Value::int),
@@ -80,8 +79,8 @@ pub enum Step {
         corrupt_reuse: bool,
     },
     /// Stop an attempt without a result. `cancelled` picks which terminal
-    /// state it is published as; the record carried is the same either way, so
-    /// one step covers both and the two cannot drift apart in what they test.
+    /// state is published; the record carried is the same either way, so one
+    /// step covers both.
     Stop {
         attempt: Selector,
         dependencies: Box<[GeneratedDependency]>,

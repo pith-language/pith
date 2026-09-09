@@ -28,11 +28,9 @@ pub trait ActionRule: Send + Sync {
 #[async_trait]
 pub trait Executor: Send + Sync {
     /// Who this executor is and where it runs, before it has run anything.
-    ///
-    /// The engine asks this before consulting the reusable action index
-    /// (decision 0031): an attempt recorded by a different executor, or on a
-    /// different platform, does not answer this run's question. Every report
-    /// this executor produces carries the same two values.
+    /// Asked before consulting the reusable action index: an attempt recorded
+    /// by a different executor or platform does not answer this run's
+    /// question. Every report this executor produces carries the same values.
     fn identity(&self) -> ExecutorIdentity;
 
     /// Execute `invocation` and return captured output bytes and a report.
@@ -51,26 +49,23 @@ pub struct ExecutorIdentity {
 
 /// Least-authority input view passed to an executor for one action.
 ///
-/// The executable is a host path carried in [`ActionSpec::executable`] (decision
-/// 0030); the executor `execve`s it directly and does not receive materialized
-/// bytes for it. Only declared source inputs are materialized here, since they
-/// are content the engine resolves from its store.
+/// The executable stays a host path in [`ActionSpec::executable`]; the
+/// executor `execve`s it and does not receive materialized bytes for it. Only
+/// declared source inputs are materialized here.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActionInvocation {
     pub spec: ActionSpec,
     pub inputs: Box<[MaterializedActionInput]>,
     /// The bytes of the program, when the contract named content rather than a
-    /// host path (`ActionProgram::Content`). The engine resolves it from the
-    /// content store on the same terms as an input, so the executor never
-    /// touches the store. `None` for a host-path program, whose bytes belong to
-    /// the host.
+    /// host path (`ActionProgram::Content`); `None` for a host-path program.
+    /// The engine resolves a content program from the store like an input, so
+    /// the executor never touches the store.
     pub program: Option<MaterializedBlob>,
-    /// The wall-clock deadline of the run starting this action, when that run
-    /// declared one (decision 0059). An executor that receives one ends the
-    /// child at it and refuses with the bound's code rather than capturing
-    /// anything. Authority for an execution, not content of the contract: it
-    /// participates in no computation key, and a recorded attempt serves a run
-    /// under any bound, because reuse serves it without running anything.
+    /// Wall-clock deadline inherited from the run starting this action, when
+    /// that run declared one. An executor ends the child at it and refuses
+    /// with the bound's code. Authority for an execution, not content of the
+    /// contract: it participates in no computation key, and a recorded attempt
+    /// serves a run under any bound.
     pub deadline: Option<std::time::Instant>,
 }
 
@@ -105,8 +100,6 @@ pub struct MaterializedTree {
 pub type MaterializedTreeEntry = TreeEntry<MaterializedFileContent, MaterializedTree>;
 
 /// A materialized file: its content identity, executability, and local bytes.
-/// Carries everything the canonical store form does, plus the bytes a blob
-/// materializes to.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MaterializedFileContent {
     pub content: ContentId,
@@ -132,12 +125,11 @@ pub struct CapturedActionExecution {
 pub struct ActionExecution {
     pub report: ExecutionReport,
     /// How the program ended, carried through from the executor so
-    /// [`ActionRule::complete`] can read a verdict out of it under
-    /// `ExitStatusContract::Reported`.
-    ///
-    /// [`ExecutionReport`] is the part that persists, and this is not on it.
-    /// `complete` runs only when an action actually executes, and a later run is
-    /// served the value it derived, so the derived value is what the graph keeps.
+    /// [`ActionRule::complete`] can read a verdict under
+    /// `ExitStatusContract::Reported`. Not on [`ExecutionReport`], the part
+    /// that persists: `complete` runs only when an action actually executes,
+    /// and a later run is served the derived value, so this is what the graph
+    /// keeps.
     pub exit: Option<ActionExit>,
 }
 
@@ -165,14 +157,14 @@ pub enum AccessVerification {
 impl AccessVerification {
     /// Whether this level is at least as strong a claim as `minimum`. Used to
     /// decide whether a recorded attempt's confinement is good enough for a run
-    /// that demands more (decision 0031).
+    /// that demands more.
     #[must_use]
     pub const fn satisfies(self, minimum: Self) -> bool {
         self.strength() >= minimum.strength()
     }
 
-    /// Ordering of the three claims. The variants are declared strongest
-    /// first, so a derived `Ord` would mean the opposite of this.
+    /// Variants are declared strongest first, so a derived `Ord` would mean
+    /// the opposite of this ordering.
     const fn strength(self) -> u8 {
         match self {
             Self::Unverified => 0,
@@ -199,8 +191,8 @@ pub struct ProducedOutput {
 }
 
 /// One output an executor reports capturing. The Blob/Tree discriminator lives
-/// in the [`CapturedOutputContent`] payload; the engine no longer hand-matches
-/// a separate kind against it.
+/// in the [`CapturedOutputContent`] payload; there is no separate `kind`
+/// field to hand-match against it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CapturedOutput {
     pub path: Box<str>,
