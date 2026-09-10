@@ -1,9 +1,7 @@
-//! The process driver and `Executor` implementation (decision 0028).
-//!
-//! Orchestrates [`crate::stage`] → fork/exec → [`crate::capture`], installing
-//! the sandbox filters in the child between `fork` and `execve`. The sandbox is
-//! installed via a `pre_exec` hook on `tokio::process::Command`, which is the
-//! async-safe place to run `prctl`/`seccomp`/`landlock` setup.
+//! The process driver and `Executor` implementation: orchestrates
+//! [`crate::stage`] → fork/exec → [`crate::capture`], installing the sandbox
+//! filters in the child between `fork` and `execve` via a `pre_exec` hook on
+//! `tokio::process::Command`.
 
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -23,13 +21,11 @@ use crate::stage;
 use crate::sys_landlock::landlock_installed;
 use crate::sys_seccomp::{register_sandbox_hook, seccomp_filter_installed};
 
-/// The name this executor stamps on every report, and answers the engine with
-/// when asked who is about to run (decision 0031).
+/// The name this executor stamps on reports and answers the engine with.
 const EXECUTOR_NAME: &str = "pith-executor-local";
 
-/// Who this executor is and where it runs. The engine is answered from this
-/// before execution and the report is built from it after, so the two cannot
-/// disagree about which executor produced a result.
+/// The identity answered before execution and stamped on the report after, so
+/// both name the same executor.
 fn executor_identity() -> ExecutorIdentity {
     ExecutorIdentity {
         executor: EXECUTOR_NAME.into(),
@@ -61,12 +57,10 @@ impl LocalExecutor {
         }
     }
 
-    /// The [`AccessVerification`] this build reports, given which confinement
-    /// layers it actually installed. `Prevented` requires both landlock and
-    /// seccomp; `Observed` is one layer alone; `Unverified` is neither. This
-    /// build installs both on Linux x86_64 (see [`crate::sys_landlock`] and
-    /// [`crate::sys_seccomp`]); elsewhere the seccomp half does not exist and
-    /// the honest report is `Observed`.
+    /// The [`AccessVerification`] for whichever confinement layers installed.
+    /// This build installs both on Linux x86_64 (see [`crate::sys_landlock`]
+    /// and [`crate::sys_seccomp`]); elsewhere seccomp is absent and one layer
+    /// alone reports `Observed`.
     fn access_verification() -> AccessVerification {
         match (landlock_installed(), seccomp_filter_installed()) {
             (true, true) => AccessVerification::Prevented,
@@ -76,8 +70,8 @@ impl LocalExecutor {
         }
     }
 
-    /// The platform this executor runs on. Detected from `std::env::consts` so
-    /// it matches the host the executor binary runs on.
+    /// The platform of the host this executor binary runs on, from
+    /// `std::env::consts`.
     fn platform() -> ExecutionPlatform {
         ExecutionPlatform {
             operating_system: std::env::consts::OS.into(),
@@ -102,10 +96,8 @@ impl Executor for LocalExecutor {
         &self,
         invocation: &ActionInvocation,
     ) -> pith_diag::PithResult<CapturedActionExecution> {
-        // The first version of this executor does not honor network access
-        // (decision 0028 "unresolved"). Refuse rather than silently relaxing
-        // the seccomp filter, so the declared contract is never quietly
-        // violated.
+        // This build cannot honor network access; refuse rather than permit
+        // what the seccomp filter does not confine.
         if !matches!(invocation.spec.network, NetworkPolicy::Deny) {
             return Err(crate::executor_diag(
                 "the local executor does not honor network access in this build; \
@@ -113,9 +105,8 @@ impl Executor for LocalExecutor {
             ));
         }
 
-        // If the spec pins an exact platform, it must match the host this
-        // executor runs on. The engine validates this again on the report; do
-        // it here too so a mismatch fails fast before staging a scratch root.
+        // Beyond the engine's own validation, so a platform mismatch fails
+        // before a scratch root is staged.
         if let PlatformRequirement::Exact {
             operating_system,
             architecture,
@@ -134,8 +125,8 @@ impl Executor for LocalExecutor {
 
         let scratch = create_scratch_root(&self.scratch_base)?;
         let result = run_in_scratch(invocation, scratch.path()).await;
-        // The scratch root is cleaned up when `scratch` drops, regardless of
-        // outcome. Outputs were already captured into memory by `run_in_scratch`.
+        // Cleanup happens when `scratch` drops, regardless of outcome; outputs
+        // are already captured into memory.
         drop(scratch);
         result
     }
@@ -151,14 +142,12 @@ fn create_scratch_root(base: &Option<PathBuf>) -> pith_diag::PithResult<tempfile
     .map_err(|error| crate::executor_diag(format!("could not create scratch root: {error}")))
 }
 
-/// How much of a failed action's stderr the diagnostic carries. A build tool
-/// can produce megabytes; the tail is where the error that stopped it is, and
-/// the rest belongs in a log the executor does not yet keep.
+/// How much of a failed action's stderr the diagnostic carries; the tail is
+/// where the error that stopped the tool usually is.
 const STDERR_EXCERPT: usize = 4096;
 
-/// Why the child stopped, in terms the reader can act on. A signal is not an
-/// exit code, and reporting one as the other is how "killed by the OOM killer"
-/// gets mistaken for "the compiler rejected the input".
+/// Why the child stopped, in terms a diagnostic reader can act on. A signal is
+/// reported as a signal, not converted into an exit code.
 fn exit_description(status: &std::process::ExitStatus) -> String {
     use std::os::unix::process::ExitStatusExt;
 
@@ -171,9 +160,7 @@ fn exit_description(status: &std::process::ExitStatus) -> String {
     }
 }
 
-/// The tail of the child's stderr, if it wrote any. Without this a failed
-/// action reports only its exit status, which says that something went wrong
-/// and nothing about what.
+/// The tail of the child's stderr, appended to a failure diagnostic.
 fn stderr_note(stderr: &[u8]) -> String {
     let excerpt = stderr_excerpt(stderr);
     let text = String::from_utf8_lossy(excerpt);
@@ -191,9 +178,9 @@ fn stderr_note(stderr: &[u8]) -> String {
     format!("; stderr: {text}")
 }
 
-/// The tail of `stderr`, cut at a line boundary so the excerpt does not begin
-/// mid-word. Falls back to the byte cut when the tail holds no newline, which
-/// is the case for a tool that wrote one very long line.
+/// The tail of `stderr`, cut after the first newline in the tail so the excerpt
+/// does not start mid-word. Falls back to the byte cut when the tail holds no
+/// newline, as from a tool that wrote one very long line.
 fn stderr_excerpt(stderr: &[u8]) -> &[u8] {
     let Some(from) = stderr.len().checked_sub(STDERR_EXCERPT) else {
         return stderr;
@@ -218,13 +205,12 @@ async fn run_child(command: &mut Command) -> pith_diag::PithResult<std::process:
         .map_err(|error| crate::executor_diag(format!("waiting for the action failed: {error}")))
 }
 
-/// Wait for the child no longer than the run's deadline allows (decision 0059).
+/// Wait for the child no longer than the run's deadline allows.
 ///
-/// On elapse the wait future is dropped and `kill_on_drop` ends the child. The
-/// action is then refused with the bound's code rather than captured: a killed
-/// child wrote nothing the declared contract stands behind, and under
-/// `Reported` a timeout must never reach a rule as a signal-death verdict
-/// (decision 0037).
+/// On elapse the wait future is dropped and `kill_on_drop` ends the child; the
+/// action is refused with the bound's code rather than captured. Nothing a
+/// killed child wrote stands behind the declared contract, and under `Reported`
+/// a timeout must not reach a rule as a signal-death verdict.
 async fn run_child_bounded(
     command: &mut Command,
     deadline: Instant,
@@ -252,8 +238,7 @@ async fn run_in_scratch(
         .args(invocation.spec.arguments.iter().map(|arg| arg.as_ref()))
         .current_dir(&staged.working_dir)
         // A clean environment: no ambient inheritance. `TMPDIR` is set before
-        // the declared variables rather than after, so a spec that declares its
-        // own still wins.
+        // the declared variables, so a spec declaring its own still wins.
         .env_clear()
         .env("TMPDIR", &staged.temp_dir)
         .envs(
@@ -264,13 +249,13 @@ async fn run_in_scratch(
                 .map(|var| (var.name.as_ref(), var.value.as_ref())),
         )
         .stdin(Stdio::null())
-        // Piped explicitly because the child is spawned rather than run through
-        // `output()`, which would set these itself.
+        // Piped explicitly: the child goes through `spawn` and
+        // `wait_with_output`, which do not set these the way `output()` would.
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        // The engine drops this future to cancel an action, so the child has to
-        // die with it. Without this a cancelled action leaves a process running
-        // against a scratch root that is about to be deleted.
+        // The engine cancels an action by dropping this future, so the child
+        // must die with it rather than outlive a scratch root about to be
+        // deleted.
         .kill_on_drop(true);
     // Built before the fork so the child's pre_exec hook allocates nothing.
     let paths = crate::sys_landlock::SandboxPaths::new(
@@ -290,8 +275,8 @@ async fn run_in_scratch(
         None => run_child(&mut command).await?,
     };
     // Under `SuccessRequired` a nonzero exit means the declared outputs were
-    // never written, so there is nothing to capture and the action failed. Under
-    // `Reported` the status is the result, and the rule reads it (decision 0037).
+    // never written, so there is nothing to capture. Under `Reported` the
+    // status is the result, and the rule reads it.
     if invocation.spec.exit_status == ExitStatusContract::SuccessRequired
         && !output.status.success()
     {
@@ -311,19 +296,18 @@ async fn run_in_scratch(
             platform: identity.platform,
             access: LocalExecutor::access_verification(),
             outputs: captured_outputs.into_boxed_slice(),
-            // The executor enforced whatever capabilities the spec declared via
-            // the sandbox; it adds none of its own. The engine's
-            // `validate_execution` confirms the reported set is a subset of the
-            // declared set.
+            // Exactly what the spec declared; the executor adds none of its
+            // own. The engine's `validate_execution` confirms the reported set
+            // is a subset of the declared set.
             capabilities_used: invocation.spec.capabilities.clone(),
         },
         exit: observed_exit(&output.status),
     })
 }
 
-/// How the child stopped, as an [`ActionExit`]. A status carrying neither a code
-/// nor a signal is not something this platform produces; `None` reports that
-/// honestly, where a zero would be invented.
+/// How the child stopped, as an [`ActionExit`]. `None` when the status carries
+/// neither a code nor a signal, which this platform does not produce; a zero
+/// would be invented.
 fn observed_exit(status: &std::process::ExitStatus) -> Option<ActionExit> {
     use std::os::unix::process::ExitStatusExt;
 

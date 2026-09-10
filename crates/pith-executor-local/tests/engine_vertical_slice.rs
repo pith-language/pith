@@ -16,8 +16,8 @@ use pith_ids::ContentId;
 
 mod support;
 
-/// A runtime for one test. Built per call: constructing a thread pool is
-/// cheap next to what these tests do, and it keeps each test independent.
+/// A per-test runtime: a thread pool is cheap next to what these tests do, and
+/// per-call construction keeps each test independent.
 fn runtime() -> TokioRuntime {
     match TokioRuntime::new() {
         Ok(runtime) => runtime,

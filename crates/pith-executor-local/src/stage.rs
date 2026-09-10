@@ -1,18 +1,13 @@
-//! Staging declared inputs into a private scratch root.
-//!
-//! Pure filesystem work: no `unsafe`, no syscalls beyond ordinary `mkdir`,
-//! `write`, and `symlink`. The executor's authority is the mapping from the
-//! engine's typed [`MaterializedContent`] to a concrete directory layout the
-//! child sees. Paths come from the validated [`pith_core::ActionSpec`], which
-//! already rejected absolute paths, `..`, trailing slashes, and overlapping
+//! Staging declared inputs into a private scratch root. Pure filesystem work:
+//! no `unsafe`, no syscalls beyond ordinary `mkdir`, `write`, and `symlink`.
+//! Paths come from the validated [`pith_core::ActionSpec`], which already
+//! rejected absolute paths, `..`, trailing slashes, and overlapping
 //! input/output pairs (see `pith_core::ActionSpec::validate`).
 //!
-//! A host-path program is `execve`d where it lies and is not staged (decision
-//! 0030). A content program is staged, as `program` in the scratch root beside
-//! the working and temporary directories, so it cannot collide with a declared
-//! path and cannot be mistaken for a declared output (decision 0036). Declared
-//! source inputs are laid out under the working directory: of the scratch root's
-//! three entries, `work` holds them and `tmp` holds the child's temporaries.
+//! Layout: `work` holds the declared inputs and the child runs there, `tmp`
+//! holds its temporaries, and a content program is staged as `program` beside
+//! both so it cannot collide with a declared path. A host-path program is
+//! `execve`d where it lies and is not staged.
 
 use std::path::{Path, PathBuf};
 
@@ -26,31 +21,28 @@ use tokio::fs;
 
 use crate::executor_diag;
 
-/// The staged scratch root: where inputs were laid out and where the child
-/// should run, plus the host path of the executable to `execve`. Paths are
-/// absolute and local to this machine; they do not escape the executor.
+/// The staged scratch root: the directory layout the child sees plus the host
+/// path of the executable to `execve`. All paths are absolute.
 pub(super) struct StagedAction {
     /// The whole scratch root, holding the working and temporary directories.
     pub(super) scratch_root: PathBuf,
     /// The directory the child runs in (`chdir` target).
     pub(super) working_dir: PathBuf,
-    /// Where the child writes temporaries. A sibling of the working directory,
-    /// so a tool's temporaries can never collide with a declared path or be
-    /// mistaken for a declared output.
+    /// Where the child writes temporaries: a sibling of the working directory,
+    /// so temporaries cannot collide with a declared path or be mistaken for a
+    /// declared output.
     pub(super) temp_dir: PathBuf,
-    /// The absolute host path the executor `execve`s: `spec.executable` itself
-    /// for a host-path program, or where the content program was staged. Either
-    /// way the process driver does not re-parse the spec.
+    /// The host path the executor `execve`s: `spec.executable` itself for a
+    /// host-path program, otherwise where the content program was staged.
     pub(super) executable: Box<str>,
 }
 
 type StageResult<T> = pith_diag::PithResult<T>;
 
-/// Stage `invocation` under `root`: a working directory and each declared input
-/// at its declared relative path. The executable is not staged; it is a host
-/// path carried through for the executor to `execve`. Output paths are *not*
-/// created here; the child creates them as it writes, and [`crate::capture`]
-/// reads them back after exit.
+/// Stage `invocation` under `root`: the working and temporary directories, each
+/// declared input at its declared relative path, and the program resolved for
+/// `execve`. Output paths are not created here; the child creates them as it
+/// writes, and [`crate::capture`] reads them back after exit.
 pub(super) async fn stage(invocation: &ActionInvocation, root: &Path) -> StageResult<StagedAction> {
     let working_dir = root.join("work");
     fs::create_dir_all(&working_dir)
@@ -74,8 +66,8 @@ pub(super) async fn stage(invocation: &ActionInvocation, root: &Path) -> StageRe
 
 /// Resolve the program to a path the driver can `execve`. A host path is used
 /// as declared; a content program is written into the scratch root with its
-/// executable bit set, since a program the graph produced arrives as bytes and
-/// nothing on the host has made it runnable yet.
+/// executable bit set, since nothing on the host has made bytes from the graph
+/// runnable yet.
 async fn stage_program(invocation: &ActionInvocation, root: &Path) -> StageResult<Box<str>> {
     match (invocation.spec.executable.host_path(), &invocation.program) {
         (Some(path), _) => Ok(path.into()),
@@ -99,8 +91,7 @@ async fn stage_program(invocation: &ActionInvocation, root: &Path) -> StageResul
 }
 
 /// Lay out each declared input at its declared relative path under the working
-/// directory. Blobs become files; trees become directories recursively; symlinks
-/// become symlinks.
+/// directory.
 async fn stage_inputs(invocation: &ActionInvocation, working_dir: &Path) -> StageResult<()> {
     for input in &invocation.inputs {
         let destination = working_dir.join(input.path.as_ref());
@@ -145,8 +136,7 @@ async fn stage_tree(tree: &MaterializedTree, destination: &Path) -> StageResult<
             }
             MaterializedTreeEntryContent::Tree(child) => {
                 // Box the recursive call: an async fn that recurses directly
-                // would have an infinitely sized future. The tree depth is
-                // bounded by the content store's own tree depth.
+                // would have an infinitely sized future.
                 Box::pin(stage_tree(child, &entry_path)).await?;
             }
             TreeEntryContent::Symlink { target } => {
@@ -198,8 +188,7 @@ pub(super) struct DeclaredOutput {
     pub(super) kind: OutputKind,
 }
 
-/// Extract the declared outputs from the invocation's spec. [`crate::capture`]
-/// uses this so it does not re-parse the invocation.
+/// The declared outputs of `invocation`, for [`crate::capture`].
 pub(super) fn declared_outputs(invocation: &ActionInvocation) -> Vec<DeclaredOutput> {
     invocation
         .spec

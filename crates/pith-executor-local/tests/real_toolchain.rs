@@ -1,12 +1,7 @@
-//! One real toolchain, driven end to end through the engine (milestone M-3).
-//!
-//! Every other test that runs an action runs a fixture executor or a shell
-//! script written for the occasion. This one hands a C compiler to
-//! [`pith_engine::Engine::run`] and asks for an object file back, which is the
-//! first time the kernel has driven a tool it did not author.
-//!
-//! It skips when the host has no compiler. The subject is the engine, not the
-//! availability of a toolchain, and a missing `cc` is a fact about the machine.
+//! One real toolchain driven end to end through the engine: hands a C compiler
+//! to [`pith_engine::Engine::run`] and asks for an object file back. Skips when
+//! the host has no compiler; a missing `cc` is a fact about the machine, not a
+//! failure of the subject under test.
 
 #![cfg(target_os = "linux")]
 
@@ -33,22 +28,19 @@ const SOURCE: &[u8] = b"int answer(void) { return 42; }\n";
 const SOURCE_PATH: &str = "answer.c";
 const OBJECT_PATH: &str = "answer.o";
 
-/// The first four bytes of an ELF file. The compiler's output is checked for
-/// being an object rather than for its exact bytes, which are the compiler's
-/// business and not the engine's.
+/// The first four bytes of an ELF file: the compiler's output is checked to be
+/// an object, not to have the engine's chosen bytes.
 const ELF_MAGIC: &[u8] = b"\x7fELF";
 
 /// The host C compiler: the driver's path, and the two search paths the driver
 /// needs to find the rest of itself.
 ///
-/// A compiler is not one executable. The driver `cc` execs `cc1` to compile and
-/// `as` to assemble, and it finds them through paths baked in at *its* build
-/// time, relative to where the driver itself lives. Both paths are therefore
-/// asked of the driver rather than assumed: a distribution compiler and a nix
-/// one keep them in different places, and neither is guessable. The driver
-/// itself is referenced by its host path (decision 0030); its bytes are not
-/// staged, because the driver opens the rest of its closure at baked-in
-/// absolute paths only it knows.
+/// The driver `cc` execs `cc1` to compile and `as` to assemble, finding them
+/// through paths baked in at its own build time, relative to where it lives. A
+/// distribution compiler and a nix one keep them in different places, so both
+/// are asked of the driver rather than assumed. The driver is referenced by
+/// host path and its bytes are not staged: it opens the rest of its closure at
+/// baked-in absolute paths only it knows.
 struct HostCompiler {
     /// Absolute host path of the `cc` driver the action execves.
     driver: Box<str>,
@@ -64,8 +56,7 @@ struct HostCompiler {
 impl HostCompiler {
     /// `None` when there is no `cc`, or when `cc` is outside the nix store,
     /// where discovery cannot see past the loader to `cc1` and the fixed
-    /// includes. A short closure would fail on an undeclared read and say
-    /// nothing about the engine.
+    /// includes; a short closure would only fail later on an undeclared read.
     fn discover() -> Option<Self> {
         let driver_path = find_in_path("cc")?;
         let driver = driver_path.to_str()?;
@@ -89,9 +80,8 @@ fn find_in_path(program: &str) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
-/// Ask the driver where it keeps one of its own programs. Returns `None` when
-/// the driver answers with a bare name, which is how it says "I expect to find
-/// this on `PATH`".
+/// Ask the driver where it keeps one of its own programs. `None` when the
+/// driver answers with a bare name, meaning it expects `PATH` to find it.
 fn print_program_path(driver: &Path, program: &str) -> Option<PathBuf> {
     let output = Command::new(driver)
         .arg(format!("-print-prog-name={program}"))
@@ -235,7 +225,7 @@ fn compile_engine(root: &Path, compiler: &HostCompiler) -> (Engine, Request<Pure
     };
     let mut engine = Engine::with_content_store(store);
 
-    // The compiler driver is referenced by host path (decision 0030), so only
+    // The compiler driver is referenced by host path, so only
     // the source blob is stored. The closure the driver reads is declared in
     // the spec's `toolchain` field, and landlock confines the child to it.
     let source_blob = match engine.put_blob(SOURCE) {
@@ -319,10 +309,9 @@ fn a_c_compiler_produces_an_object_file_through_the_engine() {
 
     let object = compile(&mut engine, &request);
 
-    // The bytes the compiler wrote are in the engine's store under the identity
-    // the engine gave them, which is what "the engine owns the content identity
-    // of an action's output" means when the producer is a real tool. Reading
-    // them from a second store instance is the cross-instance claim of 0024.
+    // The compiler's bytes are in the store under the identity the engine gave
+    // them; reading them from a second store instance is the cross-instance
+    // claim: what one store instance wrote, another must read back.
     let store = match FilesystemContentStore::open(root.path()) {
         Ok(store) => store,
         Err(error) => unreachable!("the filesystem store failed to reopen: {error:?}"),
@@ -337,10 +326,9 @@ fn a_c_compiler_produces_an_object_file_through_the_engine() {
     );
 }
 
-/// Determinism is a separate claim from reuse (decision 0014), and reuse hides
-/// it: a served result is identical for being the same bytes, and says nothing
-/// about what the tool would produce a second time. Switching caching off makes
-/// the compiler run twice, which is what the claim needs.
+/// Determinism is a separate claim from reuse, which hides it: a served result
+/// is the same bytes whatever a second run would produce. Switching caching off
+/// makes the compiler run twice, which is what the claim needs.
 #[test]
 fn the_same_compile_run_twice_produces_identical_objects() {
     let Some(compiler) = HostCompiler::discover() else {

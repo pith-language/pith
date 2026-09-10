@@ -1,8 +1,6 @@
-//! Toolchain closure discovery for the executor tests.
-//!
-//! Decision 0030 gives this to the build library milestone M-3 opens. Until that
-//! exists the tests need the same answer, so it lives here rather than in the
-//! executor, which confines the closure it is handed and never discovers one.
+//! Toolchain closure discovery for the executor tests. The executor confines
+//! the closure it is handed and never discovers one, so the tests compute the
+//! same answer here.
 
 #![allow(
     dead_code,

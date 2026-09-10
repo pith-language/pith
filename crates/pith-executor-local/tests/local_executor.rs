@@ -1,10 +1,6 @@
-//! End-to-end tests for the local executor (decision 0028).
-//!
-//! These run real child processes through [`LocalExecutor`], proving the
-//! stage → fork/exec → capture path works. The executable is the host path
-//! `/bin/sh` (decision 0030), so the tests exercise the same execve-a-path
-//! path the engine's `materialize_action` produces without depending on the
-//! engine.
+//! End-to-end tests for the local executor: real child processes through
+//! [`LocalExecutor`], exercising the same execve-a-host-path route the engine's
+//! `materialize_action` produces.
 
 #![cfg(target_os = "linux")]
 
@@ -20,9 +16,7 @@ use pith_ids::ContentId;
 
 mod support;
 
-/// Whether `/bin/sh` exists on the host, so each `#[test]` can fail loudly via
-/// its own assertion rather than a helper panic; tests skip with a clear message
-/// otherwise.
+/// Whether `/bin/sh` exists on the host; tests skip with a message otherwise.
 fn shell_present() -> bool {
     std::fs::read("/bin/sh").is_ok()
 }
@@ -69,13 +63,12 @@ fn invocation(script: &str, operand: &str) -> ActionInvocation {
     }
 }
 
-/// Turn `invocation` into one whose program is content the engine owns rather
-/// than a host path (decision 0036): the same script, handed over as bytes.
+/// Turn `invocation` into one whose program is content rather than a host path:
+/// the same script, handed over as bytes.
 ///
-/// A `#!` script is the smallest program that can be written as a literal here.
-/// The kernel execs the staged file and then the interpreter it names, which is
-/// `/bin/sh` from the declared closure, so the exec reaches the same shell by a
-/// different route.
+/// The kernel execs the staged `#!` file and then the interpreter it names,
+/// `/bin/sh` from the declared closure, reaching the same shell by a different
+/// route.
 fn as_content_program(mut invocation: ActionInvocation, script: &str) -> ActionInvocation {
     let program = format!("#!/bin/sh\n{script}\n")
         .into_bytes()
@@ -119,7 +112,7 @@ async fn a_content_program_the_engine_did_not_materialize_is_refused() {
         eprintln!("skipping: /bin/sh is not readable");
         return;
     }
-    // The executor never reads the content store (decision 0028), so bytes it
+    // The executor never reads the content store, so bytes it
     // was not handed are bytes it cannot run.
     let mut invocation = as_content_program(invocation("true > result", "x"), "true > result");
     invocation.program = None;
@@ -143,7 +136,7 @@ async fn a_content_program_the_engine_did_not_materialize_is_refused() {
 #[tokio::test]
 async fn runs_a_real_child_and_captures_declared_output() {
     let executor = LocalExecutor::new();
-    // Double the input's length and write it to the declared output path.
+    // Writes the input's byte count to the declared output path.
     if !shell_present() {
         eprintln!("skipping: /bin/sh is not readable");
         return;
@@ -171,10 +164,9 @@ async fn runs_a_real_child_and_captures_declared_output() {
 
 #[tokio::test]
 async fn reports_prevented_when_both_layers_are_installed() {
-    // This build installs the landlock path-confinement ruleset and the seccomp
-    // syscall allowlist (decisions 0028, 0030), so the report is Prevented,
-    // which 0028 reserves for both layers. On an architecture the seccomp
-    // filter does not target, the honest report would still be Observed.
+    // Both layers installed, so the report is `Prevented`. On an architecture
+    // the seccomp filter does not target, only landlock is installed and the
+    // report is `Observed`.
     let executor = LocalExecutor::new();
     if !shell_present() {
         eprintln!("skipping: /bin/sh is not readable");
@@ -191,8 +183,8 @@ async fn reports_prevented_when_both_layers_are_installed() {
     assert_eq!(captured.report.access, AccessVerification::Observed);
 }
 
-/// `kill(2)` is absent from the seccomp allowlist, and the shell's `kill` is a
-/// builtin, so the script issues the syscall in its own process. Unfiltered,
+/// `kill(2)` is outside the seccomp allowlist and the shell's `kill` is a
+/// builtin, so the script issues the syscall in its own process; unfiltered,
 /// the same script exits zero, which is what makes the death here evidence.
 ///
 /// x86_64 only, since that is where the filter is installed at all.
@@ -337,8 +329,7 @@ async fn action_failure_surfaces_as_a_diagnostic() {
         message.contains("exit status 1"),
         "the error should name the exit status, got: {message}"
     );
-    // `false` is silent, and saying so is worth a few words: it tells the
-    // reader the executor looked rather than that it did not bother.
+    // `false` is silent, and the diagnostic should say the executor looked.
     assert!(
         message.contains("nothing to stderr"),
         "the error should say the action was silent, got: {message}"

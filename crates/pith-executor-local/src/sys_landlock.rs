@@ -1,26 +1,15 @@
-//! Landlock filesystem confinement for the sandboxed executor (decisions 0028,
-//! 0030).
+//! Landlock filesystem confinement: a deny-by-default ruleset over the scratch
+//! root, the declared executable, and each toolchain closure path.
 //!
-//! The ruleset is deny-by-default over the scratch root, the declared
-//! executable, and each declared toolchain closure path.
-//!
-//! # `unsafe`
-//!
-//! This module is one of the two sanctioned `unsafe` sites in the executor
-//! crate (decision 0016). The crate root denies `unsafe_code`; this module
-//! allows it. Only the three landlock syscalls are reached raw, because rustix
-//! 1.1.4 does not wrap them; `openat` goes through rustix.
-//!
-//! # Where this runs
-//!
-//! [`restrict_to`] runs in the child's `pre_exec` hook, between `fork` and
-//! `execve`, so it must be async-signal-safe. That is why [`SandboxPaths`]
-//! holds NUL-terminated strings built by the parent: the hook allocates
-//! nothing.
+//! One of the crate's two sanctioned `unsafe` sites; only the three landlock
+//! syscalls are reached raw, because rustix 1.1.4 does not wrap them. All of it
+//! runs in the child's `pre_exec` hook between `fork` and `execve`, so it must
+//! be async-signal-safe: [`SandboxPaths`] holds NUL-terminated strings built by
+//! the parent, and the hook allocates nothing.
 
 #![allow(
     unsafe_code,
-    reason = "landlock setup is a sanctioned foreign-function boundary per decision 0016; every unsafe block names the syscall it enables"
+    reason = "landlock setup is a sanctioned foreign-function boundary; every unsafe block names the syscall it enables"
 )]
 
 use std::ffi::{CStr, CString};
@@ -113,9 +102,9 @@ const fn read_execute_access() -> u64 {
     LANDLOCK_ACCESS_FS_EXECUTE | LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR
 }
 
-/// The rights landlock accepts on a rule whose path is not a directory. Granting
-/// a directory-only right on a file fails the rule with `EINVAL`, and a closure
-/// names both: a store directory is a directory, a shared object is a file.
+/// The rights landlock accepts on a rule whose path is not a directory: a
+/// directory-only right on a file fails the rule with `EINVAL`, and a closure
+/// names both store directories and shared objects.
 const fn file_access_fs(abi: u32) -> u64 {
     let mut mask =
         LANDLOCK_ACCESS_FS_EXECUTE | LANDLOCK_ACCESS_FS_WRITE_FILE | LANDLOCK_ACCESS_FS_READ_FILE;
@@ -137,12 +126,9 @@ pub(super) struct SandboxPaths {
 }
 
 impl SandboxPaths {
-    /// The executable is granted from `executable` itself, so a caller never has
-    /// to repeat it in `closure_paths`.
-    ///
-    /// # Errors
-    /// Returns `Err` when a path contains a NUL byte and so cannot become a C
-    /// string, which fails the sandbox closed before any child is forked.
+    /// The executable is granted from `executable` itself and need not be
+    /// repeated in `closure_paths`. A NUL byte in any path is an error, which
+    /// fails the sandbox closed before any child is forked.
     pub(super) fn new(
         scratch_root: &Path,
         executable: &str,
@@ -168,9 +154,8 @@ fn c_path(bytes: &[u8]) -> io::Result<CString> {
 /// here aborts the exec rather than running the child unconfined.
 ///
 /// # Errors
-/// Returns the kernel's `errno` when landlock is unavailable, a ruleset cannot
-/// be created, a declared path cannot be opened, or `landlock_restrict_self` is
-/// denied.
+/// The kernel's `errno` when landlock is unavailable, a ruleset cannot be
+/// created, a declared path cannot be opened, or restriction is denied.
 pub(super) fn restrict_to(paths: &SandboxPaths) -> io::Result<()> {
     let abi = abi_version()?;
     let handled = all_access_fs(abi);
@@ -182,9 +167,9 @@ pub(super) fn restrict_to(paths: &SandboxPaths) -> io::Result<()> {
     restrict_self(ruleset.as_fd())
 }
 
-/// Probe the running kernel's highest supported landlock ABI version. Returns
-/// `Err` when landlock is entirely unavailable (`ENOSYS`) or the call is
-/// rejected, which fails the sandbox closed.
+/// Probe the running kernel's highest supported landlock ABI version. `Err`
+/// when landlock is entirely unavailable (`ENOSYS`) or the call is rejected,
+/// which fails the sandbox closed.
 fn abi_version() -> io::Result<u32> {
     // SAFETY: `landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)`
     // is the documented probe: a NULL attr with zero size and the VERSION flag

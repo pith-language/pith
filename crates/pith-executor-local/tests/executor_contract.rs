@@ -1,9 +1,6 @@
-//! Public contract tests for the first-party local executor (decision 0028).
-//!
-//! The tests deliberately cover the currently implemented staging, process,
-//! capture, cleanup, and fail-closed behavior. Full landlock/seccomp
-//! confinement, timeouts, and network-enabled policies remain unresolved by
-//! the decision record and are not asserted here.
+//! Public contract tests for the local executor: staging, process, capture,
+//! cleanup, and fail-closed behavior. Sandbox enforcement itself is covered in
+//! `local_executor.rs`.
 
 #![cfg(target_os = "linux")]
 
@@ -591,7 +588,7 @@ async fn declaring_a_file_as_a_tree_is_a_capture_error() {
 
 #[tokio::test]
 async fn an_executable_path_that_does_not_exist_is_a_spawn_error() {
-    // The executable is a host path (decision 0030). A path that does not exist
+    // The executable is a host path. A path that does not exist
     // on the host fails at spawn with an adapter diagnostic, before any child
     // runs.
     let invocation = ActionInvocation {
@@ -640,7 +637,7 @@ async fn nonzero_exit_status_is_reported_numerically() {
 #[tokio::test]
 async fn a_reported_contract_survives_a_nonzero_exit_and_carries_the_status() {
     // `exit 37` under `Reported`: the status is the result, so a rule can read
-    // a verdict from a program that exits nonzero to express one (decision 0037).
+    // a verdict from a program that exits nonzero to express one.
     let Some(mut invocation) = invocation("exit 37") else {
         return;
     };
@@ -654,15 +651,11 @@ async fn a_reported_contract_survives_a_nonzero_exit_and_carries_the_status() {
     assert_eq!(captured.exit, Some(ActionExit::Code(37)));
 }
 
-/// A crashed program and a program reporting failures are different facts, and a
-/// rule turning either into a verdict has to tell them apart, so the reported
-/// status keeps the signal separate from the code.
+/// A signal death is a different fact from an exit status; under `Reported` the
+/// signal reaches the rule separately, for it to judge.
 ///
-/// The signal here is `SIGSYS` from the seccomp filter, because `kill(2)` is
-/// outside the allowlist and the shell has no other way to signal itself. Under
-/// `Reported` a sandbox kill also reaches the rule as a fact for it to judge, so
-/// a rule reading every signal as a pass would call a confinement violation a
-/// success. 0037's "unresolved" section carries that.
+/// The signal is `SIGSYS` from the seccomp filter: `kill(2)` is outside the
+/// allowlist and the shell has no other way to signal itself.
 #[cfg(target_arch = "x86_64")]
 #[tokio::test]
 async fn a_reported_contract_distinguishes_a_signal_from_a_status() {
@@ -770,8 +763,7 @@ async fn a_long_stderr_is_excerpted_rather_than_inlined_whole() {
         message.contains("FINAL"),
         "the excerpt should keep the end of stderr, got: {message}"
     );
-    // Says it dropped something and how much, without the test restating the
-    // arithmetic the excerpt already did.
+    // Says it dropped something and how much.
     assert!(
         message.contains("stderr (last ") && message.contains(" bytes): "),
         "the excerpt should say how much it dropped, got: {message}"

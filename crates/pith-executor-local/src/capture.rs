@@ -1,7 +1,5 @@
-//! Capturing declared outputs after the child exits.
-//!
-//! The inverse of [`crate::stage`]: walks the declared output paths, reads each
-//! back from the scratch root, and builds the [`CapturedOutput`] values the
+//! Capturing declared outputs after the child exits: reads each declared path
+//! back from the scratch root and builds the [`CapturedOutput`] values the
 //! engine content-addresses on import. Pure filesystem work; no `unsafe`.
 
 use std::path::Path;
@@ -18,8 +16,8 @@ use crate::{executor_diag, stage::DeclaredOutput};
 
 type CaptureResult<T> = pith_diag::PithResult<T>;
 
-/// Capture every declared output from the working directory. The executor
-/// returns these as raw bytes; the engine assigns content identities on import.
+/// Capture every declared output from the working directory as raw bytes; the
+/// engine assigns content identities on import.
 pub(super) async fn capture(
     working_dir: &Path,
     outputs: &[DeclaredOutput],
@@ -61,12 +59,9 @@ async fn capture_tree(path: &Path) -> CaptureResult<CapturedTree> {
             .map_err(|error| io_diag("tree output entry type", error))?;
         let entry_path = entry.path();
         let content = if file_type.is_symlink() {
-            // A symlink is an entry in its own right: its target is part of
-            // the tree's identity the way a file's bytes are. Reading the
-            // link rather than following it also lets a target outside the
-            // captured tree, or one that does not exist yet, survive as
-            // declared content instead of failing or silently becoming a
-            // copy of what it points at.
+            // The link is read rather than followed: its target is part of the
+            // tree's identity, and a target outside the captured tree, or one
+            // that does not exist yet, survives as declared content.
             let target = fs::read_link(&entry_path)
                 .await
                 .map_err(|error| io_diag("tree output symlink target", error))?;
@@ -104,10 +99,8 @@ async fn capture_tree(path: &Path) -> CaptureResult<CapturedTree> {
                 })
             }
         };
-        // `TreeEntry::new` validates the name and rejects `/`, NUL, `.`/`..`,
-        // matching the store's own validation so the captured form imports.
-        // `CapturedTreeEntry` is `TreeEntry<CapturedFileContent, CapturedTree>`,
-        // which is exactly what `TreeEntry::new` returns here.
+        // `TreeEntry::new` rejects `/`, NUL, and `.`/`..`, matching the store's
+        // own validation so the captured form imports.
         let entry = TreeEntry::new(name, content)
             .map_err(|error| executor_diag(format!("captured tree entry is invalid: {error}")))?;
         entries.push(entry);
@@ -117,9 +110,8 @@ async fn capture_tree(path: &Path) -> CaptureResult<CapturedTree> {
     })
 }
 
-/// Reads one directory into the UTF-8 name order used by captured trees.
-/// Filesystems do not promise an iteration order, so normalization happens at
-/// the adapter boundary before the entries become an executor result.
+/// Reads one directory into the UTF-8 name order captured trees use. Filesystem
+/// iteration order is unspecified, so it is normalized here.
 async fn sorted_directory_entries(path: &Path) -> CaptureResult<Vec<(Box<str>, fs::DirEntry)>> {
     let mut entries = Vec::new();
     let mut reader = fs::read_dir(path)

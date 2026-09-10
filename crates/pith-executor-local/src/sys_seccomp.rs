@@ -1,85 +1,45 @@
-//! Seccomp syscall confinement for the sandboxed executor (decision 0028).
+//! Seccomp syscall confinement: a deny-by-default BPF allowlist installed in
+//! the child's `pre_exec` hook, after `no_new_privs` and the landlock ruleset.
+//! One of the crate's two sanctioned `unsafe` sites; each block carries a
+//! `// SAFETY:` comment naming the foreign operation it enables.
 //!
-//! # `unsafe`
-//!
-//! This module is one of the two sanctioned `unsafe` sites in the executor
-//! crate (decision 0016: "`unsafe` is reserved for genuine foreign-function
-//! boundaries where the host cannot express the operation: sandbox setup,
-//! syscall interception"). The crate root denies `unsafe_code`; this module
-//! allows it, and every `unsafe` block in it carries a `// SAFETY:` comment
-//! naming the foreign operation it enables. Two blocks remain: loading the
-//! filter, and registering the hook that loads it.
-//!
-//! # What is installed
-//!
-//! The deny-by-default BPF allowlist decision 0028 describes, widened by the
-//! measurement its unresolved section records: the original fifteen-entry list
-//! named a third of the forty-five syscalls a traced compile issues, and the
-//! missing part was structural (process creation, because the driver is a
-//! supervisor). The allowlist in this module starts from that measured union
-//! and from the fixtures that run real children through this executor. Every
-//! entry is named and justified; an addition needs a concrete failure it
-//! fixes, never a broadening for its own sake.
-//!
-//! `socket` is allowed only for `AF_UNIX`, which is the form 0028's unresolved
-//! section names for the local name-service lookup glibc performs during an
-//! ordinary compile. `connect` is allowed wholesale because no socket outside
-//! `AF_UNIX` can exist to connect once `socket(2)` itself is filtered. Egress
-//! beyond the local socket remains the network-namespace design's question.
-//!
-//! # Where the numbers come from
-//!
-//! Syscall numbers, the `seccomp_data` layout, the BPF opcodes, and the filter
-//! ABI constants all come from `libc`, and none may be written out here. A
-//! number that disagrees with the architecture still compiles: it denies the
-//! syscall its name claims and grants whatever else holds the slot. The kill
-//! that follows reaches the reader as `SIGSYS` from a child whose stderr the
-//! executor has already taken, so nothing points back at the number.
-//!
-//! # Where this runs
-//!
-//! The filter is installed in the child's `pre_exec` hook after
-//! `no_new_privs` and after the landlock ruleset, matching 0028's ordering.
-//! The BPF program is built by the parent before the fork (see
-//! [`SeccompFilter`]), so the hook itself allocates nothing.
+//! The allowlist starts from the syscalls a traced compile actually issues.
+//! Syscall numbers and layout constants all come from `libc` and are never
+//! written out here: a wrong number still compiles, it denies the syscall its
+//! name claims and grants whatever else holds the slot, and the `SIGSYS` death
+//! never reaches the captured stderr. The BPF program is built by the parent
+//! before the fork (see [`SeccompFilter`]), so the hook allocates nothing.
 
 #![allow(
     unsafe_code,
-    reason = "seccomp setup is a sanctioned foreign-function boundary per decision 0016; every unsafe block names the syscall it enables"
+    reason = "seccomp setup is a sanctioned foreign-function boundary; every unsafe block names the syscall it enables"
 )]
 
 use std::io;
 
 use crate::sys_landlock::{SandboxPaths, restrict_to};
 
-/// Whether the deny-by-default seccomp filter is installed by this build.
-///
-/// `true` where the filter is compiled in: Linux x86_64, the platform whose
-/// syscall numbers [`ALLOWED_SYSCALLS`] carries. Elsewhere the executor cannot
-/// report better than [`pith_engine::AccessVerification::Observed`], which is
-/// the honest reading, since the filter this module describes is absent there.
+/// Whether the deny-by-default seccomp filter is installed by this build: true
+/// on Linux x86_64, the architecture [`ALLOWED_SYSCALLS`] numbers are for.
+/// Elsewhere the executor cannot report better than
+/// [`pith_engine::AccessVerification::Observed`].
 pub(super) const fn seccomp_filter_installed() -> bool {
     cfg!(target_arch = "x86_64")
 }
 
-/// Set the calling thread's `no_new_privs` attribute. This must be done before
-/// installing a seccomp filter (the kernel requires it unless the caller is
-/// already privileged) and is a permanent, irrevocable property of the process.
-///
-/// Intended to run in a `pre_exec` hook between `fork` and `execve`, where
-/// rustix's raw-syscall backend is what makes the call allocation-free.
-///
-/// # Errors
-/// Returns the kernel's `errno` if the `prctl` fails.
+/// Set the calling thread's `no_new_privs`, which the kernel requires before a
+/// seccomp filter can be installed unless the caller is privileged. Permanent
+/// once set. Runs in the `pre_exec` hook, where rustix's raw-syscall backend
+/// allocates nothing.
 fn set_no_new_privs() -> io::Result<()> {
     rustix::thread::set_no_new_privs(true)
         .map_err(|errno| io::Error::from_raw_os_error(errno.raw_os_error()))
 }
 
-/// The seccomp BPF program, compiled before the fork so the child's
-/// `pre_exec` hook allocates nothing. A unit on platforms the filter does not
-/// target, where [`SeccompFilter::install`] is a no-op and
-/// [`seccomp_filter_installed`] answers `false`.
+/// The seccomp BPF program, compiled before the fork so the `pre_exec` hook
+/// allocates nothing. A unit on platforms the filter does not target, where
+/// [`SeccompFilter::install`] is a no-op and [`seccomp_filter_installed`]
+/// answers `false`.
 pub(super) struct SeccompFilter {
     #[cfg(target_arch = "x86_64")]
     program: Box<[libc::sock_filter]>,
@@ -145,12 +105,9 @@ impl SeccompFilter {
 }
 
 /// Register the sandbox-setup hook on `command`, to run in the child between
-/// `fork` and `execve`. The hook sets `no_new_privs`, installs the landlock
-/// ruleset over `paths`, then loads the seccomp allowlist, in the order
-/// decision 0028 fixes. This is the single place the executor reaches tokio's
-/// `unsafe` `pre_exec` surface, kept inside the sanction module so the
-/// process driver itself stays `unsafe`-free (decision 0028: "There is no
-/// `unsafe` in staging, capture, or the process driver").
+/// `fork` and `execve`: sets `no_new_privs`, installs the landlock ruleset over
+/// `paths`, then loads the seccomp allowlist, in that order. The one place the
+/// executor touches tokio's `unsafe` `pre_exec` surface.
 pub(super) fn register_sandbox_hook(command: &mut tokio::process::Command, paths: SandboxPaths) {
     let filter = SeccompFilter::build();
     let hook = move || child_sandbox_hook(&paths, &filter);
@@ -167,11 +124,9 @@ pub(super) fn register_sandbox_hook(command: &mut tokio::process::Command, paths
     }
 }
 
-/// The async-signal-safe function the child runs after `fork` and before
-/// `execve`. Sets `no_new_privs`, installs the landlock ruleset, then loads
-/// the seccomp filter. Must be async-signal-safe: no allocations, no locks, no
-/// stdio, only direct syscalls. Everything it touches is pre-built by the
-/// parent so nothing here allocates.
+/// The hook body, run in the child between `fork` and `execve`. Must stay
+/// async-signal-safe: no allocations, no locks, no stdio; everything it touches
+/// is pre-built by the parent.
 fn child_sandbox_hook(paths: &SandboxPaths, filter: &SeccompFilter) -> io::Result<()> {
     set_no_new_privs()?;
     restrict_to(paths)?;
@@ -188,18 +143,13 @@ macro_rules! allowlist {
 }
 
 /// The syscalls a build action may issue on x86_64. Deny-by-default: an entry
-/// here is permission, and anything absent is `SIGSYS`.
-///
-/// Grouped by the role the syscall plays, every entry justified. The discipline
-/// 0028 fixes is that the list is drawn from measurement, with each addition
-/// naming the concrete need that produced it. A different
-/// architecture needs its own measured list rather than a translation of this
-/// one.
+/// here is permission, and anything absent is `SIGSYS`. Drawn from measurement;
+/// another architecture needs its own list, not a translation of this one.
 #[cfg(target_arch = "x86_64")]
 const ALLOWED_SYSCALLS: &[(libc::c_long, &str)] = allowlist![
     // Byte and file-descriptor I/O, the floor for any program. `newfstatat`
-    // is the form glibc actually issues where 0028's original list wrote
-    // `fstat`; `statx` is what modern coreutils probe with.
+    // is the form glibc actually issues, rather than the plain `fstat`;
+    // `statx` is what modern coreutils probe with.
     SYS_read,
     SYS_write,
     SYS_close,
@@ -212,16 +162,15 @@ const ALLOWED_SYSCALLS: &[(libc::c_long, &str)] = allowlist![
     SYS_lseek,
     SYS_pread64,
     // Coreutils advise the kernel to drop the cache behind an input they have
-    // finished reading (`wc`, `cat`); the call is harmless to deny only if the
-    // caller survives it, and a filter kills instead.
+    // finished reading (`wc`, `cat`). Denial would be harmless for a caller
+    // that survives `EPERM`, but this filter kills, so the call is allowed.
     SYS_fadvise64,
     SYS_fcntl,
     SYS_dup,
     SYS_dup2,
     SYS_dup3,
     // The driver is a supervisor: `cc` execs `cc1` and `as`, `collect2` execs
-    // `ld`, and the shell fixtures pipeline their children. This is 0028's
-    // structural finding, without which a compile dies at its first real step.
+    // `ld`, and the shell fixtures pipeline their children.
     SYS_clone,
     SYS_clone3,
     SYS_vfork,
@@ -245,7 +194,7 @@ const ALLOWED_SYSCALLS: &[(libc::c_long, &str)] = allowlist![
     SYS_rt_sigreturn,
     SYS_exit,
     SYS_exit_group,
-    // glibc thread startup, named by 0028's trace: every dynamically linked
+    // glibc thread startup: every dynamically linked
     // binary issues these before `main`.
     SYS_arch_prctl,
     SYS_set_tid_address,
@@ -267,11 +216,10 @@ const ALLOWED_SYSCALLS: &[(libc::c_long, &str)] = allowlist![
     // A recursive walk holds each directory open and moves by descriptor. The
     // ruleset confines what those descriptors can reach either way.
     SYS_fchdir,
-    // Coreutils `mkdir -p` with several operands walks the relative
-    // components with the plain form instead (measured: stele's assembly
-    // script hands it the artifact's directories at once). The same walk
-    // `fchdir` above already sanctions, so the ruleset confines it the same
-    // way.
+    // Coreutils `mkdir -p` with several operands walks the relative components
+    // with the plain form instead (measured: stele's assembly script hands it
+    // the artifact's directories at once). The same walk `fchdir` above already
+    // sanctions, so the ruleset confines it the same way.
     SYS_chdir,
     // `isatty` and friends: a child probes its stdio descriptors even when
     // they are pipes, and dies at startup if the probe is fatal.
@@ -291,20 +239,18 @@ const ALLOWED_SYSCALLS: &[(libc::c_long, &str)] = allowlist![
     SYS_rename,
     // Composing a tree of links: coreutils `ln -s` creates through
     // `symlinkat` (the `at` form, measured), and an /etc assembled from
-    // declared parts is mostly symlinks, so an action that builds one writes
-    // its entries through here.
+    // declared parts is mostly symlinks.
     SYS_symlinkat,
     // Coreutils `cat` splices with `copy_file_range` before falling back to
-    // `read`/`write`, so a shell action that places staged bytes into a tree
-    // it is about to declare as output takes this path first.
+    // `read`/`write`, so a shell action placing staged bytes into a tree it is
+    // about to declare as output takes this path first.
     SYS_copy_file_range,
     // Randomness for temp names: glibc's `mkstemp` family draws from
     // `getrandom` and dies rather than falling back when the call is filtered.
     SYS_getrandom,
-    // The shell's own housekeeping, and the identity queries it makes at
-    // startup: `sh` asks for its uid/gid before running anything, and checks
-    // real against effective to find out whether it is setuid. It asks for the
-    // group triple straight after the user one, so the two travel together.
+    // The shell's identity queries at startup: `sh` asks for its uid/gid
+    // before running anything and checks real against effective to detect
+    // setuid. The group triple follows the user one.
     SYS_umask,
     SYS_getuid,
     SYS_getgid,
@@ -316,7 +262,7 @@ const ALLOWED_SYSCALLS: &[(libc::c_long, &str)] = allowlist![
     // about the filesystem the ruleset confines.
     SYS_uname,
     // Timing: `sleep` and every clock probe. `clock_nanosleep` is the modern
-    // form glibc issues where 0028's original list wrote `nanosleep`.
+    // form glibc issues, rather than the plain `nanosleep`.
     SYS_clock_gettime,
     SYS_clock_nanosleep,
     SYS_nanosleep,
@@ -327,8 +273,8 @@ const ALLOWED_SYSCALLS: &[(libc::c_long, &str)] = allowlist![
     // compile over a timer it never intended to fire.
     SYS_alarm,
     // Local sockets: glibc's name-service switch opens an `AF_UNIX` stream to
-    // the nscd door during an ordinary compile (0028's measurement). `connect`
-    // follows because no other socket can exist to connect.
+    // the nscd door during an ordinary compile. `connect` follows because no
+    // other socket can exist to connect.
     SYS_connect,
 ];
 
@@ -341,22 +287,21 @@ const ALLOWED_SYSCALLS: &[(libc::c_long, &str)] = allowlist![
 #[cfg(target_arch = "x86_64")]
 const ARGUMENT_FILTERED_SYSCALLS: &[ArgumentFiltered] = &[
     // A build action reaching for a non-local socket is trying to leave the
-    // machine, which `NetworkPolicy::Deny` promises it cannot. Refusing that
-    // with an errno would let it fall back and carry on quietly, so it dies.
+    // machine, which `NetworkPolicy::Deny` promises it cannot. An errno would
+    // let it fall back and carry on quietly, so it dies.
     ArgumentFiltered {
         number: libc::SYS_socket,
         name: "SYS_socket",
         argument: libc::AF_UNIX as u32,
         refusal: libc::SECCOMP_RET_KILL_PROCESS,
     },
-    // `prctl` is a multiplexer over several dozen operations, some of which
-    // change how the process is traced or what privileges it can gain.
-    // Coreutils set their own process name at startup, which is the one
-    // operation the fixtures need. They then ask for `PR_SET_MM`, which needs
-    // `CAP_SYS_RESOURCE` and so already fails for an ordinary caller, a
-    // best-effort call whose failure the caller handles. Killing it would make
-    // the sandbox stricter than the kernel it stands in for, so the unnamed
-    // operations get the `EPERM` an unprivileged process would have seen.
+    // `prctl` is a multiplexer over operations that include changing how the
+    // process is traced or what privileges it can gain. Coreutils set their
+    // process name at startup, the one operation the fixtures need; they then
+    // ask for `PR_SET_MM`, which needs `CAP_SYS_RESOURCE` and so already fails
+    // for an ordinary caller whose failure the caller handles. Unnamed
+    // operations get the `EPERM` an unprivileged process would have seen, not
+    // a kill stricter than the kernel.
     ArgumentFiltered {
         number: libc::SYS_prctl,
         name: "SYS_prctl",
@@ -563,10 +508,10 @@ mod tests {
                 "{} denies the argument it is filtered to",
                 entry.name
             );
-            // Every allowlist number is swept as an argument value, because a
-            // block that fell through to the next comparison with the argument
-            // word still in the accumulator would admit one of them as that
-            // syscall. Three hand-picked domains do not reach that.
+            // Every allowlist number is swept as an argument value: a block
+            // that fell through with the argument word still in the accumulator
+            // would admit one of them as that syscall, which a few hand-picked
+            // values would miss.
             for &(other, other_name) in ALLOWED_SYSCALLS {
                 let word = syscall_word(other);
                 if word == entry.argument {
@@ -584,9 +529,9 @@ mod tests {
 
     #[test]
     fn a_socket_outside_af_unix_dies_and_an_unnamed_prctl_gets_eperm() {
-        // The calls each refusal action was chosen for: reaching for the
-        // network is a contract violation, and `PR_SET_MM` is a privileged
-        // probe whose caller already handles failure.
+        // The calls each refusal action was chosen for: the network attempt is
+        // a contract violation, `PR_SET_MM` a privileged probe whose caller
+        // already handles failure.
         let program = build_program();
         assert_eq!(
             run(&program, libc::SYS_socket, libc::AF_INET as u32),

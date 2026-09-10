@@ -1,20 +1,12 @@
-//! Real child processes overlapping under the engine's scheduler (decisions
-//! 0022, 0029).
+//! Real child processes overlapping under the engine's scheduler, through the
+//! real staging, fork/exec, and capture path.
 //!
-//! The fixture-executor tests in `pith-engine` prove the scheduler holds
-//! several actions in flight. They cannot prove the thing that has to be true
-//! for it to matter: that two actual processes run at the same time, through
-//! the real staging, fork/exec, and capture path.
-//!
-//! Overlap is not inferred from wall time here. Each action marks its arrival
-//! in its own scratch root and waits to be released, and the test releases both
-//! only once both markers exist. An engine that ran them one at a time never
-//! releases the first, which gives up after ten seconds and exits nonzero — a
-//! failed run with a diagnostic, not a hung test.
-//!
-//! The children cannot see each other: landlock confines each to its own scratch
-//! root (decision 0030). The rendezvous is therefore observed and released from
-//! outside, by the test.
+//! Overlap is not inferred from wall time. Each action marks its arrival in its
+//! own scratch root and waits to be released, and the test releases both only
+//! once both markers exist, so a serialized engine fails its run after ten
+//! seconds instead of hanging the test. The children cannot see each other
+//! (landlock confines each to its own root), so the rendezvous is observed and
+//! released by the test from outside.
 
 #![cfg(target_os = "linux")]
 
@@ -37,8 +29,8 @@ use pith_ids::ContentId;
 
 mod support;
 
-/// A runtime for one test. Built per call: constructing a thread pool is
-/// cheap next to what these tests do, and it keeps each test independent.
+/// A per-test runtime: a thread pool is cheap next to what these tests do, and
+/// per-call construction keeps each test independent.
 fn runtime() -> TokioRuntime {
     match TokioRuntime::new() {
         Ok(runtime) => runtime,
@@ -71,8 +63,8 @@ const RELEASED: &str = "released";
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
 const RENDEZVOUS_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// One participant in the rendezvous. Each gets a distinct spec — a different
-/// `ME` — so the engine plans, materializes, and caches them separately.
+/// One participant in the rendezvous. Each gets a distinct `ME`, so the engine
+/// plans, materializes, and caches them separately.
 struct RendezvousAction {
     executable: &'static str,
     sleep: Box<str>,
@@ -219,9 +211,8 @@ impl Rendezvous {
     }
 }
 
-/// The directories beneath `base` holding an arrival marker. Searched rather
-/// than derived, because where a child runs inside its scratch root is the
-/// executor's business and not something this test should restate.
+/// The directories beneath `base` holding an arrival marker, searched rather
+/// than derived from the executor's scratch layout.
 fn arrived_roots(base: &Path) -> Vec<PathBuf> {
     const MAX_DEPTH: usize = 3;
     let mut found = Vec::new();
@@ -335,13 +326,9 @@ fn register_participants(engine: &mut Engine) -> Option<Vec<Request<Pure>>> {
     Some(requests)
 }
 
-/// An engine that keeps two actions in flight, whatever the host reports.
-///
-/// The default width is the host's available parallelism, and a CI runner
-/// whose CPU quota reports one available core would serialize the rendezvous
-/// these tests exist to observe. The overlap under test is the scheduler's
-/// willingness, not the host's core count, so the width is declared the way
-/// [`Engine::set_action_concurrency`] exists for.
+/// An engine that keeps two actions in flight, whatever the host reports: the
+/// default width is the host's available parallelism, and a CI runner whose CPU
+/// quota reports one core would serialize the rendezvous under test.
 fn overlap_engine() -> Engine {
     let mut engine = Engine::new();
     engine.set_action_concurrency(NonZeroUsize::new(2).unwrap_or(NonZeroUsize::MIN));
@@ -377,9 +364,9 @@ fn two_real_child_processes_run_at_the_same_time() {
         2,
         "the two actions were never in flight together"
     );
-    // The engine content-addresses what each child wrote, so the identity of
-    // the imported output is the assertion: only a released child gets as far
-    // as writing `met:<name>`.
+    // The engine content-addresses what each child wrote, so the imported
+    // identity is the assertion: only a released child gets as far as writing
+    // `met:<name>`.
     let identities: Vec<Value> = evaluations
         .iter()
         .map(|evaluation| evaluation.value.clone())
