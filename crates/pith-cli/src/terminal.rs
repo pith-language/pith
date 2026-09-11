@@ -8,10 +8,8 @@ use terminal_colorsaurus::{ColorPalette, QueryOptions, ThemeMode, color_palette}
 use termprofile::{DetectorSettings, SpecialVars, TermProfile, TermVars};
 
 /// Maximum theme-query latency before the balanced palette takes over.
-///
-/// Supporting terminals usually answer immediately. A short bound keeps an
-/// unreachable outer terminal from delaying every pith command over a remote
-/// or multiplexed connection.
+/// Terminals that answer do so immediately; the bound keeps an unreachable
+/// outer terminal from delaying every pith command.
 const THEME_QUERY_TIMEOUT: Duration = Duration::from_millis(100);
 
 /// Everything output rendering needs to know about stdout.
@@ -27,8 +25,8 @@ pub struct OutputTerminal {
 impl OutputTerminal {
     /// Detect stdout's color depth and, when safe, its current theme.
     pub fn detect(stdout: &Stdout) -> Self {
-        // termprofile detection is passive: environment, terminfo, and tmux
-        // metadata. The separate OSC theme query below is tightly gated.
+        // termprofile detection is passive (environment, terminfo, tmux
+        // metadata); the OSC theme query below is the only active probe.
         let profile = detect_profile(TermVars::from_env(stdout, DetectorSettings::default()));
         let stdout_is_terminal = stdout.is_terminal();
         let pretty_by_default = stdout_is_terminal && profile != TermProfile::NoTty;
@@ -66,12 +64,12 @@ impl OutputTerminal {
         self.pretty_by_default
     }
 
-    /// Write the deliberately unstable terminal-detection report.
+    /// Write the unstable terminal-detection report.
     ///
-    /// Unlike normal output, this does not use `OutputRecord` or the query API.
-    /// An explicit debug invocation attempts a theme query even when normal
-    /// output would skip it, which lets `pith debug terminal` explain a pipe or
-    /// `NO_COLOR` environment without changing their normal behavior.
+    /// Unlike normal output this bypasses `OutputRecord` and the query API, and
+    /// attempts a theme query even when normal output would skip it, so `pith
+    /// debug terminal` can explain a pipe or `NO_COLOR` environment without
+    /// changing their normal behavior.
     pub fn write_debug_report(&self, mut out: impl Write) -> io::Result<()> {
         let probe = match &self.theme_probe {
             ThemeProbe::NotAttempted => probe_theme(),
@@ -138,12 +136,10 @@ const fn profile_supports_color(profile: TermProfile) -> bool {
 }
 
 /// Detect the profile for the given terminal variables, keeping a pipe
-/// unstyled.
-///
-/// CI markers such as `GITHUB_ACTIONS` describe the log viewer around the
-/// process, not what stdout is attached to, and termprofile lets them upgrade
-/// even a `NoTty` base. They are dropped when nothing is attached; the force
-/// overrides survive because the crate applies them before the special cases.
+/// unstyled. CI markers such as `GITHUB_ACTIONS` describe the log viewer
+/// around the process, not stdout, and termprofile would otherwise let them
+/// upgrade a `NoTty` base; force overrides survive because the crate applies
+/// them before this masking.
 fn detect_profile(mut vars: TermVars) -> TermProfile {
     if !vars.meta.is_terminal {
         vars.special = SpecialVars::default();

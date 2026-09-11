@@ -12,8 +12,8 @@ use crate::error::QueryError;
 use crate::roots::Roots;
 use crate::session::{ReadOnly, Session, read_failure};
 
-/// The adapter every session opens. The DTO carries it because a repair
-/// question is addressed to the holder, not to the query layer.
+/// The adapter name every state DTO carries: a repair question is addressed
+/// to the holder, not to the query layer.
 const ADAPTER: &str = "sqlite";
 
 impl Session<ReadOnly> {
@@ -64,9 +64,9 @@ impl Session<ReadOnly> {
     }
 
     /// The read-only state database when one exists, and `None` when the path
-    /// holds nothing at all. Presence is decided by the filesystem rather
-    /// than by the open error, because an existing file that fails to open is
-    /// a reportable failure and not an empty store.
+    /// holds nothing. Presence is decided by the filesystem, not by the open
+    /// error: an existing file that fails to open is a reportable failure,
+    /// not an empty store.
     ///
     /// # Errors
     /// [`QueryError`] when a present database cannot be opened read-only.

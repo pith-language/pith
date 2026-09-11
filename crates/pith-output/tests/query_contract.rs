@@ -382,8 +382,8 @@ fn every_query_record_carries_the_api_version() {
 
 /// The view is nested under `query` rather than flattened into the envelope.
 /// A DTO is free to name a field `kind` or `code`, and a flattened view would
-/// overwrite the envelope's own field of that name — the shape this test
-/// exists because `StoredContent.kind` silently did.
+/// overwrite the envelope's own field of that name, which `StoredContent.kind`
+/// once did silently.
 #[test]
 fn a_view_field_cannot_overwrite_an_envelope_field() {
     let record = OutputRecord::query(QueryView::Content(StoredContent {

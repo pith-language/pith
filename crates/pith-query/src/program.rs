@@ -1,9 +1,7 @@
 //! A root module and its transitive dependencies, loaded once and ready to
-//! bind onto either engine authority. Two routes reach the same shape:
-//! standalone source files with their file-relative imports, and a
-//! `module.pi` manifest with its explicit path dependencies. Passing a
-//! manifest selects manifest mode unconditionally — a malformed manifest
-//! never falls back to source mode.
+//! bind onto either engine authority. Standalone source files resolve
+//! file-relative imports; a `module.pi` manifest selects manifest mode
+//! unconditionally, never falling back to source mode.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -120,8 +118,8 @@ pub(crate) fn prepared_imports(
     Ok((imports, parsed))
 }
 
-/// Whether `path` names a manifest, selecting manifest mode. The name is
-/// the mode's whole rule: any other file loads as standalone source.
+/// Whether `path` names a manifest. The file name alone decides; every other
+/// file loads as standalone source.
 pub(crate) fn is_manifest(path: &Path) -> bool {
     path.file_name()
         .is_some_and(|name| name == pith_loader::MANIFEST_NAME)
@@ -190,9 +188,9 @@ fn builtin_environment() -> Result<ImportEnv, QueryError> {
         .map_err(|error| QueryError::internal(format!("cannot construct builtin types: {error}")))
 }
 
-/// Parse `source` once, resolve and load its transitive imports in dependency
-/// order, and hand the caller the parse so the root elaborates from it. Every
-/// module in the graph is parsed exactly once.
+/// Resolve and load `source`'s transitive imports in dependency order, then
+/// hand the caller its parse. Every module in the graph is parsed exactly
+/// once.
 fn populate_imports(
     path: &Path,
     source: &ModuleSource,

@@ -1,8 +1,6 @@
-//! The binary, driven the way a shell drives it.
-//!
-//! `CARGO_BIN_EXE_pith` locates the built binary, so these need no
-//! `assert_cmd`. What they pin is the part no unit test can see: the exit code
-//! a script branches on, and the JSON a machine parses.
+//! The binary, driven the way a shell drives it: the exit code a script
+//! branches on, and the JSON a machine parses. `CARGO_BIN_EXE_pith` locates
+//! the built binary, so these need no `assert_cmd`.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -125,9 +123,8 @@ fn a_module_that_elaborates_succeeds_and_reports_its_abi() -> TestResult {
     Ok(())
 }
 
-/// `check` is the one command that has to produce useful output when
-/// elaboration fails. A non-zero exit with no report would be a worse
-/// failure than the one being reported.
+/// `check` must still report when elaboration fails: a non-zero exit with no
+/// report would be a worse failure than the one being reported.
 #[test]
 fn a_module_that_does_not_elaborate_still_reports_before_failing() -> TestResult {
     let home = scratch()?;
@@ -172,9 +169,8 @@ fn denying_warnings_changes_the_exit_code_and_not_the_report() -> TestResult {
 
     assert_eq!(permissive.query()?, denying.query()?, "the report differed");
     assert_eq!(permissive.code(), 0);
-    // The corpus module warns about nothing today, so denying changes nothing.
-    // The flag is pinned here so the day a lint lands, this test says which
-    // half moved.
+    // The corpus module warns about nothing today; the assertion is written so
+    // the day a lint lands, this test says which half moved.
     let warnings = permissive
         .query()?
         .and_then(|query| query.get("warnings").and_then(serde_json::Value::as_u64))
@@ -378,9 +374,8 @@ fn m14_workspace_commands_are_visible_refusals() -> TestResult {
     Ok(())
 }
 
-/// A tree `pith store add` produced and a tree an action captured are the same
-/// kind of thing, so the walk has to agree with the executor's capture path:
-/// a symlink is an entry in its own right, and the executable bit is part of
+/// The store's tree walk must agree with the executor's capture path: a
+/// symlink is an entry in its own right, and the executable bit is part of
 /// the identity.
 #[test]
 fn a_directory_round_trips_through_the_store_with_its_links_and_modes() -> TestResult {
@@ -534,10 +529,9 @@ fn cat_writes_the_blob_and_nothing_else() -> TestResult {
     Ok(())
 }
 
-/// `fmt` writes the canonical spelling and `--check` verifies it, so the two
-/// modes and the exit code a script branches on are pinned together: a
-/// non-canonical module under `--check` is the refusal, and a second run over
-/// canonical text is a no-op.
+/// `fmt` writes the canonical spelling and `--check` verifies it: a
+/// non-canonical module under `--check` is the refusal, a canonical one a
+/// no-op.
 #[test]
 fn fmt_writes_the_canonical_spelling_and_check_verifies_it() -> TestResult {
     let home = scratch()?;
@@ -593,8 +587,7 @@ fn fmt_writes_the_canonical_spelling_and_check_verifies_it() -> TestResult {
     Ok(())
 }
 
-/// The formatter's measured claim, on the one path a shell can reach it: a
-/// formatted corpus module elaborates to the ABI digest it had before.
+/// Formatting must not move the ABI digest the module elaborates to.
 #[test]
 fn a_formatted_module_keeps_its_abi_digest() -> TestResult {
     let home = scratch()?;
@@ -627,7 +620,7 @@ fn a_formatted_module_keeps_its_abi_digest() -> TestResult {
     Ok(())
 }
 
-/// The three outcomes a shell branches on. Content the store does not hold is
+/// The exit codes a shell branches on. Content the store does not hold is
 /// the caller's problem; a store that contradicts itself is not.
 #[test]
 fn the_three_exit_codes_are_distinguishable() -> TestResult {
@@ -653,8 +646,7 @@ fn the_three_exit_codes_are_distinguishable() -> TestResult {
     Ok(())
 }
 
-/// `--store` overrides its half alone, which is what makes a hermetic run and
-/// a test fixture possible without moving the other half.
+/// `--store` overrides its half alone; the state root keeps its default.
 #[test]
 fn the_store_flag_overrides_only_its_half() -> TestResult {
     let home = scratch()?;
@@ -766,8 +758,8 @@ fn pretty_output_and_help_adapt_to_every_supported_color_depth() -> TestResult {
     Ok(())
 }
 
-/// Debug reports intentionally bypass the record renderer: they are useful to
-/// a developer looking at one terminal and are not a second machine API.
+/// Debug reports bypass the record renderer: they serve a developer looking at
+/// one terminal, not a second machine API.
 #[test]
 fn terminal_debug_output_is_hidden_unversioned_and_pipe_safe() -> TestResult {
     let home = scratch()?;
@@ -823,9 +815,8 @@ fn a_positional_does_not_collide_with_a_global_flag() -> TestResult {
     Ok(())
 }
 
-/// A machine that has recorded no engine state still gets a report, which is
-/// what makes `state info` safe on a fresh checkout and in CI before any
-/// build has run.
+/// A machine that has recorded no engine state still gets a report, so `state
+/// info` is safe on a fresh checkout and in CI.
 #[test]
 fn state_info_reports_a_machine_that_recorded_nothing() -> TestResult {
     let home = scratch()?;
@@ -872,9 +863,8 @@ fn state_info_reports_a_machine_that_recorded_nothing() -> TestResult {
     Ok(())
 }
 
-/// `pith gc` without `--dry-run` is a refusal and not a quiet no-op: nothing
-/// in the tree prunes anything, and pretending otherwise would be the one
-/// command whose failure mode is deleting evidence.
+/// `pith gc` without `--dry-run` refuses instead of acting as a quiet no-op:
+/// nothing in the tree prunes anything yet.
 #[test]
 fn gc_without_dry_run_refuses_rather_than_deleting() -> TestResult {
     let home = scratch()?;
@@ -940,11 +930,8 @@ fn gc_dry_run_names_admitted_content_as_reclaimable() -> TestResult {
     Ok(())
 }
 
-/// The checked-in local workspace of decision 0067: two modules, one path
-/// dependency with a two-file source set, one pure entry. This is the M-14
-/// slice's acceptance witness — check, explore, fmt --check, run computing
-/// then hydrating in a fresh process, and the graph commands addressing the
-/// entry, all from the fixture's own root.
+/// The checked-in local workspace fixture, driven end to end from its own
+/// root.
 #[test]
 fn the_local_workspace_fixture_checks_explores_and_hydrates() -> TestResult {
     let home = scratch()?;
@@ -1070,8 +1057,8 @@ fn query_in(home: &Path, arguments: &[&str], root: &Path) -> TestResult<serde_js
 ///
 /// Each read-only command gets its own store, so one of them creating a
 /// database cannot be hidden by another that legitimately would. `fmt
-/// --check` is here for the second half of its contract too: it reports
-/// without writing, so the fixture's own bytes must survive it.
+/// --check` is here for the other half of its contract: it reports without
+/// writing.
 #[test]
 fn the_read_only_manifest_commands_create_no_state_database() -> TestResult {
     let root = workspace_file("examples/local-workspace");
@@ -1097,21 +1084,15 @@ fn the_read_only_manifest_commands_create_no_state_database() -> TestResult {
     );
     Ok(())
 }
-/// Design probe, not a regression of a chosen behavior: where an added rule
-/// can break a consumer, and where it cannot.
-///
-/// The module-system proposal classified an added rule as a minor change.
-/// That is wrong, but not in the way the proposal's critics would guess, and
-/// the two halves below fix the actual boundary.
+/// Design probe: where an added rule can break a consumer. The module-system
+/// proposal classified an added rule as a minor change; the probes here pin
+/// the actual boundary.
 ///
 /// Within one module, two rules providing one interface are refused at
-/// elaboration (`E-3012`), so a publisher cannot build that break, let alone
-/// publish it. Across modules, elaboration accepts both providers and the
-/// consumer only fails when it evaluates (`E-1102`).
-///
-/// The consequences for the differ are exact. An addition is potentially
-/// breaking, the break is a property of a consumer's whole closure rather than
-/// of the edited module, the publisher's own `check` cannot detect it, and no
+/// elaboration (`E-3012`), so a publisher cannot build that break. Across
+/// modules, elaboration accepts both providers and the consumer fails only
+/// when it evaluates (`E-1102`). The break is a property of the consumer's
+/// whole closure: the publisher's own `check` cannot detect it, and no
 /// comparison of two versions of one module can prove an addition safe.
 #[test]
 fn a_rule_added_to_one_dependency_breaks_a_consumer_that_imports_another() -> TestResult {
@@ -1171,9 +1152,8 @@ fn a_rule_added_to_one_dependency_breaks_a_consumer_that_imports_another() -> Te
         "the probe edited the consumer; it must only edit a dependency"
     );
 
-    // A cold state for the runs below. Whether an existing recorded answer is
-    // revalidated when a dependency gains a competing provider is a separate
-    // question about reuse, and this probe is about selection.
+    // A cold state for the runs below: revalidating recorded answers is a
+    // separate question about reuse, and this probe is about selection.
     let cold = scratch()?;
 
     // Elaboration accepts the closure: the break is not a frontend fact, and a
@@ -1233,10 +1213,9 @@ fn two_rules_providing_one_interface_in_one_module_are_refused_at_elaboration() 
     Ok(())
 }
 
-/// The first-party module that imports another, still loading the way
-/// M-13 loaded it: file-relative, by name, no manifest. Pinning this beside
-/// the manifest fixture is the migration boundary 0067 names — a `.pi`
-/// source file and a `module.pi` are different documents, and neither
+/// The first-party module that imports another, still loading the way a
+/// standalone module always has: file-relative, by name, no manifest. A
+/// `.pi` source file and a `module.pi` are different documents, and neither
 /// falls back to the other.
 #[test]
 fn the_standalone_importing_module_still_checks_by_file_relative_route() -> TestResult {
@@ -1271,9 +1250,9 @@ fn the_standalone_importing_module_still_checks_by_file_relative_route() -> Test
 }
 
 /// A changed dependency body revalidates the entry at run time: the
-/// consumer's elaboration is reusable — its ABI and entry revision did not
-/// move — but the recorded dependency edge did, so a fresh process over the
-/// same store recomputes rather than hydrates the stale answer.
+/// consumer's elaboration is reusable (its ABI and entry revision did not
+/// move), but the recorded dependency edge changed, so a fresh process over
+/// the same store recomputes rather than hydrates the stale answer.
 #[test]
 fn an_edited_dependency_body_revalidates_the_entry() -> TestResult {
     let home = scratch()?;

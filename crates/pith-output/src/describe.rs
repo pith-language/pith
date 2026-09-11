@@ -1,9 +1,8 @@
 //! One description of a query view, rendered twice.
 //!
-//! The plain and pretty renderers differ in color, not in what they say. A
-//! description is built once as styled lines here and painted or not at the
-//! renderer, so the two shapes cannot drift into reporting different facts
-//! about one view.
+//! The plain and pretty renderers differ in color, not in what they say: a
+//! description is built once as styled lines here, and painted or not at the
+//! renderer, so the two shapes cannot report different facts about one view.
 
 use crate::dto::{
     AboutValueRepr, ActionPlanView, ActionProgramRepr, AttemptStatusRepr, CheckReport,
@@ -322,8 +321,8 @@ fn diagnostic_line(lines: &mut Lines, diagnostic: &DiagnosticRepr) {
     line.plain(diagnostic.message.as_ref());
 }
 
-/// One of the three outcomes formatting a module has, each in the color the
-/// rest of the report already uses for that verdict.
+/// The formatting outcome, in the color the rest of the report uses for that
+/// verdict.
 fn format(lines: &mut Lines, report: &FmtReport) {
     lines
         .line(0)

@@ -43,10 +43,9 @@ impl Session<ReadOnly> {
     }
 
     /// Consume this session into an engine that can register and query rules,
-    /// but cannot evaluate or publish durable attempts.
-    ///
-    /// The returned type carries only [`EngineStateReader`] authority. Methods
-    /// such as `evaluate_pure` and `run` are absent at compile time.
+    /// but cannot evaluate or publish durable attempts: the type carries only
+    /// [`EngineStateReader`] authority, so methods such as `run` are absent
+    /// at compile time.
     ///
     /// # Errors
     /// [`QueryError`] when the state database cannot be opened read-only.

@@ -6,7 +6,8 @@ pub struct EntryTarget {
     #[arg(value_name = "ENTRY")]
     pub entry: String,
 
-    /// The root module. Defaults to module.pi, the M-14 workspace root name.
+    /// The root module. Defaults to module.pi, the conventional workspace
+    /// root name.
     #[arg(long, value_name = "PATH", default_value = "module.pi")]
     pub module: PathBuf,
 }

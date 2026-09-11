@@ -69,10 +69,11 @@ pub struct StoreMaterialize {
     #[arg(value_name = "ID")]
     id: ContentId,
 
-    /// The directory to create. Named `directory` and not `output`, because a
-    /// positional sharing an id with the global `--output` resolves to
-    /// whichever clap looked up last — and `debug_assert` does not catch it.
+    /// The directory to create.
     #[arg(value_name = "DIR")]
+    // Named `directory` and not `output`: a positional sharing an id with the
+    // global `--output` resolves to whichever clap looks up last, and
+    // `debug_assert` misses it.
     directory: PathBuf,
 }
 

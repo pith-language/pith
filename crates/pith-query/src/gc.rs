@@ -47,8 +47,8 @@ impl Session<ReadOnly> {
         })
     }
 
-    /// A live tree keeps its entries live, and a live subtree does the same,
-    /// so the closure follows every tree the seeds reached.
+    /// The live set is a transitive closure: a live tree keeps its entries
+    /// and its subtrees live.
     fn expand_live_trees(&self, live: &mut BTreeSet<ContentId>) -> Result<(), QueryError> {
         let mut queue: VecDeque<ContentId> = live.iter().copied().collect();
         let mut expanded = BTreeSet::new();

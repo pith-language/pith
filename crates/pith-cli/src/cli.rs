@@ -10,7 +10,7 @@ use crate::command;
     version,
     about = "the pith kernel",
     propagate_version = true,
-    after_help = "Workspace commands require a workspace; diff, update, and add are visible here but arrive with M-14."
+    after_help = "Workspace commands require a workspace; diff, update, and add are visible here but only apply once one exists."
 )]
 pub(crate) struct Cli {
     #[command(flatten)]

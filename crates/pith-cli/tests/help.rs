@@ -1,8 +1,5 @@
-//! The help text, as a person reads it.
-//!
-//! Cheaper than adding `trycmd`, and it is what catches a flag that quietly
-//! moved between the globals and a command, or a group that grew a verb
-//! without a durable object kind behind it.
+//! The help text, as a person reads it. Catches a flag that quietly moved
+//! between the globals and a command.
 
 use std::process::Command;
 

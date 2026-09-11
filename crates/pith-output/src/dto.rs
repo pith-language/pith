@@ -72,15 +72,13 @@ pub struct SumConstructorRepr {
 
 /// The version of the DTO contract below. `--output json` is a machine
 /// surface, so the shape a reader parses is versioned separately from the
-/// binary: bump this when a DTO's shape changes, and never for a change that
-/// only adds a command. The `query_view_shape_is_stable` snapshots are what
-/// make the number mean something.
+/// binary: bump this when a DTO's shape changes, not when a command is added.
 pub const QUERY_API_VERSION: u32 = 1;
 
-/// A DTO projection of `pith_diag::Severity`. Mirrored here rather than
-/// imported for the reason `ValueRepr` is: this crate holds serde and depends
-/// on nothing else in the stack. The driver converts through an exhaustive
-/// match, so a variant added upstream fails to compile rather than drifting.
+/// A DTO projection of `pith_diag::Severity`, mirrored like `ValueRepr`:
+/// this crate holds serde and depends on nothing else in the stack. The
+/// driver converts through an exhaustive match, so a variant added upstream
+/// fails to compile rather than drifting.
 #[derive(Copy, Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SeverityRepr {
@@ -96,7 +94,7 @@ pub enum SeverityRepr {
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct DiagnosticRepr {
     pub severity: SeverityRepr,
-    /// The stable code (K-11). Never renumbered, only added to.
+    /// The stable code. Never renumbered, only added to.
     pub code: u32,
     /// The source file the diagnostic points into, when it points into one.
     pub label: Option<Box<str>>,
@@ -106,8 +104,7 @@ pub struct DiagnosticRepr {
     pub message: Box<str>,
 }
 
-/// What `pith check` found. Reported whether or not elaboration succeeded,
-/// which is the property that keeps `check` outside the entry mechanism.
+/// What `pith check` found, reported whether or not elaboration succeeded.
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct CheckReport {
     pub module: Box<str>,
@@ -120,8 +117,7 @@ pub struct CheckReport {
 }
 
 /// What `pith fmt` did to one module. Like `check`, it works on source that
-/// does not elaborate — but not on source that does not parse, which is a
-/// refusal rather than a status.
+/// does not elaborate; source that does not parse is a refusal, not a status.
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct FmtReport {
     pub module: Box<str>,
@@ -170,9 +166,8 @@ impl TierRepr {
 pub struct InterfaceRepr {
     pub inputs: Box<[TypeRepr]>,
     pub output: Box<TypeRepr>,
-    /// The one-line spelling `Display for Interface` produces. The surface
-    /// notation renders the interface literal wherever the short call-site
-    /// form is written, so the rendered line travels with the structure.
+    /// The one-line spelling `Display for Interface` produces, shown wherever
+    /// the short call-site form is written.
     pub rendered: Box<str>,
 }
 
@@ -196,8 +191,7 @@ pub struct DeclarationView {
     pub name: Box<str>,
     pub body: DeclarationBodyRepr,
     /// The declaration grammar's own spelling of the body, from
-    /// `Display for DeclarationBody`. A reader gets the source form back
-    /// rather than a second notation invented at the renderer.
+    /// `Display for DeclarationBody`.
     pub rendered: Box<str>,
     /// The declaration's own revision digest. Doc text does not participate,
     /// so editing a description leaves this where it was.

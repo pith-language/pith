@@ -51,7 +51,6 @@ mod tests {
         let s = String::from_utf8(buf).unwrap();
         let lines: Vec<&str> = s.lines().collect();
         assert_eq!(lines.len(), 2);
-        // each line parses as its own JSON object
         for line in &lines {
             let v: serde_json::Value = serde_json::from_str(line).unwrap();
             assert_eq!(
@@ -59,7 +58,6 @@ mod tests {
                 Some("cache")
             );
         }
-        // and the two outcomes differ
         let first: serde_json::Value = serde_json::from_str(lines.first().unwrap()).unwrap();
         let second: serde_json::Value = serde_json::from_str(lines.get(1).unwrap()).unwrap();
         assert_ne!(first.get("outcome"), second.get("outcome"));

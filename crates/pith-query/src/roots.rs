@@ -50,10 +50,9 @@ pub struct Roots {
 }
 
 impl Roots {
-    /// Resolve both halves. `store` and `state` are the explicit overrides,
-    /// each taking precedence over `$PITH_HOME` and then over the XDG default,
-    /// and each overriding its half alone so a hermetic run or a test fixture
-    /// can move one without the other.
+    /// Resolve both halves. The `store` and `state` overrides each beat the
+    /// `$PITH_HOME` default, which beats the XDG default, and each overrides
+    /// its half alone so a hermetic run can move one without the other.
     ///
     /// # Errors
     /// [`RootsError::NoHome`] when a half is unnamed and no home directory

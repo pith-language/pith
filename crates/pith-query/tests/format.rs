@@ -18,8 +18,8 @@ const CORPUS: &[(&str, &str)] = &[
 ];
 
 /// The written-body tier: every request construct, the control forms, and an
-/// entry, which the corpus's host-tier modules cannot exercise. Spellings
-/// the notation suite already elaborates.
+/// entry, which the corpus's host-tier modules cannot exercise. Every
+/// spelling here already elaborates.
 const NOTATION: &str = "sum Shape = circle(Int) | square
 
 nominal Object = Blob
@@ -106,9 +106,9 @@ fn corpus_env() -> TestResult<ImportEnv> {
     Ok(imports)
 }
 
-/// The claim over the corpus: formatting moves no ABI digest and no body
-/// digest, in either direction — a formatted module and the module it came
-/// from are the same module to every reader below the frontend.
+/// Formatting moves no ABI digest and no body digest, in either direction: a
+/// formatted module and its original are the same module to every reader
+/// below the frontend.
 #[test]
 fn formatting_moves_no_corpus_digest() -> TestResult {
     let imports = corpus_env()?;
@@ -126,8 +126,8 @@ fn formatting_moves_no_corpus_digest() -> TestResult {
     Ok(())
 }
 
-/// The claim over the notation: written bodies, the request constructs, and
-/// an entry keep their digests through formatting too.
+/// Written bodies, the request constructs, and an entry keep their digests
+/// through formatting too.
 #[test]
 fn formatting_moves_no_body_digest() -> TestResult {
     let formatted = format_module(&source("notation", "notation.pi", NOTATION))
@@ -148,12 +148,11 @@ fn single(reports: Vec<FmtReport>) -> FmtReport {
     only.clone()
 }
 
-/// `fmt(fmt(x))` equals `fmt(x)`, over the corpus, the notation, and one
-/// deliberately non-canonical module, through the query the `pith fmt`
-/// command takes. The tree keeps its corpus canonical, so a corpus module's
-/// first format can already be a no-op; the messy one cannot, and it keeps
-/// the write path exercised. Formatting is parse-only, so no corpus module
-/// needs its imports here.
+/// `fmt(fmt(x))` equals `fmt(x)` over the corpus, the notation, and one
+/// deliberately non-canonical module, through the query `pith fmt` takes.
+/// The corpus is already canonical, so the messy module keeps the write path
+/// exercised. Formatting is parse-only, so no corpus module needs imports
+/// here.
 #[test]
 fn formatting_is_idempotent() -> TestResult {
     let directory = tempfile::tempdir()?;

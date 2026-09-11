@@ -26,13 +26,12 @@ pub enum FormatMode {
 
 /// Format the module at `path`: write the canonical spelling of its parsed
 /// surface back, or under [`FormatMode::Check`] name what a write would
-/// change without touching the file. A manifest formats itself and the
-/// root module's own source files, one report per file, and edits neither
+/// change without touching the file. A manifest formats itself and the root
+/// module's own source files, one report per file, and touches neither
 /// dependencies nor other members.
 ///
-/// A module has to parse — there is no canonical spelling of a module that
-/// does not — but it does not have to elaborate, which is the property
-/// `fmt` shares with `check`.
+/// A module must parse (there is no canonical spelling otherwise) but need
+/// not elaborate, which `fmt` shares with `check`.
 ///
 /// # Errors
 /// [`QueryError`] when the file cannot be read, is not named as a module,

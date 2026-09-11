@@ -1,25 +1,22 @@
 //! One semantic palette, adapted once to the output terminal.
 //!
 //! The CLI detects a [`TermProfile`] for stdout and gives the resulting
-//! [`Palette`] to every human-facing renderer. The renderer asks for a
-//! semantic [`Role`], not for a color, so terminal capability never leaks into
-//! descriptions and RGB/256/16-color fallbacks cannot drift between call
-//! sites. When the terminal reports its current foreground and background,
-//! [`TerminalTheme`] also lets richer profiles enforce text contrast against
-//! the actual background rather than guessing whether it is light or dark.
+//! [`Palette`] to every human-facing renderer. Renderers ask for a semantic
+//! [`Role`], never a color, so RGB/256/16-color fallbacks cannot drift between
+//! call sites. With a measured [`TerminalTheme`], richer profiles also enforce
+//! text contrast against the actual background.
 
 use anstyle::{Ansi256Color, AnsiColor, Color, RgbColor, Style};
 use termprofile::TermProfile;
 
-/// Minimum contrast used for colored terminal text.
-///
-/// This is the WCAG AA threshold for ordinary text.
+/// Minimum contrast used for colored terminal text: the WCAG AA threshold for
+/// ordinary text.
 pub const MIN_CONTRAST_RATIO: f32 = 4.5;
 
 /// The terminal's measured default foreground and background colors.
 ///
-/// Detection and terminal I/O stay in the driver. This value is deliberately
-/// small so renderers can be tested without owning a terminal.
+/// Detection and terminal I/O stay in the driver; this value is small so
+/// renderers can be tested without owning a terminal.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct TerminalTheme {
     foreground: RgbColor,

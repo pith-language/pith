@@ -16,7 +16,7 @@ pub struct OutputRecord {
     pub payload: Payload,
 }
 
-/// Stable string tag on every record. Never renumber, only add (K-11).
+/// Stable string tag on every record. Never rename one, only add.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecordKind {
@@ -30,10 +30,8 @@ pub enum RecordKind {
 }
 
 impl RecordKind {
-    /// The stable snake_case tag for this kind. This is the single source of
-    /// truth for the string every renderer (plain, pretty, JSON) uses; it must
-    /// match the `#[serde(rename_all = "snake_case")]` derivation, which the
-    /// `record_kind_as_str_matches_serde` test pins.
+    /// The stable snake_case tag for this kind. Single source of truth for the
+    /// string every renderer uses; must match the serde derivation.
     pub const fn as_str(self) -> &'static str {
         match self {
             RecordKind::Phase => "phase",
@@ -72,14 +70,13 @@ pub enum Payload {
         errors: u64,
         wall_ms: u64,
     },
-    /// A typed answer from the query API. The version rides on the record
-    /// rather than being announced once per run, so a reader that consumes one
-    /// line in isolation still knows the contract it is reading.
+    /// A typed answer from the query API. The version rides on the record so a
+    /// reader that consumes one line in isolation knows the contract it is
+    /// reading.
     ///
-    /// The view is nested rather than flattened. A DTO is free to name a field
-    /// `kind` or `code`, and flattening one into the envelope would let it
-    /// overwrite the envelope's own field of that name — silently, and
-    /// differently per view.
+    /// The view is nested rather than flattened: a DTO may name a field `kind`
+    /// or `code`, and flattening would let it overwrite the envelope's own
+    /// field of that name, silently and differently per view.
     Query {
         api_version: u32,
         query: dto::QueryView,
@@ -87,10 +84,9 @@ pub enum Payload {
 }
 
 impl Payload {
-    /// The [`RecordKind`] that classifies this payload. This is the single
-    /// source of truth for the kind/payload pairing: an `OutputRecord`'s `kind`
-    /// field is derived from its payload, never hand-paired at a construction
-    /// site. The `kind_matches_payload_in_every_constructor` test pins this.
+    /// The [`RecordKind`] that classifies this payload. An `OutputRecord`'s
+    /// `kind` field is derived from its payload, never hand-paired at a
+    /// construction site.
     pub const fn record_kind(&self) -> RecordKind {
         match self {
             Payload::Phase { .. } => RecordKind::Phase,
@@ -338,9 +334,8 @@ mod tests {
         }
     }
 
-    /// Every constructor must pair its `kind` with the matching `Payload`
-    /// variant. Because `kind` is now derived from the payload, this also
-    /// guards that the `kind` field never drifts from `payload.record_kind()`.
+    /// `kind` is derived from the payload; this pins that it never drifts
+    /// from `payload.record_kind()`.
     #[test]
     fn kind_matches_payload_in_every_constructor() {
         let records = [

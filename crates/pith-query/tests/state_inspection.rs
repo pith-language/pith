@@ -82,9 +82,9 @@ fn admit_content(roots: &Roots) -> TestResult<Content> {
     })
 }
 
-/// Four attempts over three keys: two publications of one key (the second
-/// supersedes the first in the index), one attempt whose edge keeps the
-/// superseded publication retained, and one attempt that never finished.
+/// Two publications of one key (the second supersedes the first in the
+/// index), one attempt whose edge keeps the superseded publication retained,
+/// and one attempt that never finished.
 fn record_attempts(roots: &Roots, content: &Content) -> TestResult<()> {
     let store = SqliteEngineStateStore::open(roots.state())?;
     let (_, first_key) = key("constant");
@@ -195,9 +195,8 @@ fn the_dry_run_keeps_what_the_roots_reach_and_names_the_rest() -> TestResult {
         "{content_preview:?}"
     );
 
-    // The live bytes are exactly the edge-named blob, the result-named blob,
-    // the tree, and the tree's own file — the last reached only through the
-    // tree's entries.
+    // The tree's own file is live only through the tree's entries; the rest
+    // of the live set is what the retained records name directly.
     let object_size = |id: ContentId| -> TestResult<u64> {
         let blob = store
             .get_blob(id)?
@@ -238,9 +237,8 @@ fn content_without_state_is_all_reclaimable() -> TestResult {
     Ok(())
 }
 
-/// An existing file that is not a state database is a failure to read, not an
-/// empty store: the presence check is the only thing standing between a
-/// mistyped `--state` and a report of zeros over it.
+/// An existing file that is not a state database is a read failure, not an
+/// empty store: a mistyped `--state` path errors instead of reporting zeros.
 #[test]
 fn a_broken_state_database_is_an_error_and_not_an_empty_store() -> TestResult {
     let home = tempfile::tempdir()?;

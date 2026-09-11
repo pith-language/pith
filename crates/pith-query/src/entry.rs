@@ -54,8 +54,8 @@ impl EntryRequest {
 }
 
 impl Session<Writable> {
-    /// Evaluate a named entry through the writable engine. The method is absent
-    /// from [`Session<ReadOnly>`], so a query-only client cannot publish an
+    /// Evaluate a named entry through the writable engine. Absent from
+    /// [`Session<ReadOnly>`], so a query-only client cannot publish an
     /// attempt accidentally.
     ///
     /// ```compile_fail
@@ -198,9 +198,9 @@ impl Session<ReadOnly> {
     }
 }
 
-/// Everything an entry query shares before its own step: the module loaded,
-/// its declarations bound, the entry registered, and its rule selected. The
-/// engine arrives with the entry on it; only its origin differs per query.
+/// Shared prefix of every entry query: load the module, bind declarations,
+/// register the entry, select its rule. Queries differ only in what runs
+/// next, and in whether the engine is writable.
 fn prepare_entry<S>(
     path: &Path,
     entry: &str,
@@ -217,8 +217,6 @@ where
     Ok((request, engine))
 }
 
-/// A completed entry evaluation: the request it ran under, the engine that
-/// ran it, and the result.
 struct Evaluated {
     request: EntryRequest,
     engine: Engine,
@@ -344,10 +342,9 @@ fn list_text_field(
 }
 
 /// Expand one attempt into its dependency node. `rendered` memoizes finished
-/// nodes by attempt, so a shared dependency renders once and reads once no
-/// matter how many paths reach it — without it, a dense recorded graph walks
-/// one path per route through it. `visiting` is the current path only, and
-/// still names the cycle case, where a node repeats inside its own subtree.
+/// nodes so a shared dependency renders and reads once regardless of how many
+/// paths reach it. `visiting` is the current path, and detects the cycle case
+/// where a node repeats inside its own subtree.
 fn attempt_node(
     reader: &dyn EngineStateReader,
     attempt: Arc<DurableAttempt>,

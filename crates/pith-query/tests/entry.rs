@@ -138,8 +138,8 @@ fn the_builtin_exec_type_is_evaluated_before_the_caller_effect() -> TestResult {
 }
 
 /// A host rule in a dependency's second file refuses with that file's own
-/// label and a file-local span: multi-file modules present engine refusals
-/// where the declaration lives, not at a module-wide offset.
+/// label and a file-local span, at the declaration rather than a module-wide
+/// offset.
 #[test]
 fn an_unbound_host_rule_in_a_later_file_points_there() -> TestResult {
     let source = tempfile::tempdir()?;
