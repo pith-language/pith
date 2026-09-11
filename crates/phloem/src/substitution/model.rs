@@ -191,7 +191,7 @@ impl Admitted {
     /// Decodes an admitted substitution from `value`.
     ///
     /// # Errors
-    /// Returns a diagnostic when `value` is not a substitution record.
+    /// When `value` is not a substitution record.
     pub fn from_value(value: &Value) -> PithResult<Self> {
         if !value.is_type(&substitution_type()) {
             return Err(crate::diag(format!(

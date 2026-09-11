@@ -67,8 +67,8 @@ pub enum Resolution {
         /// so a recorded answer names the universe it came from.
         universe: ContentId,
     },
-    /// No solution exists, and here is the derivation. Distinct from every
-    /// other constructor: this is a fact about the problem.
+    /// No solution exists; `derivation` names the subject, the constraints
+    /// in force, and the available candidates.
     Unsatisfiable { derivation: Derivation },
     /// The preference list did not separate otherwise valid candidates.
     Underdetermined {
@@ -164,7 +164,7 @@ pub(crate) fn declare(
     }
 }
 
-/// Returns the resolution interface over its five declared inputs.
+/// Returns the resolution interface over its declared inputs.
 #[must_use]
 pub fn resolve_interface() -> Interface {
     Interface {
@@ -180,7 +180,7 @@ pub fn resolve_interface() -> Interface {
 }
 
 /// A resolve request value against the resolution interface: the declared
-/// scheme name and the four protocol inputs.
+/// scheme name and the protocol inputs.
 #[must_use]
 pub fn resolve_request(
     scheme: &Value,
@@ -262,8 +262,8 @@ impl Resolution {
     /// Read a resolution from a value.
     ///
     /// # Errors
-    /// A [`pith_diag::DiagnosticSink`] naming what was found when the value
-    /// is not a resolution of the declared sum.
+    /// [`pith_diag::DiagnosticSink`] when the value is not a resolution of
+    /// the declared sum.
     pub fn from_value(value: &Value) -> PithResult<Self> {
         if !value.is_type(&resolution_type()) {
             return Err(crate::diag(format!(

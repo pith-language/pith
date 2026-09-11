@@ -1,14 +1,8 @@
-//! Scope's base case, held unchanged (0009, 0039): someone builds one
-//! executable without defining a package, and this file builds one with no
-//! phloem value constructed anywhere — the compile and link requests are
-//! xylem's own, driven through the kernel exactly as a package-less build
-//! drives them. The phloem crate appears only as the test's host, which is
-//! the point: packaging is a peer, not a parent.
-//!
-//! Linux-gated like xylem's toolchain tests, with the same
-//! `toolchain_or_skip` discipline: skip only on genuine absence, fail on a
-//! driver that is present but undiscoverable, and fail the run outright when
-//! no compiler exists at all so a compiler-less host cannot read as green.
+//! The package-less base case: compile and link requests built from xylem's
+//! own types, driven through the kernel, with no phloem value constructed
+//! anywhere. Linux-gated like xylem's toolchain tests, with the same
+//! `toolchain_or_skip` discipline: skip only on genuine absence, and fail
+//! the run outright when no compiler exists.
 
 #![cfg(target_os = "linux")]
 
@@ -66,8 +60,6 @@ fn an_executable_builds_with_no_package_defined_anywhere() {
         "the package-less build produced a linked executable"
     );
 
-    // The built program runs and reports success: the executable works, not
-    // just bytes with the right magic.
     let program = root.path().join("program");
     std::fs::write(&program, bytes.as_bytes()).unwrap();
     make_executable(&program).unwrap();
@@ -78,9 +70,9 @@ fn an_executable_builds_with_no_package_defined_anywhere() {
     );
 }
 
-/// The fixture's own failure spelling, as `source_adapter.rs` states it: a
-/// helper outside a `#[test]` function cannot unwrap or panic under the
-/// crate's lint posture, so failures travel as diagnostics.
+/// Fixture failure spelling, as `source_adapter.rs` states it: helpers
+/// outside a `#[test]` function cannot unwrap, so failures travel as
+/// diagnostics.
 fn run(
     engine: &mut Engine,
     request: &pith_core::Request<pith_core::Pure>,

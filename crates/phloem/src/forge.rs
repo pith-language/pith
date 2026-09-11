@@ -17,10 +17,9 @@ use crate::resolution::Resolution;
 use crate::source::SourceBinding;
 use crate::universe::Candidate;
 
-/// Why a git invocation could not answer: the host has no git, or the
-/// invocation ran and git refused. The distinction is the skip-versus-fail
-/// line the toolchain fixtures drew: an absent tool skips, a present tool
-/// that cannot resolve the repository fails.
+/// Why a git invocation could not answer: the host has no git, or git ran
+/// and refused. Callers treat the first as a skip and the second as a
+/// failure, matching the skip-versus-fail line the toolchain fixtures drew.
 #[derive(Debug)]
 enum ForgeError {
     NotFound,

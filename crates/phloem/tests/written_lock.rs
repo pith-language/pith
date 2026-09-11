@@ -1,10 +1,7 @@
-//! The written lock as an artifact in the graph's terms (decision 0041):
-//! a resolution produces a lock document carrying every recorded input, the
-//! engine never writes the file, the written form round-trips, two
-//! resolutions under the same candidate universe produce the same file
-//! bytes, a changed input produces a different file whose diff names the
-//! moved input, and a lock read back pins the same selection and reports
-//! drift rather than absorbing it.
+//! The written lock as an artifact in the graph's terms: the engine never
+//! writes the file, the written form round-trips, identical inputs give
+//! identical bytes, a changed input gives a file whose diff names what
+//! moved, and a lock read back pins the same selection and reports drift.
 
 #[path = "support/engine_state.rs"]
 mod engine_state_support;
@@ -204,8 +201,8 @@ fn two_resolutions_under_the_same_universe_write_identical_bytes() {
     assert_eq!(lock::render(&first_lock), lock::render(&second_lock));
     assert_eq!(first_lock.content_id(), second_lock.content_id());
 
-    // The same engine serving the same request from the reusable index
-    // produces the same file again.
+    // The same request served from the reusable index renders the same
+    // file again.
     let reused = first
         .evaluate_pure(&request_over(
             NUMERIC_SEGMENTS,
@@ -341,8 +338,8 @@ fn a_lock_read_back_pins_the_same_selection_and_reports_drift() {
         );
     }
 
-    // The same coordinates offered as different content is drift: reported
-    // with both content identities, never absorbed.
+    // The same coordinates backed by different content is drift, reported
+    // with both content identities.
     let republished =
         CandidateUniverse::new(vec![candidate("zlib", "1.3", b"zlib-1.3-republished")]);
     let drifted = engine
@@ -390,7 +387,7 @@ fn a_lock_read_back_pins_the_same_selection_and_reports_drift() {
 #[test]
 fn the_value_spelling_survives_the_codec_boundary_unchanged() {
     // The lock crosses processes as its value too, and the digest taken over
-    // canonical bytes is what "the same lock" means there (0041).
+    // canonical bytes is what "the same lock" means there.
     let universe = CandidateUniverse::new(vec![candidate("zlib", "1.3", b"zlib-1.3")]);
     let mut engine = engine_with(&SharedState::default());
     let answer = engine
@@ -415,11 +412,9 @@ fn the_value_spelling_survives_the_codec_boundary_unchanged() {
 }
 
 /// A malformed lock read back from its path is refused by a diagnostic that
-/// carries the file itself: the source is the file at the path it was read
-/// from, the span selects the offending field's written spelling, and a
-/// miette render over that diagnostic names the file, the line, and the
-/// column, so a reader renders position from structure rather than prose
-/// (decision 0053).
+/// carries the file itself: the source is the file at the read path, the
+/// span selects the offending field's written spelling, and a miette
+/// render names the file, the line, and the column.
 #[test]
 fn a_malformed_lock_read_back_carries_its_file_and_renders_its_position() {
     let scratch = TempDir::new().unwrap();

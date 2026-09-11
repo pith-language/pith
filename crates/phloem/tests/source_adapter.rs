@@ -1,13 +1,9 @@
-//! The first source adapter against real bytes (decision 0044): a local
-//! filesystem registry is read into the declared candidate universe, a
-//! resolution over that universe locks bindings whose archives are then
-//! fetched and measured, the transparency log over the index's binding
-//! lines witnesses each binding, and the failures the threat model names —
-//! a tampered archive, a registry that republishes under one name, a
-//! checkpoint the configuration does not pin — are each detected with a
-//! diagnostic naming what was expected and what was found. A git
-//! reference, the one source whose witness is intrinsic, locks only after
-//! a fetch materializes and measures the tree.
+//! The source adapter against real bytes: a registry read into the declared
+//! candidate universe, a resolution that locks bindings, archives fetched
+//! and measured, and the transparency log witnessing each binding. The
+//! threat-model failures (a tampered archive, a self-consistent
+//! republished registry, an unpinned checkpoint) are each detected with a
+//! diagnostic naming what was expected and what was found.
 
 #[path = "support/diagnostic.rs"]
 mod diagnostic_support;
@@ -86,11 +82,10 @@ fn binding_of(published: &Published) -> LockEntry {
     )
 }
 
-/// Publish a registry and its witnessing log: the index lines, the
-/// archives, the log's leaves in the lock's own binding spelling, and the
-/// checkpoint over them. The test is the log's operator here; the fallible
-/// filesystem work is carried as a result so the tests unwrap at their
-/// call sites, where unwrapping is allowed.
+/// Publish a registry and its witnessing log, with leaves in the lock's
+/// own binding spelling and the checkpoint over them. The fallible
+/// filesystem work is carried as a result so tests unwrap at their call
+/// sites.
 fn publish(root: &Path, packages: &[Published]) -> pith_diag::PithResult<Checkpoint> {
     let mut index: Vec<(String, String)> = Vec::new();
     for package in packages {
@@ -184,14 +179,9 @@ fn a_registry_index_becomes_a_universe_that_locks_content_actually_read() {
     assert_eq!(entry.source, ContentId::of_blob(ZLIB_BYTES));
     assert_eq!(entry.origin, Origin::Registry(REGISTRY.into()));
 
-    // The fetch reads real bytes and measures them: the binding and the
-    // measurement agree because the registry told the truth.
     let fetched = registry::fetch(scratch.path(), &entry).unwrap();
     entry.verify_resolution(fetched.measured).unwrap();
 
-    // The witness passes: the log holds the line, the proof carries it
-    // into the pinned checkpoint, and the witnessed digest is the bound
-    // one.
     let evidence = registry::read_witness(&scratch.path().join("log"), &entry).unwrap();
     registry::verify(&entry, &evidence, &pinned).unwrap();
 
@@ -215,9 +205,8 @@ fn tampered_archive_bytes_are_detected_naming_both_digests() {
     let universe = registry::read_index(scratch.path(), REGISTRY).unwrap();
     let entry = zlib_entry(&resolve_lock(&universe).unwrap());
 
-    // The registry serves other bytes than its index claims. The
-    // measurement is the fact, and the drift diagnostic carries both
-    // content identities.
+    // The registry serves other bytes than its index claims; the drift
+    // diagnostic carries both content identities.
     std::fs::write(
         package_path(scratch.path(), "zlib", "1.3"),
         b"tampered on the mirror",
@@ -238,9 +227,8 @@ fn tampered_archive_bytes_are_detected_naming_both_digests() {
 #[test]
 fn a_self_consistent_republished_registry_is_detected_by_the_log() {
     // The adversary the digest alone cannot catch: the registry republishes
-    // different bytes under one name and updates its own index to match,
-    // so every local claim agrees with every other. The log still holds
-    // the original line.
+    // different bytes under one name and updates its own index to match, so
+    // every local claim agrees. The log still holds the original line.
     let scratch = TempDir::new().unwrap();
     publish(scratch.path(), &published()).unwrap();
 
@@ -264,8 +252,8 @@ fn a_self_consistent_republished_registry_is_detected_by_the_log() {
     let fetched = registry::fetch(scratch.path(), &entry).unwrap();
     entry.verify_resolution(fetched.measured).unwrap();
 
-    // The witness disagrees: the log's line for these coordinates binds
-    // the original content, and the diagnostic names both.
+    // The witness disagrees: the log's line still binds the original
+    // content.
     let pinned = {
         let log = scratch.path().join("log");
         Checkpoint::parse(&std::fs::read_to_string(log.join("checkpoint")).unwrap()).unwrap()
@@ -289,8 +277,8 @@ fn a_checkpoint_the_configuration_does_not_pin_is_refused_naming_both() {
     let entry = zlib_entry(&resolve_lock(&universe).unwrap());
     let evidence = registry::read_witness(&scratch.path().join("log"), &entry).unwrap();
 
-    // Another log answers with another root; the configuration pinned this
-    // one. The policy leg refuses first, naming both checkpoints.
+    // Another log answers with another root; the configuration pinned
+    // this one.
     let mut foreign = pinned.clone();
     foreign.root = ContentId::of_blob(b"another log's tree").digest();
     let error = registry::verify(&entry, &evidence, &foreign).unwrap_err();
@@ -300,10 +288,8 @@ fn a_checkpoint_the_configuration_does_not_pin_is_refused_naming_both() {
         "the diagnostic names the pinned checkpoint: {message}"
     );
 
-    // The log's own file moved while the leaves did not: the served
-    // checkpoint no longer commits to the tree the proof folds into, and
-    // the inclusion leg refuses, naming the computed root and the
-    // checkpoint's.
+    // The checkpoint moved while the leaves did not, so it no longer
+    // commits to the tree the proof folds into; the inclusion leg refuses.
     let tampered_root = ContentId::of_blob(b"a rewritten checkpoint").digest();
     let mut rewritten = evidence.clone();
     rewritten.checkpoint.root = tampered_root;
@@ -361,9 +347,8 @@ fn a_registry_answer_that_moved_between_runs_moves_the_universe_and_the_diff_nam
 
 #[test]
 fn resolving_and_verifying_touch_no_path_beyond_the_adapter_reads() {
-    // The adapter reads are caller effects; everything downstream of them
-    // is pure. Resolution, locking, digesting, and the witness verification
-    // consume what was read and write nothing.
+    // The adapter reads are caller effects; everything downstream is pure
+    // and writes nothing.
     let scratch = TempDir::new().unwrap();
     let pinned = publish(scratch.path(), &published()).unwrap();
     let universe = registry::read_index(scratch.path(), REGISTRY).unwrap();
@@ -452,9 +437,8 @@ fn a_git_reference_locks_only_after_the_fetch_measures_the_tree() {
         message_of(&error)
     );
 
-    // The fetch materializes the tree and measures it; the answer that
-    // locked nothing now locks measured content, whose bytes the test
-    // measures independently from git itself.
+    // The fetch materializes the tree; the lock now binds measured
+    // content, checked independently against `git archive`.
     let materialized = forge::materialize_resolution(&repo, &resolution).unwrap();
     let lock = Lock::from_resolution(NUMERIC_SEGMENTS, &preferences(), &materialized).unwrap();
     let entry = lock.entries.first().unwrap();

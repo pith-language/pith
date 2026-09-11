@@ -1,11 +1,9 @@
-//! Package build declarations and execution rules.
-//!
-//! A build selects source paths from a measured source tree and names the
-//! include paths it offers. The pure build rules compile those sources through
-//! xylem and link the resulting objects — as one executable for the package
-//! itself, or as a library (objects plus the offered headers) for whatever
-//! depends on it. Archive unpacking imports source files at the caller's
-//! effect boundary.
+//! Package build declarations and execution rules. A build selects source
+//! paths from a measured source tree and names the include paths it offers;
+//! the pure build rules compile those sources through xylem and link the
+//! resulting objects, one executable for the package itself or a library
+//! for whatever depends on it. Archive unpacking imports source files at
+//! the caller's effect boundary.
 
 mod model;
 mod rule;

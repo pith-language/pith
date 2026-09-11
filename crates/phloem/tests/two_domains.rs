@@ -1,20 +1,15 @@
-//! The range algebra depends only on the ordering, not the spelling
-//! (decision 0040's claim about splitting PEP 440's three-in-one grammar).
-//!
-//! Two domains declare different version schemes — a semver-shaped numeric
-//! one and a Debian-shaped one with epochs and tilde ordering — and the same
-//! algebra must hold over both. Every expectation below is derived from the
-//! position a spelling occupies in the domain's own declared ordering, so
-//! the test knows nothing about how either scheme spells or parses a
-//! version: if the algebra leaked any spelling knowledge, one of the two
-//! instances would fail.
+//! The range algebra depends only on the ordering, not the spelling. Two
+//! domains declare different version schemes, and the same algebra must
+//! hold over both; every expectation is derived from the position a
+//! spelling occupies in the domain's own ordering, so a leaked spelling
+//! assumption would fail one of the two instances.
 
 use phloem::constraint::{Bound, Range};
 use phloem::identity::{Debian, NumericSegments, VersionScheme};
 
-/// `at least` admits exactly the suffix of the ordering, edge included: the
-/// i-th spelling of `ordered` is the i-th version under the scheme's own
-/// comparison, and every assertion speaks in those positions.
+/// `at least` admits exactly the suffix of the ordering, edge included:
+/// the i-th spelling of `ordered` is the i-th version under the scheme's
+/// own comparison, and every assertion speaks in those positions.
 fn at_least_admits_exactly_the_suffix(scheme: &dyn VersionScheme, ordered: &[&str]) {
     for (lower_index, lower) in ordered.iter().enumerate() {
         let at_least = Range::AtLeast(Bound::new(*lower, true));
@@ -55,9 +50,8 @@ fn between_admits_the_interval_and_negates_the_complement(
 ) {
     for (lower_index, lower) in ordered.iter().enumerate() {
         for (upper_index, upper) in ordered.iter().enumerate() {
-            // A between with a crossed edge pair is not constructed by
-            // honest callers; skip the empty spelling rather than define
-            // what a crossed interval means.
+            // A crossed edge pair is not a valid construction; skip the
+            // empty spelling rather than define what it would mean.
             if lower_index > upper_index {
                 continue;
             }
@@ -125,9 +119,7 @@ fn the_algebra_holds_over_a_semver_shaped_domain() {
 #[test]
 fn the_algebra_holds_over_a_debian_shaped_domain() {
     // Ascending under Debian: tilde sorts below the untilded same version,
-    // `+dfsg` above the bare version, and the epoch dominates everything —
-    // the three facts that make this ordering a different animal from the
-    // semver-shaped one above.
+    // `+dfsg` above the bare version, and the epoch dominates everything.
     let scheme = &Debian as &dyn VersionScheme;
     let ordered = &[
         "0.9~rc1", "0.9", "1.0~rc1", "1.0", "1.0+dfsg", "2.0", "1:0.1", "1:0.2",
@@ -140,9 +132,8 @@ fn the_algebra_holds_over_a_debian_shaped_domain() {
 
 #[test]
 fn the_two_schemes_genuinely_disagree_about_spellings() {
-    // The guard behind the two instances: if the schemes did not order the
-    // same spellings differently, both instances would be the same test and
-    // nothing about "depends only on the ordering" would be measured.
+    // The guard behind the two instances: if the schemes ordered these
+    // spellings the same way, both instances would be the same test.
     use std::cmp::Ordering;
     let semver_shaped = NumericSegments.compare("1.0+dfsg", "1.0~rc1");
     let deb = Debian.compare("1.0+dfsg", "1.0~rc1");

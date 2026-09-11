@@ -17,9 +17,8 @@ pub(crate) const FIELD_PACKAGE: &str = "package";
 pub(crate) const FIELD_TOOLCHAIN: &str = "toolchain";
 pub(crate) const FIELD_VERSION: &str = "version";
 
-/// Build a record type from `(name, payload)` pairs. Field names are
-/// distinct constants at every call site, so the duplicate-name rejection
-/// is unreachable by construction.
+/// Builds a record type from `(name, payload)` pairs. Call sites pass
+/// distinct name constants, so the duplicate-name rejection never fires.
 pub(crate) fn record_type<const N: usize>(fields: [(&str, Type); N]) -> Type {
     let record = Type::record(fields.map(|(name, payload)| RecordField {
         name: name.into(),
@@ -28,7 +27,7 @@ pub(crate) fn record_type<const N: usize>(fields: [(&str, Type); N]) -> Type {
     record.unwrap_or_else(|error| unreachable!("{error}"))
 }
 
-/// Build a record value from `(name, payload)` pairs, on the same terms as
+/// Builds a record value from `(name, payload)` pairs, on the same terms as
 /// [`record_type`].
 pub(crate) fn record_value<const N: usize>(fields: [(&str, Value); N]) -> Value {
     let record = Value::record(fields.map(|(name, payload)| RecordField {
@@ -63,14 +62,13 @@ pub(crate) fn value_content_id(domain: DigestDomain, value: &Value) -> ContentId
     ContentId::of_domain(domain, &value.encode_canonical())
 }
 
-/// Decode exactly one SHA-256 digest written as hexadecimal.
+/// Decodes a digest written as hexadecimal.
 pub(crate) fn digest_from_hex(text: &str) -> Option<ContentDigest> {
     let mut bytes = [0; DIGEST_LEN];
     pith_ids::decode_hex_into(&mut bytes, text).then(|| ContentDigest::from_bytes(bytes))
 }
 
-/// A record's field payload by name, or `None` when the record has no such
-/// field.
+/// A record's field payload by name, or `None` when absent.
 pub(crate) fn field_of<'a>(fields: &'a [RecordField<Value>], name: &str) -> Option<&'a Value> {
     fields
         .iter()
@@ -79,10 +77,6 @@ pub(crate) fn field_of<'a>(fields: &'a [RecordField<Value>], name: &str) -> Opti
 }
 
 /// A payload as text, naming the field it was read from.
-///
-/// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming what the field carried when the
-/// payload is not a text.
 pub(crate) fn text_of(value: &Value, field: &str) -> PithResult<Box<str>> {
     match value {
         Value::Text(text) => Ok(text.clone()),
@@ -94,10 +88,6 @@ pub(crate) fn text_of(value: &Value, field: &str) -> PithResult<Box<str>> {
 }
 
 /// A payload as a list of texts, naming the field it was read from.
-///
-/// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming what the field carried when the
-/// payload is not a list of texts.
 pub(crate) fn text_list(value: &Value, field: &str) -> PithResult<Vec<Box<str>>> {
     let Value::List(elements) = value else {
         return Err(diag(format!(
@@ -112,11 +102,7 @@ pub(crate) fn text_list(value: &Value, field: &str) -> PithResult<Vec<Box<str>>>
     Ok(texts)
 }
 
-/// A record's text field by name.
-///
-/// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming what the field carried when the
-/// record has no such field or the field is not a text.
+/// A record's text field by name, naming the field in the diagnostic.
 pub(crate) fn text_field(fields: &[RecordField<Value>], name: &str) -> PithResult<Box<str>> {
     match field_of(fields, name) {
         Some(payload) => text_of(payload, name),
@@ -124,11 +110,7 @@ pub(crate) fn text_field(fields: &[RecordField<Value>], name: &str) -> PithResul
     }
 }
 
-/// A record's blob field by name.
-///
-/// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming what the field carried when the
-/// record has no such field or the field is not a blob.
+/// A record's blob field by name, naming the field in the diagnostic.
 pub(crate) fn blob_field(fields: &[RecordField<Value>], name: &str) -> PithResult<ContentId> {
     match field_of(fields, name) {
         Some(Value::Blob(id)) => Ok(*id),
@@ -143,9 +125,9 @@ pub(crate) fn blob_field(fields: &[RecordField<Value>], name: &str) -> PithResul
 /// Reads a record's integer field as a `u64`.
 ///
 /// # Errors
-/// Returns a diagnostic when the field is missing, not an integer, or outside
-/// the range of a `u64` — which a value of the kernel's arbitrary-precision
-/// integer type can be from either end (decision 0055).
+/// When the field is missing, not an integer, or outside the `u64` range,
+/// which the kernel's arbitrary-precision integers can exceed from either
+/// end.
 pub(crate) fn int_field(fields: &[RecordField<Value>], name: &str) -> PithResult<u64> {
     match field_of(fields, name) {
         Some(Value::Int(n)) => n

@@ -95,10 +95,8 @@ fn bound_type() -> Type {
     record_type([(FIELD_VERSION, Type::Text), (INCLUSIVE, Type::Bool)])
 }
 
-/// A scheme orders spellings, so it orders borrowed spellings for the
-/// shared range algebra. The algebra never sees a scheme of its own.
-/// A scheme as the shared algebra's comparator: the algebra sees an
-/// ordering of borrowed spellings and never a scheme of its own.
+/// Adapts a scheme to the shared range algebra's comparator over borrowed
+/// spellings; the algebra never sees a scheme of its own.
 struct SchemeOrder<'a>(&'a dyn VersionScheme);
 
 impl<'a, 'spelling> Compare<&'spelling str> for SchemeOrder<'a> {
@@ -281,8 +279,7 @@ impl Range {
     }
 
     /// Whether `version` is inside the range, under the ordering `scheme`
-    /// declares. The spelling participates only as something the scheme
-    /// compares.
+    /// declares.
     #[must_use]
     pub fn satisfies(&self, scheme: &dyn VersionScheme, version: &str) -> bool {
         self.shared().contains(&SchemeOrder(scheme), &version)
@@ -296,10 +293,8 @@ impl Range {
             .map(Self::from_shared)
     }
 
-    /// The complement, as the union of at most two ranges: the complement of
-    /// a bounded interval is everything below its lower edge plus everything
-    /// above its upper edge, each edge flipping its inclusivity. Empty when
-    /// the range is `Any`.
+    /// The complement, as at most two ranges whose edges flip inclusivity.
+    /// Empty when the range is `Any`.
     #[must_use]
     pub fn negate(&self) -> Box<[Self]> {
         self.shared()
@@ -321,9 +316,8 @@ fn bound_of(payload: Option<&Value>, constructor: &str) -> PithResult<Bound> {
 }
 
 /// One hard constraint: a range and a feature set over one package's
-/// coordinates, attributed to whoever declared it. The attribution is what a
-/// failure derivation names; an unattributed constraint is unspeakable in an
-/// explanation.
+/// coordinates, attributed to its declarer so a failure derivation can
+/// name it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Constraint {
     pub subject: PackageIdentity,
@@ -417,10 +411,9 @@ impl Constraint {
         })
     }
 
-    /// Whether a candidate's coordinates satisfy this constraint: the
-    /// version inside the range and every required feature among the
-    /// coordinates' features. Both checks are over declared coordinates;
-    /// nothing here knows a realization.
+    /// Whether a candidate's coordinates satisfy this constraint: `version`
+    /// inside the range and every required feature among the coordinates'
+    /// features. Both checks run over declared coordinates only.
     #[must_use]
     pub fn admits(&self, scheme: &dyn VersionScheme, version: &str, features: &[Box<str>]) -> bool {
         self.range.satisfies(scheme, version)

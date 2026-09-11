@@ -1,13 +1,6 @@
-//! Lock entries and source binding verification.
-//!
-//! A lock entry binds package coordinates to source content and records the
-//! origin as provenance. Origin does not participate in binding identity.
-//!
-//! The lock concern lives in this module tree: the entry, binding, and
-//! origin values here; the document over entries and its structural diff
-//! (`document`, `diff`); the shared field grammar of every written line
-//! (`text`, also the index and environment files' grammar); the lock
-//! document's written form (`file`); and atomic publication (`publish`).
+//! Lock entries and source binding verification. A lock entry binds package
+//! coordinates to source content and records the origin as provenance; the
+//! origin does not participate in binding identity.
 
 pub(crate) mod text;
 
@@ -48,7 +41,7 @@ const REGISTRY: &str = "Registry";
 const FORGE: &str = "Forge";
 const LOCAL_PATH: &str = "LocalPath";
 
-/// The origin kinds as the written lock spells them, one per constructor.
+/// The origin kinds as the written lock spells them.
 pub const KIND_REGISTRY: &str = "registry";
 pub const KIND_FORGE: &str = "forge";
 pub const KIND_LOCAL_PATH: &str = "local-path";
@@ -161,8 +154,8 @@ impl std::fmt::Display for Origin {
     }
 }
 
-/// The declared origin sum type: three constructors, each carrying its
-/// location as text.
+/// The declared origin sum type: each constructor carries its location as
+/// text.
 #[must_use]
 pub fn origin_type() -> Type {
     crate::declarations::declared_type(ORIGIN)
@@ -317,10 +310,8 @@ impl LockEntry {
         })
     }
 
-    /// The entry's own content identity: a digest over its canonical
-    /// encoding, identifying one revision of the entry. The digest moves
-    /// when the origin evidence moves, which is the entry-as-record's honest
-    /// behavior; the binding, which the entry records, does not.
+    /// The entry's content identity: a digest over its canonical encoding,
+    /// so it moves when the origin moves, unlike the binding.
     #[must_use]
     pub fn content_id(&self) -> ContentId {
         value_content_id(LOCK_ENTRY_DOMAIN, &self.to_value())

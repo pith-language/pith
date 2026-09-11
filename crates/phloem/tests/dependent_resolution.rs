@@ -1,14 +1,9 @@
-//! The dependency edge, resolution half (decision 0046): an index line that
-//! carries a requirement is read into the candidate the universe spells, one
-//! resolve request against the declared interface walks the edge — the solver
-//! reaches the dependency through the dependent's requirement, not through a
-//! constraint the caller wrote — and the failure derivation names the
-//! candidate whose requirement emptied. The universe digest moves when a
-//! requirement moves with nothing else changing, and the lock's diff says so.
-//!
-//! Resolution is pure, so none of this needs a toolchain: the fixture
-//! publishes a registry and resolves against it. The build half of the edge
-//! is `two_package_build.rs`, which is linux-gated.
+//! The dependency edge, resolution half: an index line carrying a
+//! requirement is read into the candidate the universe spells, and one
+//! resolve request walks the edge through the dependent's requirement; an
+//! unsatisfiable requirement names the requiring candidate in the
+//! derivation, and a moved requirement moves the universe digest. Pure, so
+//! no toolchain; the linux-gated build half is `two_package_build.rs`.
 
 #[path = "support/diagnostic.rs"]
 mod diagnostic_support;
@@ -83,7 +78,7 @@ fn requires_util() -> Box<[Requirement]> {
 
 /// Publish a registry and its witnessing log, authoring each index line
 /// through the adapter's own spelling so the format has one writer and one
-/// reader rather than a fixture's private guess at the line.
+/// reader.
 fn publish(root: &Path, packages: &[Published]) -> pith_diag::PithResult<Checkpoint> {
     let mut index: Vec<(String, String)> = Vec::new();
     for package in packages {
@@ -131,9 +126,9 @@ fn preferences() -> PreferenceList {
     PreferenceList(Box::new([Preference::Newest]))
 }
 
-/// The declared constraints: hello only. The constraint set names no
-/// dependency — the edge, if it is walked, is walked by the solver reading
-/// the index.
+/// The declared constraints name hello only. The constraint set names no
+/// dependency: the edge, if walked, is walked by the solver reading the
+/// index.
 fn constraints() -> Box<pith_core::Value> {
     Box::new(constraint_set_value(&[Constraint {
         subject: identity("hello"),
@@ -186,11 +181,10 @@ fn the_solver_reaches_a_dependency_through_the_dependents_requirement() {
         "the chosen hello candidate carries the requirement the index declared"
     );
 
-    // The lock holds one entry per package, canonically sorted over the
-    // entries' encoded bytes — `util` sorts before `hello` because a shorter
-    // length prefix precedes a longer one — and nothing about an entry says
-    // who required it: the requirement's attribution lives in the
-    // resolution's explanation, not in the pins.
+    // Entries are canonically sorted over their encoded bytes, so `util`
+    // precedes `hello`: a shorter length prefix sorts first. An entry says
+    // nothing about who required it; the attribution lives in the
+    // resolution's explanation.
     let names: Vec<&str> = lock
         .entries
         .iter()
@@ -199,7 +193,7 @@ fn the_solver_reaches_a_dependency_through_the_dependents_requirement() {
     assert_eq!(names, ["util", "hello"]);
 
     // A pinned re-resolution under the same universe reproduces both
-    // selections, which is what makes the two-entry lock a lock.
+    // selections.
     let pins: Vec<Constraint> = lock
         .entries
         .iter()
@@ -229,8 +223,8 @@ fn the_solver_reaches_a_dependency_through_the_dependents_requirement() {
 }
 
 /// The unsatisfiable pair reports a derivation naming the requiring
-/// candidate: the constraint that emptied is hello's requirement, not a root
-/// constraint and not an anonymous range.
+/// candidate: the constraint that emptied is hello's requirement, not a
+/// root constraint.
 #[test]
 fn an_unsatisfiable_pair_names_the_requiring_candidate() {
     let root = TempDir::new().unwrap();
@@ -272,10 +266,9 @@ fn an_unsatisfiable_pair_names_the_requiring_candidate() {
     );
 }
 
-/// The universe digest moves when a requirement moves and nothing else does,
-/// and the lock's diff names the moved universe: a requirement is index data,
-/// a changed requirement is a changed registry answer, and a lock written
-/// from the old one records which universe it moved from.
+/// The universe digest moves when a requirement moves and nothing else
+/// does, and the lock's diff names the moved universe: a requirement is
+/// part of the registry's answer.
 #[test]
 fn a_moved_requirement_moves_the_universe_digest_and_the_diff_names_it() {
     let before = TempDir::new().unwrap();
@@ -316,9 +309,8 @@ fn a_moved_requirement_moves_the_universe_digest_and_the_diff_names_it() {
     );
 }
 
-/// A registry that gains a package nothing requires moves the universe —
-/// the digest is over every candidate — without moving any entry, which is
-/// the other half of what the diff separates.
+/// A registry that gains a package nothing requires moves the universe
+/// (the digest is over every candidate) without moving any entry.
 #[test]
 fn an_unrelated_publication_moves_the_universe_and_no_entry() {
     let before = TempDir::new().unwrap();
@@ -347,9 +339,7 @@ fn an_unrelated_publication_moves_the_universe_and_no_entry() {
 }
 
 /// A malformed requirement is refused at the read, the span selecting the
-/// clause's field in the package's own index file, because a registry that
-/// spells a requirement this format cannot parse is a registry answer to
-/// refuse rather than silently narrow.
+/// clause's field in the package's own index file.
 #[test]
 fn a_malformed_requirement_is_refused_at_its_field_in_the_package_file() {
     let root = TempDir::new().unwrap();

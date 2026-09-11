@@ -1,8 +1,6 @@
-//! Decision 0039's identity-stability claims, checked end to end against the
-//! declared model: an identity survives a version bump, a metadata change,
-//! and a source move; a rename is a new identity, not a continuation. Each
-//! test changes what the description or the coordinates carry and asserts
-//! the identity pair did not move.
+//! Identity-stability claims: an identity survives a version bump, a
+//! metadata change, and a source move; a rename is a new identity, not a
+//! continuation.
 
 use phloem::build::PackageBuild;
 use phloem::description::Description;
@@ -55,11 +53,9 @@ fn an_identity_survives_a_version_bump_and_a_metadata_change() {
 
 #[test]
 fn an_identity_survives_a_source_move() {
-    // 0039: a source move the domain's resolution survives is the same
-    // package. The identity is the declared pair and reads no content, so a
-    // binding that moves from a registry archive to a git revision — with
-    // the description digest changing, as a revision should — moves nothing
-    // at the identity level.
+    // The identity is the declared pair and reads no content, so a binding
+    // moving from a registry archive to a git revision changes the
+    // description digest but not the identity.
     let identity = PackageIdentity::declare(DomainIdentity::new(DOMAIN), "zlib");
     let from_registry = zlib(archive_source(), &["zlib-1.3/zlib.c"]);
     let from_git = zlib(
@@ -84,10 +80,9 @@ fn an_identity_survives_a_source_move() {
 
 #[test]
 fn a_rename_is_a_new_identity_not_a_continuation() {
-    // 0039: continuity across a rename is an explicit aliasing operation
-    // recorded in provenance, never something the system infers. The
-    // construction half of that claim is that `PackageIdentity` has nowhere
-    // to carry a predecessor; the inequality below is the other half.
+    // Continuity across a rename would have to be an explicit aliasing
+    // operation recorded in provenance; `PackageIdentity` has nowhere to
+    // carry a predecessor.
     let old = PackageIdentity::declare(DomainIdentity::new(DOMAIN), "zlib");
     let renamed = PackageIdentity::declare(DomainIdentity::new(DOMAIN), "zlib-ng");
 

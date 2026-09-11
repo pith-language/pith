@@ -7,9 +7,8 @@ use crate::lock::Origin;
 
 use super::model::{Admission, Admitted, BinaryOffer};
 
-/// The clauses of the admission test, one per claim: a variant exists for
-/// each fact the test consults, and a refusal names exactly one, with both
-/// of its sides.
+/// One claim of the admission test. A refusal names exactly one clause,
+/// with both of its sides.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Clause {
     Coordinates {
@@ -111,8 +110,7 @@ fn admitted_list(admitted: &[Origin]) -> String {
 }
 
 /// The substitution admission's refusal: the shared refusal over this
-/// mechanism's clauses, so a refused source elsewhere refuses with the same
-/// machinery under a different vocabulary.
+/// mechanism's clauses.
 pub type Refusal = pith_constraint::Refusal<Clause>;
 
 fn differ(held: bool, clause: Clause) -> Result<(), Clause> {

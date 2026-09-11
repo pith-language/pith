@@ -119,8 +119,7 @@ impl Candidate {
     /// Read a candidate from a value.
     ///
     /// # Errors
-    /// A [`pith_diag::DiagnosticSink`] naming what was found when the value
-    /// is not a candidate record.
+    /// When the value is not a candidate record.
     pub fn from_value(value: &Value) -> PithResult<Self> {
         if !value.is_type(&candidate_type()) {
             return Err(diag(format!(
@@ -263,8 +262,7 @@ impl CandidateUniverse {
     /// Read a universe from a value.
     ///
     /// # Errors
-    /// A [`pith_diag::DiagnosticSink`] naming what was found when the value
-    /// is not a list of candidate records.
+    /// When the value is not a list of candidate records.
     pub fn from_value(value: &Value) -> PithResult<Self> {
         let Value::List(elements) = value else {
             return Err(diag(format!(

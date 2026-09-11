@@ -76,8 +76,8 @@ impl Preference {
     /// Read one preference from a value.
     ///
     /// # Errors
-    /// A [`pith_diag::DiagnosticSink`] naming what was found when the value
-    /// is not a declared preference.
+    /// [`pith_diag::DiagnosticSink`] when the value is not a declared
+    /// preference.
     pub fn from_value(value: &Value) -> PithResult<Self> {
         let Value::Sum {
             type_name,
@@ -115,8 +115,6 @@ impl Preference {
     }
 
     /// The preference a written name names, the inverse of [`Self::name`].
-    /// Both spellings live here, beside the ordering they name, so a new
-    /// ordering lands where it is declared rather than in a reader.
     #[must_use]
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
@@ -176,8 +174,8 @@ pub fn preference_list_value(list: &PreferenceList) -> Value {
 /// Read a preference list from a value.
 ///
 /// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming what was found when the value is
-/// not a list of declared preferences.
+/// [`pith_diag::DiagnosticSink`] when the value is not a list of declared
+/// preferences.
 pub fn preference_list_from_value(value: &Value) -> PithResult<PreferenceList> {
     let Value::List(elements) = value else {
         return Err(diag(format!(

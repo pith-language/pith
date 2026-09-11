@@ -1,10 +1,7 @@
-//! Filesystem-backed package registry adapter.
-//!
-//! Registry reads produce candidate universes, fetched archive bytes, and
-//! transparency-log evidence. The sparse index stores one version per line;
-//! package archives and log data live in adjacent directories. All reads are
-//! caller-side effects, and every parse refusal carries a span into the file
-//! read and the file itself as its source.
+//! Filesystem-backed package registry adapter: a sparse index, package
+//! archives, and transparency-log data in adjacent directories. Every parse
+//! refusal carries a span into the file it came from, with that file
+//! attached as source.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -26,11 +23,11 @@ const PACKAGE: &str = "pkg";
 const CHECKPOINT_FILE: &str = "checkpoint";
 const LEAVES_FILE: &str = "leaves";
 
-/// Reads a registry index as a candidate universe. Each index file becomes
-/// the source of the diagnostics its lines produce, named by its path.
+/// Reads a registry index as a candidate universe. Diagnostics from a line
+/// name the index file they came from.
 ///
 /// # Errors
-/// Returns a diagnostic when the index cannot be read or parsed.
+/// When the index cannot be read or parsed.
 pub fn read_index(root: &Path, registry: &str) -> PithResult<CandidateUniverse> {
     let index = root.join(INDEX);
     let mut candidates = Vec::new();
@@ -56,13 +53,11 @@ pub fn read_index(root: &Path, registry: &str) -> PithResult<CandidateUniverse> 
     Ok(CandidateUniverse::new(candidates))
 }
 
-/// One index line from the fields a line carries — the spelling
-/// [`read_index`] parses, the same one-spelling arrangement the lock's
-/// binding line has, so a publisher and a reader cannot drift into two
-/// formats. The domain and package name are the file's path on the read
-/// side and never appear in the line, and the provenance is the archive the
-/// digest claims, so a candidate of another binding shape has no line to
-/// write. Requirements render in the order given.
+/// Renders one index line in the spelling [`read_index`] parses, the same
+/// one-spelling arrangement the lock's binding line uses, so a publisher and
+/// a reader cannot drift into two formats. The domain and package name live
+/// on the file path, never in the line; requirements render in the order
+/// given.
 #[must_use]
 pub fn index_line(
     version: &str,
@@ -91,13 +86,10 @@ pub fn index_line(
     line
 }
 
-/// One index line as one candidate: `<version> <features> blake3:<digest>`
-/// followed by zero or more `requires <domain>/<name> <range> [<features>]`
-/// clauses, where the digest is the registry's claim about the archive and
-/// each clause a version's claim about another package. The fetch verifies
-/// the digest against bytes and the witness against the log; the solver
-/// turns the requirements into constraints, so resolution reads what the
-/// index says and fetches nothing.
+/// Parses one index line into one candidate: `<version> <features>
+/// blake3:<digest>` followed by zero or more `requires <domain>/<name>
+/// <range> [<features>]` clauses. The digest is the registry's claim about
+/// the archive; each clause, a version's claim about another package.
 fn index_candidate(
     source: &Arc<SourceFile>,
     domain: &str,
@@ -132,9 +124,9 @@ fn index_candidate(
     })
 }
 
-/// The `requires <domain>/<name> <range> [<features>]` clauses that follow an
-/// index line's digest, as requirements. The clause's features are optional
-/// and last; each next clause begins with its own `requires`.
+/// Parses the `requires <domain>/<name> <range> [<features>]` clauses after
+/// an index line's digest. A clause's features are optional and last; the
+/// next clause begins with its own `requires`.
 fn parse_requires(
     source: &Arc<SourceFile>,
     name: &str,
@@ -211,10 +203,9 @@ fn parse_requires(
     Ok(clauses.into())
 }
 
-/// One fetched entry: the bytes as read, and the content identity measured
-/// from them. Matching the measurement against the binding is
-/// [`LockEntry::verify_resolution`], and matching it against the log is the
-/// witness verification.
+/// One fetched entry: the archive bytes and the content identity measured
+/// from them. [`LockEntry::verify_resolution`] matches the measurement
+/// against the binding; the witness verification matches it against the log.
 #[derive(Debug)]
 pub struct Fetched {
     pub bytes: Vec<u8>,
@@ -224,7 +215,8 @@ pub struct Fetched {
 /// Reads and measures the archive bound by a lock entry.
 ///
 /// # Errors
-/// Returns a diagnostic for an invalid coordinate or unreadable archive.
+/// When a coordinate is not a single path component or the archive is
+/// unreadable.
 pub fn fetch(root: &Path, entry: &LockEntry) -> PithResult<Fetched> {
     let identity = entry.package.identity();
     let domain = component(identity.domain().as_str(), "domain")?;
@@ -256,8 +248,7 @@ pub struct Witnessed {
 /// Reads transparency-log evidence for a lock entry.
 ///
 /// # Errors
-/// Returns a diagnostic when log data is unreadable, invalid, or missing the
-/// entry.
+/// When log data is unreadable, invalid, or holds no line for the entry.
 pub fn read_witness(log: &Path, entry: &LockEntry) -> PithResult<Witnessed> {
     let checkpoint = Checkpoint::parse(&read(&log.join(CHECKPOINT_FILE))?)?;
     let leaves_path = log.join(LEAVES_FILE);
@@ -301,8 +292,7 @@ pub fn read_witness(log: &Path, entry: &LockEntry) -> PithResult<Witnessed> {
 /// Verifies an entry against a pinned checkpoint and inclusion evidence.
 ///
 /// # Errors
-/// Returns a diagnostic for the first mismatched checkpoint, proof, or
-/// binding.
+/// For the first mismatch among checkpoint, proof, or binding.
 pub fn verify(entry: &LockEntry, evidence: &Witnessed, pinned: &Checkpoint) -> PithResult<()> {
     if evidence.checkpoint != *pinned {
         return Err(crate::diag(format!(
@@ -331,15 +321,15 @@ pub fn verify(entry: &LockEntry, evidence: &Witnessed, pinned: &Checkpoint) -> P
     Ok(())
 }
 
-/// Whether a leaf line carries the entry's coordinates, ignoring the
-/// digest: a leaf that matches the coordinates under another digest is the
-/// disagreement the verification exists to report.
+/// Whether a leaf line carries the entry's coordinates, ignoring the digest,
+/// so a leaf matching under another digest is still found and reported as a
+/// mismatch.
 fn same_coordinates(binding: &crate::lock::Binding, entry: &LockEntry) -> bool {
     binding.package == entry.package && binding.features == entry.features
 }
 
-/// A name that becomes a path component under `root`, refused when it is
-/// not one, so a registry's naming cannot escape the registry.
+/// A name that is a single path component, refused otherwise: a registry's
+/// naming cannot name a path outside the registry.
 fn component<'a>(name: &'a str, what: &str) -> PithResult<&'a str> {
     let mut components = Path::new(name).components();
     if matches!(
@@ -359,9 +349,8 @@ fn read(path: &Path) -> PithResult<String> {
         .map_err(|error| crate::diag(format!("reading {} failed: {error}", path.display())))
 }
 
-/// A directory's children in one canonical order, because a read whose
-/// output depended on the directory's iteration order would be a universe
-/// whose digest depended on the filesystem.
+/// A directory's children sorted, so a universe's digest never depends on
+/// the filesystem's iteration order.
 fn sorted_children(path: &Path) -> PithResult<Vec<String>> {
     let entries = std::fs::read_dir(path)
         .map_err(|error| crate::diag(format!("reading {} failed: {error}", path.display())))?;

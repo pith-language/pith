@@ -30,8 +30,8 @@ pub struct ArchiveFile {
 /// Parses regular files from a ustar archive in archive order.
 ///
 /// # Errors
-/// Returns a diagnostic for malformed archives, unsupported entries, unsafe
-/// paths, or repeated file paths.
+/// For malformed archives, unsupported entries, unsafe paths, or repeated
+/// file paths.
 pub fn parse(bytes: &[u8]) -> pith_diag::PithResult<Box<[ArchiveFile]>> {
     let mut files = Vec::new();
     let mut seen: Vec<Box<str>> = Vec::new();

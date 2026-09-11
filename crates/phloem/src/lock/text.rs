@@ -1,10 +1,8 @@
 //! Fields, feature lists, digests, and ranges for lock text: the
 //! domain-specific halves of a wire format whose token half is
-//! [`pith_diag::text`].
-//!
-//! Every parse here refuses with a span selecting the offending field in the
-//! source, and the message naming what is wrong with it; the caller holds
-//! the source and attaches it.
+//! [`pith_diag::text`]. Every parse here refuses with a span selecting the
+//! offending field in the source, and the message naming what is wrong with
+//! it; the caller holds the source and attaches it.
 
 pub(crate) use pith_diag::text::{Refusal, Token, token, tokenize};
 use pith_diag::text::{is_bare, quoted_token};
@@ -208,9 +206,7 @@ pub(crate) fn range_token(range: &crate::constraint::Range) -> String {
 ///
 /// # Errors
 /// A [`Refusal`] whose span selects the field when the text is not a range
-/// of this shape. A malformed two-edge range names which edge failed; a
-/// malformed single token names the grammar rather than guessing which side
-/// it was meant to be.
+/// of this shape; a malformed two-edge range names the edge that failed.
 pub(crate) fn parse_range(field: &Token) -> Result<crate::constraint::Range, Refusal> {
     use crate::constraint::{Bound, Range};
     let text = field.text.as_str();

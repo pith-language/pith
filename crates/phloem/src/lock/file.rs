@@ -1,11 +1,7 @@
-//! Text encoding for lock documents.
-//!
-//! Rendering is deterministic and parsing accepts the rendered form plus
-//! equivalent non-canonical spellings. Every parse refusal carries a span
-//! into the parsed text and the source file itself, so a reader renders the
-//! line and the field rather than a number baked into prose. Character-level
-//! token handling lives in `text`; filesystem publication lives in
-//! `publish`.
+//! Text encoding for lock documents. Rendering is deterministic; parsing
+//! accepts the rendered form plus equivalent non-canonical spellings. Every
+//! parse refusal carries a span into the parsed text and the source file
+//! itself. Character-level tokens live in `text`; publication in `publish`.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -26,9 +22,8 @@ use crate::lock::{Binding, LockEntry, Origin};
 use crate::preference::{Preference, PreferenceList};
 use crate::text_diag;
 
-/// The lock file's format version, pinned at 1 on the same terms the state
-/// store pins its own: nothing is released, and a format change breaks the
-/// file rather than migrating it.
+/// The lock file's format version, pinned at 1: nothing is released, so a
+/// format change breaks the file rather than migrating it.
 pub const LOCK_FILE_VERSION: u32 = 1;
 
 const LOCK_VERSION: &str = "lock-version";
@@ -63,8 +58,8 @@ pub fn render(lock: &Lock) -> String {
 /// its path.
 ///
 /// # Errors
-/// Returns a diagnostic attached to the parsed text, its span selecting the
-/// field or line that was refused.
+/// The diagnostic attaches to the parsed text, its span selecting the
+/// refused field or line.
 pub fn parse(label: &str, text: &str) -> PithResult<Lock> {
     let file = Arc::new(SourceFile::new(SourceId::from_raw(0), label, text));
     parse_file(&file)
@@ -130,8 +125,8 @@ fn parse_file(file: &Arc<SourceFile>) -> PithResult<Lock> {
 /// Adds a parsed binding, collapsing identical duplicates.
 ///
 /// # Errors
-/// Returns a diagnostic when the package is already bound differently: the
-/// span selects this line, and a note selects the earlier one.
+/// When the package is already bound differently: the span selects this
+/// line and a note selects the earlier one.
 fn record_binding(
     file: &Arc<SourceFile>,
     seen: &mut BTreeMap<PackageIdentity, (Span, LockEntry)>,
@@ -808,11 +803,8 @@ mod tests {
 
     #[test]
     fn a_digest_spelling_another_algorithm_is_refused_naming_the_expected_one() {
-        // A lock written by an earlier tree of this workspace spelled the
-        // prefix `sha256:` over the same blake3 bytes. the bytes hash one
-        // way whatever the line claims, so the claim is what moves: the read
-        // refuses it and names the expected spelling, and under 0048 the
-        // pre-release answer is to re-render, with no format version change.
+        // A lock spelling the digest prefix `sha256:` over blake3 bytes: the
+        // read refuses it and names the expected spelling.
         let universe = format!("blake3:{}", lock().universe.digest());
         let spelled = format!("sha256:{}", lock().universe.digest());
         let text = render(&lock()).replace(&universe, &spelled);

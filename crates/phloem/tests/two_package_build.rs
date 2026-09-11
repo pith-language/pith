@@ -1,24 +1,9 @@
-//! A package builds against another package's artifact (decision 0046): two
-//! packages in one registry, the dependent's index line carrying the
-//! requirement, the resolution reaching the dependency through it, and the
-//! dependent's build consuming the dependency's library in-graph — its
-//! objects linked after the dependent's own, its headers provided to the
-//! dependent's compiles as request data over an engine whose registered
-//! header universe is empty, which is what makes the header half of the edge
-//! real rather than registration-fabricated.
-//!
-//! The reuse asymmetry is the claim the fixture exists for: republishing
-//! only the dependency moves the dependent's artifact — the dependent's own
-//! tree and build unchanged, its request input moved — while republishing a
-//! package neither uses moves no artifact at all. The first is what makes
-//! the edge a graph edge; the second is what makes it selective.
-//!
-//! Linux-gated with `base_case.rs`'s discipline: skip only on
-//! `DiscoveryError::NotFound`, fail on a driver that is present but
-//! undiscoverable, and keep a sentinel that fails outright when no compiler
-//! exists at all so a compiler-less host cannot read as green. The host
-//! these were written on is darwin: this file compiled to nothing there, and
-//! nothing below is measured until it runs on linux.
+//! A package builds against another package's artifact: the dependent's
+//! index line carries the requirement, the resolution reaches the
+//! dependency through it, and its build consumes the dependency's library
+//! in-graph. The reuse asymmetry is the claim: republishing only the
+//! dependency moves the dependent's artifact; republishing a package
+//! neither uses moves none. Linux-gated per `base_case.rs`'s discipline.
 
 #![cfg(target_os = "linux")]
 
@@ -71,8 +56,8 @@ const UTIL_C: (&str, &[u8]) = (
 );
 const UTIL_H: (&str, &[u8]) = ("util-1.0/util.h", b"int util(void);\n");
 
-/// The dependent: includes the dependency's header by its tree path — the
-/// include spelling is the staged path — and exits with what util returns.
+/// The dependent: includes the dependency's header by its tree path, and
+/// exits with what util returns.
 const HELLO_C: (&str, &[u8]) = (
     "hello-1.0/hello.c",
     b"#include \"util-1.0/util.h\"\nint main(void) { return util() == 7 ? 0 : 1; }\n",
@@ -182,9 +167,8 @@ fn publish(root: &Path, packages: &[Published]) -> pith_diag::PithResult<Checkpo
     write_transparency_log(root, LOG, &leaves)
 }
 
-/// The packages' declarations, authored beside the registry the way a
-/// package author authors them. The dependency's build names the include it
-/// offers; the dependent's names only its own source.
+/// The dependency's build names the include it offers; the dependent's
+/// names only its own source.
 fn util_build() -> PackageBuild {
     PackageBuild {
         sources: Box::new([UTIL_C.0.into()]),
@@ -199,11 +183,9 @@ fn hello_build() -> PackageBuild {
     }
 }
 
-/// The build engine over a durable root. The header universe is empty on
-/// purpose: every header this build sees arrives as request data — the
-/// dependency's through its library value, the dependency's own through its
-/// build declaration — so an edge that depended on engine registration
-/// would fail here rather than pass quietly.
+/// The build engine over a durable root. The header universe is empty:
+/// every header this build sees arrives as request data, so an edge that
+/// depended on engine registration would fail here.
 fn engine_at(root: &Path, toolchain: &Toolchain) -> pith_diag::PithResult<Engine> {
     let store = FilesystemContentStore::open(root)
         .map_err(|error| fixture_error(format!("opening the store failed: {error}")))?;
@@ -254,9 +236,9 @@ fn resolve_lock(root: &Path) -> pith_diag::PithResult<Lock> {
     Lock::from_resolution(NUMERIC_SEGMENTS, &preferences(), &resolution)
 }
 
-/// The one request the whole two-package build is: the dependent's tree and
-/// build, with the dependency named as `(tree, build)` — the caller derives
-/// that from the lock and the declarations, and the graph does the rest.
+/// The whole two-package build as one request: the dependent's tree and
+/// build, with the dependency named as `(tree, build)`, derived by the
+/// caller from the lock and the declarations.
 fn dependent_request(
     toolchain_value: Value,
     hello_tree: &SourceTree,
@@ -306,7 +288,7 @@ fn blob_of(value: &Value) -> pith_diag::PithResult<ContentId> {
 }
 
 /// Runs a built executable from the store and returns its exit code, with
-/// the filesystem work carried as a result so the test bodies unwrap where
+/// the filesystem work carried as a result so test bodies unwrap where
 /// unwrapping is allowed.
 fn exit_code_of(engine_root: &Path, artifact: ContentId) -> pith_diag::PithResult<i32> {
     let bytes = FilesystemContentStore::open(engine_root)
@@ -379,12 +361,10 @@ fn a_c_toolchain_is_available() {
     assert_c_toolchain_available("the round cannot run, and its other tests would all skip green");
 }
 
-/// The round's whole claim, build half: two index lines become one running
-/// executable with nothing fabricated between — one resolution reads the
-/// requirement, both archives are fetched and measured, the dependency
-/// builds as a library in-graph, the dependent's compile sees the
-/// dependency's header as request data over an empty registered universe,
-/// and the program returns what the dependency's code makes it return.
+/// The build half of the whole claim: two index lines become one running
+/// executable. One resolution reads the requirement, the dependency builds
+/// as a library in-graph, and the dependent's compile sees the dependency's
+/// header as request data over an empty registered universe.
 #[test]
 fn a_dependent_builds_against_a_dependency_from_index_lines_to_a_running_program() {
     let Some(toolchain) = toolchain_or_skip("cc").unwrap() else {
@@ -423,9 +403,6 @@ fn a_dependent_builds_against_a_dependency_from_index_lines_to_a_running_program
         "the program runs and returns what the dependency's code makes it return"
     );
 
-    // The fine-grained shape: the dependent's discovery, the dependent's
-    // compile, the dependency's discovery, the dependency's compile, and the
-    // link — five actions, the same count a two-source package build runs.
     assert_eq!(
         action_computations(&engine),
         5,
@@ -473,11 +450,11 @@ fn a_two_package_build_reuses_and_hydrates_on_the_engine_alone() {
     );
 }
 
-/// The asymmetry the round exists for. Republishing only the dependency
-/// moves the dependent's artifact — the dependent's own tree and build
-/// unchanged — and moves it selectively: the dependent's own compile is
-/// served, and what runs is the dependency's discovery and compile plus the
-/// link. Republishing a package neither uses moves nothing.
+/// The asymmetry the fixture exists for. Republishing only the dependency
+/// moves the dependent's artifact, selectively: the dependent's own
+/// compile is served, and what runs is the dependency's discovery and
+/// compile plus the link. Republishing a package neither uses moves
+/// nothing.
 #[test]
 fn republishing_the_dependency_moves_the_dependent_and_republishing_an_unrelated_moves_nothing() {
     let Some(toolchain) = toolchain_or_skip("cc").unwrap() else {
@@ -500,10 +477,10 @@ fn republishing_the_dependency_moves_the_dependent_and_republishing_an_unrelated
     assert_eq!(exit_code_of(root.path(), first_artifact).unwrap(), 0);
 
     // The dependency republishes under one name: different bytes, its index
-    // line rewritten to agree. The hello entry is untouched; the util entry
-    // drifts; the universe the adapter reads moves. The log moves with the
-    // republish, and the configuration re-pins — the same fixture's lying
-    // registry is 0044's, where the pin refuses the moved log.
+    // line rewritten to agree. The hello entry is untouched, the util entry
+    // drifts, and the universe moves. The log moves with the republish and
+    // the configuration re-pins; `source_adapter.rs` covers the case where
+    // the pin refuses the moved log.
     const UTIL_C_V2: &[u8] = b"#include \"util-1.0/util.h\"\nint util(void) { return 9; }\n";
     let repinned = publish(
         registry_root.path(),
@@ -541,9 +518,8 @@ fn republishing_the_dependency_moves_the_dependent_and_republishing_an_unrelated
         "the dependent's own binding did not move"
     );
 
-    // The dependent's request input moved — the dependency's tree — so the
-    // build recomputes, the artifact moves, and the program now returns what
-    // the republished code makes it return.
+    // The dependent's request input, the dependency's tree, moved, so the
+    // build recomputes and the artifact moves.
     let drifted_fetched =
         resolve_fetch_unpack(registry_root.path(), &mut engine, &repinned).unwrap();
     assert!(
@@ -572,18 +548,17 @@ fn republishing_the_dependency_moves_the_dependent_and_republishing_an_unrelated
         "the program returns what the republished dependency makes it return"
     );
 
-    // Selective: the dependent's discovery and compile are served, and what
-    // ran is the dependency's discovery, the dependency's compile, and the
-    // link over the new object — three actions, not five.
+    // Selective: the dependent's discovery and compile are served; what
+    // ran is the dependency's discovery, its compile, and the link over
+    // the new object.
     assert_eq!(
         action_computations(&engine),
         actions_after_first + 3,
         "the dependent's own compile is served across the moved edge"
     );
 
-    // A package neither uses republishes into the registry: the universe
-    // digest moves — it is over every candidate — and nothing the build
-    // consumes does, so the engine serves the same artifact.
+    // A package neither uses republishes: the universe digest moves (it is
+    // over every candidate), but nothing the build consumes does.
     let extra = Published {
         name: "extra",
         version: "1.0",
@@ -624,8 +599,8 @@ fn republishing_the_dependency_moves_the_dependent_and_republishing_an_unrelated
 }
 
 /// The library the dependency builds is the artifact a second dependent
-/// consumes: its objects link and its headers compile against, held as one
-/// value the graph produced rather than something the caller assembled.
+/// consumes: its objects link and its headers compile against, produced as
+/// one value by the graph.
 #[test]
 fn a_dependency_builds_as_a_library_value() {
     let Some(toolchain) = toolchain_or_skip("cc").unwrap() else {

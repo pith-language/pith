@@ -1,11 +1,8 @@
-//! Binary reuse as an admitted substitution (decision 0042): a binary
-//! offered for a binding the lock produced through a real resolution is
-//! admitted when every clause holds and replaces the build, a refused offer
-//! leaves the build running with the refusal named, the rendered lock is
-//! byte-identical before and after a served substitution, and the engine's
-//! own reuse — 0031 and 0033's path — and a substitution remain different
-//! answers to different questions, held apart on what the engine recorded
-//! rather than on a difference of literals.
+//! Binary reuse as an admitted substitution: an offer admitted on every
+//! clause replaces the build, a refused offer leaves the build running
+//! with the refusal named, a served substitution leaves the rendered lock
+//! byte-identical, and the engine's own reuse and a substitution are told
+//! apart by what the engine recorded.
 
 #[path = "support/engine_state.rs"]
 mod engine_state_support;
@@ -36,9 +33,8 @@ use pith_store::MemoryContentStore;
 
 const BINARY: &[u8] = b"zlib-1.3.so";
 
-/// The run's toolchain as one value: the same value the admission test reads
-/// and the build requests carry, so the fixture cannot spell the leg and the
-/// build differently.
+/// One toolchain value shared by the admission test and the build requests,
+/// so the fixture cannot spell them differently.
 fn toolchain() -> Value {
     xylem::types::toolchain("/nix/store/cc")
 }
@@ -59,9 +55,8 @@ fn newest() -> PreferenceList {
 }
 
 /// A rule that completes immediately with fixture content, standing in for
-/// xylem's compile and link entries so the build a refusal leaves running
-/// can run through the engine and be recorded as an attempt. The tests
-/// below read the engine's attempt records, not the completed value.
+/// xylem's compile and link entries. The tests read the engine's attempt
+/// records, not the completed value.
 struct FixtureEntry {
     output: Value,
 }
@@ -102,8 +97,6 @@ fn fixture_compile_rule() -> Rule<Pure> {
     fixture_rule("compile", xylem::types::compile_interface())
 }
 
-/// A link entry that stands in for xylem's, so the package build a refusal
-/// leaves running can run to its artifact through the engine.
 fn fixture_link_rule() -> Rule<Pure> {
     fixture_rule("link", xylem::types::link_interface())
 }
@@ -168,9 +161,8 @@ fn zlib_request() -> Request<Pure> {
     )
 }
 
-/// The lock the request resolves to, with the failures propagated so each
-/// test unwraps on its own terms, inside the code the crate's clippy
-/// configuration allows to.
+/// The lock the request resolves to, with failures propagated: test bodies
+/// may unwrap, helper bodies may not.
 fn locked_zlib(engine: &mut Engine) -> PithResult<Lock> {
     let answer = engine.evaluate_pure(&zlib_request())?;
     Lock::from_resolution(
@@ -223,9 +215,8 @@ fn description() -> Description {
     }
 }
 
-/// The tree the description's build runs over, holding the one path it
-/// prescribes. The fixture compile stands in for xylem's, so the file's
-/// content is fixture bytes.
+/// The tree the description's build runs over. The fixture compile stands
+/// in for xylem's, so the file content is fixture bytes.
 fn tree() -> SourceTree {
     SourceTree {
         files: Box::new([SourceFile {
@@ -257,8 +248,8 @@ fn an_admitted_binary_substitutes_for_the_build_of_a_locked_binding() {
         Origin::Forge("builds.pith-lang.org".into())
     );
 
-    // The substitution's whole effect on the graph: the requests are simply
-    // not made, and the lock — which records source only — is untouched.
+    // The substitution's whole effect on the graph: no build request, and
+    // the lock, which records source only, is untouched.
     assert!(
         serving_request(
             &realization,
@@ -315,13 +306,11 @@ fn a_refused_offer_builds_in_the_binarys_place_with_the_clause_named() {
 
 #[test]
 fn the_engines_reuse_and_a_substitution_are_different_answers() {
-    // 0031 and 0033's reuse is the engine's word about a computation it ran,
-    // served under a computation key; a substitution is phloem's word about a
-    // computation nobody ran here. The difference is held on what the engine
-    // recorded: the reused resolution has an attempt under its key, the
-    // substituted build has none under the key the build's own request
-    // derives, and the build a refusal leaves running gains exactly that
-    // attempt.
+    // Engine reuse is the engine's own record of a computation it ran; a
+    // substitution stands for a computation nobody ran here. The two are
+    // told apart by what the engine recorded: the reused resolution has an
+    // attempt under its key, the substituted build has none, and the
+    // refused offer's build gains exactly that attempt.
     let state = SharedState::default();
     let mut engine = engine_with(&state);
     let toolchain = toolchain();
@@ -335,10 +324,9 @@ fn the_engines_reuse_and_a_substitution_are_different_answers() {
         "the engine serves its own recorded attempt under its key"
     );
 
-    // The package build a build of this binding would issue, keyed under
-    // the rule that serves it. The toolchain in the request is the same
-    // value the admission leg read, which is what ties the leg to the build
-    // it guards.
+    // The package build this binding would issue, keyed under the rule
+    // that serves it. Its toolchain is the same value the admission leg
+    // read, which ties the leg to the build it guards.
     let package_rule = PackageBuildRule::rule();
     let would_run = serving_request(
         &Serving::Built { refused: None },

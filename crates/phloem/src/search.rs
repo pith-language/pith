@@ -12,8 +12,8 @@ use crate::preference::{Preference, PreferenceList};
 use crate::resolution::{Derivation, Resolution, TrailEntry};
 use crate::universe::{Candidate, CandidateUniverse};
 
-/// The solver request: the four declared inputs, as typed data, beside the
-/// ordering the request names.
+/// The solver request's declared inputs as typed data, beside the ordering
+/// the request names.
 #[derive(Clone, Debug)]
 pub struct SolveRequest {
     pub constraints: Box<[Constraint]>,
@@ -23,8 +23,7 @@ pub struct SolveRequest {
     pub budget: u64,
 }
 
-/// The solver. A pure function of the request under `scheme`: the same
-/// request under the same declared ordering always produces the same answer.
+/// The solver: a pure function of the request under `scheme`.
 #[must_use]
 pub fn resolve(scheme: &dyn VersionScheme, request: &SolveRequest) -> Resolution {
     let mut search = Search::new(scheme, request);
@@ -208,9 +207,9 @@ impl<'a> Search<'a> {
     }
 
     /// Candidates best-first under the declared orderings. The stable sort
-    /// retains the candidate slice's order within a tie; engine requests
-    /// obtain that slice from the universe's canonical value. Tied candidates
-    /// stay adjacent and are refused rather than picked by iteration order.
+    /// retains the universe's canonical order within a tie, so tied
+    /// candidates stay adjacent and are refused rather than picked by
+    /// iteration order.
     fn ordered_by_preference(&self, satisfying: Vec<&'a Candidate>) -> Vec<&'a Candidate> {
         let mut ordered = satisfying;
         ordered.sort_by(|left, right| {
@@ -312,9 +311,8 @@ impl<'a> Search<'a> {
         }
     }
 
-    /// Withdraw one frame's added constraints. Each pop removes the entry
-    /// the paired push added; the two are called only as a pair inside
-    /// `descend`, which is what keeps them balanced.
+    /// Withdraw one frame's added constraints. Called only as the pair of
+    /// `push_constraints` inside `descend`, which keeps the entries balanced.
     fn pop_constraints(&mut self, added: &[Constraint]) {
         for constraint in added {
             if let Some(entries) = self.constraints.get_mut(&constraint.subject) {
@@ -335,9 +333,7 @@ impl<'a> Search<'a> {
         })
     }
 
-    /// Remember the dead end at the greatest depth reached: the derivation
-    /// names the subject that emptied, the constraints in force over it, and
-    /// the candidate versions that were available.
+    /// Remember the dead end at the greatest depth reached.
     fn record_dead_end(&mut self, subject: &PackageIdentity, candidates: Box<[Box<str>]>) {
         let constraints = self.constraints.get(subject).cloned().unwrap_or_default();
         let derivation = Derivation {

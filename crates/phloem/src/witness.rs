@@ -1,9 +1,9 @@
 //! Transparency-log witnesses for lock binding lines.
 //!
 //! The log is an append-only Merkle tree with distinct leaf and node hash
-//! domains. Checkpoints contain an origin, tree size, and root digest.
-//! Inclusion proofs recompute that root from one binding line and its sibling
-//! path. Checkpoint signature verification is outside this module.
+//! domains. Checkpoints carry an origin, tree size, and root digest;
+//! inclusion proofs recompute that root from one binding line and its
+//! sibling path. Signature verification is outside this module.
 
 use pith_diag::PithResult;
 use pith_ids::{ContentDigest, DigestDomain};
@@ -16,11 +16,10 @@ const NODE_DOMAIN: DigestDomain = DigestDomain::new("phloem-log-node", 1);
 
 /// A log's signed-tree-head shape: which log this is, how many records it
 /// holds, and the root hash committing to them. The name follows Go's
-/// spelling because the shape does. unlike Go's, it carries no signature.
+/// spelling because the shape does; unlike Go's, it carries no signature.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Checkpoint {
-    /// The log's declared identity, the thing a person's configuration
-    /// pins when it pins a log.
+    /// The log's declared identity, what a configuration pins.
     pub origin: Box<str>,
     /// The number of records the tree commits to.
     pub size: u64,
@@ -39,8 +38,8 @@ impl Checkpoint {
     /// Read a checkpoint from its written form.
     ///
     /// # Errors
-    /// A [`pith_diag::DiagnosticSink`] naming what was found when the text
-    /// is not an origin, a size, and a hexadecimal root.
+    /// [`pith_diag::DiagnosticSink`] when the text is not an origin, a
+    /// size, and a hexadecimal root.
     pub fn parse(text: &str) -> PithResult<Self> {
         let mut lines = text.lines();
         let (Some(origin), Some(size), Some(root), None) =
@@ -138,9 +137,9 @@ fn path_of(index: u64, hashes: &[ContentDigest]) -> Vec<ContentDigest> {
     }
 }
 
-/// The log's operator half: a tree over records that serves the root a
-/// checkpoint names and the proofs a client verifies. A pith-operated log
-/// and the prototype's fixture share this spelling. a third-party log
+/// The log's operator half: a tree over records serving the root a
+/// checkpoint names and the proofs a client verifies. Pith-operated logs
+/// and the prototype's fixture share this spelling; a third-party log
 /// needs only the checkpoint and proof format above.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MerkleTree {
@@ -177,8 +176,8 @@ impl MerkleTree {
     /// The inclusion proof for the record at `index`.
     ///
     /// # Errors
-    /// A [`pith_diag::DiagnosticSink`] naming the index and the size when
-    /// the index is outside the tree.
+    /// [`pith_diag::DiagnosticSink`] naming the index and size when the
+    /// index is outside the tree.
     pub fn inclusion(&self, index: u64) -> PithResult<Inclusion> {
         if index >= self.size() {
             return Err(diag(format!(
@@ -228,9 +227,6 @@ pub fn verify_inclusion(
 }
 
 /// Recomputes a Merkle root from a leaf and sibling path.
-///
-/// # Errors
-/// Returns a diagnostic when the path ends before reaching the root.
 fn fold(
     index: u64,
     size: u64,

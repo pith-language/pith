@@ -1,25 +1,9 @@
-//! A locked source becomes a built artifact (decision 0045): a registry
-//! index read by 0044's adapter resolves and locks through the engine, the
-//! bound archive is fetched, measured, and unpacked into a tree, and the
-//! package's declared build runs as one pure rule over xylem's compile and
-//! link entries, producing an executable that runs — an index line to an
-//! ELF with nothing fabricated in between.
-//!
-//! The claims the record makes are the ones asserted here: the artifact's
-//! identity is the kernel's content identity and its computation is the
-//! engine's attempt; a second build of the same lock is `Reused` and a
-//! fresh engine over the same state root `Hydrated`, on 0031 and 0033's
-//! machinery with nothing package-side added; a registry that republishes
-//! moves the universe digest, the lock entry, and the artifact, with the
-//! diff naming the input that moved; a served substitution publishes no
-//! attempt where a refused offer's build publishes exactly that attempt;
-//! and an environment document over the same lock names realization
-//! coordinates under which a realization now exists.
-//!
-//! Linux-gated with `base_case.rs`'s discipline: skip only on
-//! `DiscoveryError::NotFound`, fail on a driver that is present but
-//! undiscoverable, and keep a sentinel that fails outright when no
-//! compiler exists at all so a compiler-less host cannot read as green.
+//! A locked source becomes a built artifact: a registry index read by the
+//! source adapter resolves and locks through the engine, the bound archive
+//! is fetched, measured, unpacked, and the declared build runs over
+//! xylem's compile and link entries into an executable that runs; reuse,
+//! hydration, drift, and substitution bookkeeping ride the engine's
+//! existing machinery. Linux-gated per `base_case.rs`'s skip discipline.
 
 #![cfg(target_os = "linux")]
 
@@ -111,8 +95,8 @@ fn publish(root: &Path, published: &Published) -> pith_diag::PithResult<Checkpoi
     write_transparency_log(root, LOG, &[binding])
 }
 
-/// A ustar archive holding the two sources, authored by the fixture the
-/// way a publisher authors a release tarball.
+/// A ustar archive holding the two sources, authored the way a publisher
+/// authors a release tarball.
 fn archive() -> Vec<u8> {
     let mut bytes = Vec::new();
     for (path, data) in [UTIL, HELLO] {
@@ -126,7 +110,7 @@ fn archive() -> Vec<u8> {
         let octal = format!("{:011o}\0", data.len());
         header[124..136].copy_from_slice(octal.as_bytes());
         // A ustar checksum sums the header with the checksum field read as
-        // eight spaces — the reading `archive.rs` checks against — so the
+        // eight spaces, the reading `archive.rs` checks against, so the
         // field is spaced before the sum and overwritten after it.
         header[148..156].fill(b' ');
         let sum: u64 = header.iter().copied().map(u64::from).sum();
@@ -146,9 +130,8 @@ fn archive() -> Vec<u8> {
     bytes
 }
 
-/// The package's own declaration, authored beside the registry the way a
-/// package author authors it: the source is the archive the index claims,
-/// the build names the sources in link order.
+/// The package's declaration: the source is the archive the index claims,
+/// and the build names the sources in link order.
 fn description(archive: ContentId) -> Description {
     Description {
         name: "hello".into(),
@@ -160,10 +143,10 @@ fn description(archive: ContentId) -> Description {
     }
 }
 
-/// The engine the build runs on: the durable substrate at `root` — a
-/// filesystem content store and a sqlite state database — with the
-/// resolver, xylem's rules, and the package-build rule registered. Two
-/// engines over one root are successive runs of the same build (0033).
+/// The build engine over the durable substrate at `root`: a filesystem
+/// content store and a sqlite state database, with the resolver, xylem's
+/// rules, and the package-build rule registered. Two engines over one root
+/// are successive runs of the same build.
 fn engine_at(root: &Path, toolchain: &Toolchain) -> pith_diag::PithResult<Engine> {
     let store = FilesystemContentStore::open(root)
         .map_err(|error| fixture_error(format!("opening the store failed: {error}")))?;
@@ -203,7 +186,7 @@ fn preferences() -> PreferenceList {
     PreferenceList(Box::new([Preference::Newest]))
 }
 
-/// Read the registry, resolve, and lock — the caller-side half of the
+/// Read the registry, resolve, and lock: the caller-side half of the
 /// round, everything before the fetch.
 fn resolve_lock(root: &Path) -> pith_diag::PithResult<Lock> {
     let universe = registry::read_index(root, REGISTRY)?;
@@ -263,9 +246,8 @@ fn a_c_toolchain_is_available() {
     assert_c_toolchain_available("the round cannot run, and its other tests would all skip green");
 }
 
-/// The round's whole claim: an index line becomes a running executable
-/// with nothing fabricated in the middle — a real registry read, a real
-/// resolution, a real fetch, a real unpack, a real compile and link.
+/// The whole claim: an index line becomes a running executable, through a
+/// real registry read, resolution, fetch, unpack, and compile and link.
 #[test]
 fn an_index_line_becomes_a_running_executable() {
     let Some(toolchain) = toolchain_or_skip("cc").unwrap() else {
@@ -284,15 +266,13 @@ fn an_index_line_becomes_a_running_executable() {
         "the authored declaration and the lock bind the same archive"
     );
 
-    // The fetch reads bytes; the measurement agrees with the binding; the
-    // log's witnessed line agrees with both (0044).
+    // The fetch's measurement, the binding, and the log's witnessed line
+    // all agree.
     let fetched = registry::fetch(scratch.path(), &entry).unwrap();
     entry.verify_resolution(fetched.measured).unwrap();
     let evidence = registry::read_witness(&scratch.path().join("log"), &entry).unwrap();
     registry::verify(&entry, &evidence, &pinned).unwrap();
 
-    // The unpack is the adapter's second half: parse the tar, import the
-    // files, measure each. It holds the two sources the build prescribes.
     let root = TempDir::new().unwrap();
     let mut engine = engine_at(root.path(), &toolchain).unwrap();
     let tree = build::unpack(&mut engine, &fetched.bytes).unwrap();
@@ -311,8 +291,8 @@ fn an_index_line_becomes_a_running_executable() {
         "the first build computes"
     );
 
-    // The artifact's identity is the kernel's: a nominal executable over
-    // the content identity the store holds, nothing package-side.
+    // The artifact's identity is the kernel's content identity, nothing
+    // package-side.
     let artifact = blob_of(&evaluation.value).unwrap();
     let bytes = FilesystemContentStore::open(root.path())
         .unwrap()
@@ -333,10 +313,9 @@ fn an_index_line_becomes_a_running_executable() {
     );
 }
 
-/// 0039's claim, measured: a realization reuses on the engine's machinery
-/// alone. The second build of the same lock is served, and a fresh engine
-/// over the same state root hydrates rather than rebuilds — 0031's action
-/// index and 0033's consumer walk reaching a package build unchanged.
+/// A realization reuses on the engine's machinery alone: the second build
+/// of the same lock is served, and a fresh engine over the same state root
+/// hydrates rather than rebuilds.
 #[test]
 fn a_second_build_is_reused_and_a_fresh_engine_hydrates() {
     let Some(toolchain) = toolchain_or_skip("cc").unwrap() else {
@@ -374,8 +353,8 @@ fn a_second_build_is_reused_and_a_fresh_engine_hydrates() {
         "the reused build planned no action"
     );
 
-    // A fresh engine over the same durable state — the first dropped, the
-    // way a second process finds the build — hydrates the attempt.
+    // A fresh engine over the same durable state, as a second process
+    // finds the build, hydrates the attempt.
     drop(engine);
     let mut fresh = engine_at(root.path(), &toolchain).unwrap();
     let hydrated = run_build(&mut fresh, &request).unwrap();
@@ -389,8 +368,7 @@ fn a_second_build_is_reused_and_a_fresh_engine_hydrates() {
 }
 
 /// A registry that republishes moves the universe, the entry, and the
-/// artifact, and the lock's diff names the input that moved: the drift a
-/// binding exists to catch, answered by a rebuild rather than absorbed.
+/// artifact, and the lock's diff names the input that moved.
 #[test]
 fn a_republished_registry_moves_the_universe_the_entry_and_the_artifact() {
     let Some(toolchain) = toolchain_or_skip("cc").unwrap() else {
@@ -416,8 +394,7 @@ fn a_republished_registry_moves_the_universe_the_entry_and_the_artifact() {
     .unwrap();
 
     // The registry republishes under one name: different bytes, its index
-    // rewritten to agree with them. The universe the adapter reads moves,
-    // and the lock's diff names the moved universe and the drifted entry.
+    // rewritten to agree.
     let republished: &[u8] = b"int util(void) { return 9; }\n";
     let mut rewritten = archive();
     let offset: usize = 512; // the first entry's body begins after its header
@@ -444,8 +421,8 @@ fn a_republished_registry_moves_the_universe_the_entry_and_the_artifact() {
         "the diff names the moved universe and the drifted entry: {changes:?}"
     );
 
-    // The new tree is new content, so the build is a different computation
-    // and the artifact moves with it.
+    // New tree content makes the build a different computation, and the
+    // artifact moves with it.
     let second_fetch = registry::fetch(scratch.path(), &second_entry).unwrap();
     let second_tree = build::unpack(&mut engine, &second_fetch.bytes).unwrap();
     assert_ne!(
@@ -469,11 +446,9 @@ fn a_republished_registry_moves_the_universe_the_entry_and_the_artifact() {
     );
 }
 
-/// 0042's central claim against a real build: a served substitution
-/// publishes no attempt under the key the build's own request derives,
-/// and the build a refused offer leaves running publishes exactly that
-/// attempt — held on what the engine records, not on a difference of
-/// literals.
+/// A served substitution publishes no attempt under the key the build's
+/// own request derives, and the build a refused offer leaves running
+/// publishes exactly that attempt.
 #[test]
 fn a_served_substitution_publishes_no_attempt_and_a_refused_ones_build_publishes_it() {
     let Some(toolchain) = toolchain_or_skip("cc").unwrap() else {
@@ -559,7 +534,7 @@ fn a_served_substitution_publishes_no_attempt_and_a_refused_ones_build_publishes
     );
 }
 
-/// 0043's document over a lock whose realizations now exist: the
+/// The environment document over a lock whose realizations now exist: the
 /// coordinates the environment names are the ones the build ran under,
 /// and the artifact those coordinates realize is in the store.
 #[test]
@@ -624,9 +599,8 @@ fn an_environment_document_names_realizations_that_now_exist() {
     assert_eq!(document.toolchain, toolchain.value());
     assert_eq!(document.platform, platform());
 
-    // The realization those coordinates name now exists: the artifact the
-    // build produced is in the store under the environment's own engine
-    // root, the same content the build's evaluation named.
+    // The artifact the build produced is in the store under the
+    // environment's own engine root.
     let artifact = blob_of(&built.value).unwrap();
     assert!(
         FilesystemContentStore::open(root.path())

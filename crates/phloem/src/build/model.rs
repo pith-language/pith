@@ -71,8 +71,8 @@ pub fn tree_type() -> Type {
 }
 
 /// Source paths to compile, in link order, and header paths the package
-/// offers — to its own sources and to whatever depends on it — where the
-/// tree path is also the include spelling.
+/// offers, to its own sources and to whatever depends on it. A tree path is
+/// also the include spelling.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PackageBuild {
     pub sources: Box<[Box<str>]>,
@@ -108,7 +108,7 @@ impl PackageBuild {
     /// Decodes a package build from `value`.
     ///
     /// # Errors
-    /// Returns a diagnostic when `value` is not a package build.
+    /// When `value` is not a package build.
     pub fn from_value(value: &Value) -> PithResult<Self> {
         if !value.is_type(&build_type()) {
             return Err(diag(format!(
@@ -148,9 +148,8 @@ pub fn build_type() -> Type {
 
 /// A library package's artifact: the objects a dependent links, and the
 /// headers its compiles see. The headers ride beside the objects so a
-/// dependency is one value — what a dependent needs of a package is both
-/// halves, and a package that published objects without its headers would be
-/// unlinkable from source.
+/// dependency is one value: a package that published objects without its
+/// headers would be unlinkable from source.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Library {
     /// Object content identities in link order.
@@ -197,7 +196,7 @@ impl Library {
     /// Decodes a library from `value`.
     ///
     /// # Errors
-    /// Returns a diagnostic when `value` is not a library record.
+    /// When `value` is not a library record.
     pub fn from_value(value: &Value) -> PithResult<Self> {
         if !value.is_type(&library_type()) {
             return Err(diag(format!(
@@ -265,9 +264,8 @@ fn header_of(entry: &Value) -> PithResult<(Box<str>, ContentId)> {
 
 /// One dependency a build declares: the dependency's measured tree and its
 /// build declaration, from which the dependency's library builds in-graph.
-/// The pair rather than the built library is the input because the edge is
-/// the graph's to order and cache — the dependent's request names what the
-/// dependency is, not what a caller already built from it.
+/// The pair is the input rather than a built library because the edge is the
+/// graph's to order and cache.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Dependency {
     pub tree: SourceTree,
@@ -290,7 +288,7 @@ impl Dependency {
     /// Decodes a dependency from `value`.
     ///
     /// # Errors
-    /// Returns a diagnostic when `value` is not a dependency record.
+    /// When `value` is not a dependency record.
     pub fn from_value(value: &Value) -> PithResult<Self> {
         if !value.is_type(&dependency_type()) {
             return Err(diag(format!(

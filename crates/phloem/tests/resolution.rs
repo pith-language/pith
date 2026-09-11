@@ -1,10 +1,8 @@
-//! Resolution as a computation in the graph (decision 0040): the solver is
-//! an ordinary pure rule selected by 0015, its inputs — the declared version
-//! ordering, the constraint set, the candidate universe, the preference
-//! list, the budget — are values that participate in the computation key,
-//! and the reusable index serves and invalidates resolutions through the
-//! machinery that already exists. These tests measure that; the solver's own
-//! behavior is pinned in the module tests under `src/`.
+//! Resolution as a computation in the graph: the solver is an ordinary pure
+//! rule, its inputs (ordering, constraints, universe, preferences, budget)
+//! are values in the computation key, and the reusable index serves and
+//! invalidates resolutions through the machinery that already exists. The
+//! solver's own behavior is pinned in the module tests under `src/`.
 
 #[path = "support/engine_state.rs"]
 mod engine_state_support;
@@ -85,8 +83,9 @@ fn request_over(
     resolve_request(scheme, constraints, universe, preferences, budget)
 }
 
-/// A failing body, registered in the place of the solver in engines that must
-/// not run it: reaching a value at all proves the result came from state.
+/// A failing body registered in the place of the solver in engines that
+/// must not run it: reaching a value at all proves the result came from
+/// state.
 struct FailingRule;
 
 impl PureRule for FailingRule {
@@ -163,12 +162,11 @@ fn a_resolution_hydrates_into_a_fresh_engine_over_the_same_state() {
 
 #[test]
 fn a_changed_candidate_universe_is_a_new_computation_and_the_old_answer_stands() {
-    // The four inputs are values in the computation key, so a changed
-    // universe is not an invalidation the engine explains; it is a different
-    // computation. What the engine guarantees is the other half: the old
-    // answer is still served for the old key, and the new answer names the
-    // universe it resolved against — the digest a lock diff reads to say
-    // which input moved.
+    // The inputs are values in the computation key, so a changed universe
+    // is a different computation, not an invalidation the engine explains.
+    // The old answer is still served for the old key, and the new answer
+    // names the universe it resolved against: the digest a lock diff reads
+    // to say which input moved.
     let state = SharedState::default();
     let before = CandidateUniverse::new(vec![candidate("zlib", "1.3")]);
     let after = CandidateUniverse::new(vec![candidate("zlib", "1.3.1")]);
@@ -202,8 +200,7 @@ fn a_changed_candidate_universe_is_a_new_computation_and_the_old_answer_stands()
     assert_eq!(universe, after.content_id());
 
     // Every input but the universe is unchanged by value, so the universe
-    // is the one that moved; and the recorded answer for the old key still
-    // serves, which is what reproducible-under-the-same-universe means.
+    // is the one that moved.
     for unchanged in [0, 1, 3, 4] {
         assert_eq!(
             old_request.inputs.get(unchanged).unwrap(),
@@ -223,10 +220,9 @@ fn a_changed_candidate_universe_is_a_new_computation_and_the_old_answer_stands()
 
 #[test]
 fn a_budget_exhausted_answer_is_a_function_of_the_inputs_and_is_served_from_the_index() {
-    // 0040's determinism clause, made concrete: the budget is a declared
-    // input in deterministic units, so an exhausted answer caches like any
-    // other — the refusal a second run receives is a recorded answer, not a
-    // re-run that might now succeed.
+    // The budget is a declared input, so an exhausted answer caches like
+    // any other: the refusal a second run receives is a recorded answer,
+    // not a re-run that might now succeed.
     let mut engine = engine_with(&SharedState::default());
     let universe = CandidateUniverse::new(vec![
         candidate("a", "1.0"),
@@ -260,9 +256,8 @@ fn a_budget_exhausted_answer_is_a_function_of_the_inputs_and_is_served_from_the_
 
 #[test]
 fn the_resolution_interface_selects_exactly_one_rule() {
-    // Resolution rides 0015 like any other request: the interface names it,
-    // a request against it validates, and registration is what makes it
-    // available — no pre-pass, no special entry point.
+    // Resolution is selected like any other request: the interface names
+    // it, and registration is what makes it available.
     let engine = engine_with(&SharedState::default());
     let query = engine.query();
     let universe = CandidateUniverse::new(vec![candidate("zlib", "1.3")]);
@@ -292,13 +287,11 @@ fn the_resolution_interface_selects_exactly_one_rule() {
 
 #[test]
 fn a_different_declared_ordering_is_a_different_computation() {
-    // The scheme input closes the hole 0038's third class of state names:
-    // the ordering a resolution ran under is part of the computation key, so
-    // an answer recorded under one declared ordering is never served under
-    // another. The two spellings below order differently under the two
-    // schemes — tilde is lowest for Debian, a non-numeric segment sorts
-    // above a numeric one for the numeric scheme — so `newest` picks
-    // different winners, and neither engine sees the other's answer.
+    // The ordering a resolution ran under is part of the computation key,
+    // so an answer recorded under one declared ordering is never served
+    // under another. The two spellings below order differently under the
+    // two schemes: tilde is lowest for Debian, and a non-numeric segment
+    // sorts above a numeric one for the numeric scheme.
     let state = SharedState::default();
     let universe =
         CandidateUniverse::new(vec![candidate("zlib", "1.0"), candidate("zlib", "1.0~rc1")]);
@@ -328,9 +321,8 @@ fn a_different_declared_ordering_is_a_different_computation() {
     );
 
     // A fresh engine over the same durable substrate: the debian-keyed
-    // request has no recorded answer under its key, so it computes, while
-    // the numeric-keyed one is served from the reusable index — hydration,
-    // not re-evaluation, because this engine's arena has never seen the key.
+    // request has no recorded answer, so it computes, while the
+    // numeric-keyed one is served from the reusable index.
     let mut second = engine_with(&state);
     let deb_answer = second
         .evaluate_pure(&request_over(

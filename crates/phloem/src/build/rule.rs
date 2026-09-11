@@ -74,7 +74,7 @@ pub fn library_request(
     )
 }
 
-/// Resolves the declared source paths in link order.
+/// Resolves the declared source paths in the order they are declared.
 pub(super) fn resolve_sources(
     tree: &SourceTree,
     build: &PackageBuild,
@@ -101,8 +101,7 @@ pub(super) fn resolve_sources(
 
 /// Resolves the declared include paths against the tree, canonically sorted.
 /// An include the tree does not hold is a diagnostic, the same refusal a
-/// prescribed source meets: a declaration naming content the package does not
-/// carry is not a build.
+/// prescribed source meets.
 pub(super) fn resolve_includes(tree: &SourceTree, build: &PackageBuild) -> PithResult<HeaderSet> {
     let mut resolved: Vec<HeaderPair> = Vec::with_capacity(build.includes.len());
     for path in build.includes.iter() {
@@ -121,10 +120,10 @@ pub(super) fn resolve_includes(tree: &SourceTree, build: &PackageBuild) -> PithR
     Ok(resolved.into())
 }
 
-/// Merges provided header sets — the package's own includes with its
-/// dependencies' — refusing one spelling that names two contents. Agreeing
-/// duplicates collapse; the result is canonically sorted, so the value is a
-/// function of the header set and not of the assembly order.
+/// Merges the package's provided headers with its dependencies', refusing a
+/// path that names two contents. Agreeing duplicates collapse; the result is
+/// canonically sorted, so it is a function of the header set, not of the
+/// assembly order.
 pub(super) fn merge_provided(own: HeaderSet, libraries: &[Library]) -> PithResult<Value> {
     let mut merged: std::collections::BTreeMap<Box<str>, ContentId> = own.into_iter().collect();
     for library in libraries {
@@ -177,10 +176,8 @@ impl PureRule for PackageBuildRule {
     }
 }
 
-/// Where one dependent build is: requesting the dependencies' libraries,
-/// compiling its own sources over the merged header set, linking, or holding
-/// the executable. A build with no dependencies passes through an empty
-/// library batch, so one procedure serves every depth.
+/// The phases of a dependent build. A build with no dependencies passes
+/// through an empty library batch, so one procedure serves every depth.
 enum BuildPhase {
     Libraries,
     Compiling,

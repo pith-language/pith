@@ -1,11 +1,8 @@
-//! The dependency direction 0009 and scope's build-without-package base case
-//! rest on: phloem produces build requests against interfaces xylem already
-//! declares, and xylem knows nothing about packages or about phloem. The
-//! resolved dependency graph is where that direction either holds or does
-//! not, so the graph is what this asserts — read from `cargo metadata`,
-//! never matched against manifest spelling, which diverges from the graph in
-//! both directions: a reformatted manifest would break the spelling, and a
-//! transitive edge through a third crate would skip it.
+//! The dependency direction the domain split rests on: phloem produces
+//! build requests against interfaces xylem declares, and xylem knows
+//! nothing about packages or about phloem. The claim is read from
+//! `cargo metadata`, never matched against manifest spelling, which
+//! diverges from the graph in both directions.
 
 use std::collections::BTreeMap;
 use std::process::Command;
@@ -26,10 +23,9 @@ fn phloem_consumes_xylem_and_xylem_cannot_reach_phloem() {
     );
     let metadata: Json = serde_json::from_slice(&output.stdout).unwrap();
 
-    // The resolved graph as package-name edges: every dependency of every
-    // workspace member and of everything they pull in, transitive edges
-    // included. Dev- and build-dependency edges are dependencies; the
-    // direction claim has to hold over all of them or it holds over none.
+    // The resolved graph as package-name edges, transitive edges included.
+    // Dev- and build-dependency edges count as dependencies; the direction
+    // claim must hold over all of them or it holds over none.
     let mut names = BTreeMap::new();
     for package in metadata.get("packages").and_then(Json::as_array).unwrap() {
         names.insert(
@@ -74,9 +70,9 @@ fn phloem_consumes_xylem_and_xylem_cannot_reach_phloem() {
         "phloem should depend on xylem; its resolved dependencies are {phloem_deps:?}"
     );
 
-    // Every path out of xylem, not just its direct edges: a phloem edge
-    // smuggled through a third crate is still the reversed direction 0009
-    // forbids, and the direct-edge check above would not see it.
+    // Every path out of xylem, direct edges included: a phloem edge
+    // through a third crate is still the reversed dependency direction,
+    // and the direct-edge check above would not see it.
     let mut reachable = vec!["xylem".to_string()];
     let mut visited = vec!["xylem".to_string()];
     while let Some(package) = reachable.pop() {

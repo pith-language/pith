@@ -44,7 +44,6 @@ pub struct LockDiff {
     pub changes: Box<[LockChange]>,
 }
 
-/// Compares two lock documents.
 #[must_use]
 pub fn diff(before: &Lock, after: &Lock) -> LockDiff {
     let mut changes = Vec::new();

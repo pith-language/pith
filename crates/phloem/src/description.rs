@@ -57,7 +57,7 @@ impl Description {
     /// Decodes a package description from `value`.
     ///
     /// # Errors
-    /// Returns a diagnostic when `value` is not a package description.
+    /// When `value` is not a package description.
     pub fn from_value(value: &Value) -> PithResult<Self> {
         if !value.is_type(&description_type()) {
             return Err(diag(format!(

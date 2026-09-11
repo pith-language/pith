@@ -45,7 +45,6 @@ const SUBSTITUTIONS: &str = "substitutions";
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Environment {
     pub name: Box<str>,
-    /// Package constraints requested by the environment.
     pub constraints: Box<[Constraint]>,
     pub platform: ExecutionPlatform,
     pub toolchain: Value,
@@ -318,12 +317,8 @@ mod tests {
 
     #[test]
     fn a_toolchain_whose_representation_is_not_the_driver_path_is_refused_by_the_type() {
-        // Before decision 0047 the nominal type could not see the
-        // representation, so this refusal was the reader's alone and the
-        // document still inhabited its own type. The declaration xylem now
-        // registers says `Toolchain` is over `Text`, so an `Int` inside one is
-        // refused at the type — one layer earlier and for every consumer rather
-        // than only for the readers that thought to check.
+        // The declaration xylem registers says `Toolchain` is over `Text`, so
+        // an `Int` inside one is refused at the type, before any field read.
         let wrong = Value::Nominal {
             name: xylem::types::toolchain_name().into(),
             representation: Box::new(Value::int(7)),
@@ -333,12 +328,8 @@ mod tests {
             !value.is_type(&environment_document_type()),
             "an Int inside a Toolchain must not inhabit the document type"
         );
-        // The reader refuses it too, and now at its own type guard rather than
-        // at the driver-path branch further in: the type it checks against
-        // carries the declaration, so the wrong representation never reaches the
-        // field read. The driver-path diagnostic survives as defense in depth
-        // for a caller that skips the guard, and is no longer the only thing
-        // standing between an `Int` and a toolchain.
+        // The reader refuses it at its type guard; the driver-path diagnostic
+        // remains as defense in depth for a caller that skips the guard.
         let error = EnvironmentDocument::from_value(&value).unwrap_err();
         assert!(
             error

@@ -1,7 +1,5 @@
-//! Package identities and domain-specific version ordering.
-//!
-//! A package identity consists of a declared domain and package name.
-//! Version schemes compare version strings without changing package identity.
+//! Package identities and domain-specific version ordering. A version
+//! scheme orders version strings without changing package identity.
 
 use std::cmp::Ordering;
 
@@ -11,10 +9,9 @@ use pith_diag::PithResult;
 use crate::declarations::declared_name;
 use crate::diag;
 
-/// A namespace authority a package is named within: either a first-party
-/// library's namespace or a remote source identity such as a registry or a
-/// forge. A distinct type from a bare string so a domain name does not stand
-/// where a package name is wanted.
+/// A namespace a package is named within: a first-party library's namespace
+/// or a remote source such as a registry or forge. Distinct from a bare
+/// string so a domain name cannot stand where a package name is wanted.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct DomainIdentity(Box<str>);
 
@@ -88,7 +85,7 @@ impl PackageVersion {
     /// Compares two versions of the same package with `scheme`.
     ///
     /// # Errors
-    /// Returns a diagnostic when the package identities differ.
+    /// When the two identities are different packages.
     pub fn compare(&self, scheme: &dyn VersionScheme, other: &Self) -> PithResult<Ordering> {
         if self.identity != other.identity {
             return Err(diag(format!(
@@ -105,7 +102,6 @@ impl PackageVersion {
 
 /// A domain-specific total ordering over version strings.
 pub trait VersionScheme {
-    /// Compares two version strings.
     fn compare(&self, left: &str, right: &str) -> Ordering;
 }
 
@@ -117,9 +113,8 @@ impl<T: VersionScheme + ?Sized> VersionScheme for Box<T> {
     }
 }
 
-/// The declared name of the nominal type a request carries to name the ordering
-/// it runs under. Declared in phloem's table over `Text`, the scheme's own
-/// declared name (decision 0047).
+/// Declared name of the nominal type a request carries to name the ordering
+/// it runs under, declared in phloem's table over `Text`.
 const VERSION_SCHEME_NAME: &str = "VersionScheme";
 
 /// The coordinate spelling a version-scheme value carries, derived from the
@@ -158,11 +153,10 @@ pub fn version_scheme_value(scheme: &str) -> Value {
     }
 }
 
-/// The declared name a version-scheme value carries.
+/// The scheme name a version-scheme value carries.
 ///
 /// # Errors
-/// A [`pith_diag::DiagnosticSink`] naming what was found when the value is
-/// not a version-scheme value.
+/// When the value is not a version-scheme value.
 pub fn version_scheme_name(value: &Value) -> PithResult<&str> {
     match value {
         Value::Nominal {
@@ -265,8 +259,7 @@ fn compare_revision(left: &str, right: &str) -> Ordering {
 
 /// The Debian upstream comparison: digit runs compare numerically, other
 /// characters by rank, with `~` ranked below the end of the string and the
-/// end of the string below every other character. Both walk their strings
-/// in lockstep until one decides.
+/// end of the string below every other character.
 fn compare_upstream(left: &str, right: &str) -> Ordering {
     let (mut left, mut right) = (left, right);
     loop {

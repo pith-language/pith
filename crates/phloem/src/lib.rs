@@ -1,9 +1,7 @@
-//! Package management over the pith kernel.
-//!
-//! Phloem defines package identities, source bindings, constraints,
-//! resolution, lock documents, substitutions, builds, and development
-//! environments. Filesystem and network adapters remain outside engine rule
-//! evaluation.
+//! Package management over the pith kernel: package identities, source
+//! bindings, constraints, resolution, lock documents, substitutions, builds,
+//! and development environments. Filesystem and network adapters stay
+//! outside engine rule evaluation.
 
 pub(crate) mod archive;
 pub mod build;

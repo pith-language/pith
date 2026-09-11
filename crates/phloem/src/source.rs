@@ -137,7 +137,7 @@ impl SourceBinding {
     /// Decodes a source binding from `value`.
     ///
     /// # Errors
-    /// Returns a diagnostic when `value` is not a source binding.
+    /// When `value` is not a source binding.
     pub fn from_value(value: &Value) -> PithResult<Self> {
         if !value.is_type(&source_type()) {
             return Err(diag(format!(

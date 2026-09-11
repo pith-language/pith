@@ -29,8 +29,7 @@ impl Schemes {
     /// A set over `(declared name, scheme)` pairs, held in name order.
     ///
     /// # Errors
-    /// A [`pith_diag::DiagnosticSink`] naming a declared name when more than
-    /// one ordering claims it.
+    /// When more than one ordering claims a declared name.
     pub fn new(mut entries: Box<[(Box<str>, Scheme)]>) -> PithResult<Self> {
         entries.sort_by(|left, right| left.0.cmp(&right.0));
         if let Some(duplicate) = entries.windows(2).find_map(|pair| match pair {
@@ -45,7 +44,7 @@ impl Schemes {
         Ok(Self { entries })
     }
 
-    /// Returns the numeric-segments and Debian schemes.
+    /// The built-in schemes.
     #[must_use]
     pub fn standard() -> Self {
         Self {
@@ -114,14 +113,12 @@ impl ResolveSolver {
     }
 }
 
-/// The resolver revision digest as lowercase hexadecimal, for the lock document
-/// that records which resolver produced a resolution (decision 0041).
-///
-/// Read off the rule rather than re-derived, so the lock records the revision the
-/// engine actually keys on. Since decision 0047 that revision derives from the
-/// resolve interface, which means a change to the version-scheme, constraint,
-/// universe, or preference declarations moves it — and a pre-release lock
-/// carrying the old one breaks freely, on 0043's terms.
+/// The resolver revision digest as lowercase hexadecimal, for the lock
+/// document that records which resolver produced a resolution. Read off the
+/// rule rather than re-derived, so the lock records the revision the engine
+/// keys on; the revision derives from the resolve interface, so a change to
+/// the version-scheme, constraint, universe, or preference declarations
+/// moves it.
 #[must_use]
 pub fn resolver_revision_hex() -> Box<str> {
     Rule::<Pure>::declared(
@@ -159,7 +156,7 @@ impl PureRuleFrame for ResolveFrame {
     }
 }
 
-/// Decode the request's five inputs, resolve the scheme name against the
+/// Decode the request's inputs, resolve the scheme name against the
 /// registered orderings, and run the search.
 fn solve_from_values(schemes: &Schemes, inputs: &[Value]) -> PithResult<Value> {
     let [scheme, constraints, universe, preferences, budget] = inputs else {
@@ -197,9 +194,8 @@ fn solve_from_values(schemes: &Schemes, inputs: &[Value]) -> PithResult<Value> {
     Ok(resolve(ordering, &request).to_value())
 }
 
-/// Re-exported so callers that build requests need one import for the whole
-/// host-rule surface: the rule, the schemes it resolves names against, and
-/// the request builder for the interface it serves.
+/// Re-exported so callers that build requests need one import for the
+/// host-rule surface.
 pub use crate::resolution::{Resolution, resolve_request};
 
 #[cfg(test)]

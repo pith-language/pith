@@ -1,12 +1,8 @@
-//! The development environment as a value over the lock (decision 0043):
-//! an environment declared as a value resolves through the engine and
-//! locks through 0041's lock, materializing one declaration twice produces
-//! the same rendered record and the same content identity, a changed
-//! declaration moves the environment with the moved input named, the lock's
-//! placement is derived from the declaration with one lock per
-//! environment, resolving touches no path until the caller writes, and a
-//! served substitution persists in the environment's record while the
-//! rendered lock stays byte-identical.
+//! The development environment as a value over the lock: a declared
+//! environment resolves through the engine into a document, the document's
+//! identity is stable across materializations and moves with its inputs,
+//! each environment holds one derived lock path, and resolving writes
+//! nothing until the caller writes.
 
 use phloem::constraint::{Bound, Constraint, Range};
 use phloem::environment::{self, Environment, EnvironmentChange, EnvironmentDocument, Offer};
@@ -87,9 +83,8 @@ fn engine() -> Engine {
     engine
 }
 
-/// The lock a declaration resolves to, with the failure propagated so each
-/// test unwraps on its own terms, inside the code the crate's clippy
-/// configuration allows to.
+/// The lock a declaration resolves to, with failures propagated: test
+/// bodies may unwrap, helper bodies may not.
 fn resolve(
     declaration: &Environment,
     universe: &CandidateUniverse,
@@ -224,8 +219,7 @@ fn an_environment_declared_as_a_value_resolves_and_locks_through_the_engine() {
     assert_eq!(document.name, declared.name);
     assert_eq!(document.platform, declared.platform);
     assert_eq!(document.toolchain, declared.toolchain);
-    // The lock is held unchanged: it is the same document the resolution
-    // would have written, entries and all.
+    // The same lock a plain resolution would have written.
     assert_eq!(document.lock, resolve(&declared, &universe()).unwrap());
     let entry = document.lock.entries.first().unwrap();
     assert_eq!(entry.package.identity(), &identity("zlib"));
@@ -236,10 +230,9 @@ fn an_environment_declared_as_a_value_resolves_and_locks_through_the_engine() {
 
 #[test]
 fn materializing_one_declaration_twice_produces_the_same_environment() {
-    // The sameness is asserted over the rendered record and the content
-    // identity — observable projections of the document — never over the
-    // declaration both came from, which would hold under any
-    // implementation.
+    // Sameness is asserted over the rendered record and the content
+    // identity, projections of the document, not the declaration both came
+    // from: that would hold under any implementation.
     let first = EnvironmentDocument::resolve(
         &declaration(),
         &mut engine(),
@@ -477,10 +470,8 @@ fn a_served_substitution_persists_in_the_record_and_not_in_the_lock() {
         "the lock records source only and does not move"
     );
 
-    // A tampered offer serves nothing, and its refusal arrives beside the
-    // document with both sides of the comparison. The build it leaves
-    // running is 0042's business; the document is the one an absent offer
-    // produces.
+    // A tampered offer serves nothing; its refusal arrives beside the
+    // document with both sides of the comparison.
     let tampered: &[u8] = b"zlib-1.3-tampered.so";
     let refused = EnvironmentDocument::resolve(
         &declaration(),
