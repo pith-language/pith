@@ -1,12 +1,7 @@
-//! The representation hole 0047 closed, asserted from the other side.
-//!
-//! Before the declaration table, `Type::Nominal` carried a bare name and matched
-//! any value carrying the same string, so a value naming `xylem.Object` while
-//! holding a `Text` inhabited xylem's link interface from any crate in the
-//! workspace. This file asserted that it did. Now `Type::Nominal` carries its
-//! declaration, `is_type` checks the representation against it, and the same
-//! fabricated value is refused — at `is_type` and at the request-input gate that
-//! calls it.
+//! A value naming `xylem.Object` while holding a `Text` must not inhabit
+//! xylem's link interface from any crate in the workspace. `Type::Nominal`
+//! carries its declaration and `is_type` checks the representation against it,
+//! at `is_type` and at the request-input gate that calls it.
 
 use pith_core::{Type, Value};
 use pith_ids::ContentId;
@@ -26,7 +21,7 @@ fn a_value_naming_object_with_a_text_representation_does_not_inhabit_the_link_in
     );
 
     // And through a real request: the link entry's input list is validated with
-    // the same check, so the fabricated object no longer reaches the rule.
+    // the same check, so a fabricated object never reaches the rule.
     let toolchain = xylem::types::toolchain("/bin/cc");
     let request = xylem::types::link_request(toolchain, [ContentId::of_blob(b"real")]);
     let [toolchain_input, _objects] = request.inputs.as_ref() else {

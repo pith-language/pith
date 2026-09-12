@@ -17,7 +17,7 @@ fn a_passing_test_reports_a_passing_verdict() {
     let executable = built_executable(&mut engine, SOURCE_TEST_PASSING, "passing.c");
 
     // The program under test is the action's program, staged from the store and
-    // run confined (decisions 0036, 0028).
+    // run confined.
     let verdict = run_build(
         &mut engine,
         &types::test_request(toolchain_value, executable),

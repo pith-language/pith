@@ -1,9 +1,8 @@
 //! Registration of xylem's rules onto a pith [`Engine`].
 //!
-//! The build library owns the wiring between its action rules and the pure
-//! rules that request them. A caller discovers its [`Toolchains`] and assembles
-//! a [`HeaderUniverse`], registers the rules once, and drives the engine with
-//! the request constructors in [`crate::types`].
+//! A caller discovers its [`Toolchains`], assembles a [`HeaderUniverse`],
+//! registers the rules once, and drives the engine with the request
+//! constructors in [`crate::types`].
 
 use pith_engine::Engine;
 
@@ -20,11 +19,9 @@ pub trait BuildEngine {
     /// One registration serves every toolchain in the set: a request names the
     /// driver it wants and the rule resolves that toolchain's closure, so two
     /// compilers share one graph. Registering per toolchain would give two rules
-    /// one interface and collide as `E-1102`.
-    ///
-    /// Sources compiled under this registration may include the headers
-    /// `universe` offers; which of them a given source reads is discovered per
-    /// source, not declared here.
+    /// one interface and collide as `E-1102`. Sources may include any header
+    /// `universe` offers; which ones a given source reads is discovered per
+    /// source.
     fn register_xylem(&mut self, toolchains: Toolchains, universe: HeaderUniverse);
 }
 

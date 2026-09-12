@@ -1,23 +1,15 @@
 //! The build rules: discovery, compile, link, generate, test.
 //!
-//! Header dependencies are discovered, not declared by hand (decision 0034).
-//! The discovery pass is its own action — the preprocessor over the source
-//! with the whole header universe staged, capturing a depfile — and the
-//! compile entry parses that depfile and requests the compile with the
-//! discovered set as a request input. The compile's `plan()` resolves each
-//! discovered path against the universe it was registered with, so the
-//! contract it digests names exactly the headers the source includes.
+//! Header dependencies are discovered, not declared by hand: the discovery
+//! pass runs the preprocessor with the whole header universe staged and
+//! captures a depfile, the compile entry parses it and requests the compile
+//! with the discovered set, and the compile's `plan()` resolves each discovered
+//! path against the registered universe, so the contract names exactly the
+//! headers the source includes.
 //!
-//! Every request input here carries what dispatch and caching need (the
-//! toolchain, the source or object identities, the discovered set). The source
-//! `ContentId` reaches `plan()` through `inputs`, so one registration of the
-//! compile rule serves every source file: a different source is a different
-//! request, which plans a different contract, which computes a different action
-//! key (decision 0031).
-//!
-//! Each rule lives in its own module beside this one; what they share — the
-//! revision they derive identity from, the diagnostics they speak, the
-//! request-input and value readers, the staged path names — lives here.
+//! Request inputs carry what dispatch and caching need (toolchain, source or
+//! object identities, discovered set), so one registration of each rule serves
+//! every source. The helpers the per-rule modules share live here.
 
 mod compile;
 mod discover;
@@ -145,9 +137,8 @@ pub(crate) fn provided_headers_of(value: &Value) -> PithResult<Vec<ProvidedHeade
 }
 
 /// The headers one compile may see: the registered universe plus the request's
-/// provided set, refusing a path the two spell with different content — the
-/// same include naming two headers is a conflict to report, and agreeing
-/// duplicates collapse, whether they agree with the registration or with an
+/// provided set. A path the two spell with different content is a conflict, to
+/// report; agreeing duplicates collapse, against the registration or an
 /// earlier provided header.
 pub(crate) fn effective_headers(
     universe: &HeaderUniverse,

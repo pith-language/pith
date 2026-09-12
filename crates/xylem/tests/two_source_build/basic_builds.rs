@@ -2,17 +2,12 @@ use super::*;
 
 /// Discover a toolchain, skipping only on genuine absence. A driver that is
 /// present but undiscoverable fails the test rather than skipping it green:
-/// a skip and a pass must not be the same color, because nearly every claim
-/// M-3 makes rests on these tests actually running. A skip prints, which is
-/// visible under an uncaptured run (`cargo nextest run --no-capture`) — nextest
-/// captures the output of passing tests, so `a_c_toolchain_is_available` is
-/// what makes a compiler-less host fail rather than look green.
-/// A host with no C compiler at all cannot run any test in this file, and a
-/// green run over seventeen skips would read as a verified M-3. Fail instead:
-/// installing a compiler is the fix, not reading the run as evidence.
+/// these claims mean something only if the tests run. nextest captures the
+/// output of passing tests, so this test is what makes a compiler-less host
+/// fail rather than read green over a file of skips.
 #[test]
 fn a_c_toolchain_is_available() {
-    assert_c_toolchain_available("the M-3 fixture cannot run and its other tests all skipped");
+    assert_c_toolchain_available("the builds in this file cannot run and their tests all skipped");
 }
 
 #[test]
@@ -50,10 +45,9 @@ fn a_two_source_build_produces_an_executable() {
     );
 }
 
-/// The linked executable runs and exits with the value its sources compute.
+/// The linked executable runs and exits with the value its sources compute:
 /// `main` returns `a() + b()` = `ANSWER + (ANSWER + 1)` = `81`, which becomes
-/// the process exit code. This is the truest end-to-end check: the toolchain
-/// produced a program that works, not just bytes with the right magic.
+/// the process exit code.
 #[test]
 fn the_built_executable_runs_and_exits_with_the_expected_code() {
     let Some(toolchain) = toolchain_or_skip("cc").unwrap() else {
@@ -98,10 +92,8 @@ fn the_built_executable_runs_and_exits_with_the_expected_code() {
     );
 }
 
-/// Variadic linking (decision 0035): a build of four sources links all four
-/// objects in one driver invocation over a `List<Object>`, and the executable
-/// that comes out computes over all of them — `a() + b() + c()` = `123`. The
-/// cold build runs nine actions: four discoveries, four compiles, one link.
+/// Variadic linking: every object in a `List<Object>` links in one driver
+/// invocation, and the executable computes over all of them.
 #[test]
 fn a_three_source_build_links_a_list_of_objects() {
     let Some(toolchain) = toolchain_or_skip("cc").unwrap() else {
@@ -113,8 +105,7 @@ fn a_three_source_build_links_a_list_of_objects() {
             Ok(store) => Engine::with_content_store(store),
             Err(error) => unreachable!("the filesystem store failed to open: {error:?}"),
         };
-        // A universe whose header declares all three functions, since this
-        // build's main calls `c`.
+        // This build's `main` calls `c`, so the header declares it.
         let header = match engine
             .put_blob(b"#define ANSWER 40\nint a(void);\nint b(void);\nint c(void);\n")
         {

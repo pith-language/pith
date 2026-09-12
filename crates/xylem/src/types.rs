@@ -1,20 +1,16 @@
 //! The declarations xylem owns, and the value constructors over them.
 //!
-//! Decision 0047 makes a declaration an entry in a per-module table: its
-//! identity is the coordinate `xylem.<name>`, and its revision is a digest over
-//! its representation. The table below is the single place each of xylem's six
-//! nominal types is named; the interfaces and the value constructors derive
-//! their spellings and their types from it, where they previously restated a
-//! string constant and built `Type::Nominal { name }` inline at eighteen sites.
+//! A declaration is an entry in a per-module table: its identity is the
+//! coordinate `xylem.<name>`, and its revision is a digest over its
+//! representation. The table is the one place each of xylem's nominal types is
+//! named; the interfaces and the constructors derive their spellings from it.
+//! Nominal identity over content keeps two rules producing content
+//! from collapsing to the same `() -> Blob` interface and colliding as
+//! `E-1102`.
 //!
-//! They are nominal over their content identity so two rules producing content
-//! never collapse to the same `() -> Blob` interface and collide as `E-1102`
-//! ambiguity (the blocker Phase 0 lifted).
-//!
-//! The discovered header set is the one input here that is not nominal: it is
-//! a `List<Text>` of include paths as the depfile spelled them, the landed
-//! slice of 0026's `List<T>` constructor. Its content identities are resolved
-//! by the compile action against the header universe it was registered with.
+//! The discovered header set is the one input here that is not nominal: a
+//! `List<Text>` of include paths as the depfile spelled them, resolved by the
+//! compile action against the universe it was registered with.
 
 use std::sync::OnceLock;
 
@@ -23,7 +19,7 @@ use pith_diag::Span;
 use pith_ids::ContentId;
 
 /// The module identity every xylem declaration is registered under, matching
-/// the one its rule identities already carry (decision 0023).
+/// the one its rule identities already carry.
 pub const MODULE: &str = "xylem";
 
 /// One declared type: the use-site type and the coordinate spelling a value of
@@ -33,7 +29,7 @@ struct Declared {
     spelling: Box<str>,
 }
 
-/// Xylem's declaration table and the six types declared in it.
+/// Xylem's declaration table and the nominal types declared in it.
 struct Declarations {
     table: DeclarationTable,
     toolchain: Declared,
@@ -58,10 +54,9 @@ fn declarations() -> &'static Declarations {
                 declared_type,
             }
         };
-        // A toolchain's driver path is its identity for dispatch. Two compiles
-        // over different drivers are different requests because this value is a
-        // request input; the closure the executor confines is declared
-        // separately in the action spec.
+        // The driver path is the toolchain's dispatch identity: as a request
+        // input it makes two drivers different requests. The closure the
+        // executor confines is declared separately in the action spec.
         let toolchain = declare("Toolchain", Type::Text);
         let c_source = declare("CSource", Type::Blob);
         let object = declare("Object", Type::Blob);
@@ -69,11 +64,10 @@ fn declarations() -> &'static Declarations {
         // The make-syntax depfile a discovery pass captured. The entry rule
         // parses it; the paths it names are the source's header dependencies.
         let depfile = declare("Depfile", Type::Blob);
-        // A verdict is nominal over `Bool`, which is the whole of what a build
-        // asks a test. A report carrying the exit status, the captured output,
-        // and a per-assertion breakdown wants a record, and the rule that
-        // produces this reads the status and decides, so the distinction
-        // between an exit code and a signal is made where the information is.
+        // A verdict is nominal over `Bool`, the whole of what a build asks a
+        // test. A richer report (exit status, captured output, per-assertion
+        // breakdown) wants a record; the exit-versus-signal distinction is
+        // made here, where the information is.
         let test_report = declare("TestReport", Type::Bool);
         Declarations {
             table,
@@ -88,7 +82,7 @@ fn declarations() -> &'static Declarations {
 }
 
 /// Xylem's declaration table, for a rule revision derived from the declarations
-/// its interface names (decision 0047).
+/// its interface names.
 #[must_use]
 pub fn table() -> &'static DeclarationTable {
     &declarations().table
@@ -202,9 +196,9 @@ pub const HEADER_PATH: &str = "path";
 pub const HEADER_CONTENT: &str = "content";
 
 /// The type of a provided header set: `(path, content)` pairs a request
-/// declares beside a source, so a compile whose headers come from another
-/// build's output sees them as request data rather than engine registration.
-/// The path is both the include spelling and the staged path.
+/// declares beside a source, so headers from another build's output arrive as
+/// request data rather than engine registration. The path is both the include
+/// spelling and the staged path.
 #[must_use]
 pub fn provided_headers_type() -> Type {
     let header = Type::record([
@@ -251,10 +245,7 @@ where
 /// `(Toolchain, CSource, Headers) -> Depfile`: the interface of the discovery
 /// pass. The preprocessor runs over the source with the registered header
 /// universe plus the request's provided headers staged, and captures the
-/// depfile naming what the source actually includes. Provided headers are how
-/// a compile whose headers come from another build's output — a package
-/// dependency's includes — sees them as request data rather than engine
-/// registration.
+/// depfile naming what the source actually includes.
 #[must_use]
 pub fn discovery_interface() -> Interface {
     Interface {
@@ -284,8 +275,8 @@ pub fn compile_action_interface() -> Interface {
 /// `(Toolchain, CSource, Headers) -> Object`: the compile entry a build
 /// requests. The entry runs discovery over the registered universe plus the
 /// provided headers, parses the depfile, and requests the compile with the
-/// discovered set, so a caller names a source and — where its headers come
-/// from elsewhere — those headers, and nothing about the registered universe.
+/// discovered set, so a caller names a source (plus, where its headers come
+/// from elsewhere, those headers) and nothing about the registered universe.
 #[must_use]
 pub fn compile_interface() -> Interface {
     Interface {
@@ -295,10 +286,9 @@ pub fn compile_interface() -> Interface {
 }
 
 /// `(Toolchain, List<Object>) -> Executable`: the link interface over any
-/// number of objects (decision 0035). The elements keep their nominal
-/// identity, so this is `List<xylem.Object>` and not `List<Blob>` — the
-/// distinction that keeps rule selection unambiguous now that the input is a
-/// list.
+/// number of objects. The elements keep their nominal identity, so this is
+/// `List<xylem.Object>` and not `List<Blob>`, which keeps rule selection
+/// unambiguous.
 #[must_use]
 pub fn link_interface() -> Interface {
     Interface {
@@ -320,10 +310,9 @@ pub fn test_interface() -> Interface {
 }
 
 /// `(Toolchain, Executable) -> CSource`: run a generator the build produced and
-/// take the source it wrote. Shares its input types with [`test_interface`] and
-/// differs in its output, which is what keeps the two rules unambiguous under
-/// 0015's selection: a nominal output type is a distinguishing part of an
-/// interface, and this is the collision 0026's nominal identity exists to stop.
+/// take the source it wrote. Shares its input types with [`test_interface`];
+/// the differing nominal output is what keeps the two rules unambiguous in
+/// selection.
 #[must_use]
 pub fn generate_interface() -> Interface {
     Interface {
@@ -356,7 +345,7 @@ pub fn test_request(toolchain_value: Value, executable: ContentId) -> Request<Pu
 
 /// A pure request to compile `source` under `toolchain_value`, discovering its
 /// header dependencies first over the registered universe plus `provided`.
-/// The provided set is the request's own headers — `provided_headers(&[])`
+/// The provided set is the request's own headers; `provided_headers(&[])`
 /// for a source whose includes all live in the registered universe.
 #[must_use]
 pub fn compile_request(

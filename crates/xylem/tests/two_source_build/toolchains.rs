@@ -78,7 +78,8 @@ fn a_toolchain_the_build_was_not_registered_with_is_refused() {
     let source = store_blob(&mut engine, SOURCE_A, "a.c");
 
     // A driver nothing registered has no closure to confine, and planning a
-    // contract against a guessed one would be the ambient discovery 0007 forbids.
+    // contract against a guessed one would be ambient discovery, which is not
+    // allowed during evaluation.
     let diagnostics = run_build_expecting_failure(
         &mut engine,
         &types::compile_request(types::toolchain("/nowhere/cc"), source, no_headers()),

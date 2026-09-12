@@ -28,9 +28,8 @@ fn a_generated_source_is_compiled_and_linked_through_the_graph() {
     let main = store_blob(&mut engine, SOURCE_USES_GENERATED, "main.c");
     let program = blob_of(&run_build(&mut engine, &build_request(&[generated, main])).value);
 
-    // The generator wrote a function returning 7, so a program that exits
-    // nonzero ran code the generate action produced: the generated source
-    // compiled, linked, and behaved as it was written.
+    // The generator wrote a function returning 7, so a nonzero exit means the
+    // program ran code the generate action produced.
     let verdict = run_build(&mut engine, &types::test_request(toolchain_value, program));
     assert_eq!(verdict.value, types::test_report(false));
 }
@@ -63,7 +62,7 @@ fn touching_the_generator_regenerates_the_source_and_relinks() {
         blob_of(&run_build(&mut engine, &build_request(&[first_generated, main])).value);
 
     // A changed generator is a different program, so the generate action's
-    // contract names different content and derives a different key (0031, 0036).
+    // contract names different content and derives a different key.
     let second_generator =
         built_executable(&mut engine, SOURCE_GENERATOR_TOUCHED, "generator.c touched");
     let second_generated = blob_of(

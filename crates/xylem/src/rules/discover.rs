@@ -18,12 +18,10 @@ use crate::types;
 /// The headers a build offers to `#include`: each at the path the compiler
 /// names it in a depfile, with its content identity.
 ///
-/// The universe is host configuration the build library assembles before the
-/// run, on the same terms as [`Toolchain::discover`](crate::Toolchain::discover):
-/// decision 0007 forbids discovering dependencies during evaluation, and the
-/// universe is not a dependency — it is the declared set of candidates the
-/// discovery pass may choose from. Which of them a compile actually reads is
-/// the discovered fact.
+/// Host configuration assembled before the run, on the same terms as
+/// [`Toolchain::discover`](crate::Toolchain::discover). The universe is not a
+/// discovered dependency but the declared set of candidates; which of them a
+/// compile actually reads is the discovered fact.
 #[derive(Clone, Debug)]
 pub struct HeaderUniverse {
     entries: Box<[(Box<str>, ContentId)]>,
@@ -64,9 +62,9 @@ impl HeaderUniverse {
 }
 
 /// Runs the preprocessor over one source and captures the depfile naming what
-/// it includes. The universe is staged whole — the preprocessor reads what the
-/// source asks for, and landlock confines it to what was staged — and the
-/// depfile is the kernel's own record of which files those were.
+/// it includes. The universe is staged whole: landlock confines the
+/// preprocessor to what was staged, and the depfile is the record of which
+/// staged files it actually opened.
 pub struct HeaderDiscoveryAction {
     toolchains: Toolchains,
     universe: HeaderUniverse,

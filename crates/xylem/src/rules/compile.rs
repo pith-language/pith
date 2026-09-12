@@ -18,8 +18,7 @@ use crate::depfile;
 use crate::toolchain::Toolchains;
 use crate::types;
 
-/// Compiles one C source to one object. The toolchain, source, and discovered
-/// header set arrive as the request inputs; each discovered path is resolved
+/// Compiles one C source to one object. Each discovered path is resolved
 /// against the registered universe, and the resolved files are the compile's
 /// declared inputs, so the contract digests exactly what the source includes.
 pub struct CompileAction {
@@ -71,8 +70,8 @@ impl ActionRule for CompileAction {
                      only the depfile parser produces this list",
                 ));
             };
-            // A provided header that agrees with the registered universe is
-            // already staged by name; either spelling resolves to one content.
+            // Agreeing duplicates collapsed into one entry, so each path
+            // stages once.
             match headers
                 .iter()
                 .find(|(offered, _)| offered.as_ref() == path.as_ref())
@@ -171,9 +170,6 @@ impl PureRule for CompileRule {
     }
 }
 
-/// Where one compile entry application is: requesting the discovery pass,
-/// reading the depfile it captured, requesting the compile with the discovered
-/// set, or holding the object it produced.
 enum CompilePhase {
     Discover,
     Depfile,
@@ -272,11 +268,9 @@ mod tests {
         )
     }
 
-    /// `plan()` receives no toolchain here and does not read one: the spec's
-    /// executable and closure fields are what the toolchain fills in, and this
-    /// test is about which inputs the discovered set selects. A placeholder
-    /// driver outside `/nix/store` keeps the spec valid without discovering a
-    /// real toolchain.
+    /// A placeholder driver outside `/nix/store` keeps the spec valid without
+    /// discovering a real toolchain; these tests are about which inputs the
+    /// discovered set selects.
     fn compile_action() -> CompileAction {
         let toolchain = Toolchain {
             driver: "/bin/cc".into(),
@@ -298,11 +292,9 @@ mod tests {
 
     #[test]
     fn the_discovered_set_selects_which_headers_the_compile_declares() {
-        // The universe offers two headers; the source includes one. The planned
-        // contract stages the source and the included header, and not the
-        // unincluded one, which is the fine-grained claim the depfile pass
-        // exists to make. The entry frame has already dropped the source's own
-        // prerequisite token, which is why it is absent from the list.
+        // The contract stages the included header and not the unincluded one:
+        // the fine-grained claim the depfile pass exists to make. The entry
+        // frame already dropped the source's own prerequisite token.
         let spec = compile_action()
             .plan(&compile_inputs(&["answer.h"], &[]))
             .expect("the compile plans");
@@ -313,8 +305,8 @@ mod tests {
 
     #[test]
     fn a_discovered_path_the_universe_does_not_offer_fails_the_plan() {
-        // The loud half of declared-first: a depfile naming a path outside the
-        // universe is a diagnostic, never a silently narrowed input set.
+        // A depfile naming a path outside the universe is a diagnostic, never
+        // a silently narrowed input set.
         let error = compile_action()
             .plan(&compile_inputs(&["elsewhere.h"], &[]))
             .expect_err("the path is not in the universe");

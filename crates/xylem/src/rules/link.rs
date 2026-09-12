@@ -13,9 +13,8 @@ use crate::toolchain::Toolchains;
 use crate::types;
 
 /// Links any number of objects into one executable. The objects arrive as one
-/// request input, a `List<Object>` (decision 0035); each is staged at a path
-/// derived from its position, which is the order the caller's list gave and is
-/// the order the driver receives them in.
+/// request input, a `List<Object>`; each is staged at a path derived from its
+/// position, and list order is the order the driver receives.
 pub struct LinkAction {
     toolchains: Toolchains,
 }
@@ -39,9 +38,8 @@ impl LinkAction {
 }
 
 /// The staged path of the object at `position`: `object-0.o`, `object-1.o`, ….
-/// Derived from position so the contract is a function of the list and nothing
-/// else; two link requests over the same objects in the same order plan the
-/// same contract and share a cache entry.
+/// A function of position alone, so two link requests over the same objects in
+/// the same order plan the same contract and share a cache entry.
 fn object_path(position: usize) -> Box<str> {
     format!("object-{position}.o").into()
 }
@@ -173,8 +171,7 @@ mod tests {
             ["object-0.o", "object-1.o", "object-2.o", "-o", "out"]
         );
         // Each staged input carries the content identity at its position, so
-        // the contract — and the action key derived from it — is a function of
-        // the list.
+        // the contract and its action key are a function of the list.
         let staged: Vec<ContentId> = spec
             .inputs
             .iter()
@@ -199,10 +196,9 @@ mod tests {
             .plan(reversed.inputs.as_ref())
             .expect("the reversed link plans");
 
-        // Object order reaches the driver, and the contract says so: a
-        // reordered link is a different request, not a cache hit on the same
-        // set. (A linker is free to make order observable through symbol
-        // resolution and layout.)
+        // A reordered link is a different request, not a cache hit on the same
+        // set: order is observable to the linker, through symbol resolution
+        // and layout.
         assert_ne!(
             forward_spec.digest().expect("the forward spec digests"),
             reversed_spec.digest().expect("the reversed spec digests")
@@ -225,9 +221,8 @@ mod tests {
 
     #[test]
     fn a_bare_blob_in_the_object_list_fails_the_plan() {
-        // The list's element type is nominal: a `Value::Blob` that skipped the
-        // `xylem.Object` constructor is a type error the planner reports
-        // rather than links.
+        // A `Value::Blob` that skipped the `xylem.Object` constructor is a
+        // type error the planner reports rather than links.
         let request = Request::<Pure>::new(
             "link-entry",
             types::link_interface(),

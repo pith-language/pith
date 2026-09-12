@@ -1,16 +1,14 @@
 //! Build and dependency transport over the pith kernel.
 //!
-//! `xylem` is the first-party build library (docs/foundation/name.md): the
-//! tissue that carries sources, toolchains, and artifacts through the kernel's
-//! typed rule graph. It owns toolchain closure discovery (decision 0030) and
-//! header dependency discovery (decision 0034), and declares the compile and
-//! link actions a C build needs, over the nominal types decision 0026 names
-//! and the action cache 0031 serves from.
+//! `xylem` is the first-party build library: it carries sources, toolchains,
+//! and artifacts through the kernel's typed rule graph. It owns toolchain
+//! closure discovery and header dependency discovery, and declares the actions
+//! a C build needs over the kernel's nominal types and its action cache.
 //!
 //! A caller discovers a [`Toolchain`] and assembles a [`HeaderUniverse`]
-//! before the run (decision 0007 forbids discovery during evaluation),
-//! registers xylem's rules on an [`Engine`](pith_engine::Engine), and drives
-//! the graph with the request constructors in [`types`].
+//! before the run (discovery during evaluation is not allowed), registers
+//! xylem's rules on an [`Engine`](pith_engine::Engine), and drives the graph
+//! with the request constructors in [`types`].
 
 pub mod build;
 pub mod depfile;

@@ -13,16 +13,12 @@ use crate::types;
 
 /// Runs a built executable and reads its verdict from how it ended.
 ///
-/// The program is the executable itself, as content the graph produced
-/// (decision 0036), so the contract names the bytes under test. The toolchain
-/// closure is
-/// declared because a dynamically linked binary needs the loader it names in
-/// `PT_INTERP` and the libraries on its `RUNPATH`, and under a nix toolchain
-/// both are store paths inside that closure.
-///
-/// The contract reports the exit status instead of failing on it (decision
-/// 0037): a test that exits nonzero has produced a finding, and the graph
-/// records and reuses findings.
+/// The program is the executable as content the graph produced, so the
+/// contract names the bytes under test. The toolchain closure is declared
+/// because a dynamically linked binary needs the loader in `PT_INTERP` and the
+/// libraries on its `RUNPATH`, both store paths inside a nix toolchain's
+/// closure. The contract reports the exit status rather than failing on it: a
+/// nonzero exit is a finding, and findings are recorded and reused.
 pub struct TestAction {
     toolchains: Toolchains,
 }
@@ -54,9 +50,8 @@ impl ActionRule for TestAction {
             toolchain: toolchain.closure.clone(),
             arguments: Box::new([]),
             inputs: Box::new([]),
-            // A test says what it found by how it ends. Declaring an output
-            // would specify a report format the program has to write, which is a
-            // harness pith would be imposing on it.
+            // A test says what it found by how it ends; a declared output
+            // would impose a report format on the program.
             outputs: Box::new([]),
             environment: Box::new([]),
             platform: PlatformRequirement::Exact {
@@ -75,16 +70,15 @@ impl ActionRule for TestAction {
                 "the executor reported no exit status, so the test has no verdict",
             ));
         };
-        // Only a clean zero passes. A program killed by a signal reported
-        // nothing, and reading that as a pass would call a crash a success; it
-        // would also call a confinement kill one, which is the reading 0037's
-        // unresolved section warns about.
+        // Only exit code zero passes. A program killed by a signal reported
+        // nothing, and reading that as a pass would call a crash, or a
+        // confinement kill, a success.
         Ok(types::test_report(exit == ActionExit::Code(0)))
     }
 }
 
 /// The pure entry a build requests to run a test, so the verdict is a pure
-/// result that reuse and hydration reach (decision 0033).
+/// result that reuse and hydration reach.
 pub struct TestRule;
 
 impl TestRule {

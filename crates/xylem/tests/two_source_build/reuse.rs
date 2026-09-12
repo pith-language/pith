@@ -34,9 +34,9 @@ fn a_second_build_of_unchanged_sources_reuses_its_root() {
 }
 
 /// The same build in a fresh engine over the same sqlite state and filesystem
-/// content store: the root hydrates rather than recomputing. The first engine is
-/// dropped before the second opens, so the result crosses a process boundary in
-/// everything but name.
+/// content store: the root hydrates rather than recomputing. The first engine
+/// is dropped before the second opens, so the result crosses a process
+/// boundary.
 #[test]
 fn a_fresh_engine_over_the_same_state_hydrates_the_build() {
     let Some(toolchain) = toolchain_or_skip("cc").unwrap() else {
@@ -76,7 +76,7 @@ fn a_fresh_engine_over_the_same_state_hydrates_the_build() {
     );
 }
 
-/// Determinism (0014): two cold compiles of the same source over the same
+/// Determinism: two cold compiles of the same source over the same
 /// header universe produce byte-identical objects. Caching is switched off so
 /// both compiles actually run.
 #[test]

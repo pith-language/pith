@@ -1,24 +1,9 @@
 use super::*;
 
-/// K-9 as a differential check over a real build, which is what decision 0049's
-/// unresolved section says the property still needs.
-///
-/// Every other reuse assertion in this fixture measures same-input behaviour: a
-/// second build reuses, a fresh engine hydrates, an edit changes an action
-/// count. None of them compares an incrementally derived result against the same
-/// state derived from nothing, which is what K-9 says: "incremental and cached
+/// The equivalence property as a differential check: incremental and cached
 /// evaluation produces a result equivalent to evaluation from an empty cache
-/// under the same declared inputs."
-///
-/// So: build two sources, edit one, rebuild incrementally over the warm store
-/// and index. Then build the edited state in a fresh engine over an empty store,
-/// having never seen the unedited source. The executables must be the same
-/// content.
-///
-/// This is the narrow form. It holds one path — the two-source build under one
-/// toolchain — rather than a generated population, and it is worth having ahead
-/// of the general harness because the round that moves every computation key is
-/// the round where a reuse regression would hide.
+/// under the same declared inputs. The from-empty side is the round that moves
+/// every computation key, where a reuse regression would hide.
 #[test]
 fn an_incremental_build_matches_the_same_state_built_from_empty() {
     let Some(toolchain) = toolchain_or_skip("cc").unwrap() else {
@@ -44,9 +29,7 @@ fn an_incremental_build_matches_the_same_state_built_from_empty() {
         let second = run_build(&mut engine, &build_request(&[edited_a, source_b]));
 
         // The incremental build has to actually be incremental, or the
-        // comparison below is two cold builds agreeing and says nothing about
-        // reuse. Fewer new actions than a cold build's five is the evidence
-        // something was served.
+        // comparison below is two cold builds agreeing.
         let new_actions = action_computations(&engine)
             .checked_sub(before_edit)
             .expect("the action count went down");
@@ -81,6 +64,6 @@ fn an_incremental_build_matches_the_same_state_built_from_empty() {
     assert_eq!(
         incremental, from_empty,
         "the incrementally rebuilt executable differs from the same declared inputs built \
-         from an empty store, which is what K-9 forbids"
+         from an empty store"
     );
 }

@@ -1,20 +1,9 @@
-//! Milestone M-3: a two-source C build through xylem, with fine-grained
-//! rebuilds and discovered header dependencies.
+//! A two-source C build through xylem, with fine-grained rebuilds and
+//! discovered header dependencies: two sources share a header and link to one
+//! executable.
 //!
-//! Two C sources share a header and link to one executable. The tests cover
-//! the properties that matter: touching one source recompiles only its object
-//! and leaves the other's discovery and compile in the reusable action index
-//! (U-5), editing the shared header rebuilds both objects because each
-//! compile's planned contract stages the header's new content (decision 0034),
-//! an undeclared header fails the compile inside the sandbox rather than
-//! reading the host filesystem (decision 0030), two cold compiles of the same
-//! source produce byte-identical objects (0014 determinism), and the linked
-//! executable runs and exits with the value its sources compute.
-//!
-//! It skips when the host has no nix-store C compiler, and only then: a
-//! driver that is present but fails discovery fails the test rather than
-//! skipping it green. The subject is xylem's integration with the kernel, not
-//! the availability of a toolchain.
+//! Skips only when the host has no nix-store C compiler; a driver that is
+//! present but fails discovery fails the test rather than skipping it green.
 
 #![cfg(target_os = "linux")]
 
@@ -58,9 +47,8 @@ const HEADER_PATH: &str = "answer.h";
 const UNUSED_PATH: &str = "unused.h";
 const UNUSED: &[u8] = b"#define UNUSED 0\n";
 
-/// A generator: writes a C source to the path it is given. Takes the output path
-/// as an argument, the way a codegen tool does, so nothing about where the result
-/// goes is baked into the program.
+/// A generator: writes a C source to the output path given as its argument,
+/// the way a codegen tool does.
 const SOURCE_GENERATOR: &[u8] = b"#include <stdio.h>\nint main(int argc, char **argv) {\n  if (argc < 2) return 1;\n  FILE *out = fopen(argv[1], \"w\");\n  if (!out) return 1;\n  fputs(\"int generated(void) { return 7; }\\n\", out);\n  return fclose(out) == 0 ? 0 : 1;\n}\n";
 /// A second generator emitting a different constant, for the invalidation test.
 const SOURCE_GENERATOR_TOUCHED: &[u8] = b"#include <stdio.h>\nint main(int argc, char **argv) {\n  if (argc < 2) return 1;\n  FILE *out = fopen(argv[1], \"w\");\n  if (!out) return 1;\n  fputs(\"int generated(void) { return 9; }\\n\", out);\n  return fclose(out) == 0 ? 0 : 1;\n}\n";
@@ -226,8 +214,7 @@ fn run_build(engine: &mut Engine, request: &Request<Pure>) -> Evaluation {
 }
 
 /// Drive a build that is expected to fail, and return the diagnostics it
-/// failed with. The undeclared-header test lives here: the failure is the
-/// claim being asserted, not a surprise.
+/// failed with.
 fn run_build_expecting_failure(engine: &mut Engine, request: &Request<Pure>) -> DiagnosticSink {
     let run = engine.run(request, &runtime(), &AllowAllActions, &LocalExecutor::new());
     match run {
@@ -237,10 +224,10 @@ fn run_build_expecting_failure(engine: &mut Engine, request: &Request<Pure>) -> 
     }
 }
 
-/// A fresh engine over the durable substrate at `root` — a filesystem content
-/// store and a sqlite engine state database — with xylem's rules and the
+/// A fresh engine over the durable substrate at `root` (a filesystem content
+/// store and a sqlite engine state database), with xylem's rules and the
 /// two-source build rule registered for `toolchain`, and `universe` offered to
-/// `#include`. Two engines built over one root are successive runs of the same
+/// `#include`. Two engines over one root are successive runs of the same
 /// build; a changed `universe` between them is an edit to a shared header.
 fn build_engine(root: &Path, toolchain: &Toolchain, universe: HeaderUniverse) -> (Engine, Value) {
     let store = match FilesystemContentStore::open(root) {
@@ -334,10 +321,6 @@ fn store_blob(engine: &mut Engine, bytes: &[u8], what: &str) -> ContentId {
     }
 }
 
-/// A second build of unchanged sources reuses its root (decision 0033). Every
-/// target of a build sits above an action, so before the consumer of an action
-/// could be reused this was the whole pure half of the graph re-running on every
-/// build. Nothing new is computed and no action is planned.
 /// Build `source` into an executable and return its content identity.
 fn built_executable(engine: &mut Engine, source: &[u8], what: &str) -> ContentId {
     let id = store_blob(engine, source, what);

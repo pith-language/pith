@@ -11,12 +11,10 @@ use super::{ActionRequestFrame, GENERATED_PATH, blob_of, diag, input, requested_
 use crate::toolchain::Toolchains;
 use crate::types;
 
-/// Runs a generator the build produced and takes the C source it wrote.
-///
-/// A codegen tool takes its output path as an argument, so the contract names
-/// the path, the program receives it, and the captured file is the result. A
-/// generator that wrote somewhere else produces no declared output and fails the
-/// action, which is the failure a baked-in path would hide.
+/// Runs a generator the build produced and takes the C source it wrote. The
+/// contract names the output path and passes it as an argument, the way a
+/// codegen tool expects; a generator that wrote anywhere else produces no
+/// declared output and fails the action.
 pub struct GenerateAction {
     toolchains: Toolchains,
 }
@@ -76,8 +74,8 @@ impl ActionRule for GenerateAction {
     }
 }
 
-/// The pure entry a build requests to generate a source, so the generated source
-/// is a pure result later compiles depend on through the graph.
+/// The pure entry a build requests to generate a source, so later compiles
+/// depend on it through the graph.
 pub struct GenerateRule;
 
 impl GenerateRule {
