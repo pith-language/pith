@@ -33,12 +33,12 @@ pub(crate) const BOOT_TEXT: &str = "title pith\nlinux /boot/vmlinuz\ninitrd /boo
 pub(crate) const HOSTS: &[u8] = b"127.0.0.1 localhost\n";
 pub(crate) const WELCOME: &[u8] = b"#!/bin/sh\necho welcome\n";
 
-/// Where `find_tool` looks when `PATH` has nothing to say.
+/// Directories `find_tool` searches after `PATH`.
 const FALLBACK_DIRS: [&str; 2] = ["/bin", "/usr/bin"];
 
-/// The first existing `name` binary on this host, by `PATH` then the usual
-/// directories. A host without it skips, honestly; a tool that is present
-/// but broken fails.
+/// The first existing `name` binary on this host: `PATH`, then the fallback
+/// directories. A host without the tool skips the suite; a tool that is
+/// present but broken fails.
 pub(crate) fn find_tool(name: &str) -> Option<PathBuf> {
     let mut candidates = Vec::new();
     if let Some(path) = std::env::var_os("PATH") {
@@ -50,15 +50,14 @@ pub(crate) fn find_tool(name: &str) -> Option<PathBuf> {
     candidates.into_iter().find(|candidate| candidate.is_file())
 }
 
-/// The five host programs assembly needs, or `None` on a host without them.
-/// The closure is empty: the portable fixture claims no confinement, so there
-/// is nothing for it to declare. The confined linux suite builds its own tools
-/// value with the closure discovery.
+/// The host programs assembly needs, or `None` on a host without them.
+/// The closure is empty: the portable fixture claims no confinement, so
+/// there is nothing for it to declare.
 pub(crate) fn tools_value() -> Option<Value> {
     confined_tools_value(&[])
 }
 
-/// The five programs plus the closure a confined child opens to run them.
+/// The programs plus the closure a confined child opens to run them.
 pub(crate) fn confined_tools_value(closure: &[&str]) -> Option<Value> {
     let shell = find_tool("sh")?;
     let mkdir = find_tool("mkdir")?;
@@ -80,7 +79,7 @@ pub(crate) fn confined_tools_value(closure: &[&str]) -> Option<Value> {
     ))
 }
 
-/// The five programs' absolute paths, for closure discovery.
+/// The programs' absolute paths, for closure discovery.
 pub(crate) fn tool_paths() -> Option<Vec<String>> {
     let found: Vec<PathBuf> = ["sh", "mkdir", "cat", "chmod", "ln"]
         .iter()

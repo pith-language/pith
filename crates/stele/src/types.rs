@@ -1,11 +1,7 @@
 //! The declarations this domain owns, and the values over them.
 //!
-//! The table is built the way xylem's is (decision
-//! 0047): a coordinate `stele.<name>` per declaration, a revision derived
-//! from the representation, and no registration against anything outside
-//! this crate. Every constructor the representations use was already in the
-//! calculus before this domain opened — records, declared sums, lists, and
-//! the scalars — which is the convergence question M-5a exists to answer.
+//! A coordinate `stele.<name>` per declaration, a revision derived from the
+//! representation, and no registration against anything outside this crate.
 
 use std::sync::OnceLock;
 
@@ -16,9 +12,7 @@ use pith_diag::Span;
 use pith_ids::ContentId;
 
 /// The module identity this domain's declarations and rules are registered
-/// under. The stele is the central cylinder of a stem, the structure that
-/// holds every tissue in one axis; the system library composes the machine's
-/// parts into one tree the same way.
+/// under.
 pub const MODULE: &str = "stele";
 
 /// The field naming the contribution's owner, on every contribution record.
@@ -103,7 +97,7 @@ pub const TOOL_LN: &str = "ln";
 pub const TOOL_CLOSURE: &str = "closure";
 
 /// One declared type: the use-site type and the coordinate spelling a value
-/// of it carries. Both derived from the table entry, so a declaration is
+/// of it carries, both derived from the table entry so a declaration is
 /// named once.
 pub struct Declared {
     declared_type: Type,
@@ -164,8 +158,8 @@ pub struct UserEntry {
     pub shell: Box<str>,
 }
 
-/// One merge behavior the unit policy can declare for a field, decision
-/// 0052's closed constructor set as this library ships it.
+/// One merge behavior the unit policy can declare for a field; the
+/// constructor set is closed to these two.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Behavior {
     /// Every contribution carrying the field must agree on its value.
@@ -414,8 +408,8 @@ fn declarations() -> &'static Declarations {
     })
 }
 
-/// This domain's declaration table, for a reader that wants the coordinates
-/// and revisions behind the types below.
+/// This domain's declaration table: the coordinates and revisions behind the
+/// accessors below.
 #[must_use]
 pub fn table() -> &'static DeclarationTable {
     &declarations().table
@@ -427,7 +421,7 @@ pub fn file_body() -> &'static Declared {
     &declarations().file_body
 }
 
-/// A path-sorted set of file and symlink entries, 0040's keyed spelling.
+/// A path-sorted set of file and symlink entries.
 #[must_use]
 pub fn file_set() -> &'static Declared {
     &declarations().file_set
@@ -457,7 +451,7 @@ pub fn unit_policy() -> &'static Declared {
     &declarations().unit_policy
 }
 
-/// The host programs an assembly runs, as declared inputs on 0030's terms.
+/// The host programs an assembly runs, as declared inputs.
 #[must_use]
 pub fn tools() -> &'static Declared {
     &declarations().tools
@@ -488,16 +482,15 @@ pub fn boot_text() -> &'static Declared {
 }
 
 /// The composed artifact: one tree's content identity. Tree-ness lives in the
-/// store's tree model and in the action contract that declares a tree output;
-/// the value layer carries the identity, which is all M-5b's activation half
-/// will need to name a composed system.
+/// store's tree model and in the action contract's declared tree output; the
+/// value layer carries the identity a consumer names downstream.
 #[must_use]
 pub fn system_tree() -> &'static Declared {
     &declarations().system_tree
 }
 
 /// A file body value over `body`. The body is a declared sum, so the value
-/// names its constructor and carries the constructor's payload.
+/// names its constructor and carries its payload.
 #[must_use]
 pub fn file_body_value(body: &FileBody) -> Value {
     let (constructor, payload) = match body {
@@ -536,8 +529,8 @@ pub fn file_body_value(body: &FileBody) -> Value {
     }
 }
 
-/// A file set value over `entries`, sorted by path. Sorting is what makes two
-/// callers who list the same files in different orders one request.
+/// A file set value over `entries`, sorted by path: two callers listing the
+/// same files in different orders make one request.
 #[must_use]
 pub fn file_set_value<I, P>(entries: I) -> Value
 where
@@ -606,7 +599,7 @@ fn user_record_value(user: &UserEntry) -> Value {
 }
 
 /// A unit value. The two list fields are canonicalized here, so a unit
-/// contribution's spelling cannot carry an assembly order into the merge.
+/// contribution cannot carry an assembly order into the merge.
 #[must_use]
 pub fn unit_value(
     name: &str,
@@ -708,10 +701,9 @@ pub fn behavior_value(behavior: Behavior) -> Value {
     }
 }
 
-/// A tools value naming the five host programs an assembly runs and the
-/// closure they need, on 0030's terms: a tool enters a contract as a host
-/// path plus a declared closure, and the closure is what the loader opens —
-/// the interpreter above all — not only the tools themselves.
+/// A tools value naming the host programs an assembly runs and the
+/// closure they need. The closure is what the loader opens, the interpreter
+/// above all, not only the tools themselves.
 #[must_use]
 pub fn tools_value(
     shell: &str,
@@ -853,9 +845,8 @@ fn contributions_value(payload_field: &str, contributions: &[(&str, Value)]) -> 
     )
 }
 
-/// File contributions, one record per owner, sorted by owner. Sorting is what
-/// makes the merge a function of the set of contributions rather than their
-/// order, decision 0052's order-insensitivity.
+/// File contributions, one record per owner, sorted by owner, so the merge
+/// is a function of the set of contributions.
 #[must_use]
 pub fn etc_contributions(contributions: &[(&str, Value)]) -> Value {
     contributions_value(FILES, contributions)
@@ -873,9 +864,7 @@ pub fn unit_contributions(contributions: &[(&str, Value)]) -> Value {
     contributions_value(UNIT, contributions)
 }
 
-/// A replacement list, sorted by field then expected owner. A replacement is
-/// decision 0052's deliberate way a value wins: it names the field, the owner
-/// it expects to replace, and the value that takes the field.
+/// A replacement list, sorted by field then expected owner.
 #[must_use]
 pub fn unit_replacements(replacements: &[(&str, &str, &str)]) -> Value {
     let mut replacements: Vec<(&str, &str, &str)> = replacements.to_vec();
@@ -951,9 +940,8 @@ pub fn users_interface() -> Interface {
 }
 
 /// `(policy, contributions, replacements) -> Unit`: what the unit merge
-/// computes. The policy and the replacements are declared inputs, so two
-/// merges run under different policies or replacements are different
-/// computations on 0023's terms.
+/// computes. The policy and replacements are declared inputs, so merges run
+/// under different policies are different computations.
 #[must_use]
 pub fn unit_interface() -> Interface {
     Interface {
@@ -1013,8 +1001,7 @@ pub fn render_boot_interface() -> Interface {
 
 /// `(Tools, machine, unit file name, FileSet, UnitText, PasswdText, BootText)
 /// -> SystemTree`: what the assembly action computes. The machine and file
-/// names are plain texts: they name paths inside the artifact, and the two
-/// rendered kinds beside them already carry the domain's own identity.
+/// names are plain texts: they name paths inside the artifact.
 #[must_use]
 pub fn assemble_interface() -> Interface {
     Interface {
@@ -1134,7 +1121,7 @@ pub fn render_boot_request(boot: Value) -> Request<Pure> {
 }
 
 /// A request to assemble the artifact tree from a merged file set and the
-/// three rendered texts.
+/// rendered texts.
 #[must_use]
 pub fn assemble_request(
     tools: Value,

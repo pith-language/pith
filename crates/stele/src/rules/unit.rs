@@ -1,4 +1,4 @@
-//! The unit merge: fragments compose under a declared policy, with deliberate
+//! The unit merge: fragments compose under a declared policy, with
 //! replacement as the only way a value wins.
 
 use pith_core::{BodyRevision, Pure, Rule, Value};
@@ -9,7 +9,7 @@ use crate::merge::{self, Contribution};
 use crate::rules::{Leaf, contributions_of, diag, field_of, representation_of, text_of};
 use crate::types::{self, Behavior, MODULE};
 
-/// Merge unit contributions under the declared policy, applying each declared
+/// Merge unit contributions under the declared policy, applying each
 /// replacement first and holding it to the owner it names.
 pub struct ComposeUnit;
 

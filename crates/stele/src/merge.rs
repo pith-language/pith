@@ -1,17 +1,12 @@
-//! The merge operator decision 0052 places in this library.
+//! The merge operator in this library.
 //!
-//! Two spellings of one algebra. Records compose field by field under a
-//! declared policy, and keyed collections — file sets by path, user tables by
-//! account name — compose by key. Both fail closed: agreeing contributions
-//! collapse, one key or field naming two values is a diagnostic naming both
-//! owners, and no ordering, priority, or registration order picks a winner.
-//! A replacement that names the field and its expected owner is the only way
-//! a value wins.
-//!
-//! The result is a function of the set of contributions plus the policy:
-//! inputs are sorted before anything is compared, so two callers who list the
-//! same contributions in different orders get one answer under one
-//! computation key.
+//! Records compose field by field under a declared policy; keyed collections
+//! (file sets by path, user tables by account name) compose by key. Both fail
+//! closed: agreeing contributions collapse, a key or field naming two values
+//! is a diagnostic naming both owners, and a replacement naming the field and
+//! its expected owner is the only way a value wins. Inputs are sorted before
+//! anything is compared, so the result is a function of the contribution set
+//! plus the policy.
 
 use pith_core::{RecordField, Value};
 use pith_diag::PithResult;
@@ -38,16 +33,14 @@ pub struct Keyed {
 
 /// Merge record contributions under `policy`.
 ///
-/// `what` names the thing being merged for the diagnostics. A field the
-/// policy does not name must agree, so a policy that wants accumulation on a
-/// field has to say so at the merge site. A `concat` field takes every
-/// contribution's list, concatenates them, and canonicalizes the result to
-/// sorted, duplicate-free order.
+/// A field the policy does not name must agree, so accumulation has to be
+/// declared at the merge site. A `concat` field concatenates every
+/// contribution's list and canonicalizes the result to sorted,
+/// duplicate-free order.
 ///
 /// # Errors
-/// A diagnostic naming the field, both values, and both owners when two
-/// contributions disagree on a field that must agree; a diagnostic naming the
-/// owner when a contribution's value is not a record or a concat field does
+/// A diagnostic when two contributions disagree on a field that must agree,
+/// when a contribution's value is not a record, or when a concat field does
 /// not carry a list.
 pub fn merge_records(
     what: &str,
@@ -117,8 +110,8 @@ pub fn merge_records(
     })
 }
 
-/// The values every carrier agrees on for `field`, or the diagnostic naming
-/// the first disagreement with both owners.
+/// Check that every carrier agrees on `field`, or produce the diagnostic
+/// naming the first disagreement with both owners.
 fn agree(what: &str, field: &str, carriers: &[&Contribution]) -> PithResult<()> {
     let Some(first) = carriers.first() else {
         return Ok(());
@@ -142,8 +135,7 @@ fn agree(what: &str, field: &str, carriers: &[&Contribution]) -> PithResult<()> 
     Ok(())
 }
 
-/// Every carrier's list under `field`, concatenated and canonicalized to the
-/// order the value spelling fixes.
+/// Every carrier's list under `field`, concatenated and canonicalized.
 fn concat(what: &str, field: &str, carriers: &[&Contribution]) -> PithResult<Value> {
     let mut items: Vec<Value> = Vec::new();
     for carrier in carriers {
@@ -162,20 +154,14 @@ fn concat(what: &str, field: &str, carriers: &[&Contribution]) -> PithResult<Val
     Ok(crate::types::canonical_list(items))
 }
 
-/// Replace `field` with `value`, as `expected_owner` declares it.
-///
-/// This is decision 0052's C-3 operation and the one explicit way a value
-/// wins: C-2's disagreement refuses unless an operation handles it, and this
-/// is the operation. The replacement names the owner whose declaration it
-/// replaces and fails when that owner no longer declares the field — the
-/// ownership has changed underneath it, and the merge holds the operation to
-/// the name it gave. On success the value lands on every carrier, so the
-/// merge below agrees by construction and the winner is visible at the merge
-/// site rather than picked from an order.
+/// Replace `field` with `value`, as `expected_owner` declares it: the one
+/// explicit way a value wins. Fails when `expected_owner` no longer declares
+/// the field, so a replacement is held to the ownership it named. On success
+/// the value lands on every carrier.
 ///
 /// # Errors
-/// A diagnostic naming who declares the field now, when `expected_owner` is
-/// not among them, or nobody at all.
+/// A diagnostic naming the field's current owners, when `expected_owner` is
+/// not among them or nobody declares the field.
 pub fn replace_field(
     what: &str,
     contributions: &[Contribution],
@@ -244,9 +230,8 @@ pub fn replace_field(
 }
 
 /// Merge keyed contributions: agreeing entries collapse, and one key naming
-/// two values is a diagnostic naming both owners.
-///
-/// The result is sorted by key, so it is a function of the set of entries.
+/// two values is a diagnostic naming both owners. The result is sorted by
+/// key, so it is a function of the set of entries.
 ///
 /// # Errors
 /// A diagnostic naming the key and both owners when two contributions

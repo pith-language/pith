@@ -1,8 +1,7 @@
-//! The composed artifact under the first-party confined executor, on the
-//! host that has one. This is where the milestone's two executor findings are
-//! measured for the domain: an action whose child creates symlinks inside a
-//! declared tree output, and those entries surviving capture as symlinks
-//! rather than dereferenced copies.
+//! The composed artifact under the first-party confined executor, on a host
+//! that has one. The properties pinned here: a child may create symlinks
+//! inside a declared tree output, and those entries survive capture as
+//! symlinks rather than dereferenced copies.
 
 #![cfg(target_os = "linux")]
 
@@ -60,15 +59,14 @@ fn compose(
     }
 }
 
-/// A host without the five tools cannot run the confined assembly; one that
-/// has them runs it for real.
+/// A host without the tools cannot run the confined assembly.
 fn host_has_the_tools() -> bool {
     ["sh", "mkdir", "cat", "chmod", "ln"]
         .iter()
         .all(|tool| find_tool(tool).is_some())
 }
 
-/// The five tools plus the closure a confined child opens to run them. The
+/// The tools plus the closure a confined child opens to run them. The
 /// interpreter is in the closure, so the child can start at all.
 fn confined_tools() -> Option<pith_core::Value> {
     let paths = tool_paths()?;

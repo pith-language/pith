@@ -1,12 +1,7 @@
-//! What a system composition through the public engine gets: an artifact
-//! tree carrying files, rendered texts, and symlinks; reuse and hydration on
-//! the engine's machinery alone; merges that fail closed before any action
-//! runs; a policy that is a declared input; a replacement that is the one
-//! way a value wins; and a contract whose derived script is inspectable.
+//! System composition through the public engine.
 //!
-//! Host-agnostic, on the portable fixture executor: the same derived script
-//! the confined executor runs, with confinement itself claimed nowhere
-//! (`Unverified`, honestly). The linux suite drives the real executor.
+//! Host-agnostic, on the portable fixture executor, which claims no
+//! confinement (`Unverified`). The linux suite drives the confined executor.
 
 #[path = "support/assembler.rs"]
 mod assembler;

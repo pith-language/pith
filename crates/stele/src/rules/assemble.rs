@@ -1,14 +1,10 @@
 //! The assembly action and the entry that requests it.
 //!
-//! Everything above the action is decided from values; the action exists
-//! because content enters the store only through an executor's capture. Its
-//! contract stages each file's bytes at a neutral path under `pool/`, hands
-//! the three rendered texts to the script as environment, and derives the
-//! script itself from the canonical file set: one `mkdir -p` for the
-//! directories, one `cat` per staged file, one `printf` per text, one
-//! `chmod` per executable flag, one `ln -s` per symlink. The script is a
-//! derived fact of the contract — in its arguments, in its digest, and in
-//! `plan_action`'s answer — rather than a program anyone writes by hand.
+//! The action exists because content enters the store only through an
+//! executor's capture. Its contract stages each file's bytes at a neutral
+//! path under `pool/`, passes the rendered texts as environment, and derives
+//! the script from the canonical file set. The script is part of the
+//! contract, so it shows up in the digest and in `plan_action`'s answer.
 //!
 //! The input and output paths of one contract may not overlap, which is why
 //! staging and artifact live in two disjoint trees inside the scratch root:
@@ -34,7 +30,7 @@ const ARTIFACT: &str = "system";
 /// input path overlaps the declared output.
 const STAGED: &str = "pool";
 
-/// The artifact-relative paths of the three rendered texts.
+/// The artifact-relative paths of the rendered texts.
 const PASSWD_ENTRY: &str = "etc/passwd";
 const BOOT_DIR: &str = "boot/loader/entries";
 const UNIT_DIR: &str = "etc/systemd/system";
@@ -115,8 +111,8 @@ fn tools_of(value: &Value) -> PithResult<ToolPaths> {
     })
 }
 
-/// A single path component, as the unit file name and the machine name must
-/// be to become file names inside the artifact.
+/// One path component: the unit file name and machine name become file names
+/// inside the artifact.
 fn component_of(value: &Value, what: &str) -> PithResult<Box<str>> {
     let component = text_of(value)?;
     if component.is_empty()
@@ -296,10 +292,9 @@ impl ActionRule for AssembleAction {
             script.push('\n');
         }
 
-        // The tools themselves plus the closure they run against, which is
-        // what the loader opens: the interpreter above all. Without it the
-        // confined child cannot even start (decision 0030's finding, measured
-        // here a second time).
+        // The tools themselves plus the closure they run against: what the
+        // loader opens, the interpreter above all. Without it the confined
+        // child cannot even start.
         let mut closure: Vec<Box<str>> = vec![
             tools.cat.clone(),
             tools.chmod.clone(),
@@ -333,9 +328,9 @@ impl ActionRule for AssembleAction {
                     value: unit_text,
                 },
             ]),
-            // The artifact is plain tree content — files, modes, and link
-            // targets — so where the tools ran is not part of what the result
-            // means; the tool paths themselves are declared inputs already.
+            // The artifact is plain tree content (files, modes, link
+            // targets), so where the tools ran is not part of what the
+            // result means; the tool paths are declared inputs already.
             platform: PlatformRequirement::Any,
             capabilities: Box::new([]),
             network: NetworkPolicy::Deny,
@@ -357,7 +352,7 @@ impl ActionRule for AssembleAction {
 }
 
 /// The entry a caller requests: merges each kind of contribution, renders the
-/// three texts, and assembles the artifact.
+/// texts, and assembles the artifact.
 pub struct ComposeSystem;
 
 impl ComposeSystem {

@@ -1,23 +1,17 @@
-//! Discovering the paths the assembly tools need at run time.
+//! Discovering the run-time paths the assembly tools need.
 //!
-//! Decision 0030 gives closure discovery to the library that declares the
-//! tools, and this library declares five: a shell, `mkdir`, `cat`, `chmod`,
-//! and `ln`. The closure is what a confined child opens to run them — the ELF
-//! interpreter above all — and a contract that names only the binaries cannot
-//! start, which is 0030's own finding measured again on the assembly path.
-//!
-//! Under `/nix/store` the answer is exact, because nix records it: one
-//! `path-info --recursive` per store root. Elsewhere the answer covers what
-//! the loader opens and nothing a program opens later, the same limit the
-//! executor's own fixtures record, and a caller that needs more declares it.
+//! The closure is what a confined child opens to run a tool, the ELF
+//! interpreter above all; a contract naming only the binaries cannot start.
+//! Under `/nix/store` the answer is exact, from one `path-info --recursive`
+//! per store root. Elsewhere the answer covers only what the loader opens at
+//! start, and a caller that needs more declares it.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::process::Command;
 
-/// Every host path `tools` need at run time. `tools` are absolute program
-/// paths. The answer is sorted and duplicate-free, so it is a function of the
-/// set of tools.
+/// Every host path `tools` needs at run time: sorted and duplicate-free, so a
+/// function of the set of tools.
 #[must_use]
 pub fn tools_closure(tools: &[&str]) -> Vec<String> {
     let mut closure = BTreeSet::new();
@@ -64,11 +58,10 @@ fn nix_closure(store_root: &str) -> Option<Vec<String>> {
     (!closure.is_empty()).then_some(closure)
 }
 
-/// What `program`'s dynamic loader opens to start it. Asking the loader named
-/// in the binary's own `PT_INTERP` (`LD_TRACE_LOADED_OBJECTS`) is the answer
-/// that matches what the kernel opens; `ldd` picks a loader from `PATH` and
-/// can name libraries the binary never loads. A static binary reports
-/// nothing, which is the right answer.
+/// What `program`'s dynamic loader opens to start it, via the loader named in
+/// the binary's own `PT_INTERP` (`LD_TRACE_LOADED_OBJECTS`); `ldd` picks a
+/// loader from `PATH` and can name libraries the binary never loads. A static
+/// binary reports nothing, which is the right answer.
 fn loaded_objects(program: &str) -> Vec<String> {
     let output = match Command::new(program)
         .env("LD_TRACE_LOADED_OBJECTS", "1")

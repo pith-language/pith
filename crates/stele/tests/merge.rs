@@ -1,7 +1,6 @@
-//! The merge operator's own claims, the three decision 0052 named as owed by
-//! the round that lands it: a conflict names the field and both owners, a
-//! replacement whose ownership changed fails, and a permutation of the
-//! contributions merges to the same canonical result.
+//! The merge operator's own claims: a conflict names the field and both
+//! owners, a replacement whose ownership changed fails, and a permutation of
+//! the contributions merges to the same canonical result.
 
 use pith_core::{RecordField, Value};
 use stele::merge::{self, Contribution, Keyed};

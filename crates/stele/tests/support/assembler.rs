@@ -1,11 +1,8 @@
 //! A portable executor for the assembly action: stages the blobs, runs the
 //! contract's own shell script with the declared environment, and captures
-//! the declared tree back by walking what the script built.
-//!
-//! It runs the same derived script the confined executor runs, on any host
-//! with a POSIX shell, which keeps the artifact's claims checkable where the
-//! first-party executor does not build. It claims no confinement and reports
-//! `Unverified`, which is what it installed.
+//! the declared tree back by walking what the script built. It runs the same
+//! derived script the confined executor runs, on any host with a POSIX shell,
+//! and claims no confinement: access is reported as `Unverified`.
 
 use std::fs;
 use std::path::{Path, PathBuf};

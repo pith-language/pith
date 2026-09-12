@@ -1,14 +1,10 @@
-//! The rules: three merges, three renders, one assembly action, and the entry
+//! The rules: the merges, the renders, the assembly action, and the entry
 //! that requests them all.
 //!
-//! The splits follow the seam xylem's rules set. What can be decided from the
-//! values alone — every merge, every text projection — is a pure rule, where a
-//! disagreement is a diagnostic and no process starts. Publishing a tree is
-//! the action's, because content enters the store only through an executor's
-//! capture (decision 0045's ground), and one action is one tool invocation
-//! (0032): the shell script the planner derives places the staged bytes,
-//! writes the rendered texts, sets the declared modes, and creates the
-//! symlinks.
+//! Everything decidable from the values alone (every merge, every text
+//! projection) is a pure rule, where a disagreement is a diagnostic and no
+//! process starts. Publishing a tree is the action's, because content enters
+//! the store only through an executor's capture.
 
 pub(crate) mod assemble;
 pub(crate) mod etc;
@@ -28,12 +24,8 @@ use pith_engine::{PureRuleFrame, PureStep, Resumption};
 
 use crate::types::{self, FileBody};
 
-/// The code every diagnostic from this domain carries.
-///
-/// The 9000 range is where xylem (9002) and phloem (9004) already stamp
-/// theirs, and pith-diag still documents no allocation rule for it. Decision
-/// 0056 names that gap; this crate extends the convention it names rather
-/// than the rule that does not exist.
+/// The code every diagnostic from this domain carries: unique among the
+/// domain codes other domains register.
 pub(crate) const DOMAIN_CODE: StableCode = StableCode(9006);
 
 pub(crate) fn diag(message: &str) -> DiagnosticSink {

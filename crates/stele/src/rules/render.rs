@@ -1,8 +1,6 @@
-//! The three text projections: a unit file, a passwd table, and a boot
-//! loader entry. Rendering is pure and deterministic, the written lock's
-//! discipline (0041): the projection is a function of its declared inputs,
-//! and writing any of them to a machine is a caller effect that belongs to
-//! the activation half (M-5b).
+//! The text projections. Rendering is a pure function of its declared
+//! inputs; writing a result to a machine is a caller effect that belongs to
+//! the activation half.
 
 use pith_core::{BodyRevision, Pure, Rule, Value};
 use pith_diag::{PithResult, Span};

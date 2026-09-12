@@ -1,22 +1,13 @@
-//! The system library M-5a opens: compose files, users, a service, and boot
+//! The system library: compose files, users, a service, and boot
 //! configuration into one immutable Linux artifact.
 //!
-//! The artifact is one canonical tree — the shape the system-composition
-//! research note found in four of the five systems it reads — published by a
-//! single action, because content enters the store only through capture.
-//! Everything the artifact's identity rests on is decided above the action,
-//! by pure rules: the merges decision 0052 places here compose file sets,
-//! user tables, and units from declared contributions, and three renders
-//! project the merged values into the texts an /etc and a boot entry are
-//! made of. Symlinks are load-bearing rather than latent: an immutable /etc
-//! is mostly links, so the assembly creates them and capture records them as
-//! entries.
-//!
-//! This is the first domain whose shapes the calculus was not extended for,
-//! which is the milestone's actual subject. Its declarations use records,
-//! declared sums, and lists exactly as they stood, and no kernel constructor
-//! or encoding version moved for it; what the milestone did drive is two
-//! changes in the first-party executor, argued in decision 0058.
+//! The artifact is one canonical tree published by a single action, because
+//! content enters the store only through capture. Everything its identity
+//! rests on is decided above the action by pure rules: the merges compose
+//! file sets, user tables, and units from declared contributions, and the
+//! renders project the merged values into the texts an /etc and a boot entry
+//! are made of. Symlinks are real structure here: an immutable /etc is mostly
+//! links, so the assembly creates them and capture records them as entries.
 //!
 //! ```no_run
 //! use pith_engine::Engine;
@@ -40,9 +31,6 @@
 //! )]);
 //! # Ok::<(), pith_store::StoreError>(())
 //! ```
-//!
-//! The name is botanical, like xylem's and phloem's: the stele is the central
-//! cylinder of a stem, the structure that holds every tissue in one axis.
 
 pub mod discover;
 pub mod merge;
@@ -56,11 +44,10 @@ use rules::{
     RenderUnit,
 };
 
-/// Registration of this domain's rules onto an [`Engine`], the same extension
-/// trait shape xylem's `BuildEngine` uses.
+/// Registration of this domain's rules onto an [`Engine`].
 pub trait SteleEngine {
-    /// Register the three merges, the three renders, the assembly action,
-    /// and the compose entry that requests them.
+    /// Register the merges, the renders, the assembly action, and the
+    /// compose entry that requests them.
     fn register_stele(&mut self);
 }
 
