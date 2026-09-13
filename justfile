@@ -84,7 +84,7 @@ test-ci:
 repo-check:
     cargo run --locked -p xtask -- check
 
-# The xtask determinism guard (no HashMap in source, decision 0021).
+# The xtask determinism guard (no HashMap/HashSet in source).
 [group('ci')]
 determinism:
     cargo run -p xtask -- check-determinism

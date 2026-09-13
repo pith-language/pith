@@ -33,7 +33,7 @@ pub(crate) fn run(root: &Path) -> Report {
                 report.push(Diagnostic::line(
                     &path,
                     line_number,
-                    "HashMap and HashSet are forbidden by decision 0021",
+                    "HashMap and HashSet are forbidden; map iteration order must be deterministic",
                 ));
             }
         }
