@@ -1,12 +1,10 @@
-//! The other half of the U-10 claim: carrying this domain took no change
-//! anywhere else.
-//!
-//! The peerhood suite shows the domain works through the public engine. That
-//! is only evidence of peerhood if nothing was added elsewhere to make it work,
-//! so these tests read the tree: no crate in the workspace names this one, and
-//! this crate depends on no other domain. Both are derived — the crate's own
-//! name comes from cargo, and the set of domains comes from the crates
-//! directory — so a crate added later is covered without editing a list here.
+//! The other half of the peerhood claim: carrying this domain took no change
+//! anywhere else. The peerhood suite shows the domain works through the
+//! public engine; these tests read the tree to check nothing was added
+//! elsewhere. No workspace crate names this one, and this crate depends on no
+//! other domain. Both sets are derived (the crate's name from cargo, the
+//! domains from the crates directory), so a crate added later is covered
+//! without editing a list here.
 
 use std::path::{Path, PathBuf};
 
@@ -111,8 +109,8 @@ fn this_domain_depends_on_no_other_domain() {
             Err(error) => unreachable!("this crate has a manifest: {error:?}"),
         };
 
-    // A domain is a crate that is neither a kernel crate nor this one. Deriving
-    // the set means a third domain added later is covered here without an edit.
+    // A domain is a crate that is neither a kernel crate (`pith-*`) nor this
+    // one; deriving the set covers a domain added later without an edit.
     let domains: Vec<String> = crate_directories(&root)
         .iter()
         .filter_map(|directory| directory.file_name()?.to_str().map(str::to_owned))

@@ -1,14 +1,7 @@
-//! The domain's host half: the action body that runs the renderer.
-//!
-//! The module's declarations — the nominal types, the action's signature, and
-//! the entry that checks the template against its bindings — are authored in
-//! `example.pi` and arrive as loaded declarations; registration binds this
-//! body to the coordinate the file declares. The seam the module follows is
-//! the one xylem's rules do. What can be decided from the values alone — that
-//! every placeholder the template spells is bound, and that no name is bound
-//! twice — is decided in the entry, where a failure is a diagnostic and no
-//! process starts. Substituting the text is the renderer's, because the
-//! renderer is a program and running one is an action.
+//! The domain's host half: the action body that runs the renderer. The
+//! declarations are authored in `example.pi`; registration binds this body to
+//! the coordinate the file declares. Checks decidable from the values alone
+//! live in the entry, where a failure is a diagnostic and no process starts.
 
 use pith_core::{
     ActionInput, ActionOutput, ActionProgram, ActionSpec, Content, ExitStatusContract,
@@ -26,13 +19,8 @@ const TEMPLATE_PATH: &str = "template";
 /// The staged path of the document the renderer writes.
 const DOCUMENT_PATH: &str = "document";
 
-/// The code every diagnostic from this domain carries.
-///
-/// The 9000 range is where xylem (9002) and phloem (9004) already stamp their
-/// diagnostics, and pith-diag documents no allocation rule for it: it reserves
-/// a 1000-based engine namespace and a 2000-based composition namespace and
-/// says nothing about the rest. A domain from outside the workspace picks a
-/// number and hopes. Decision 0056 records that; this crate does not fix it.
+/// The code every diagnostic from this domain carries: unique among the
+/// domain codes other domains register.
 const DOMAIN_CODE: StableCode = StableCode(9005);
 
 fn diag(message: &str) -> DiagnosticSink {
@@ -145,9 +133,9 @@ fn request_parts(inputs: &[Value]) -> PithResult<(ContentId, ContentId, &Value)>
 
 /// Renders a template by running the renderer over it.
 ///
-/// The contract names the renderer as content (decision 0036), so what it
-/// covers is the bytes that will run, and the bindings reach the program as
-/// arguments in the canonical order the value already carries.
+/// The contract names the renderer as content, so it covers the bytes that
+/// will run; the bindings reach the program as arguments in the canonical
+/// order the value already carries.
 pub struct RenderAction;
 
 impl ActionRule for RenderAction {

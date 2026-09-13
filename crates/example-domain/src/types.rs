@@ -1,12 +1,11 @@
 //! The declarations this domain owns, and the values over them.
 //!
-//! The table is built the same way xylem's is (decision 0047), through
-//! `DeclarationTable` from `pith-core`: a coordinate `example.<name>` per
-//! declaration, a revision derived from the representation, and no registration
-//! against anything outside this crate. Nothing here is reachable from the
-//! kernel, which is the point — a module identity is a string the registration
-//! boundary accepts, so a domain the workspace does not know about declares its
-//! types on the same terms the first-party ones do.
+//! Built through `DeclarationTable` from `pith-core`, the way xylem's table
+//! is: a coordinate `example.<name>` per declaration, a revision derived from
+//! the representation. Nothing here is reachable from the kernel; a module
+//! identity is a string the registration boundary accepts, so a domain the
+//! workspace does not know about declares its types on the same terms the
+//! first-party ones do.
 
 use std::sync::OnceLock;
 
@@ -47,9 +46,8 @@ impl Declared {
 
     /// A value of this type over `representation`.
     ///
-    /// The representation is not checked here: a value is data, and a value
-    /// whose representation does not match its declaration is refused at the
-    /// request-input gate, which is where the declaration table put that check.
+    /// The representation is not checked here: a mismatch is refused at the
+    /// request-input gate, where the declaration table puts that check.
     #[must_use]
     pub fn value(&self, representation: Value) -> Value {
         Value::Nominal {
@@ -88,9 +86,8 @@ fn declarations() -> &'static Declarations {
             }
         };
         // The renderer is a program the graph produced, so it enters the
-        // contract as content (decision 0036) and is a request input: a
-        // rebuilt renderer is a different request, and the document it wrote
-        // is not served for the old one.
+        // contract as content and is a request input: a rebuilt renderer is a
+        // different request, and the old document is not served for it.
         let renderer = declare("Renderer", Type::Blob);
         let template = declare("Template", Type::Blob);
         let bindings = declare("Bindings", binding_list());
@@ -106,7 +103,7 @@ fn declarations() -> &'static Declarations {
 }
 
 /// The structural representation behind `example.Bindings`: `(name, value)`
-/// pairs, which the constructor below keeps sorted by name.
+/// pairs, kept sorted by name.
 fn binding_list() -> Type {
     let binding = Type::record([
         RecordField {
@@ -122,8 +119,8 @@ fn binding_list() -> Type {
     Type::List(Box::new(binding))
 }
 
-/// This domain's declaration table, for a reader that wants the coordinates
-/// and revisions behind the types below.
+/// This domain's declaration table: the coordinates and revisions behind the
+/// types below.
 #[must_use]
 pub fn table() -> &'static DeclarationTable {
     &declarations().table
@@ -155,10 +152,11 @@ pub fn document() -> &'static Declared {
 
 /// A bindings value over `pairs`, sorted by name.
 ///
-/// Sorting is what makes two callers who list the same substitutions in
-/// different orders one request: the computation key is over the request
-/// inputs, so an unsorted list would compute one document under two keys. A name bound twice survives this constructor and is
-/// refused by the rule, where the diagnostic can name it.
+/// Sorting makes two callers who list the same substitutions in different
+/// orders one request: the computation key covers the request inputs, so an
+/// unsorted list would compute one document under two keys. A name bound
+/// twice survives this constructor and is refused by the rule, where the
+/// diagnostic can name it.
 #[must_use]
 pub fn bindings_value<I, N, V>(pairs: I) -> Value
 where
@@ -193,11 +191,8 @@ where
 }
 
 /// `(Renderer, Template, Bindings) -> Document`: what this domain computes.
-///
-/// The pure entry and the action share it, the way xylem's test entry shares
-/// its interface with the action it requests: the entry is what a caller
-/// requests and what reuse and hydration reach (decision 0033), and the action
-/// under it is the invocation.
+/// The pure entry and the action share it; the entry is what a caller
+/// requests and what reuse and hydration reach.
 #[must_use]
 pub fn render_interface() -> Interface {
     Interface {

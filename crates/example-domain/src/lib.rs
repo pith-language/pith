@@ -1,24 +1,13 @@
-//! A domain library the kernel does not know about.
-//!
-//! Requirement U-10 says each first-party domain uses public kernel interfaces
-//! and that "tests prove that an external library can replace or extend it
-//! without hidden hooks". Until this crate there was no such test: xylem and
-//! phloem are the evidence for the interface being usable, and phloem depends
-//! on xylem, so the workspace held one independent domain and one layered on
-//! it. This crate is the second independent one, and the proof is why it
-//! exists.
+//! A domain library the kernel does not know about: it extends the kernel
+//! through public interfaces alone, and depends on neither xylem nor phloem
+//! (phloem depends on xylem). That independence is why it exists.
 //!
 //! It renders a text template: a pure entry checks that every placeholder the
 //! template spells is bound, and an action runs a renderer program over the
-//! template with the bindings as arguments. Since M-13 the whole module is
-//! authored in `example.pi` — declarations, the action rule's signature, and
-//! the entry's represented body — and the crate binds its one host body to a
-//! coordinate it does not own: the loader elaborates the file, the entry
-//! registers as represented data, and the action binds through
-//! [`pith_loader::HostRuleDeclaration::bind`]. What the crate demonstrates is that
-//! declared types, represented bodies, and one bound host body are ordinary
-//! public API, and that reuse, hydration, and contract inspection follow.
-//! Membership in the first-party set adds nothing.
+//! template with the bindings as arguments. Everything is authored in
+//! `example.pi`: the loader elaborates the file, the entry registers as
+//! represented data, and the action binds through
+//! [`pith_loader::HostRuleDeclaration::bind`].
 //!
 //! ```no_run
 //! use example_domain::{ExampleEngine, types};
@@ -47,12 +36,11 @@ pub use rules::RenderAction;
 
 /// Registration of this domain onto an [`Engine`].
 ///
-/// An extension trait over the engine, which is how a domain that the engine
-/// does not depend on adds a method to it. xylem's `BuildEngine` is the same
-/// shape, and that it is available to a crate outside the first-party set is
-/// part of what this domain is here to show. The rules themselves come from
-/// `example.pi`: the entry's body is represented data, and the action is this
-/// crate's host body bound to the coordinate the file declares.
+/// An extension trait: this is how a domain the engine does not depend on
+/// adds a method to it, the same shape as xylem's `BuildEngine`. The rules
+/// come from `example.pi`: the entry's body is represented data, and the
+/// action is this crate's host body bound to the coordinate the file
+/// declares.
 pub trait ExampleEngine {
     /// Load the module and register its rules.
     fn register_example_domain(&mut self);

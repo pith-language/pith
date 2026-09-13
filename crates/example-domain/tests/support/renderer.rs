@@ -1,17 +1,12 @@
-//! An executor that stands in for running the renderer.
-//!
-//! It performs the substitution the renderer program would perform, and it
-//! checks that the engine handed it what the contract declared: the renderer's
-//! bytes as the program (decision 0036), the template at its staged path, and
-//! the bindings as arguments. It reports the host platform, because the
+//! An executor that stands in for running the renderer: it performs the
+//! substitution the renderer program would, and checks that the engine staged
+//! what the contract declared. It reports the host platform, because the
 //! contract this domain plans names it.
 //!
-//! The local executor is not used here on purpose. What this crate is evidence
-//! for is the registration surface, and running a real program would make the
-//! suite depend on a host toolchain and on linux, which is what keeps eight
-//! other suites in the workspace from running anywhere but CI. `Executor` is a
-//! public trait for the same reason `PureRule` is, so supplying one exercises
-//! the surface under test.
+//! No real program runs: a real renderer would tie the suite to a host
+//! toolchain and to linux, the constraint that keeps suites needing one gated
+//! to machines that have it. Supplying an `Executor` exercises the surface
+//! under test, since it is a public trait like `PureRule`.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -23,9 +18,9 @@ use pith_engine::{
     ExecutorIdentity, MaterializedContent,
 };
 
-/// The bytes standing in for a renderer program. Their identity is what reaches
-/// the contract, so two different renderers are two different actions whatever
-/// these bytes say.
+/// The bytes standing in for a renderer program. Their identity is what
+/// reaches the contract, so two different renderers are two different actions
+/// whatever the bytes say.
 pub const RENDERER: &[u8] = b"a renderer program\n";
 
 /// A second renderer, for the case where the program moves and the document
@@ -57,8 +52,7 @@ pub struct RendererExecutor {
 
 impl RendererExecutor {
     /// How many times this executor has been asked to run an action. A render
-    /// served from the reusable index never reaches it, which is what the reuse
-    /// tests assert against.
+    /// served from the reusable index never reaches it.
     pub fn executions(&self) -> usize {
         self.executions.load(Ordering::Relaxed)
     }

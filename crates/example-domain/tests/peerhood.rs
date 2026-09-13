@@ -1,13 +1,10 @@
-//! What a domain outside the first-party set gets from the kernel.
-//!
-//! Requirement U-10 asks for a test that an external library can extend the
-//! first-party set "without hidden hooks". These are that test. A template
-//! renderer is here for the proof and for nothing else. What is asserted is
-//! that registering two rules through the public engine is enough to get the
-//! properties the first-party domains are measured on: an action
-//! planned from a contract, a result served from the reusable index on the
-//! second request, the same result hydrated in a later process, and a failure
-//! that stops before anything runs.
+//! What a domain outside the first-party set gets from the kernel. The
+//! requirement is that an external library can extend the first-party set
+//! "without hidden hooks"; these tests register two rules through the public
+//! engine and check the properties the first-party domains are measured on:
+//! an action planned from a contract, a result served from the reusable index
+//! on the second request, the same result hydrated in a later process, and a
+//! failure that stops before anything runs.
 
 #[path = "support/renderer.rs"]
 mod renderer;
@@ -284,9 +281,9 @@ fn an_unbound_placeholder_fails_before_the_renderer_runs() {
         &executor,
     );
 
-    // The refusal is a represented body's declared failure now, so it carries
-    // the engine's E-1218 rather than the host domain's 9005; what it names is
-    // the placeholder nothing binds, exactly as the host body named it.
+    // The refusal is the represented body's declared failure, so it carries
+    // the engine's E-1218 rather than the host domain's 9005, and names the
+    // placeholder nothing binds, as the host body did.
     assert!(
         diagnostics
             .iter()
