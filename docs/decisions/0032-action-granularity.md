@@ -35,9 +35,9 @@ the notebook never asks how much work one `Action` represents. it answers the qu
 
 the glossary defines the term: "a bounded external computation with declared inputs and outputs. a compiler invocation is an action." the rules-and-graph design doc's only worked example is `rule compile(source: Source, compiler: Compiler) -> Artifact`, which takes one source. requirement U-5 asks the build library for "fine-grained invalidation." 0019 describes `Opaque` as work "treated, for scheduling and caching, like a Nix derivation or a Bazel genrule: a fixed-output boundary whose interior the engine cannot inspect." 0020 makes a nixpkgs derivation enter the graph "as `Opaque`, with a content identity, and usable like any other value."
 
-read together these say something specific: one tool invocation is an `Action`, one foreign build system is an `Opaque`, and the two are different categories rather than two settings of one knob. read separately, none of them says it, which is why the question keeps reappearing. it reappeared again when the first toolchain ran, because `crates/pith-executor-local/tests/real_toolchain.rs` compiles exactly one source file and there is nothing in the repository that says whether that is the intended unit or an artifact of the test being small.
+read together these say something specific: one tool invocation is an `Action`, one foreign build system is an `Opaque`, and the two are different categories rather than two settings of one knob. read separately, none of them says it, which is why the question keeps reappearing. it reappeared when the first toolchain ran, because `crates/pith-executor-local/tests/real_toolchain.rs` compiles exactly one source file and nothing in the repository says whether that is the intended unit or an artifact of the test being small.
 
-the question is not academic. it decides what the first build library is. at one granularity `xylem` defines rules that plan a compiler invocation per source and a linker invocation per binary, and the engine's dependency edges, reuse index, and invalidation explanations are what make a rebuild small. at the other it defines one rule that plans `cargo build`, and the engine schedules a single opaque box whose interior does its own caching. both are buildable on the current kernel. they are different products.
+the answer decides what the first build library is. at one granularity `xylem` defines rules that plan a compiler invocation per source and a linker invocation per binary, and the engine's dependency edges, reuse index, and invalidation explanations are what make a rebuild small. at the other it defines one rule that plans `cargo build`, and the engine schedules a single opaque box whose interior does its own caching. both are buildable on the current kernel. they are different products.
 
 ## proposed decision
 
@@ -59,19 +59,19 @@ it is also the granularity the enforcement claims are true at. requirement A-2 s
 
 U-2 requires that "existing projects can adopt the tool around a subset of their build or deployment" with "unmodeled boundaries remain explicit." 0019 is explicit that `Opaque` is "foundational, not a future amendment" and "exists so the category system can be opt-in by progression rather than required up front." 0020 makes it the mechanism by which a mature package collection becomes reachable on day one.
 
-a project that wraps its existing `cargo build` in an `Opaque` and gets caching, provenance, content identity, and composition with other pith values has gained something real, and has done so without lying about a contract it cannot honor. that is the intended on-ramp, not a failure to adopt properly.
+a project that wraps its existing `cargo build` in an `Opaque` gets caching, provenance, content identity, and composition with other pith values without claiming a contract it cannot honor. that is the intended on-ramp.
 
 what it gives up is enumerated by 0019 and not repeated here: an `Opaque` result does not participate in capability propagation, fine-grained invalidation, revision pinning, reproducibility analysis, or authority queries. the incentive to model a target as actions is that each of those turns on. this record adds only that the incentive is meant to operate per target, so a repository can hold both and migrate one target at a time.
 
 ### where the boundary falls between tools
 
-the distinction is not "external program" versus "internal program." it is whether the thing has a declarable contract or is itself a build system.
+the boundary does not fall between "external program" and "internal program." it falls between a thing that has a declarable contract and a thing that is itself a build system.
 
 `gcc`, `as`, `ld`, `ar`, `rustc`, `javac`, and `protoc` invoke once, read what they are given, and write what they are asked for. they are actions. the toolchain they need enters as a declared closure (0030) rather than as ambient authority.
 
-`cargo`, `gradle`, `poetry`, `uv`, `npm`, `make`, and `cmake --build` resolve dependencies, own a lockfile, maintain their own cache, and decide their own build order. they are rival kernels. wrapping one as an `Action` would be claiming a contract for work that determines its own inputs while running, which 0007 forbids as ambient discovery. they are `Opaque`.
+`cargo`, `gradle`, `poetry`, `uv`, `npm`, `make`, and `cmake --build` resolve dependencies, own a lockfile, maintain their own cache, and decide their own build order. they are each a build kernel in their own right. wrapping one as an `Action` would be claiming a contract for work that determines its own inputs while running, which 0007 forbids as ambient discovery. they are `Opaque`.
 
-the second list has a further consequence worth stating, because it constrains M-4 rather than M-3. those tools carry their own resolvers and lock data, and the package library that milestone M-4 opens is specified by U-6 to own "multiple versions, variants, constraints, feature selection, lock data, source and binary distribution, and resolution explanations." a repository that resolves through `cargo` inside an `Opaque` has not used the package library; it has delegated M-4's job. both are legitimate, and which one a user is doing must be visible rather than blurred, which the category distinction gives for free.
+the second list constrains M-4 rather than M-3. those tools carry their own resolvers and lock data, and the package library that milestone M-4 opens is specified by U-6 to own "multiple versions, variants, constraints, feature selection, lock data, source and binary distribution, and resolution explanations." a repository that resolves through `cargo` inside an `Opaque` has not used the package library; it has delegated M-4's job. both are legitimate, and which one a user is doing must be visible rather than blurred, which the category distinction provides.
 
 ### the cost this record accepts
 
@@ -97,13 +97,13 @@ rejected on the same ground 0019 rejected requiring full categorization: real ad
 
 let a rule declare whatever contract it can, and have the engine decide whether the result is trustworthy enough to treat as an `Action` or must be demoted to `Opaque`.
 
-rejected because it makes a type-level fact into a runtime judgment. 0019's whole argument for distinct types over a category field is that a load-bearing distinction the scheduler depends on must not be a value someone sets, and a demotion rule is worse than a field: it is a value the engine sets, from a heuristic, after the fact. an author who cannot declare a contract should write `Opaque` and have that visible in the source.
+rejected because it makes a type-level fact into a runtime judgment. 0019's argument for distinct types over a category field is that a distinction the scheduler depends on must not be a value someone sets, and a demotion rule is worse than a field: it is a value the engine sets, from a heuristic, after the fact. an author who cannot declare a contract should write `Opaque` and have that visible in the source.
 
 ### wrap everything opaque first, then refine
 
 adopt by declaring one `Opaque` per project and decompose into actions over time.
 
-this is not an alternative to this record, it is the adoption path this record enables, and it is worth naming so it is not mistaken for a competing option. what makes it work is that the two categories coexist per target within one repository, which is the thing being decided here.
+this is not an alternative; it is the adoption path this record enables, named so it is not mistaken for a competing option. it works because the two categories coexist per target within one repository, which is the thing being decided here.
 
 ## consequences
 

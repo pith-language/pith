@@ -36,7 +36,7 @@ relations:
 
 ## context
 
-`Observation::CACHEABLE_AS_RESULT` is false. before this record that meant more than "do not blindly serve yesterday's read": an observation had no computation identity, so an edge could not name what was read, and a pure attempt above any observation had to stay permanently outside reuse. decision 0012 already supplied the world half — a revision is whatever an adapter can attest and the engine checks equality — but not the request half, the adapter boundary, or the admission rule.
+`Observation::CACHEABLE_AS_RESULT` is false. before this record that meant more than "do not blindly serve yesterday's read": an observation had no computation identity, so an edge could not name what was read, and a pure attempt above any observation had to stay permanently outside reuse. decision 0012 already supplied the world half (a revision is whatever an adapter can attest and the engine checks equality) but not the request half, the adapter boundary, or the admission rule.
 
 0031 and 0033 provide the nearby construction. an action has a request-side key and an execution-side admission test; its pure consumer records the action edge and revalidates it rather than folding the effect into the consumer's key. observation needs the same split without inheriting action semantics. there is no declared executable contract, authorization decision, output import, or result cache. there is a subject in an external world and an observer able to say whether that subject is still at the revision it read.
 
@@ -60,7 +60,7 @@ the subject is deliberately a `Value`, not a kernel path or resource identifier.
 
 the host supplies one `Observer`. its identity names the semantics of its attestations. `observe(subject, bound)` returns the value delivered to the requesting body and a revision value; `attest(subject, bound)` returns the current revision without needing to reproduce the observed value. both receive the caller's run bound on the same rule as an executor: the adapter holding the external operation is responsible for honoring the deadline.
 
-an observation attempt records the intended observer when it becomes pending and records either `NotObserved` or `Observed { observer, revision }` as provenance. publication rejects provenance naming another observer. revisions are typed values because different worlds have different honest tokens — an etag, generation, resource version, content digest, or timestamp — and the engine needs only canonical equality.
+an observation attempt records the intended observer when it becomes pending and records either `NotObserved` or `Observed { observer, revision }` as provenance. publication rejects provenance naming another observer. revisions are typed values because different worlds have different honest tokens (an etag, generation, resource version, content digest, or timestamp), and the engine needs only canonical equality.
 
 a recorded observation edge is valid when all of these hold:
 
@@ -91,7 +91,7 @@ rejected because the revision is unknowable before the effect runs. it would mak
 
 retain the result for a duration and skip attestation until it expires.
 
-rejected as kernel semantics. a ttl is policy over a source whose revision semantics are already available, and two consumers may require different staleness tolerances. more importantly, elapsed time cannot prove that an external object did not change twice inside the window. an adapter may encode time in its revision when time is the honest source fact; the engine does not invent it.
+rejected as kernel semantics. a ttl is policy over a source whose revision semantics are already available, and two consumers may require different staleness tolerances. elapsed time cannot prove that an external object did not change twice inside the window. an adapter may encode time in its revision when time is the honest source fact; the engine does not invent it.
 
 ### make every observation consumer non-reusable
 

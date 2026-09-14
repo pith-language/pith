@@ -25,17 +25,17 @@ relations:
 
 ## context
 
-decision 0024 chose sqlite for engine metadata and named four reasons: transactions, indices, reverse queries, and crash recovery. it then listed what sqlite stores — dependency edges and their categories, capability use, reuse and invalidation reasons, executor reports — as fields of those records.
+decision 0024 chose sqlite for engine metadata and named four reasons: transactions, indices, reverse queries, and crash recovery. it then listed what sqlite stores (dependency edges and their categories, capability use, reuse and invalidation reasons, executor reports) as fields of those records.
 
 the first sqlite adapter did something narrower. it wrote each attempt as two opaque blobs holding a hand-written canonical encoding, and gave the schema columns only for what it indexed: the attempt identifier, its status, its computation key, creation order, and the reusable index. the stated reason was that re-spelling record fields as columns would give the schema a second, divergent definition of a record.
 
-that reason is real, but the arrangement costs two of the four justifications for choosing sqlite at all.
+that reason is real, but the arrangement costs two of the four justifications for choosing sqlite.
 
 reverse queries become impossible. dependency edges live inside the blob, so "which attempts depend on this one" requires decoding every row. invalidation explanations and garbage-collection reachability are both reverse-edge traversals, and both are named as unfinished work by 0024 and by milestone M-2.
 
 crash recovery becomes a scan. finding and failing interrupted `Pending` attempts decodes every pending record to do what a column comparison would do in one statement.
 
-the encoding also has a weaker justification than it appears to. the record codec exists for exactly one consumer: the in-memory adapter holds record structs directly and never encodes anything. the encoding's versioning story duplicates the adapter's schema version, which already gates layout changes. and the two payloads that genuinely need canonical bytes — a typed `Value` result and an `ActionSpec` contract — already have their own versioned encodings in `pith-core`, because both are digest-bearing.
+the record codec exists for exactly one consumer: the in-memory adapter holds record structs directly and never encodes anything. the encoding's versioning story duplicates the adapter's schema version, which already gates layout changes. and the two payloads that genuinely need canonical bytes (a typed `Value` result and an `ActionSpec` contract) already have their own versioned encodings in `pith-core`, because both are digest-bearing.
 
 ## proposed decision
 

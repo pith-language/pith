@@ -24,13 +24,13 @@ relations:
 
 ## context
 
-reproducibility is often treated as one property the engine provides. requirement A-6 ("clean-build equivalence") carries the weight of three distinct claims, and "a signature over content does not silently imply reproducibility" is easy to slide into language that treats reproducibility as an engine guarantee.
+reproducibility is often treated as one property the engine provides. requirement A-6 ("clean-build equivalence") carries the weight of three distinct claims, and the rule that "a signature over content does not silently imply reproducibility" is easy to lose in language that treats reproducibility as an engine guarantee.
 
 the Reproducible Builds project, which is the only place the bit-for-bit property has been operationalized at scale, defines it precisely:
 
 > a build is reproducible if, given the same source code, build environment, and build instructions, any party can recreate bit-by-bit identical copies of all specified artifacts.
 
-reproducibility is a property of the source, the environment, and the instructions. it is not a property of the build system. the build system can verify it. it cannot produce it. a compiler that embeds timestamps, a build script that reads readdir order, or a tool that injects a UUID produces non-reproducible output regardless of how disciplined the engine is.
+reproducibility is a property of the source, the environment, and the instructions, not of the build system. the build system can verify it but cannot produce it. a compiler that embeds timestamps, a build script that reads readdir order, or a tool that injects a UUID produces non-reproducible output regardless of how disciplined the engine is.
 
 Nix makes this distinction in practice even where the marketing blurs it. Nix can detect that a derivation is reproducible by building it twice and comparing. content-addressed derivations let it substitute a verified-reproducible result. but Nix does not make derivations reproducible. the reproducibility percentage of nixpkgs is a measured quantity, not a designed-in constant. it is tracked. it moves.
 
@@ -40,11 +40,11 @@ conflating these properties risks claiming a guarantee the engine cannot provide
 
 the design recognizes three distinct properties and uses separate terms for each.
 
-content-addressed identity is the property that two values with the same content have the same identity. it is a property of the storage and identity model, provided by construction for blobs, trees, and serializable values.
+content-addressed identity is the property that two values with the same content have the same identity. it is a property of the storage and identity model, guaranteed for blobs, trees, and serializable values.
 
 clean-build equivalence is the property that incremental, cached, local, and remote execution produce results equivalent to a clean execution under the same declared inputs and platform contract. it is a property of the rule engine and the executors. this is requirement A-6, and the invariant Skyframe and DICE were built to preserve. the kernel provides it when executors honor the declared action contract.
 
-bit-for-bit reproducibility is the property that two independent builds under the same declared inputs produce byte-identical output. it is a property of the build instructions and the build environment, not of the engine. the engine verifies it by building twice and comparing content identities, and refuses to assert it when unverified. it cannot produce it.
+bit-for-bit reproducibility is the property that two independent builds under the same declared inputs produce byte-identical output. it is a property of the build instructions and the build environment, not of the engine. the engine verifies it by building twice and comparing content identities, and refuses to assert it when unverified.
 
 an artifact's provenance records which of these have been established. content identity is always present. clean-build equivalence is asserted by the executor's contract. bit-for-bit reproducibility is present only when the engine has performed the comparison or accepted an attestation whose trust state is recorded.
 
@@ -52,9 +52,9 @@ an artifact's provenance records which of these have been established. content i
 
 the engine distinguishes "this artifact is reproducible" from "this artifact was built once." the distinction is visible in provenance and in any supply-chain attestation derived from it. a signature over an artifact's content does not imply bit-for-bit reproducibility. a bit-for-bit attestation is its own claim, as requirement T-5 already says for trust claims generally.
 
-executors that sandbox actions against the Reproducible Builds determinism rules claim a stronger guarantee than those that do not, and the plan and provenance surface the difference. an action marked `hermetic` without evidence of determinism discipline is a claim, not a measured fact. this is the same principle the effects design doc states: marking an action hermetic is not evidence that it was hermetic.
+executors that sandbox actions against the Reproducible Builds determinism rules claim a stronger guarantee than those that do not, and the plan and provenance surface the difference. an action marked `hermetic` without evidence of determinism discipline is a claim, not a measured fact. the effects design doc states the same principle: marking an action hermetic is not evidence that it was hermetic.
 
-the determinism rules are concrete and are the useful artifact the Reproducible Builds community produced over roughly a decade. do not embed the maker or the place of making. do not embed a timestamp unless it is clamped to SOURCE_DATE_EPOCH, the community's specification for a source timestamp:
+the determinism rules are concrete: the Reproducible Builds community refined them over roughly a decade. do not embed the maker or the place of making. do not embed a timestamp unless it is clamped to SOURCE_DATE_EPOCH, the community's specification for a source timestamp:
 
 ```
 SOURCE_DATE_EPOCH=1722739200
@@ -68,19 +68,19 @@ the build library should adopt these as defaults for the actions it defines and 
 
 ### treat reproducibility as a single engine guarantee
 
-collapse the three properties into one and claim the engine produces reproducible builds. the strongest marketing position and the one the engine cannot back. the Reproducible Builds project exists because real builds embed nondeterminism in ways no engine can remove without the build's cooperation. claiming the unified guarantee sets up every nondeterministic action as a counterexample and erodes trust in the guarantees that do hold.
+collapse the three properties into one and claim the engine produces reproducible builds. the strongest marketing position, and the one the engine cannot back. the Reproducible Builds project exists because real builds embed nondeterminism in ways no engine can remove without the build's cooperation. claiming the unified guarantee sets up every nondeterministic action as a counterexample and erodes trust in the guarantees that do hold.
 
 ### claim reproducibility for hermetic actions
 
-any action run under a hermetic sandbox is reproducible. closer, still an overclaim. hermeticity and reproducibility are related, not identical. an action can be hermetic and still embed a timestamp from a source it legitimately read. an action can be reproducible without being hermetic if its nondeterministic inputs happen to be fixed across builds. keeping the two claims separate lets provenance record which was established.
+any action run under a hermetic sandbox is reproducible. closer, still an overclaim: hermeticity and reproducibility are related but distinct. an action can be hermetic and still embed a timestamp from a source it legitimately read. an action can be reproducible without being hermetic if its nondeterministic inputs happen to be fixed across builds. keeping the two claims separate lets provenance record which was established.
 
 ### verify reproducibility for every action
 
-build every action twice and compare, as a default. the most rigorous option and it doubles build cost. a reasonable default for actions that publish artifacts for wide distribution, and the wrong default for a local incremental build during development. the decision makes verification available and records its result. policy on when to verify belongs in the build library.
+build every action twice and compare, as a default. the most thorough option, and it doubles build cost. a reasonable default for actions that publish artifacts for wide distribution, and the wrong default for a local incremental build during development. the decision makes verification available and records its result. policy on when to verify belongs in the build library.
 
 ## consequences
 
-requirement A-6 is narrowed to clean-build equivalence, which is the property the engine actually provides. requirement A-9 records the bit-for-bit verification property framed honestly: the engine verifies reproducibility by comparison and records the result. it does not produce it.
+requirement A-6 is narrowed to clean-build equivalence, the property the engine actually provides. requirement A-9 records the bit-for-bit verification property: the engine verifies reproducibility by comparison and records the result; it does not produce it.
 
 the artifact and identity model gains a provenance field for verified-reproducible status. the supply-chain story in T-4 and T-5 inherits this. a reproducibility attestation is a distinct claim, derived from the graph, with its own trust state.
 
@@ -90,6 +90,6 @@ the build library's default action contracts should adopt the Reproducible Build
 
 how reproducibility verification interacts with remote execution needs specification. comparing content identities from two remote builds is straightforward. comparing a local and a remote build requires agreement on the action contract including the determinism rules, and the remote executor's trust state affects whether the comparison counts as evidence.
 
-the representation of "verified reproducible" in the content identity scheme needs work. whether a verified-reproducible artifact shares content identity with its independently-built twin by construction, or whether the equality is recorded separately, gets worked out alongside the first action prototype.
+the representation of "verified reproducible" in the content identity scheme needs work. whether a verified-reproducible artifact shares content identity with its independently-built twin automatically, or whether the equality is recorded separately, gets worked out alongside the first action prototype.
 
 whether the project adopts SOURCE_DATE_EPOCH directly or defines its own equivalent is a build-library decision. direct adoption is the path of least friction against existing tooling, and divergence needs a reason.

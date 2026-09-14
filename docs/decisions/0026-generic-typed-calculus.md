@@ -31,18 +31,18 @@ relations:
 > supersedes [0017: structural types by default, nominal by declaration](0017-structural-with-nominal.md), whose structural-default and nominal-by-declaration mechanism becomes one section of the calculus below. 0017 stays in the repository; its proposed direction is replaced by this record. amends [0010: use a typed, pure, terminating declaration language](0010-typed-pure-language.md), whose unresolved list names "nominal versus structural typing, termination checking, row polymorphism, refinement performance, schema evolution, and module compatibility"; this record settles the calculus questions among those and leaves termination (0018), schema evolution, and module compatibility to their own records.
 
 > amendment, 2026-08-28: M-13's notation has no type-parameter declaration, type-variable, or
-> polymorphic-rule spelling. Rank-1 user-defined generics are withdrawn rather than left as a mandated
-> feature with no surface. Parameterized builtin constructors such as `List<Text>` remain structural type
+> polymorphic-rule spelling. rank-1 user-defined generics are withdrawn rather than left as a mandated
+> feature with no surface. parameterized builtin constructors such as `List<Text>` remain structural type
 > application over concrete arguments; there is no `forall`, inference variable, or generic declaration.
-> With the convergence evidence below and this mismatch removed, the record is accepted.
+> with the convergence evidence below and this mismatch removed, the record is accepted.
 
 ## context
 
 decision 0010 chose a strongly typed, pure, terminating declaration language and left the exact type calculus open. decision 0017 settled one axis of that question, structural typing by default with nominal identity by declaration, without naming the rest. the values-and-types design doc lists the required features: records, variants, generics, interfaces, opaque types, and validation that refines an uncertain value into a stronger type. the current implementation in `pith-core` carries six scalar types and a nominal type that holds only a name string. the calculus the design calls for has not been built.
 
-four load-bearing commitments already constrain the calculus without it being written down.
+four commitments already constrain the calculus without it being written down.
 
-decision 0023 makes type canonicalization load-bearing. the pure-computation key is a versioned, domain-separated digest over "canonical typed inputs." a type that cannot be canonicalized cannot be digested, and a type that cannot be digested cannot participate in computation identity. whatever the calculus is, it has a canonical form the engine can serialize and hash.
+decision 0023 makes type canonicalization necessary. the pure-computation key is a versioned, domain-separated digest over "canonical typed inputs." a type that cannot be canonicalized cannot be digested, and a type that cannot be digested cannot participate in computation identity. whatever the calculus is, it has a canonical form the engine can serialize and hash.
 
 decision 0015 makes types participate in dispatch. rule selection matches a request against declared interfaces and refuses ambiguity. "match" is currently equality on the `Interface` struct. a calculus that turned match into unification, as row variables in interface types would, would make the refuse-ambiguity rule substantially harder and more expensive to check.
 
@@ -68,10 +68,10 @@ records are products of named fields. a record is closed: its field set is fixed
 
 declared sums are a nominal type with a fixed set of constructors, each optionally carrying a typed payload. pattern matching is exhaustive. this is the only sum mechanism.
 
-parameterized builtin constructors accept concrete type arguments. The built value calculus currently needs
+parameterized builtin constructors accept concrete type arguments. the built value calculus currently needs
 `List<T>`; 0047 removed `Map`, `Option`, `Result`, and the effect categories from this value-type set because
-no value consumer earned them. Type application is reified: `List<Int>` and `List<Text>` are distinct types,
-distinct cache keys, and distinct interface participants. This notation is not quantification: authors
+no value consumer earned them. type application is reified: `List<Int>` and `List<Text>` are distinct types,
+distinct cache keys, and distinct interface participants. this notation is not quantification: authors
 cannot declare a type constructor or a rule abstract over `T`.
 
 nominal declarations carry a name and a structural representation. `nominal MachineId = Text` is not interchangeable with `Text` even though its representation matches. this is where the five identity types (0005, 0013) land: managed-object identity, content identity, external identity, and the rest are attributes of nominal declarations, with no separate registries.
@@ -84,7 +84,7 @@ nominal declarations are the only place a type gets identity. everything else is
 
 ### what stays out of the type language
 
-five things are deliberately absent from the calculus. each is a real position in the design space, each was weighed against the constraint that 0023 and 0015 put on canonicalization and dispatch, and each is rejected below with its reasoning on the record.
+five things are deliberately absent from the calculus. each is a real position in the design space, weighed against the constraints 0023 and 0015 put on canonicalization and dispatch; the reasoning is on the record below.
 
 no row polymorphism. records are closed. a function that wants "any record with a `name` field" cannot be typed in the calculus; it must declare the full record type it accepts, or the caller must pass a value of a nominal type the function names. composition across record shapes happens at the value level through an explicit, provenance-carrying merge operator (see below), with no row variables at the type level.
 
@@ -92,7 +92,7 @@ the decisive reason is canonicalization. no content-addressed build system has d
 
 this does not give up the composition power rows were meant to provide. it moves it to the value level, where conflict resolution belongs.
 
-no predicate refinement types. the type language does not contain `{ x : Int | x > 0 }`. predicates over values live in pure validation rules, with no home in types. the calculus models the difference between an unvalidated and a validated value structurally via `Unchecked<T>` and `T`; what the validation checked is a provenance fact, with no type-fact counterpart.
+no predicate refinement types. the type language does not contain `{ x : Int | x > 0 }`. predicates over values live in pure validation rules, with no home in types. the calculus models unvalidated versus validated values structurally via `Unchecked<T>` and `T`; what the validation checked is a provenance fact, with no type-fact counterpart.
 
 the decisive reason is content addressing. if refinements were types, then either the digest includes the predicate (and changing a signature invalidates every downstream artifact even when the value is unchanged, and predicate equivalence is undecidable so canonicalization breaks) or the digest erases it (and refinements are unobservable to the cache, so they buy nothing at the identity layer). this tension is not addressed in the published literature because no one has built a refinement-typed content-addressed system; it follows directly from the two requirements together. Dhall and Nickel, the two closest shipping systems, both keep predicates out of the type language. Dhall does so entirely; Nickel via contracts that are values.
 
@@ -100,12 +100,12 @@ no polymorphic (extensible) variants. the only sum mechanism is declared nominal
 
 the decisive reason is ambiguity. polymorphic variant tags live in a flat namespace and compose by silent unification; the `` `Running `` collision (service state versus build-step state) is the textbook failure. the structural composition across boundaries that polymorphic variants would provide is already provided by structural records, which compose by field name where a missing field is locally obvious. declared sums are what every comparable build and configuration system ships, and the OCaml community, including the designer of polymorphic variants, recommends declared variants for almost all code.
 
-no polymorphic abstraction in the surface. Parameterized builtin constructors do not imply abstraction over
+no polymorphic abstraction in the surface. parameterized builtin constructors do not imply abstraction over
 types or type constructors: there is no `forall a`, no `forall f`, and no `Functor`-style type class.
 
-the decisive reason is the cost-benefit curve. Polymorphic abstraction requires inference, instantiation,
-canonical variable binding, and a dispatch rule beyond exact interface equality. No measured build, package,
-or deployment domain needs it, and M-13 produced no honest spelling for it. A future consumer can reopen the
+the decisive reason is the cost-benefit curve. polymorphic abstraction requires inference, instantiation,
+canonical variable binding, and a dispatch rule beyond exact interface equality. no measured build, package,
+or deployment domain needs it, and M-13 produced no honest spelling for it. a future consumer can reopen the
 question by amendment; an uninhabited promise is not part of the accepted calculus.
 
 no positional tuples. records are named-field only. a tuple is a record whose field names are numeric, with no separate calculus construct. one mechanism for products.
@@ -132,9 +132,9 @@ baking the five uncertainty types into the calculus is the natural completion of
 
 `Unchecked<T>`: the type system prevents an unchecked value from flowing where a checked one is required, without an explicit validation step. validation is a pure rule `Unchecked<T> -> Result<T, ValidationFailure>`.
 
-the set is closed under the same discipline as 0019: a sixth uncertainty type requires a decision record that amends or supersedes this one. this guards the "keep the kernel small" principle. the set is bounded by argument, with no accretion.
+the set is closed under the same discipline as 0019: a sixth uncertainty type requires a decision record that amends or supersedes this one. this guards the "keep the kernel small" principle; the set is bounded by argument.
 
-the case against baking uncertainty in is Rust's `Option` / `Result`, which are library types and work structurally. that case does not transfer here, for one precise reason. the Rust compiler does not schedule, cache, or dispatch differently on `None` versus `Err`. those are value-level facts the program handles. in pith, the engine itself (not the program) dispatches on staleness, conflict, and unreachability, because those are facts about the incremental graph, the cache, and provenance. that is the difference between uncertainty a program handles, for which a library is enough, and uncertainty an engine schedules around, which must be structural.
+the case against baking uncertainty in is Rust's `Option` / `Result`, which are library types and work structurally. that case does not transfer here, for one precise reason. the Rust compiler does not schedule, cache, or dispatch differently on `None` versus `Err`. those are value-level facts the program handles. in pith, the engine itself (not the program) dispatches on staleness, conflict, and unreachability, because those are facts about the incremental graph, the cache, and provenance. uncertainty a program handles can live in a library; uncertainty an engine schedules around must be structural.
 
 ### canonicalization
 
@@ -152,9 +152,9 @@ the most expressive option and the one the configuration literature points towar
 
 the cost is canonicalization. no row-polymorphic language digests its types. PureScript's `Type` AST is not even hash-consed, and where stable ordering is needed (serialization) PureScript invents a separate `RowList` type-level representation. that is direct evidence that the row type itself is not canonicalizable without a transformation step, and that the transformation is non-trivial. in pith, where 0023 puts the type into the computation key's digest, open rows in interface or cache positions would require alpha-equivalence over row variables, canonical field sorting, and a versioned encoding for all of it. the algorithm exists; the migration story and the testing burden do not come for free.
 
-elm's removal of value-level record extension is a separate documented data point. elm had full Leijen-style extension and deletion and removed both in 0.16, citing near-zero usage over two years, code-quality collapse in the cases that did use it, and a measurable optimization cost. elm kept extensible record types and dropped extensible record values. the lesson the calculus here takes is the same: the type-level extensibility is what matters for composition; the value-level extension is a power nobody needs and a cost everybody pays.
+elm's removal of value-level record extension is a separate documented data point. elm had full Leijen-style extension and deletion and removed both in 0.16, citing near-zero usage over two years, code-quality collapse in the cases that did use it, and a measurable optimization cost. elm kept extensible record types and dropped extensible record values. the lesson the calculus here takes is the same: the type-level extensibility is what matters for composition.
 
-row polymorphism is not rejected forever. if configuration libraries chafe at exact-shape matching on closed records, the cleanest expansion is to admit row variables in local inference only and require interface and cache positions to be closed (ρ = empty). that keeps canonicalization tractable where it is load-bearing while recovering the width-accepting function signatures config libraries want. this is reserved as a future amendment, with no adoption now.
+row polymorphism is not rejected forever. if configuration libraries chafe at exact-shape matching on closed records, the cleanest expansion is to admit row variables in local inference only and require interface and cache positions to be closed (ρ = empty). that keeps canonicalization tractable where it matters while recovering the width-accepting function signatures config libraries want. this is reserved as a future amendment, with no adoption now.
 
 ### refinement types in the type language
 
@@ -170,7 +170,7 @@ two type systems, one for structural data and one for identity-bearing types. ex
 
 OCaml's full sum story: declared variants for closed cases, polymorphic variants for open extension.
 
-rejected on ambiguity. the duality between extensible records and extensible variants is formally exact but practically asymmetric: record fields are read by name where a missing field is locally obvious, while variant tags live in a flat namespace and collide silently. the `` `Running `` collision is the canonical example and pith's "reject ambiguous composition" principle has nothing to say to it under polymorphic variants that it can say structurally. the cross-boundary composition polymorphic variants would buy is already provided by structural records.
+rejected on ambiguity. the duality between extensible records and extensible variants is formally exact but practically asymmetric: record fields are read by name where a missing field is locally obvious, while variant tags live in a flat namespace and collide silently. the `` `Running `` collision is the canonical example, and pith's "reject ambiguous composition" principle can say nothing about it under polymorphic variants that it can say structurally under records. the cross-boundary composition polymorphic variants would buy is already provided by structural records.
 
 ### higher-kinded polymorphism in the surface
 
@@ -192,41 +192,41 @@ the uncertainty types and the effect categories compose. an `Observation` of a m
 
 ## landed ahead of the calculus
 
-> two things this section states in the present tense are no longer true of the tree. [0047](0047-the-declaration-table.md) removes nine constructors from the set below — `Map`, `Option`, `Result`, and the five effect categories, which were 0019's ir types read as value types — and builds the declaration site each nominal paragraph defers. and the four `RECORD_ENCODING_VERSION` bumps recorded below were made and then unwound: the constant reached 5 and returned to 1, which [0048](0048-pre-release-version-pinning.md) generalizes into one pinning rule for every version in the tree. read the bump sentences as history.
+> two things this section states in the present tense are no longer true of the tree. [0047](0047-the-declaration-table.md) removes constructors from the set below (`Map`, `Option`, `Result`, and the five effect categories, which were 0019's ir types read as value types) and builds the declaration site each nominal paragraph defers. and the four `RECORD_ENCODING_VERSION` bumps recorded below were made and then unwound: the constant reached 5 and returned to 1, which [0048](0048-pre-release-version-pinning.md) generalizes into one pinning rule for every version in the tree. read the bump sentences as history.
 
 the `Value::Nominal { name, representation: Box<Value> }` constructor landed before the rest of the constructor set above. records, declared sums, and uncertainty constructors were then unbuilt; only the one constructor that unblocks rule dispatch (0015) existed. without an inhabiting value, `Type::Nominal` was declared, canonically encoded, and digested into computation keys (0023) but never matched: `value_type` returned `false` for every value against it, so any rule declaring a nominal output failed `ResultTypeMismatch` and any request declaring a nominal input failed `RequestInputsMismatch`. every content-producing rule collapsed to `(...) -> Blob`, and any two of them collided as `E-1102` ambiguity.
 
 the slice that landed carries the 0026 semantics in miniature: a nominal value matches its own name only, and is not interchangeable with its representation. `value_type` returns `Type::Nominal { name }`; `is_type` accepts the value against `Type::Nominal { name }` when the names agree and rejects the representation's own type. `Type::Nominal` still carries only a name, not its declared representation, because the declaration site that would carry one does not exist yet; checking the name is what is checkable today. when the declaration lands, the representation type it carries becomes the second thing `is_type` verifies.
 
-the canonical codec's reserved `TAG_NOMINAL = 6`, which the comment in `value_codec.rs` held "`Type`-only," now carries a value payload: the name, then the recursively-encoded representation. `RECORD_ENCODING_VERSION` (0024) moves to 2; the byte-level `ENCODING_VERSION` stays at 1 because no existing byte sequence changed meaning — no prior build could emit a nominal value. a pre-release database recorded under version 1 is moved aside and rebuilt, which the existing test at `durable_engine_state::an_incompatible_database_is_moved_aside_and_rebuilt` already asserts.
+the canonical codec's reserved `TAG_NOMINAL = 6`, which the comment in `value_codec.rs` held "`Type`-only," now carries a value payload: the name, then the recursively-encoded representation. `RECORD_ENCODING_VERSION` (0024) moves to 2; the byte-level `ENCODING_VERSION` stays at 1 because no existing byte sequence changed meaning: no prior build could emit a nominal value. a pre-release database recorded under version 1 is moved aside and rebuilt, which the existing test at `durable_engine_state::an_incompatible_database_is_moved_aside_and_rebuilt` already asserts.
 
 `List` is the second constructor to land (0034 needed a discovered-header set with no cardinality limit, and the `List<T>` this record names is the list the calculus already reserves). `Value::List(Box<[Value]>)` and `Type::List(Box<Type>)` carry it; `TAG_LIST = 7` encodes a type's element type and a value's length-prefixed elements under the shared numbering. `List` makes both grammars recursive, so type decoding gains the depth bound value decoding already had, and `RECORD_ENCODING_VERSION` moves to 3 on the same moved-aside-and-rebuilt terms as the move to 2. type application is reified the way this record says: `List<Text>` and `List<Nominal>` are distinct types and distinct interface participants, which is what keeps a link over `List<Object>` from colliding with anything else. `is_type` types a list by its elements and accepts an empty list against every `List<T>`, a fact `value_type` cannot express (it must pick an element type when there is no element to ask); request-input checking therefore compares with `is_type` rather than `value_type`, and the two agree everywhere else.
 
-`Record` is the third constructor to land (0039 needed a package description and a lock entry, and neither is honestly spellable in scalars plus `Nominal` plus `List`). `Value::Record` and `Type::Record` carry a sorted slice of named fields; construction sorts and rejects duplicate names, `TAG_RECORD = 8` writes the count then each length-prefixed name and payload in both grammars, and the decoder accepts strictly ascending name order only, so the canonical form this record's canonicalization section specifies is the only one on the wire. `RECORD_ENCODING_VERSION` moves to 4: tag 8 is new and no existing byte sequence changes meaning, but the retained-value grammar the version gates has grown, so the gate moves on the same moved-aside-and-rebuilt terms. what does not land: the merge operator (the value-level composition this record's own section reserves for design alongside the first configuration library) and row variables, which stay rejected. `is_type` matches a record against a record type field by field — same names, each payload inhabiting the declared field type — with no width or depth subtyping, and `value_type` answers for a record field by field. a record introduces no asymmetry of its own, but it inherits any its fields carry: a record with an empty-list field types as `{f: List<Unit>}` while inhabiting `{f: List<Int>}` just the same, and a record with a sum field inherits the singleton problem. the guarantee that holds everywhere is weaker than agreement: `is_type` accepts every value against its own `value_type`, and records keep that reflexivity without adding a third exception to the two `List` and `Sum` already found.
+`Record` is the third constructor to land (0039 needed a package description and a lock entry, and neither is honestly spellable in scalars plus `Nominal` plus `List`). `Value::Record` and `Type::Record` carry a sorted slice of named fields; construction sorts and rejects duplicate names, `TAG_RECORD = 8` writes the count then each length-prefixed name and payload in both grammars, and the decoder accepts strictly ascending name order only, so the canonical form this record's canonicalization section specifies is the only one on the wire. `RECORD_ENCODING_VERSION` moves to 4: tag 8 is new and no existing byte sequence changes meaning, but the retained-value grammar the version gates has grown, so the gate moves on the same moved-aside-and-rebuilt terms. what does not land: the merge operator (the value-level composition this record's own section reserves for design alongside the first configuration library) and row variables, which stay rejected. `is_type` matches a record against a record type field by field (same names, each payload inhabiting the declared field type) with no width or depth subtyping, and `value_type` answers for a record field by field. a record introduces no asymmetry of its own, but it inherits any its fields carry: a record with an empty-list field types as `{f: List<Unit>}` while inhabiting `{f: List<Int>}` just the same, and a record with a sum field inherits the singleton problem. the guarantee that holds everywhere is weaker than agreement: `is_type` accepts every value against its own `value_type`, and records keep that reflexivity without adding a third exception to the two `List` and `Sum` already found.
 
-declared sums are the fourth constructor to land (0039's source binding is a fixed set of constructors carrying different payloads — a registry archive, a git revision, a local path — and the tag-field spelling re-creates the flat-namespace ambiguity this record rejected polymorphic variants for, at a smaller scale). `Type::Sum` carries the sum's name and its constructor set, constructors sorted by name at construction; `Value::Sum` carries the sum's name the way `Value::Nominal` carries its own — the declaration site that would resolve the name does not exist yet — plus the selected constructor and its optional payload. `TAG_SUM = 9` writes the name then, for a type, the sorted constructors with a presence byte and payload type each, and for a value, the constructor name, a presence byte, and the payload. `RECORD_ENCODING_VERSION` moves to 5 on the same terms as the move to 4. the asymmetry `List` found arrives here from the other direction: a sum value cannot recover its sibling constructors, so `value_type` names only the singleton sum holding the constructor the value selected, while `is_type` accepts every declared sum of that name containing that constructor with a matching payload. request-input checking already compares with `is_type`, so nothing gates on the singleton. what does not land: pattern matching, which is a rule-body concern (0038), and the declaration site itself, which keeps the deferral this record's unresolved section already records — landing it was not required to type a sum value, because the value carries its sum's name the way a nominal value does.
+declared sums are the fourth constructor to land (0039's source binding is a fixed set of constructors carrying different payloads: a registry archive, a git revision, a local path; and the tag-field spelling re-creates the flat-namespace ambiguity this record rejected polymorphic variants for, at a smaller scale). `Type::Sum` carries the sum's name and its constructor set, constructors sorted by name at construction; `Value::Sum` carries the sum's name the way `Value::Nominal` carries its own (the declaration site that would resolve the name does not exist yet) plus the selected constructor and its optional payload. `TAG_SUM = 9` writes the name then, for a type, the sorted constructors with a presence byte and payload type each, and for a value, the constructor name, a presence byte, and the payload. `RECORD_ENCODING_VERSION` moves to 5 on the same terms as the move to 4. the asymmetry `List` found arrives here from the other direction: a sum value cannot recover its sibling constructors, so `value_type` names only the singleton sum holding the constructor the value selected, while `is_type` accepts every declared sum of that name containing that constructor with a matching payload. request-input checking already compares with `is_type`, so nothing gates on the singleton. what does not land: pattern matching, which is a rule-body concern (0038), and the declaration site itself, which keeps the deferral this record's unresolved section already records; landing it was not required to type a sum value, because the value carries its sum's name the way a nominal value does.
 
 M-5a is the convergence measurement M-4 asked this section for, and it came back clean. stele declares
 twelve types over the four constructors above plus the six scalars and the recursion cut, drives no new
-constructor, and required no engine, core or encoding change — the first domain whose shapes this calculus
+constructor, and required no engine, core or encoding change: the first domain whose shapes this calculus
 was not extended for, and the first milestone whose convergence entry is an empty diff over the seven
-kernel crates. the four constructors that did land each came from a named domain pressure — `Nominal` from
-0015's selection collision, `List` from 0034's discovered header set, `Record` and `Sum` from 0039 — so the
-claim this record can now make is not that the kernel does not change but that it converges, one domain at
-a time, and that the convergence is measured rather than asserted.
+kernel crates. the four constructors that did land each came from a named domain pressure (`Nominal` from
+0015's selection collision, `List` from 0034's discovered header set, `Record` and `Sum` from 0039). the
+claim this record can now make is that the kernel converges, one domain at a time, and that the
+convergence is measured rather than asserted.
 
-That measurement did not initially promote this record: rank-1 prenex polymorphism was mandated while the
+that measurement did not initially promote this record: rank-1 prenex polymorphism was mandated while the
 kernel could not hold it and the notation could not spell it. M-13 resolved the mismatch by declining
-user-defined generics, as the amendment above records. The uncertainty constructors remain gated by 0047
+user-defined generics, as the amendment above records. the uncertainty constructors remain gated by 0047
 on subsystems that read them; they are reserved constructor decisions rather than a claim that unused
-variants already ship. The merge operator shipped in stele under [0052](0052-the-merge-operator.md) at the
-value layer. With the unimplemented generic mandate withdrawn, the measured constructor convergence and
+variants already ship. the merge operator shipped in stele under [0052](0052-the-merge-operator.md) at the
+value layer. with the unimplemented generic mandate withdrawn, the measured constructor convergence and
 the exact-equality dispatch model cover the accepted calculus.
 
 ## unresolved
 
-M-13 supplies the surface syntax for nominal declarations, structural records, and declared sums. It
-deliberately supplies no generic declaration or type-variable syntax. Schema evolution and module
+M-13 supplies the surface syntax for nominal declarations, structural records, and declared sums. it
+deliberately supplies no generic declaration or type-variable syntax. schema evolution and module
 compatibility remain open from 0010 and belong to M-14.
 
 the merge operator's signature, priority system, and conflict-to-`Conflicted<T>` promotion rule need design alongside the first configuration library prototype. Nickel's merge with `default` / `force` / `optional` priorities is the strongest precedent; whether pith's merge carries the same priorities or a different set is a library design question.

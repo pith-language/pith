@@ -41,7 +41,7 @@ there are two stores with different shapes. the content store (`pith-store`) is 
 
 provenance is a first-class contract. decision 0014 commits to reproducibility verification (building twice and comparing), which presupposes that the first build's provenance is still available. decision 0013 commits to managed-object continuity across observations, mutations, and platform re-creation, which presupposes that an observed managed object's history is retained. aggressive GC that deletes provenance breaks both contracts.
 
-the tension is direct. "preserve information" (principles) says keep things; "optimize for projects that live" (principles) says history grows without bound on a long-lived project. the honest position is that retention is bounded by a visible, inspectable policy, with no hope that nothing ever needs deleting.
+the tension is direct. "preserve information" (principles) says keep things; "optimize for projects that live" (principles) says history grows without bound on a long-lived project. the workable position is that retention is bounded by a visible, inspectable policy.
 
 ## the two stores and what is in each
 
@@ -53,7 +53,7 @@ the engine-state store holds, per the schema in `pith-state-sqlite`, attempts (e
 
 the reusable index is the cache. everything else is, or participates in, provenance. 0024 already encodes this split for the failed/cancelled case ("never cache hits but remain provenance"). the GC question generalizes it: every attempt is provenance; only some attempts are additionally cache hits.
 
-## the roots question (the load-bearing decision)
+## the roots question
 
 the entire policy turns on what counts as a root. four candidate root sets each preserve different things.
 
@@ -119,7 +119,7 @@ the provenance tier is the dependency edges, capability records, diagnostic trai
 
 this generalizes 0024's existing "failed and cancelled attempts remain provenance but are never cache hits" to every attempt. the schema in `pith-state-sqlite` already separates these into different tables and columns; a future GC treats them as two evictability classes.
 
-the reproducibility angle (0014) makes this split load-bearing. Debian's `.buildinfo` is signed metadata recording exact dependency versions, architecture, and build flags, retained essentially forever in the archive, used by `reproduce.debian.net` for bit-for-bit rebuilds. pith's per-attempt provenance is its `.buildinfo`. a GC that aggressively deleted provenance would remove the ability to verify, which is the whole point of retaining it.
+the reproducibility angle (0014) is why this split matters. Debian's `.buildinfo` is signed metadata recording exact dependency versions, architecture, and build flags, retained essentially forever in the archive, used by `reproduce.debian.net` for bit-for-bit rebuilds. pith's per-attempt provenance is its `.buildinfo`. a GC that aggressively deleted provenance would remove the ability to verify, which is the whole point of retaining it.
 
 ## couplings to flag, not solve
 
@@ -141,7 +141,7 @@ use `wal_autocheckpoint` plus an explicit `wal_checkpoint` at scheduling boundar
 
 run `incremental_vacuum` after GC passes, with no use of the full `VACUUM`. the full VACUUM cost (a complete rewrite, temporary disk doubling) is unjustifiable for a long-lived engine that GCs incrementally.
 
-do not partition by time. partitioning answers log-shaped stores; pith's engine state is graph-shaped, with attempts referencing each other across time via dependency edges. time-partitioning would turn reverse-edge queries (the `dependencies_by_target` index that 0025 made load-bearing) into cross-partition joins. keep one database; bound growth with R3.
+do not partition by time. partitioning answers log-shaped stores; pith's engine state is graph-shaped, with attempts referencing each other across time via dependency edges. time-partitioning would turn reverse-edge queries (the `dependencies_by_target` index 0025's relational schema provides) into cross-partition joins. keep one database; bound growth with R3.
 
 ## alternatives considered
 

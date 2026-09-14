@@ -38,7 +38,7 @@ the kernel has no built-in Unix path, user, permission, process, signal, mount, 
 
 the engine could directly model filesystem permissions, processes, users, and systemd units.
 
-this shortens the path to a working operating-system manager. it prevents non-Linux domains from using the core without inheriting irrelevant semantics.
+this shortens the path to a working operating-system manager. non-Linux domains would have to inherit irrelevant semantics to use the core.
 
 ### several platforms from the start
 

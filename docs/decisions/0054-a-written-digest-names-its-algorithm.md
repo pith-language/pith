@@ -30,11 +30,11 @@ relations:
 
 # a written digest names its algorithm
 
-> takes a mislabel no record ever chose. every written form since 0041's prototype has spelled its digest fields `sha256:`, a look borrowed from go.sum and flake.lock, while every digest in the kernel is blake3. `pith-ids` wraps blake3; nothing in the workspace computes or verifies a SHA-256. the correction raised a question worth its own record: should a written digest name its algorithm at all?
+> takes a mislabel no record ever chose. every written form since 0041's prototype has spelled its digest fields `sha256:`, a look borrowed from go.sum and flake.lock, while every digest in the kernel is blake3. `pith-ids` wraps blake3; nothing in the workspace computes or verifies a SHA-256. the correction raised a question this record answers: should a written digest name its algorithm at all?
 
 ## context
 
-the prefix arrived with e86e800, the written lock's first prototype, and propagated from the lock to the index line, the environment file, and the log's leaves. no decision record argued for it, and nothing connected it to the hasher. the label was maintained by hand in parallel with `pith-ids`, which is the shape in which drift lives. a reader who trusted it and ran `sha256sum` over an archive got a mismatch against a correct lock.
+the prefix arrived with e86e800, the written lock's first prototype, and propagated from the lock to the index line, the environment file, and the log's leaves. no decision record argued for it, and nothing connected it to the hasher. the label was maintained by hand in parallel with `pith-ids`, which is how drift starts. a reader who trusted it and ran `sha256sum` over an archive got a mismatch against a correct lock.
 
 the correction could go two ways. a neutral prefix (`digest:`) cannot misname an algorithm because it names none, and the single-party lock formats skip the tag: Cargo.lock carries its checksum as bare hex in a field named `cksum`, and flake.lock puts the algorithm in the field name. the two formats that tag the algorithm in the string, go's hash lines and Subresource Integrity, are multi-party formats, where producers and verifiers who do not control each other need the name to coordinate.
 
@@ -44,9 +44,9 @@ every digest field in the written forms names the algorithm that hashed it: `bla
 
 the ground is the reader. locks are read in diffs and merge conflicts, without the format's documentation open, and the one question a digest raises (what function produced this) the line can answer at the cost of seven characters. go's reference states the same choice for its hash column: "The hash column consists of an algorithm name (like `h1`) and a base64-encoded cryptographic hash, separated by a colon (`:`). Currently, SHA-256 (`h1`) is the only supported hash algorithm. If a vulnerability in SHA-256 is discovered in the future, support will be added for another algorithm (named `h2` and so on)." SRI's grammar puts the algorithm in the string at web scale: `hash-expression = hash-algorithm "-" base64-value`. go and SRI name the algorithm so that parties who do not control each other can coordinate; pith names it for the reader. the mechanism is the same, and so is the future it allows: a second digest kind sharing these formats arrives under its own name.
 
-the drift that produced the mislabel is closed by construction. the name lives once, `pith_ids::DIGEST_ALGORITHM`, beside `DIGEST_LEN`, whose doc already says "every blake3-derived digest in the kernel", and a test binds the written prefix to it. the old mislabel required two places to disagree; the binder turns that disagreement into a failing test.
+the binder closes the drift that produced the mislabel. the name lives once, `pith_ids::DIGEST_ALGORITHM`, beside `DIGEST_LEN`, whose doc already says "every blake3-derived digest in the kernel", and a test binds the written prefix to it. the old mislabel required two places to disagree; the binder turns that disagreement into a failing test.
 
-parse accepts only this spelling. a line naming another algorithm is refused; the message names the expected spelling and the span selects the field. under 0048 the pre-release answer to that refusal is to re-render, and no format version moves. the log's earlier leaves fail the leaf parse the same way, which is the honest behavior for a tree that hashed one way and spelled another.
+parse accepts only this spelling. a line naming another algorithm is refused; the message names the expected spelling and the span selects the field. under 0048 the pre-release answer to that refusal is to re-render, and no format version moves. the log's earlier leaves fail the leaf parse the same way, which is the correct behavior for a tree that hashed one way and spelled another.
 
 ## alternatives considered
 

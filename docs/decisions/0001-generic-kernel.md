@@ -55,7 +55,7 @@ this is flexible in syntax and weak in composition. separate libraries would rec
 
 ## consequences
 
-the kernel boundary has to be justified through shared invariants. it cannot become a hiding place for useful first-party behavior.
+the kernel boundary is justified by shared invariants, and first-party behavior must not hide behind it.
 
 domain libraries need a strong enough public API to build complete tools. this is a harder extension design than a conventional plugin registry.
 

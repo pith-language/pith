@@ -24,24 +24,24 @@ relations:
 
 # selection is a lookup on the interface, not a scan of the arena
 
-> closes the item 0050 left in its unresolved section — "the predicate is now cheap and rule selection is not" — and takes it on the benchmark 0050 built for exactly this. 0015 stands and is unchanged; what this record shows is that 0015's refusal to rank is what makes an exact index possible, which is an argument for 0015 that 0015 did not make.
+> closes the item 0050 left in its unresolved section ("the predicate is now cheap and rule selection is not") and takes it on the benchmark 0050 built for exactly this. 0015 stands and is unchanged; what this record shows is that 0015's refusal to rank is what makes an exact index possible, which is an argument for 0015 that 0015 did not make.
 
 > amendment, [0065](0065-entry-evaluation-and-the-cli-query-surface.md): the CLI constructs the index in
 > two engines. `graph select` binds the transitive program into an in-memory engine with read-only state
 > authority and no publication path; evaluation and planning bind the same program into a writable engine
 > over the content and SQLite adapters. `Program::bind` is the one registration path and `RuleTable` is the
-> one selection mechanism, so the two answers converge by construction. The query-only engine is not a
-> second selection model and the writable engine does not grant write authority to selection.
+> one selection mechanism, so the two answers converge. the query-only engine is not a second selection
+> model and the writable engine does not grant write authority to selection.
 
 ## context
 
-0050 removed the per-request cost that grew with a build's depth and named what was left. `select_rule` walked the whole rule arena on every request, compared each rule's interface with the request's structurally, cloned the interface and the label of every match into a `Vec`, sorted it, and collected — including in the ordinary case where exactly one rule matched and there was nothing to sort.
+0050 removed the per-request cost that grew with a build's depth and named what was left. `select_rule` walked the whole rule arena on every request, compared each rule's interface with the request's structurally, cloned the interface and the label of every match into a `Vec`, sorted it, and collected, including in the ordinary case where exactly one rule matched and there was nothing to sort.
 
 that cost grows with the domain model rather than with the graph. under 0015 the only way to make two rules distinguishable is to give them different interfaces, and the only way to distinguish two rules over the same shape is to mint a nominal type; 0050 recorded this as an ergonomic fact after the benchmark's two-rule shapes had to give a root an input it never reads. so a domain's rule count is a function of how many distinct things it can be asked for, and every request pays a comparison against all of them.
 
 0047 raised what each of those comparisons costs. a nominal type carries its declaration body instead of a coordinate, so comparing two interfaces that name declared types walks those bodies, and the arena walk multiplies that by the population.
 
-there is a measurement now, which is the reason this is a record and not a cleanup. the crowded-arena shape holds the requests fixed at two thousand and grows the registered population: 0.002 ms per request against no extra rules, 0.052 ms against sixteen thousand — twenty-six times, on the cheapest population the scan can be given, one whose members fail the comparison on the output constructor after a single equal input.
+there is a measurement now, which is why this is a record. the crowded-arena shape holds the requests fixed at two thousand and grows the registered population: 0.002 ms per request against no extra rules, 0.052 ms against sixteen thousand, twenty-six times, on the cheapest population the scan can be given, one whose members fail the comparison on the output constructor after a single equal input.
 
 ## proposed decision
 
@@ -51,7 +51,7 @@ the rules of one effect category and an index from interface to candidates becom
 
 0050's unresolved section proposed "the same computation digest the engine already derives," and that is the one key this cannot use. a computation digest covers the rule identity and the rule revision along with the interface and the inputs, and both are properties of the rule the lookup is trying to find. deriving it requires having already selected.
 
-a digest over the interface *alone* would work, and is still the wrong key. it would mint a digest domain under 0048 for a structure that never leaves the process, introduce a collision case that has to be either argued away or checked with the comparison it was meant to replace, and derive from the canonical encoding — which is a second notion of interface equality to keep in agreement with `Eq`. `Interface` already derives `Hash` beside the `Eq` that selection is defined by, and the hash is over the same fields at the same cost as encoding them.
+a digest over the interface *alone* would work, and is still the wrong key. it would mint a digest domain under 0048 for a structure that never leaves the process, introduce a collision case that has to be either argued away or checked with the comparison it was meant to replace, and derive from the canonical encoding, which is a second notion of interface equality to keep in agreement with `Eq`. `Interface` already derives `Hash` beside the `Eq` that selection is defined by, and the hash is over the same fields at the same cost as encoding them.
 
 ### the equivalence needs no argument in two directions
 
@@ -63,7 +63,7 @@ what the equivalence does require is that the index contain every registered rul
 
 ### candidates are ordered on the failure path
 
-0015 requires that the candidates a diagnostic names not depend on registration order, and the old implementation got that from sorting every selection. sorting belongs where the order is read: the ambiguous branch, which produces `E-1102` and ends the run. a bucket holding one rule returns it with no clone, no allocation, and no comparison — this is 0050's "the walk survives for the diagnostic" applied to the other predicate.
+0015 requires that the candidates a diagnostic names not depend on registration order, and the old implementation got that from sorting every selection. sorting belongs where the order is read: the ambiguous branch, which produces `E-1102` and ends the run. a bucket holding one rule returns it with no clone, no allocation, and no comparison, which is 0050's "the walk survives for the diagnostic" applied to the other predicate.
 
 the tie-break is unchanged. the sort is by label and stable over registration order, which is what the old stable sort by interface-then-label degraded to inside a set of rules that all share one interface.
 
@@ -75,19 +75,19 @@ nothing iterates the map: a lookup returns one bucket and the bucket is a sequen
 
 ### keep the scan and memoize its outcome per request shape
 
-the CLOS position, and what production implementations of it do: cache the effective method against the argument classes that selected it, so a repeated call shape skips the search. the dispatch research note reads it from the standard's own procedure — select the applicable methods, then sort them — which is a search that must run at least once per distinct shape.
+the CLOS position, and what production implementations of it do: cache the effective method against the argument classes that selected it, so a repeated call shape skips the search. the dispatch research note reads it from the standard's own procedure (select the applicable methods, then sort them), which is a search that must run at least once per distinct shape.
 
-rejected because there is nothing dynamic here to memoize. CLOS caches because the applicable set depends on argument classes that vary per call and on a class hierarchy that can change; pith's population is registered before evaluation starts — `register_rule` takes `&mut self`, and so does every entry point, so no rule is registered while a scheduler is live, which 0050 already relies on. a cache over an unchanging population is an index built lazily, with an invalidation story it does not need and a first-call cost it cannot avoid.
+rejected because there is nothing dynamic here to memoize. CLOS caches because the applicable set depends on argument classes that vary per call and on a class hierarchy that can change; pith's population is registered before evaluation starts (`register_rule` takes `&mut self`, and so does every entry point, so no rule is registered while a scheduler is live, which 0050 already relies on). a cache over an unchanging population is an index built lazily, with an invalidation story it does not need and a first-call cost it cannot avoid.
 
 ### an approximate index, then a scan of what survives
 
-GHC's rough map keys on the class name and the argument type constructor names and deliberately does not look further — "without poking inside the DFunId" — because resolving the full type would force interface files to load. SWI-Prolog hashes one argument, deepens to at most seven levels, and still linearly scans a small predicate. Julia's method table "splits up on the structure based on a left-to-right decision tree."
+GHC's rough map keys on the class name and the argument type constructor names and deliberately does not look further ("without poking inside the DFunId") because resolving the full type would force interface files to load. SWI-Prolog hashes one argument, deepens to at most seven levels, and still linearly scans a small predicate. Julia's method table "splits up on the structure based on a left-to-right decision tree."
 
 rejected because all three approximate for a reason pith does not have. each of those systems ranks candidates by specificity, so a narrowed set still has to be searched, and the index's only job is to make the search shorter. 0015 refuses to rank: a match is exact or it is not a match, so the bucket an exact key reaches is the entire outcome, including the ambiguity. taking a coarse key here would be the same code doing strictly less.
 
 ### sort the arena and binary search it
 
-O(log n) comparisons instead of n. each of those comparisons is a full structural comparison of two interfaces, which 0047 made unbounded in size, against one hash of one interface for the map. it also gives the arena an ordering it does not have — ids are allocation order, the brand is what makes them safe, and re-sorting on insert would either move ids or need a second index, which is the structure this record already has.
+O(log n) comparisons instead of n. each of those comparisons is a full structural comparison of two interfaces, which 0047 made unbounded in size, against one hash of one interface for the map. it also gives the arena an ordering it does not have: ids are allocation order, the brand is what makes them safe, and re-sorting on insert would either move ids or need a second index, which is the structure this record already has.
 
 ### an index in the engine, beside `pure_rule_revisions`
 
@@ -123,7 +123,7 @@ the four graph shapes are unchanged, which is what says the win is selection and
 
 ## unresolved
 
-the population is append-only and this record assumes it. nothing removes a rule, so the index has no deletion path and the table offers no way to ask for one. a registry that could unregister — a language server reloading a domain, or the represented bodies of 0038 arriving from a file that changed — has to say what happens to the bucket and to the ids in it, and that is a record, not a method.
+the population is append-only and this record assumes it. nothing removes a rule, so the index has no deletion path and the table offers no way to ask for one. a registry that could unregister (a language server reloading a domain, or the represented bodies of 0038 arriving from a file that changed) has to say what happens to the bucket and to the ids in it, and that is a record, not a method.
 
 selection is now cheap and key derivation is not. the request path still encodes the interface and every input into a manifest and hashes it once per request, which 0050's second unresolved paragraph predicted 0047 would make more expensive. the crowded-arena shape at zero extra rules is where that constant lives, and nothing has attributed it yet: 0.002 ms per request is now mostly key derivation, arena allocation, and publication, and which of the three dominates is unmeasured.
 

@@ -37,7 +37,7 @@ the question is where the reuse boundary sits. this record sets it.
 
 ## proposed decision
 
-Nix infrastructure may be reused only behind typed adapter boundaries that sit under the kernel's identity, effect, and provenance model. it is never the engine, never the identity scheme, and never the evaluator.
+Nix infrastructure may be reused only behind typed adapter boundaries that sit under the kernel's identity, effect, and provenance model. it is never the engine, the identity scheme, or the evaluator.
 
 three adapter roles are in scope:
 
@@ -47,7 +47,7 @@ three adapter roles are in scope:
 
 in every case the kernel retains semantic, computation, external, and managed-object identity, capability discipline, and provenance. the adapter carries content identity and whatever weaker guarantees the source provides, recorded honestly.
 
-the principle, in one line: Nix is one realization among possible others, never the definition of what a value, build, or identity means.
+the principle: Nix is one realization among possible others, never the definition of what a value, build, or identity means.
 
 ## what this commits the model to
 
@@ -63,7 +63,7 @@ substitution and trust evidence flow through provenance. a substituted artifact 
 
 the kernel could run on the Nix daemon, evaluator, and store path scheme.
 
-this collapses the five identity types onto one path scheme, makes the Nix runtime privileged inside the engine (which 0004 forbids for first-party code), and gives up the typed pure language 0010 chose. it is the option this decision rejects.
+this collapses the five identity types onto one path scheme, makes the Nix runtime privileged inside the engine (which 0004 forbids for first-party code), and gives up the typed pure language 0010 chose.
 
 ### no Nix reuse
 
@@ -75,13 +75,13 @@ this keeps the design pure and maximizes distance from Nix's current boundaries.
 
 a typed layer could sit on top of the Nix evaluator and present the new model as a facade.
 
-the purity the project wants is not a sandboxing problem. it is a typing and composition problem. a facade over a dynamically typed lazy evaluator inherits that evaluator's late errors and weak tooling, which is what the project exists to leave behind.
+the purity the project wants is a typing and composition problem, not a sandboxing problem. a facade over a dynamically typed lazy evaluator inherits that evaluator's late errors and weak tooling, which is what the project exists to leave behind.
 
 ## consequences
 
 the project gets day-one access to a mature package collection, a working store, and a widely available remote cache, which materially lowers the cost of adoption for people coming from Nix.
 
-the cost is the weaker guarantee carried by anything behind an `Opaque` boundary. that weakness is a feature of the on-ramp, not a defect, and 0014 requires it be surfaced rather than laundered into a full content-identity or reproducibility claim.
+the cost is the weaker guarantee carried by anything behind an `Opaque` boundary; 0014 requires it be surfaced rather than laundered into a full content-identity or reproducibility claim.
 
 the adapter set is extensible by third parties under the same authority checks as first-party code, per 0004.
 

@@ -39,7 +39,7 @@ the language compiles into the kernel's typed semantic representation. source sy
 
 ### lazy dynamically typed functional language
 
-this gives concise recursive composition and follows Nix's proven model.
+this gives concise recursive composition and follows Nix's model.
 
 errors and semantic information arrive late. tooling has to approximate evaluation behavior.
 

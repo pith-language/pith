@@ -42,7 +42,7 @@ provenance records relations between them. the type system prevents accidental s
 
 every meaningful object could be its hash.
 
-this is excellent for immutable storage. meaning changes whenever representation changes, and mutable external objects cannot be addressed naturally.
+this suits immutable storage. meaning changes whenever representation changes, and mutable external objects cannot be addressed naturally.
 
 ### source address as identity
 

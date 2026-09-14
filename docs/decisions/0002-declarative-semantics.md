@@ -27,8 +27,6 @@ Ansible playbooks expose ordered tasks. idempotence usually lives inside each mo
 
 Terraform configuration is declarative at the surface, but provider resource types define much of the meaning through create, read, update, and delete behavior. persistent state binds configuration addresses to remote objects.
 
-neither model is the intended center of this project.
-
 ## decision
 
 ordinary declarations evaluate to typed values, constraints, and requests. they do not prescribe an operation sequence.

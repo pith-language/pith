@@ -40,9 +40,9 @@ a type may declare nominal identity. a nominal type only matches values of the s
 
 nominal identity is for types where confusion is dangerous or where the type carries real identity. package identifiers, machine references, service handles, capability tokens, and managed objects from decision 0013 are the obvious cases. an ordinary record of configuration values stays structural, because nothing is lost when it matches by shape.
 
-a nominal type does not forbid intentional conversion. where a path from one type to another is meaningful, it is expressed as a rule or an explicit operation, not by the type system silently widening. the nominal declaration prevents accidental confusion. it does not prevent deliberate transformation.
+a nominal type does not forbid intentional conversion: where a path from one type to another is meaningful, it is expressed as a rule or an explicit operation, since the type system never widens silently. the declaration blocks accidental confusion while deliberate transformation stays possible.
 
-this leaves one type system. nominal types are a specialization within it, not a parallel model. there is one way types are defined and one way they compose, with an optional declaration that tightens matching for the types that need it.
+this leaves one type system. nominal types are a specialization within it, with an optional declaration that tightens matching for the types that need it.
 
 ## alternatives considered
 
@@ -62,7 +62,7 @@ safe and explicit. it requires shared type declarations across repositories and 
 
 two type systems, one for plain data and one for identity-bearing types.
 
-avoids forcing one model to serve both cases. it is two mechanisms for the same concern, which the principles reject. contributors would have to learn which system a given type lives in, and the boundary between them would be a recurring source of confusion.
+avoids forcing one model to serve both cases, but it is two mechanisms for one concern, which the principles reject. contributors would have to learn which system a given type lives in, and the boundary would be a recurring source of confusion.
 
 ## consequences
 
@@ -72,7 +72,7 @@ types that carry identity declare it. the declaration is a visible, searchable m
 
 the managed-object identity from decision 0013 is expressed as nominal types. the binding between a semantic object and its external identity is part of the type's declaration, not a convention the engine has to infer.
 
-library authors have to decide which of their types are nominal. most are not. the discipline is small, but it is a real choice each domain library makes, and the criteria need to be written down somewhere a library author can find.
+library authors have to decide which of their types are nominal; most are not. the criteria need to be written down somewhere a library author can find.
 
 ## unresolved
 

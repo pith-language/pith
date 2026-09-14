@@ -32,7 +32,7 @@ relations:
 
 decision 0003 proposes that the model distinguish pure computation, bounded actions, observations, and mutations, and leaves the exact effect calculus open. the effects-and-capabilities design doc says the final implementation may express these through one effect calculus but that "their different behavior must remain available to the scheduler, cache, policy engine, and user interface." the open questions list names the choice directly: are `Action`, `Observation`, and `Mutation` separate primitives or handlers of one effect calculus.
 
-the question is load-bearing for milestone M-1. a rule's request model cannot be defined until the engine knows what categories of work a rule may perform and how the graph records them. decision 0015 settles rule selection and is the stated gate on the semantic prototype; the effect algebra is the other term that prototype depends on and cannot define for itself.
+the question gates milestone M-1. a rule's request model cannot be defined until the engine knows what categories of work a rule may perform and how the graph records them. decision 0015 settles rule selection and is the stated gate on the semantic prototype; the effect algebra is the other term that prototype depends on and cannot define for itself.
 
 two further questions change the shape of the model and are settled here rather than left implicit.
 
@@ -52,11 +52,11 @@ the kernel IR distinguishes five effect categories. each is a distinct type. the
 - `Mutation<A>` changes external state. carries authority, target managed-object identity (decision 0013), retry behavior, known failure modes, and completion evidence. not cacheable as a result; its effect is recorded in provenance and in subsequent observations.
 - `Opaque<A>` is effectful work that has not been modeled into one of the four categories above. it is the adoption on-ramp and the escape hatch. an `Opaque` result carries a visibly weaker guarantee: the graph records that the rule performed effectful work but does not know its category, its declared inputs, or its authority. it is treated, for scheduling and caching, like a Nix derivation or a Bazel genrule: a fixed-output boundary whose interior the engine cannot inspect.
 
-`Opaque` is foundational, not a future amendment. it exists so the category system can be opt-in by progression rather than required up front.
+`Opaque` is part of the initial category set: it exists so categorization can be opt-in by progression rather than required up front.
 
 ### closure rule
 
-the category set is closed. a sixth category requires a kernel decision record. it does not amend this decision silently and does not arrive as a library extension. this mirrors how decision 0013 added a fifth identity type: by argument and record, not by field.
+the category set is closed. a sixth category requires a kernel decision record; it does not arrive silently or as a library extension. decision 0013 added a fifth identity type the same way, by argument and record.
 
 a future category that is a pure rename of an existing one is an amendment to this decision and leaves it standing. a future category that introduces new scheduling, caching, or authority semantics supersedes this decision, which stays in the repository.
 
@@ -72,13 +72,13 @@ nondeterminism is modeled as a dependency, not as an untracked property of the e
 
 at the kernel layer, the dependency is to a single `Nondeterminism` capability primitive. the kernel records that the result depends on something outside the declared deterministic inputs. it does not record the specific value of what was read.
 
-the granular taxonomy — `Time`, `Rng`, `ReaddirOrder`, `Locale`, `AddressSpaceLayout`, `Hostname`, `Username`, `CpuFeatures`, `ParallelismOrder`, and the rest of the reproducibility lineage's enumeration — is a library refinement of the kernel primitive, not a set of kernel types. a first-party determinism library (or a shared library the build library composes) specializes `Nondeterminism` into these granular sub-capabilities. the sandbox and executor report actual access at the granular level and record it in provenance, where library-level reproducibility analysis can use it.
+the granular taxonomy (`Time`, `Rng`, `ReaddirOrder`, `Locale`, `AddressSpaceLayout`, `Hostname`, `Username`, `CpuFeatures`, `ParallelismOrder`, and the rest of the reproducibility lineage's enumeration) is a library refinement of the kernel primitive, not a set of kernel types. a first-party determinism library (or a shared library the build library composes) specializes `Nondeterminism` into these granular sub-capabilities. the sandbox and executor report actual access at the granular level and record it in provenance, where library-level reproducibility analysis can use it.
 
 the dependency records the source, not the value. a build that reads the clock creates an edge to `Nondeterminism` (refined by the library to `Time`), not an edge to `1722739200`. whether the build is reproducible depends on whether the executor fixed the value, which is a contract fact recorded in provenance, consistent with decision 0014. the engine does not produce reproducibility by pinning nondeterministic values into the graph; it records that nondeterminism was a dependency and lets the executor's determinism discipline, verified by comparison per 0014, establish the rest.
 
 ### consumer policy layers on top of category
 
-the category is a structural input to the scheduler, cache, and policy engine. it is not a complete policy. each consumer may layer its own policy on top: the cache may treat an `Observation` as valid for a configured window while the scheduler treats it as stale immediately. the category tells a consumer what kind of thing it is scheduling or caching; the consumer decides what to do with that, within the contract the category imposes (an `Observation` is never cached across revisions regardless of consumer policy).
+the category is a structural input to the scheduler, cache, and policy engine, not a complete policy. each consumer may layer its own policy on top: the cache may treat an `Observation` as valid for a configured window while the scheduler treats it as stale immediately. consumers decide within the contract the category imposes (an `Observation` is never cached across revisions regardless of consumer policy).
 
 ## why type-level primitives, not one tagged value
 
@@ -86,19 +86,19 @@ decision 0005 separates four identity types rather than overloading one identifi
 
 the same reasoning applies here. the four operational categories have genuinely different caching, scheduling, authority, and staleness contracts. an `Observation` and a read-only `Action` may exercise similar capabilities but have different staleness and cache semantics. a `Mutation` is not cacheable as a result at all. if the category were a field on one `Effect` type, the distinction the scheduler depends on would be a value someone has to set correctly, with no structural enforcement. that is the same failure as a priority score: a silent local property that can drift, invisible in review.
 
-making the categories distinct types enforces the distinction structurally. the cost is that a sixth category requires an IR change rather than a field value, which the closure rule above accepts deliberately. the alternative — one primitive with a category field — is the option this decision exists to reject, for the same reason 0015 rejects ranking and 0005 rejects identity overloading.
+making the categories distinct types enforces the distinction structurally. the cost is that a sixth category requires an IR change rather than a field value, which the closure rule above accepts deliberately. the alternative, one primitive with a category field, is rejected for the same reason 0015 rejects ranking and 0005 rejects identity overloading.
 
-the friction case is real and accepted: an operation that genuinely spans two categories, such as a build action that also observes the host toolchain, is not allowed to be silently one-or-the-other. it is modeled as one category whose declared inputs include a value of another (an `Action` whose inputs include an `Observation`), which makes the composition explicit and visible in provenance. this is more verbose and more correct, the same tradeoff 0015 chose for ambiguity.
+the friction case is real and accepted: an operation that genuinely spans two categories, such as a build action that also observes the host toolchain, is modeled as one category whose declared inputs include a value of another (an `Action` whose inputs include an `Observation`), which makes the composition explicit and visible in provenance. this is more verbose and more correct, the same tradeoff 0015 chose for ambiguity.
 
 ## why an escape category rather than requiring full categorization
 
-Nix avoided this entire problem by collapsing all impure work into one opaque boundary, the derivation. the cost is that Nix cannot observe live state, track mutation, or carry capability granularity, which is why deployment and infrastructure stayed outside its model and the project this notebook designs for exists.
+Nix avoided this problem by collapsing all impure work into one opaque boundary, the derivation. the cost is that Nix cannot observe live state, track mutation, or carry capability granularity, which is why deployment and infrastructure stayed outside its model and motivated this kernel.
 
 requiring every rule to declare one of four honest categories on day one would re-impose, at a different layer, the purity bar Nix avoids. real projects adopt tools around a subset of their build or deployment (requirement U-2). a rule that wraps an opaque toolchain, an imported Makefile, or a hastily written cloud call cannot honestly declare its category until someone has modeled it. forcing the choice produces false declarations, which are worse than an honest `Opaque` marker.
 
 `Opaque` is the visibly distinct, marked construct the principles doc allows for cases that cannot yet be expressed in the normal machinery (principles:80). its weaker guarantee is visible in types, plans, queries, and user interfaces, consistent with requirement T-6. there is no hidden option that makes a categorized rule behave as `Opaque` or vice versa.
 
-the incentive to migrate off `Opaque` is structural rather than moral. `Opaque` results do not participate in capability propagation, fine-grained invalidation, revision pinning, reproducibility analysis, or authority queries, because the engine does not know what they depend on or what authority they exercised. as a project models its rules, each migration unlocks those properties. whether that incentive is strong enough in practice for real projects to mostly migrate off `Opaque` is an empirical question only a prototype answers, and is a stated reason this decision is proposed rather than accepted.
+the incentive to migrate off `Opaque` is structural: `Opaque` results do not participate in capability propagation, fine-grained invalidation, revision pinning, reproducibility analysis, or authority queries, because the engine does not know what they depend on or what authority they exercised. as a project models its rules, each migration unlocks those properties. whether that incentive is strong enough in practice for real projects to mostly migrate off `Opaque` is an empirical question only a prototype answers, and is a stated reason this decision is proposed rather than accepted.
 
 ## interaction with decision 0014
 
@@ -116,31 +116,31 @@ whether the granular library taxonomy is rich enough that static type analysis m
 
 one `Effect<A>` type carrying a category tag. the scheduler reads the field.
 
-smallest surface and the easiest to extend. it puts the load-bearing distinction the scheduler depends on into a value that can be set incorrectly with no structural enforcement. this is the silent-local-property failure mode the design rejects elsewhere (0015 on ranking, 0005 on identity overloading). a category field repeats that failure at a different layer. rejected on the same principle.
+smallest surface and the easiest to extend. it puts the distinction the scheduler depends on into a value that can be set incorrectly with no structural enforcement. this is the silent-local-property failure mode the design rejects elsewhere (0015 on ranking, 0005 on identity overloading), repeated at a different layer. rejected on the same principle.
 
 ### derive category from capability
 
 the category is whatever capability the effect requires: an `Execution` capability implies `Action`, an `Observe` capability implies `Observation`, a `Mutate` capability implies `Mutation`.
 
-true one-mechanism: capabilities already exist for authority, so deriving category from them eliminates a redundant axis. it conflates two questions the deployment decisions carefully separated: what authority does this exercise (capability) and what is the caching and scheduling contract of this work (category). they come apart in real cases. a build `Action` that runs hermetically exercises an `Execution` capability but its category is independent of the fact that it executes. an `Observation` and a read-only `Action` may both require an `Observe` capability but have different staleness and cache contracts. the deployment research (research/deployment-and-state) records that the whole problem with prior systems is confusing authority and ownership with the nature of the operation: Terraform's failures come from treating ownership of a resource as if it determined that a plan still holds. decision 0012 exists to separate the observation's revision from the mutation's authority. deriving category from capability re-entangles exactly what 0012 and 0013 were written to separate. rejected.
+true one-mechanism: capabilities already exist for authority, so deriving category from them eliminates a redundant axis. it conflates two questions the deployment decisions carefully separated: what authority does this exercise (capability) and what is the caching and scheduling contract of this work (category). a build `Action` that runs hermetically exercises an `Execution` capability but its category is independent of the fact that it executes. an `Observation` and a read-only `Action` may both require an `Observe` capability but have different staleness and cache contracts. the deployment research (research/deployment-and-state) records that the problem with prior systems is confusing authority and ownership with the nature of the operation: Terraform's failures come from treating ownership of a resource as if it determined that a plan still holds. decision 0012 separates the observation's revision from the mutation's authority, and deriving category from capability re-entangles what 0012 and 0013 were written to separate. rejected.
 
 ### effect handlers, categories as registered handlers
 
 the type system knows pure versus effectful; `Action`, `Observation`, and `Mutation` are registered handler classes.
 
-most extensible: a new category is a new handler, no IR change. it inverts the requirement the effects design doc states. the four categories "must remain available to the scheduler, cache, policy engine, and user interface." handler dispatch hides the category from the scheduler: the scheduler sees an effect and the policy lives inside the handler, not in the value the graph carries. for a graph whose job is to schedule, cache, and explain work differently by category, putting the category behind a handler indirection defeats the purpose. handlers are the right tool when the caller decides how to interpret an effect; here the engine needs to know the category to schedule it. rejected for the dispatch model; the underlying one-calculus idea is absorbed into the type-level primitives, which can share a common internal representation while exposing distinct types.
+most extensible: a new category is a new handler, no IR change. it inverts the requirement the effects design doc states. the four categories "must remain available to the scheduler, cache, policy engine, and user interface." handler dispatch hides the category from the scheduler: the scheduler sees an effect and the policy lives inside the handler, not in the value the graph carries. for a graph whose job is to schedule, cache, and explain work differently by category, hiding the category behind a handler indirection defeats that. handlers are the right tool when the caller decides how to interpret an effect; here the engine needs to know the category to schedule it. rejected for the dispatch model; the underlying one-calculus idea is absorbed into the type-level primitives, which can share a common internal representation while exposing distinct types.
 
 ### require full categorization, no escape category
 
 the four honest categories only; every rule must declare one.
 
-strongest safety story and the highest adoption barrier. real adoption does not begin fully modeled, and forcing the choice produces false declarations, which are worse than an honest `Opaque` marker because they are invisible. this re-imposes Nix's purity bar at a different layer while still expecting the scope Nix cannot cover. rejected; `Opaque` is added as a foundational category instead.
+maximum safety and the highest adoption barrier. real adoption does not begin fully modeled, and forcing the choice produces false declarations, which are worse than an honest `Opaque` marker because they are invisible. this re-imposes Nix's purity bar at a different layer while still expecting the scope Nix cannot cover. rejected; `Opaque` is added as a foundational category instead.
 
 ### defer, prototype with one primitive and revisit
 
 ship the prototype with one `Effect` type and a category field, marked provisional, and let the prototype reveal whether the categories need to be type-level.
 
-violates the notebook's own discipline. decision 0015 is resolved before the prototype because prototyping on an undefined base cannot test the question. the effect algebra is the other term milestone M-1 depends on. deferring it while building the prototype on top of an undefined effect model means the prototype cannot test it honestly. rejected for the same reason 0015 was not deferred.
+decision 0015 is resolved before the prototype because prototyping on an undefined base cannot test the question. the effect algebra is the other term milestone M-1 depends on; deferring it while building the prototype on top of an undefined effect model means the prototype cannot test it. rejected for the same reason 0015 was not deferred.
 
 ## consequences
 
@@ -150,7 +150,7 @@ the kernel IR has five effect categories as distinct types. the scheduler, cache
 
 nondeterminism enters the graph as a dependency on a kernel `Nondeterminism` capability, refined granularly by a first-party library. reproducibility stays a verified property per decision 0014; this decision adds a static precondition (the type says which nondeterminism sources apply) without replacing verification.
 
-an operation that spans two categories is modeled as a composition (one category whose inputs include a value of another), not as a silent either-or. this is more verbose and more honest.
+an operation that spans two categories is modeled as a composition (one category whose inputs include a value of another) rather than a silent either-or. this is more verbose and more correct.
 
 the category set is closed. a sixth category requires a decision record and either amends or supersedes this one.
 
@@ -158,7 +158,7 @@ the category set is closed. a sixth category requires a decision record and eith
 
 ## unresolved
 
-the granular nondeterminism taxonomy — which sources the first-party library names, how it specializes the kernel primitive, and whether the taxonomy is stable enough that static type analysis meaningfully predicts reproducibility — needs library design alongside the first build library. the reproducibility lineage's enumeration is the starting set; whether it is complete enough is empirical.
+the granular nondeterminism taxonomy (which sources the first-party library names, how it specializes the kernel primitive, whether the taxonomy is stable enough that static type analysis meaningfully predicts reproducibility) needs library design alongside the first build library. the reproducibility lineage's enumeration is the starting set; whether it is complete enough is empirical.
 
 whether the `Opaque` category is strong enough as an adoption on-ramp that real projects mostly migrate off it, or whether it becomes a permanent crutch that leaves most rules unmodeled, is the central empirical question this decision raises. it is the main reason the decision is proposed rather than accepted.
 

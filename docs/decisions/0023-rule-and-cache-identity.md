@@ -95,7 +95,7 @@ this is simple and too easy to forget. an explicit implementation-local version 
 
 rules carry more identity data at registration. display labels can change without invalidating computations, while revision changes invalidate them deterministically.
 
-rust-hosted revisions begin conservatively. cache precision improves later when rule bodies are represented as canonical pith semantic ir, without changing the distinction between identity and revision.
+rust-hosted revisions begin conservatively. cache precision improves later when rule bodies are represented as canonical pith semantic ir, with identity and revision staying separate.
 
 persistent graph records store both values. arena-local `RuleId` remains an in-process handle and is never a durable identity.
 

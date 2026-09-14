@@ -68,13 +68,13 @@ rejected by 0032, as above: two invocations with a shell choosing the order is t
 
 treat a "small" nonzero status as a result and a signal death as a failure, or make some similar rule out of what the executor can observe.
 
-rejected because the executor cannot know. the same status from `gcc` and from a test means opposite things, and any rule the executor invents is a guess dressed as a policy. 0014's distinction between a claim and a measured fact cuts here: the executor can measure how the program ended and cannot measure what the program meant.
+rejected because the executor cannot know. the same status from `gcc` and from a test means opposite things, and any rule the executor invents is a guess. 0014 separates claims from measured facts, and this is that line: the executor can measure how the program ended and cannot measure what the program meant.
 
 ### an expected-status set in the contract
 
 let the contract declare which statuses count as success, as `expected: [0, 1]`.
 
-rejected as more mechanism than the question needs, and worse at the thing it looks better at. a test's status set is open — a suite may exit with the number of failures — so the declaration would have to be a range or a predicate, and 0026 has no predicate types by decision. the two-variant form says the one thing that is actually being decided: whether the status is an outcome or an error.
+rejected as more mechanism than the question needs, and it does not cover the case it looks built for: a test's status set is open (a suite may exit with the number of failures), so the declaration would have to be a range or a predicate, and 0026 has no predicate types by decision. the two-variant form says the one thing being decided: whether the status is an outcome or an error.
 
 ### make the verdict a declared output instead
 
@@ -88,16 +88,16 @@ every `ActionSpecDigest` changes again, for the same reason as 0036: the manifes
 
 the storage encoding carries the field in version 2, alongside 0036's tagged program. 0024's independent versioning of the stored form is what makes that a version bump rather than a migration.
 
-`Reported` puts a fact in front of a rule that the executor used to act on. a rule that reads a signal death as a passing test would call a crash a success, and one that ignores the status would treat every test as passing. the two-variant contract makes the reading explicit but does not make it correct, which is the usual cost of moving a decision to where the information is.
+`Reported` puts a fact in front of a rule that the executor used to act on. a rule that reads a signal death as a passing test would call a crash a success, and one that ignores the status would treat every test as passing. the two-variant contract makes the reading explicit but does not make it correct.
 
-the reusable index now holds failing outcomes. a test whose verdict was "failed" is a completed attempt under 0031's key, and an unchanged failing test is served rather than re-run. that is the point, and it means a user who expects a re-run to re-execute a failing test will need `Engine::set_action_caching(false)` or a changed input, the same as for any other action.
+the reusable index now holds failing outcomes. a test whose verdict was "failed" is a completed attempt under 0031's key, and an unchanged failing test is served rather than re-run. a user who expects a re-run to re-execute a failing test will need `Engine::set_action_caching(false)` or a changed input, the same as for any other action.
 
 ## unresolved
 
-a seccomp or landlock kill reaches a `Reported` action as `Signal(SIGSYS)` or as a failure to read a denied path, rather than as the executor error it is under `SuccessRequired`. the confinement layers stay in force and the kill still happens, but whether it is *reported* as a confinement violation now depends on the rule. `crates/pith-executor-local/tests/executor_contract.rs` asserts this shape deliberately, using the `SIGSYS` the filter delivers for `kill(2)`, because the sandbox is the only way a shell script in this fixture can be signalled at all. an executor that distinguished "the sandbox stopped this" from "the program died" would let a rule keep the distinction; seccomp's `si_code` carries it and `wait4` does not, so getting it would mean the executor watching for the signal rather than reading the exit status.
+a seccomp or landlock kill reaches a `Reported` action as `Signal(SIGSYS)` or as a failure to read a denied path, rather than as the executor error it is under `SuccessRequired`. the confinement layers stay in force and the kill still happens, but whether it is *reported* as a confinement violation now depends on the rule. `crates/pith-executor-local/tests/executor_contract.rs` asserts this shape, using the `SIGSYS` the filter delivers for `kill(2)`, because the sandbox is the only way a shell script in this fixture can be signalled at all. an executor that distinguished "the sandbox stopped this" from "the program died" would let a rule keep the distinction; seccomp's `si_code` carries it and `wait4` does not, so getting it would mean the executor watching for the signal rather than reading the exit status.
 
 whether the raw exit status belongs in provenance alongside the derived value is open. the argument for is 0014: how an attempt ended is a measured fact about that attempt, and provenance is where measured facts go. the argument against is that the rule's typed result already records the finding, and adding the status to the durable report means a column in the sqlite schema, a field in the in-memory adapter, and a case in 0025's conformance suite for a fact nothing yet reads.
 
 `ExitStatusContract` is declared by the rule that plans the contract, so it is a property of the rule rather than of the request. a build that wanted to run the same program once as a test and once as a required step would need two rules. whether that ever comes up is unknown, and inventing a request-level override before it does would be guessing.
 
-timeouts interact with this and were out of scope here, as 0028 left them. a program killed for exceeding a timeout would have arrived at a `Reported` rule as a signal death indistinguishable from a crash, and the timeout design was where that needed answering. [0059](0059-a-caller-declared-run-bound.md) answers it: the executor kills the child at the run's deadline and refuses with the bound's code before capturing anything, so `complete` never runs and no rule reads a verdict from a kill. a signal death that does reach a rule remains what this record says it is — a crash the rule may legitimately read.
+timeouts interact with this and were out of scope here, as 0028 left them. a program killed for exceeding a timeout would have arrived at a `Reported` rule as a signal death indistinguishable from a crash, and the timeout design was where that needed answering. [0059](0059-a-caller-declared-run-bound.md) answers it: the executor kills the child at the run's deadline and refuses with the bound's code before capturing anything, so `complete` never runs and no rule reads a verdict from a kill. a signal death that does reach a rule remains what this record says it is: a crash the rule may legitimately read.

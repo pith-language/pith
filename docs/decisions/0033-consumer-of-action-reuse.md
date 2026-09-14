@@ -102,7 +102,7 @@ rejected as circular, for the reason 0031 rejected the same shape for the action
 
 drop the `ActionSpecDigest` from `ActionComputationKey`, leaving rule identity, revision, interface, and inputs. an action edge would then revalidate exactly like a pure edge, with no planning and no asymmetry.
 
-rejected. this reopens 0031's key, which committed to both halves deliberately, and it moves the whole burden onto rule revisions being honest at the moment the engine gains a way to verify them. the consumer would still have to plan to give policy a contract, so the planning is not saved.
+rejected. this reopens 0031's key, which committed to both halves, and it moves the whole burden onto rule revisions being honest at the moment the engine gains a way to verify them. the consumer would still have to plan to give policy a contract, so the planning is not saved.
 
 ### leave the consumer out of the index
 

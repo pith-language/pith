@@ -25,7 +25,7 @@ relations:
 
 ## context
 
-the kernel is a typed incremental computation engine with controlled effects, content-addressed storage, provenance, and concurrent evaluation. it has to be embeddable, fast enough for editor latency and large repositories, and honest about the safety claims it makes in provenance and capability tracking.
+the kernel is a typed incremental computation engine with controlled effects, content-addressed storage, provenance, and concurrent evaluation. it has to be embeddable, fast enough for editor latency and large repositories, and its provenance and capability claims have to be backed by the implementation.
 
 no implementation language was chosen when the design started. the open questions list names the choice as gating the first vertical slice, because no prototype can exist without it, and the language constrains the type-system and effect-syntax questions that follow.
 
@@ -37,11 +37,11 @@ the kernel is implemented in rust.
 
 rust's type system carries capability tags, effect restrictions, and provenance at compile time. pattern matching and enums fit structured diagnostics and query results. the tooling and stability are the strongest of the candidates, and the borrow checker enforces invariants the kernel claims in its public contracts.
 
-the dependency graph is modeled as an arena of nodes indexed by integer handles, not as a structure of references. edges are indices. this is the standard way compilers, ecs libraries, and graph tools represent cyclic or shared graphs in rust, and it avoids lifetime problems without weakening safety.
+the dependency graph is modeled as an arena of nodes indexed by integer handles, rather than a structure of references; edges are indices. this is how compilers, ecs libraries, and graph tools represent cyclic or shared graphs in rust, and it avoids lifetime problems without weakening safety.
 
-`unsafe` is reserved for genuine foreign-function boundaries where the host cannot express the operation: sandbox setup, syscall interception, and similar primitives. it is never used to work around graph structure, ownership, or the borrow checker. reaching for `unsafe` to make a cyclic graph convenient would defeat the reason rust was chosen and would undercut the safety story provenance is supposed to carry.
+`unsafe` is reserved for foreign-function boundaries where the host cannot express the operation: sandbox setup, syscall interception, and similar primitives. it is never used to work around graph structure, ownership, or the borrow checker; reaching for it there would defeat the reason rust was chosen.
 
-prolog is a candidate for the package and placement solver libraries, where backtracking search over constraints is the natural fit. lean is a candidate for proving properties of the design and the core invariants. both stay outside the kernel. they do not become load-bearing in the engine, or the project inherits a multi-runtime coordination problem.
+prolog is a candidate for the package and placement solver libraries, where backtracking search over constraints fits. lean is a candidate for proving properties of the design and the core invariants. both stay outside the kernel; embedding either would create a multi-runtime coordination problem.
 
 ## alternatives considered
 
@@ -49,39 +49,39 @@ prolog is a candidate for the package and placement solver libraries, where back
 
 go is simpler to write and has fast compilation and good concurrency primitives.
 
-its type system is too weak for the compile-time gates the kernel wants. capability tagging, effect restriction, and provenance would become runtime checks, which is the category of error the design is trying to move earlier. generics and sum types arrived late and remain limited.
+its type system is too weak for the compile-time gates the kernel wants: capability tagging, effect restriction, and provenance would become runtime checks, the category of error the design moves earlier. generics and sum types arrived late and remain limited.
 
 ### c
 
 c gives full control and minimal runtime overhead.
 
-it gives up the safety guarantees that are the point of choosing a systems language here. the kernel's claims about authority, provenance, and capability control are not credible if the implementation is full of the classes of bug c permits. the manual discipline required recapitulates what rust's checker provides.
+it gives up the safety guarantees the kernel's claims about authority, provenance, and capability control rest on. an implementation exposed to the bug classes c permits cannot back those claims, and the manual discipline required recapitulates what rust's checker provides.
 
 ### zig
 
 zig offers control and some safety features with a simpler model than rust.
 
-its type system and ecosystem are less mature, and the compile-time facilities, while real, are weaker for the kind of static gating this kernel depends on. the same graph-modeling considerations apply, without the same tooling to lean on.
+its type system and ecosystem are less mature, and its compile-time facilities are weaker for the static gating this kernel depends on. the same graph-modeling considerations apply, without the same tooling to lean on.
 
 ### rust with unsafe as an escape hatch for graph structure
 
 the kernel could use rust but reach for `unsafe` where cyclic or shared data is inconvenient.
 
-this is the option this decision rejects explicitly. `unsafe` as a per-case convenience is the same failure mode as priority scores in rule selection: a silent local escape that rots over time, invisible in review, and corrosive to the guarantees the rest of the system advertises. arena-and-index modeling makes it unnecessary, and reserving `unsafe` for genuine ffi keeps the boundary honest and visible.
+`unsafe` as a per-case convenience is the same failure mode as priority scores in rule selection: a silent local escape, invisible in review, that rots and erodes the guarantees the rest of the system advertises. arena-and-index modeling makes it unnecessary, and `unsafe` stays reserved for genuine ffi.
 
 ### a multi-language kernel with prolog or lean inside
 
 the engine could embed a prolog or lean core for the parts they fit well.
 
-this splits the kernel across runtimes, duplicates the value and identity model across languages, and makes the capability and provenance story harder to hold together. prolog and lean are stronger as library or verification tools that operate on the kernel's typed values than as substrates for the kernel itself.
+this splits the kernel across runtimes, duplicates the value and identity model across languages, and makes capability and provenance harder to keep consistent. prolog and lean work better as library or verification tools operating on the kernel's typed values than as the kernel's substrate.
 
 ## consequences
 
 the kernel has one implementation language and one runtime. capability tags, provenance, and effect restrictions can be compile-time facts where the type system allows.
 
-graph work uses arenas and indices. this is a different mental model from reference-heavy graph code, and contributors need to learn it. it is well-trodden ground, but it is a real cost compared to a language where cyclic references are trivial.
+graph work uses arenas and indices. contributors coming from reference-heavy graph code have to learn the model; it is well-trodden ground, but a real cost compared to a language where cyclic references are trivial.
 
-`unsafe` appears only at named ffi boundaries, each one justified. a reviewer can ask of any `unsafe` block what foreign operation it enables, and there is an answer. `unsafe` to make graph code convenient has no such answer and does not get added.
+`unsafe` appears only at named ffi boundaries, each justified by the foreign operation it enables. `unsafe` to make graph code convenient does not get added.
 
 the solver and verification work that prolog and lean suit are library and tooling concerns. they consume the kernel's typed values and produce results through the same extension surfaces as any other library. they do not get private access to the engine.
 
