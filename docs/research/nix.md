@@ -22,7 +22,7 @@ relations:
 
 this project starts from Nix because Nix showed that package construction, dependency identity, environments, and operating-system configuration can share one functional model.
 
-the goal is not to reproduce the current Nix interface with cleaner syntax. some of Nix's current direction is shaped by compatibility with its language, store, daemon, package collection, module system, and installed user base. a ground-up design gets to reconsider those boundaries.
+the goal is not to reproduce the current Nix interface with cleaner syntax. some of Nix's current direction is shaped by compatibility with its language, store, daemon, package collection, module system, and installed user base. a ground-up design can reconsider those boundaries.
 
 ## what should survive
 
@@ -43,13 +43,13 @@ recurring problems across Nix, NixOS, and nixpkgs:
 
 - a dynamically typed lazy language delays many mistakes and produces errors far from their source
 - package functions, derivations, overlays, modules, options, flakes, and command-line installables expose several overlapping composition models
-- the module system has powerful merging behavior, but priorities, defaults, forced values, and free-form values can hide ownership and conflict
+- the module system's merging is extensive, and priorities, defaults, forced values, and free-form values can hide ownership and conflict
 - deployment, secrets, and mutable application data sit outside the otherwise unified model
 - evaluation performance and editor support suffer because useful semantic information is discovered late
 - platform and cross-compilation concepts are difficult to represent consistently across packages
 - the package collection carries compatibility and policy decisions that are hard to separate from core semantics
 
-these points are hypotheses to verify against history and current implementation. they should not be treated as a completed diagnosis yet.
+these points are hypotheses to verify against history and current implementation.
 
 ## an important distinction
 

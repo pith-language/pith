@@ -21,7 +21,7 @@ relations:
 
 # build-system lineage
 
-the useful history here is not a straight `Bazel -> Buck2` chain.
+the history here is not a straight `Bazel -> Buck2` chain.
 
 Blaze and Buck were separate responses to large monorepositories where Make-like task orchestration stopped scaling. Bazel came from Blaze. Buck2 replaced Buck and explicitly borrowed from Bazel, Pants, Shake, Tup, Adapton, and build-system research.
 
@@ -49,7 +49,7 @@ Buck and Blaze were created inside Meta and Google under similar monorepo pressu
 
 Skyframe models evaluation as immutable keys, immutable values, and functions that request dependencies through the engine. this provides dependency tracking and parallel evaluation as long as every input flows through the graph.
 
-its change pruning is important. when a source change recomputes an object file to the same value, downstream work can remain cached.
+change pruning: when a source change recomputes an object file to the same value, downstream work can remain cached.
 
 Skyframe deliberately uses all-or-nothing recomputation for a node. its documentation discusses fine-grained mutation of previous values and rejects it as difficult to verify against a clean build for limited expected benefit. clean-build equivalence was the stronger invariant.
 
@@ -69,7 +69,7 @@ Buck2 replaced separate loading, analysis, and execution graphs with DICE, one i
 
 dynamic dependencies are supported through controlled mechanisms. Buck2 keeps the graph queryable and hermetic by refusing arbitrary untracked discovery.
 
-its virtual filesystem and deferred materialization reduce filesystem work. this is a useful reminder that build performance is not only compiler CPU time.
+its virtual filesystem and deferred materialization reduce filesystem work; build performance is not only compiler CPU time.
 
 ## DICE and Adapton
 
@@ -87,13 +87,13 @@ Pants v2 also replaced an earlier engine with Rust while keeping extension logic
 
 Pants chose more dependency inference than Bazel. its stated reason was the cost of manually maintained build metadata. inference uses source analysis, and hermetic execution prevents a missed dependency from silently succeeding through ambient access.
 
-this is a useful alternative to both fully manual declarations and unrestricted tracing. derived dependencies can keep provenance and fail closed.
+derived dependencies sit between fully manual declarations and unrestricted tracing: they can keep provenance and fail closed.
 
 ## the research model
 
 *Build Systems à la Carte* separates the scheduling algorithm from the rebuilding strategy. systems that look like one indivisible architecture can be described as combinations of choices: static or dynamic dependencies, dirty bits or dependency traces, restarting or suspending schedulers, local or cloud execution.
 
-that separation matters for this project. it lets us choose demand-driven rules without automatically inheriting every cache or scheduling decision from Buck2.
+that separation is what lets this project choose demand-driven rules without automatically inheriting every cache or scheduling decision from Buck2.
 
 ## decisions suggested by this lineage
 

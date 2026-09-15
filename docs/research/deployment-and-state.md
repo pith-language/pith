@@ -37,7 +37,7 @@ the infrastructure-provisioning answer, Terraform, was to declare resources and 
 
 the control-plane answer, Kubernetes, was to run continuous loops that converge observed state to a desired spec.
 
-each refused to give up something different, and the cost is the part worth recording.
+each refused to give up something different.
 
 ## Terraform: the plan, the state file, and the missing transaction
 
@@ -55,7 +55,7 @@ Terraform's invariant is the inspectable plan and the explicit ownership binding
 
 Kubernetes made the opposite call on nearly every axis.
 
-a controller is a non-terminating loop. it compares a desired spec against observed state and acts to reduce the difference. there is no plan artifact and no terminal state. the property Kubernetes refused to give up is level triggering: action is re-derived from current observed state on every pass, so a missed event, a restarted controller, or a briefly-unreachable API does not corrupt the outcome. the next pass recomputes. this is why the cluster can be built from many small controllers that fail and restart without becoming unrecoverable.
+a controller is a non-terminating loop. it compares a desired spec against observed state and acts to reduce the difference. there is no plan artifact and no terminal state. the property Kubernetes refused to give up is level triggering: action is re-derived from current observed state on every pass, so a missed event, a restarted controller, or a briefly-unreachable API does not corrupt the outcome. this is why the cluster can be built from many small controllers that fail and restart without becoming unrecoverable.
 
 the cost is symmetric with Terraform's gain. there is no durable plan. there is no point at which a controller can promise "here is exactly what will happen next and nothing more," because the world may move between the claim and the action. `kubectl apply --dry-run=server` is a hint, not a contract. the absence of an inspectable plan is the most-cited reason teams run Terraform or Pulumi alongside Kubernetes rather than driving everything through controllers.
 
@@ -63,7 +63,7 @@ Kubernetes also made a quiet choice about identity. controllers reconcile on lab
 
 ## Pulumi: stable identity, source-derived
 
-Pulumi's contribution is narrow and load-bearing for this project's identity question.
+Pulumi's contribution is narrow but central to this project's identity question.
 
 Terraform binds configuration addresses to remote objects through the state file, so the binding is only as stable as the state file. Pulumi introduced resource URNs: stable, globally-unique identifiers derived from a resource's logical position in the program (project, stack, parent, type, name), for example `urn:pulumi:prod::myapp::aws:ec2/instance:Instance::web-server`.
 
@@ -73,7 +73,7 @@ the invariant is trackability across renames and refactors. the cost is the same
 
 ## Crossplane: what happens when a design tries to inherit both parents
 
-Crossplane is the most relevant prior attempt at the synthesis requirement S-8 reaches for. it puts infrastructure resources inside Kubernetes as custom resources and runs provider controllers that reconcile them against external clouds. its own framing is control-plane versus CLI: Terraform is a one-shot process that only reconciles when invoked, Crossplane is a set of always-on control loops that reconcile continuously.
+Crossplane is the most relevant prior attempt at the synthesis requirement S-8 names. it puts infrastructure resources inside Kubernetes as custom resources and runs provider controllers that reconcile them against external clouds. its own framing is control-plane versus CLI: Terraform is a one-shot process that only reconciles when invoked, Crossplane is a set of always-on control loops that reconcile continuously.
 
 the appeal is Kubernetes' drift handling applied to infrastructure. an out-of-band change gets reverted on the next pass.
 
@@ -89,7 +89,7 @@ level triggering from Kubernetes as a robustness property of the reconciliation 
 
 the notion of stable logical identity from Pulumi, without collapsing it into one source-derived string.
 
-the synthesis none of the four reached is a plan that is a real value, pinned to the observation revisions it was built from, with execution that validates those pins at apply time and re-derives when they break. that abstraction is what lets one-shot and continuous share semantics. Crossplane showed the cost of choosing only one mode. Terraform showed the cost of treating observations as durable. the missing piece is the abstraction that contains both.
+the synthesis none of the four reached is a plan that is a real value, pinned to the observation revisions it was built from, with execution that validates those pins at apply time and re-derives when they break. that abstraction is what lets one-shot and continuous share semantics. Crossplane showed the cost of choosing only one mode. Terraform showed the cost of treating observations as durable.
 
 ## questions for the historical pass
 

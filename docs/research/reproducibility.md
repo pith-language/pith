@@ -21,7 +21,7 @@ relations:
 
 # the reproducibility lineage
 
-reproducibility is older than any of the build systems this project studies, and it has been operationalized most rigorously by a community that does not build build systems.
+reproducibility is older than any of the build systems this project studies, and the community that operationalized it most thoroughly does not build build systems.
 
 ## the pressure
 
@@ -37,7 +37,7 @@ verification is by cryptographic hash comparison of independently-built outputs.
 
 ## the mechanism
 
-the community's contribution was less the definition than the enumeration, over roughly a decade, of every way a build can fail to meet it.
+the community's contribution was the enumeration, over roughly a decade, of every way a build can fail the definition.
 
 builds embed nondeterminism through:
 
@@ -52,7 +52,7 @@ builds embed nondeterminism through:
 - CPU-feature detection
 - profile-guided optimization
 
-each is a way for two builds under "the same inputs" to produce different bytes. most look innocent in isolation. together they are the reason "two builds produced two different binaries" is the default state of software rather than an anomaly.
+each is a way for two builds under "the same inputs" to produce different bytes. together they are the reason "two builds produced two different binaries" is the default state of software rather than an anomaly.
 
 the fixes are mechanical where the nondeterminism is removable and conventional where it is not. SOURCE_DATE_EPOCH is the convention for timestamps: one environment variable carrying a unix timestamp, which build tools clamp to instead of reading the wall clock.
 
@@ -62,7 +62,7 @@ SOURCE_DATE_EPOCH=1722739200
 
 the value is the source's last-modification time. it is more informative than build time, since it reflects how old the software actually is, and it is stable across builds. the specification requires that tools embedding timestamps clamp them to a value no later than SOURCE_DATE_EPOCH, and that human-readable formatting be deferred to runtime.
 
-the deeper fixes are the community's stated principles: do not record the maker or the place of making, do work in a determined order rather than readdir order, keep the workspace clean of locale and timezone, do not embed randomness, treat parallelism and profile-guided optimization as amplifiers of any remaining nondeterminism. the list is the artifact.
+the deeper fixes are the community's stated principles: do not record the maker or the place of making, do work in a determined order rather than readdir order, keep the workspace clean of locale and timezone, do not embed randomness, treat parallelism and profile-guided optimization as amplifiers of any remaining nondeterminism.
 
 ## where the invariant lives
 
@@ -74,9 +74,9 @@ the engine is the verifier. the build instructions are the producer. confusing t
 
 ## what this project inherits
 
-the kernel's identity and storage model provides content-addressed identity by construction, which makes bit-for-bit comparison trivial once two builds exist. the kernel's clean-build-equivalence invariant, from the build-system lineage, ensures the same declared inputs produce the same computation. neither is reproducibility. both are prerequisites for verifying it cheaply.
+the kernel's identity and storage model provides content-addressed identity, which makes bit-for-bit comparison direct once two builds exist. the kernel's clean-build-equivalence invariant, from the build-system lineage, ensures the same declared inputs produce the same computation. neither is reproducibility. both are prerequisites for verifying it cheaply.
 
-what the kernel should not do is claim reproducibility as an engine property. the honest framing is that the engine verifies reproducibility by building twice and comparing content identities, records the result in provenance, and surfaces the absence of verification as a weaker guarantee. decision 0014 is about this.
+the kernel should not claim reproducibility as an engine property. it can verify reproducibility by building twice and comparing content identities, record the result in provenance, and surface the absence of verification as a weaker guarantee. decision 0014 is about this.
 
 the build library, separately, should adopt the Reproducible Builds determinism rules and SOURCE_DATE_EPOCH as defaults for the actions it defines. this is library policy, not kernel semantics. if reproducibility is a property of the build instructions, the first-party build library should ship instructions that have it.
 

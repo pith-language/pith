@@ -23,7 +23,7 @@ relations:
 
 # extension interfaces
 
-a system that ships its own domain libraries and also invites outside ones is answering two questions at once. can an extension reach what the built-ins reach? can an extension damage what it should not? call the first parity and the second isolation. the five systems below answer one or the other, and the choice of mechanism is what decides which.
+a system that ships its own domain libraries and also invites outside ones is answering two questions at once. can an extension reach what the built-ins reach? can an extension damage what it should not? call the first parity and the second isolation. the systems below answer one or the other, and the choice of mechanism is what decides which.
 
 pith's requirement U-10 asks for evidence and not an assurance: "tests prove that an external library can replace or extend it without hidden hooks." so the reading below also asks what each system offers a skeptic.
 
@@ -69,7 +69,7 @@ the code an extension supplies runs inside the server: "The PostgreSQL server ca
 
 the Nix language has a single function that reaches outside evaluation: "The most important built-in function is `derivation`, which is used to describe a single derivation: a specification for running an executable on precisely defined input files to repeatably produce output files at uniquely determined file system paths." stdenv, the build phases, and the language-specific builders are library code written above it, in the language any third-party expression uses. nixpkgs is larger and better known than other expressions and has no channel to the evaluator they lack.
 
-## where the five disagree
+## where the systems disagree
 
 they agree that outside code should be able to define a new kind of thing. they disagree about which of the two questions the mechanism answers.
 
@@ -77,13 +77,13 @@ Terraform and Kubernetes answer isolation. a provider is a separate process reac
 
 Buck2, PostgreSQL, and Nix answer parity, by routing the built-ins through the extension surface. rules are external to the buck2 binary, built-in types are catalog rows, and stdenv is an expression calling `derivation`. all three accept that an extension runs with the system's own authority; PostgreSQL says so in the manual.
 
-the second disagreement is about evidence, and it is where the field is thin. Buck2, PostgreSQL, and Nix can point at their own construction. Bazel could not until the migration shipped, and the four years are the useful part of the record: the surface was public and the documentation was unchanged while the rules were still java. Kubernetes points at a client-visible property. none of the five has a test that fails when an extension becomes second class, and Bazel's exemption tag is the kind of thing such a test would catch.
+the second disagreement is about evidence, and it is where the field is thin. Buck2, PostgreSQL, and Nix can point at their own construction. Bazel could not until the migration shipped, and the four years are the useful part of the record: the surface was public and the documentation was unchanged while the rules were still java. Kubernetes points at a client-visible property. none of them has a test that fails when an extension becomes second class, and Bazel's exemption tag is the kind of thing such a test would catch.
 
 ## questions for this project
 
 pith reaches parity the way Buck2 and PostgreSQL do. a domain is a rust crate that registers rules on an engine, and 0009's peer claim and U-10's no-privilege requirement are that same property stated as requirements. the argument the workspace has been making is Bazel's: the first-party domains use public interfaces, so an outside one could. Bazel's four years are the reason to want something stronger.
 
-what pith can build and none of the five has is the test. a domain crate that registers through the public surface, depends on no other domain, and appears nowhere in the kernel makes the claim something CI can fail. it proves less than Buck2's construction, since pith's kernel does hold rule-shaped things the domains do not and the first-party crates compile into the same workspace. it proves more than a sentence in a document, because a hook added for a first-party domain breaks it.
+what pith can build and none of them has is the test. a domain crate that registers through the public surface, depends on no other domain, and appears nowhere in the kernel makes the claim something CI can fail. it proves less than Buck2's construction, since pith's kernel does hold rule-shaped things the domains do not and the first-party crates compile into the same workspace. it proves more than a sentence in a document, because a hook added for a first-party domain breaks it.
 
 isolation stays where pith already put it: in the action contract and the executor's confinement, and nowhere in the domain boundary. Nix splits the same way, between an expression that may compute anything and a builder that runs under the daemon's rules.
 

@@ -24,7 +24,7 @@ relations:
 
 configuration languages keep rediscovering the same tension. a plain data format is easy to inspect but weak at abstraction. a general-purpose language composes well but brings effects, nontermination, unstable evaluation, and a larger security boundary.
 
-the question is not which existing syntax looks best. it is which semantic restrictions give enough abstraction without making evaluation unpredictable.
+the question is not which existing syntax looks best but which semantic restrictions give enough abstraction without making evaluation unpredictable.
 
 ## the current candidates
 
@@ -32,11 +32,11 @@ Dhall makes totality, purity, typed functions, imports, and normalization centra
 
 Nickel combines records, contracts, gradual typing, and merge-based configuration. contracts are useful at typed and untyped boundaries. its merge semantics are especially relevant because configuration is often assembled from partial definitions rather than ordinary function calls.
 
-CUE treats configuration as constraints that narrow values. unification avoids a simple last-writer-wins model and can represent defaults separately from hard requirements. it is a useful precedent for describing a set of valid realizations.
+CUE treats configuration as constraints that narrow values. unification avoids a simple last-writer-wins model and can represent defaults separately from hard requirements. it is a precedent for describing a set of valid realizations.
 
 Starlark restricts Python into deterministic configuration and extension code. Bazel and Buck2 use it because it is familiar, embeddable, and controlled. Buck2 added language-server, debugger, lint, and typechecking tools around it. Starlark's dynamic type model still leaves questions for a system that wants invalid compositions rejected early.
 
-the Nix language demonstrates how laziness and functions can describe large dependency graphs. NixOS modules add another composition system for defaults, overrides, priorities, and recursive configuration. the power is real, but having package functions and module merges as different semantic worlds complicates tooling and understanding.
+the Nix language demonstrates how laziness and functions can describe large dependency graphs. NixOS modules add another composition system for defaults, overrides, priorities, and recursive configuration. having package functions and module merges as different semantic worlds complicates tooling and understanding.
 
 ## current direction
 
