@@ -21,13 +21,13 @@ relations:
 # what the completed milestones measured
 
 these paragraphs were written inside [milestones](milestones.md), one per milestone, as that milestone
-closed. they are moved here unchanged, for the reason [the reordering](reordering.md) gives: four fifths of
-the milestone file had become retrospective evidence, and a sequence nobody can find is not a plan.
+closed. they are moved here unchanged, because four fifths of
+the milestone file had become retrospective evidence.
 
-nothing here is edited. the append-only clauses stay append-only, including the two M-2 corrections that
-the paragraph makes in place and the M-3 sentence kept "as the state M-2 measured rather than a claim about
-the tree". a milestone's forward-looking half — what it still owes — stays in
-[milestones](milestones.md), because that is a claim about work rather than about evidence.
+nothing here is edited. the append-only clauses stay append-only, including the two M-2 corrections the
+paragraph makes in place and the M-3 sentence kept "as the state M-2 measured rather than a claim about
+the tree". a milestone's forward-looking half (what it still owes) stays in
+[milestones](milestones.md), because that is a claim about work rather than evidence.
 
 M-14 is the first milestone to close a slice before closing itself, so its section below records one
 slice's evidence and says so. the milestone's own status stays in [milestones](milestones.md).

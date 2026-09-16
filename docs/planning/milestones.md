@@ -2,11 +2,11 @@
 schema: design-doc/v1
 id: planning-milestones
 title: milestones
-summary: the order the work runs in, what each milestone owes, and why the sequence puts the frontend ahead of the remaining domain libraries
+summary: what comes next, what is parked, what the completed milestones still owe, and how the order got here
 kind: planning
 status: draft
 created: 2026-03-23
-updated: 2026-09-06
+updated: 2026-09-29
 tags:
   - planning
   - milestones
@@ -15,301 +15,247 @@ relations:
     - foundation-scope
   depends_on:
     - planning-open-questions
-    - planning-reordering
     - planning-measured
   supersedes: []
 ---
 
 # milestones
 
-this file states an order and what each milestone owes. the evidence for the milestones that closed is in
-[what the completed milestones measured](measured.md), moved there unchanged. the argument for the current
-order is in [the reordering](reordering.md), and the short version is at the end of this section.
+the goal for now is to finish pith's design with one end-to-end case: a domain written outside this
+repository is loaded and runs its rules, including actions. after that, pith is marked experimental
+([0077](../decisions/0077-pre-release-pith-is-experimental.md)) and interfaces are added as the first
+outside domains need them ([0078](../decisions/0078-kernel-surface-grows-on-demand.md)).
 
-## labels are identities, not positions
+## the order
 
-a milestone label is a citation handle. five records and a research note cite `M-5b`, `M-6` and `M-7` with
-weight: 0051 names "the time and resource bounds M-6 already owes four callers", 0052 names "the deployment
-library M-6 opens", 0040 says a decision there "binds M-6 as much as M-4", and the system-composition note
-places assertions over a target "in M-5b, where the observation and mutation effects exist". renumbering
-would falsify record prose in order to express an ordering. in a repository whose records are meant to
-stay put, that is the wrong trade.
+M-16 is next. nothing else is scheduled. the rest of M-14, and M-15, M-5b, M-6 and M-7, are parked and
+have no order among themselves.
 
-so labels do not move and do not imply position. that is
-[0023](../decisions/0023-rule-and-cache-identity.md)'s distinction applied to the plan rather than to a
-rule — a stable identity, and a separate thing that moves. the order is the order of this file, and it is
-stated once, here:
+M-1 to M-5a and M-8 to M-13 are complete, and M-14 is complete as far as local workspaces, the acquisition
+boundary and the first routing checks. the evidence is in
+[what the completed milestones measured](measured.md).
 
-M-1, M-2, M-3, M-4, M-5a, M-8, M-9, M-10, M-11, M-12 and M-13 are complete, and the latency spike has
-run. then M-14, M-15, and then M-5b, M-6 and M-7.
+labels are identities and do not say where a milestone sits. the order is the one stated in this section.
 
-## why the order changed
+## M-16: an external domain runs
 
-the earlier sequence ran the domain libraries out to deployment before anything read them, on the premise
-M-1 opened this file with: "the first implementation should test the kernel through real domain libraries
-instead of polishing syntax around an unproven engine." M-4 made that falsifiable and M-5a answered it —
-the calculus converged, stele driving no constructor, no engine or core change and no encoding version.
+a module outside the workspace declares its types and rules in `.pi`, ships its host bodies as a
+WebAssembly component, is loaded by path, and runs.
 
-that premise has therefore been discharged rather than abandoned. what is left unmeasured is not whether
-the kernel holds a new domain but whether a person can reach it: `pith-cli` is 240 lines, depends on none
-of `xylem`, `phloem` or `stele`, and offers an evaluation stub and content materialization, so three
-first-party libraries are reachable only from the tests written in the round that built them, and
-`explain_invalidation` is implemented four times over and typeable nowhere. the questions that can still
-move the architecture are all in front of that boundary.
+the records:
 
-## the latency spike
+- [0071](../decisions/0071-host-bodies-bind-through-host-adapters.md): host adapters, the manifest's
+  `host` clause, request lists, and revisions derived from the artifact
+- [0072](../decisions/0072-action-plans-are-authorized-against-consumer-grants.md): grants written by the
+  consuming project, replacing `AllowAllActions`
+- [0073](../decisions/0073-the-component-interface-is-generated-from-declarations.md): the WIT world
+  generated from declarations, the type mapping, and checking of returned values
+- [0074](../decisions/0074-the-component-step-protocol-is-wasi-async.md): the step protocol on WASI 0.3
+  async
+- [0075](../decisions/0075-components-run-in-a-confined-worker.md): the confined worker and Wasmtime
+  configuration
+- [0076](../decisions/0076-component-execution-is-deterministic-and-bounded.md): determinism, bounds, and
+  faults that are never cached
 
-not a milestone and not a round. [the frontend architecture](frontend/architecture.md) rests on a bet it
-names as such — the design's central latency bet — that no in-process incremental layer is needed because
-re-elaborating an edited module is fast enough, with sorbet as the control case.
-[0021](../decisions/0021-arena-graph-engine.md) forecloses the fallback by an accepted record, so a failed
-bet changes the frontend's shape rather than its tuning.
+[the research note](../research/wasm-components.md) holds the evidence they rest on.
 
-it ran on 2026-08-21, before M-10, which gates everything after it: two hundred modules generated from
-stele's declaration shapes, a throwaway parser and elaborator, measured against the 50 ms keystroke
-bracket. the bet holds — the edited module's path is 105.6 µs at p50 and 117.3 µs at p99, about four
-hundred and twenty times inside the bracket, and the whole world elaborates cold in 21.9 ms. the number,
-its boundaries and one arithmetic correction it found in the architecture's sorbet paragraph are recorded
-in the frontend architecture; the code is discarded.
+*measured claim:* `example-domain` rewritten as `.pi` plus a component, outside the workspace, gives the
+same contract-test results as the rust crate and plans an `ActionSpec` with the same digest. its action is
+reused on a second run and explained after an edit, refused without a grant, and run confined with one.
 
-## M-9: observation identity and freshness
+three costs are measured, each against a target stated before measuring: instantiating a component per
+computation, one step across the worker boundary, and a batch of requests compared with the same requests
+one at a time.
 
-status: complete. the evidence is in [measured](measured.md), and
-[0060](../decisions/0060-observation-identity-and-freshness.md) is the record.
+M-16 uses only the module system that exists now, path dependencies and workspaces. it needs none of the
+parked M-14 work.
 
-the record M-5b opens with, detached from the activation library it was going to open.
+the likely order of work inside it:
 
-M-5b already separates the two, "because the shape of the problem is not implementation":
-`Observation::CACHEABLE_AS_RESULT` is false, so an observation has no computation key, so 0033's equality
-pruning has no analogue on an observation edge and every consumer of one would be permanently
-non-reusable. what an observation's identity and freshness are is the question.
+1. the host adapter boundary and the rust adapter, with `bind_module` binding through it
+2. grants and the refusal of ungranted plans, which also applies to represented bodies and in-tree crates
+3. WIT generation and the type mapping, tested against the corpus's declarations
+4. the worker process and its measured seccomp allowlist
+5. the component adapter, the step protocol and the witness
+6. the three measurements, the fuzzing harness, and the experimental notice from 0077
 
-it moves ahead of the frontend for a structural reason rather than a preference. M-11 fixes the IR
-constructor set, and [the frontend architecture](frontend/architecture.md) states what that set encodes —
-"the `PureStep` protocol — `Need`, `NeedAll`, `NeedBlob`, `NeedAction` — is the effect vocabulary of the
-core ir". M-5b enumerates the cost of an observation step: "new variants in `PureStep`, `Resumption`,
-`DependencyEdge`, `ComputationKind`, `DurableComputation` and `DurableProvenance`". a variant arriving in
-`PureStep` after the IR encoding is fixed moves the IR body-encoding version, every represented body's
-digest, and every `RuleRevision` derived from one.
+## parked
 
-nothing is released, so taking that amendment late would be cheap. the reason to take it early is not the
-migration cost — it is that a constructor set enumerated against a vocabulary known to be incomplete
-records a design nobody argued.
+the milestones below keep their labels and their text, and can be taken up again after M-16. once host
+bodies can be components, the domain milestones among them can be written as modules the same way an
+outside domain would be.
 
-the fork is picked: one thin file-mtime observation ships as the prototype witness, so the step, async
-adapter boundary, durable record and freshness admission are exercised rather than inferred.
+`xylem`, `phloem` and `stele` stay in the tree as kernel witnesses and keep their tests. they get no new
+features while their milestones are parked.
 
-## M-10: the declaration artifact
+### the rest of M-14: the module system
 
-status: complete. the evidence is in [measured](measured.md), and
-[0061](../decisions/0061-the-declaration-artifact.md) is the record.
+the parts still to do are the registry round trip, transitive resolution over a scoped universe, the Git,
+archive and live-path adapters, compatibility reports and the publication gate, the CLI commands that
+need a lock, and the registry security work. the designs stay in
+[module distribution](modules/distribution.md), [the module registry](modules/registry.md) and
+[registry integration](modules/registry-integration.md), and
+[0069](../decisions/0069-module-authority-is-consumer-configuration.md) and
+[0070](../decisions/0070-module-acquisition-resolution-and-replay.md) remain the records.
 
-round one of [the language frontend](frontend/language.md), designed in
-[the module surface](modules/surface.md). `Declaration::encode_canonical`, a table encoder, the ABI and
-revision digests, the `.pi` declaration grammar, the loader crate, the two-phase intra-module pass.
+`pith-query` still elaborates a manifest program directly, so no person-facing command reuses a frontend
+computation. routing it through the workspace projection onto the frontend graph tier is the first thing
+to do when this resumes.
 
-*measured claim:* the four crates' live tables and their `.pi` counterparts agree digest-for-digest, and
-xylem's nine rule revisions are bit-identical before and after.
+*measured claim:* publish `example-domain` to a temporary registry and get byte-identical elaborated IR
+compared with the local-path entry, plus the two configuration refusals.
 
-it gates every milestone after it and is blocked by no unbuilt constructor —
-[0047](../decisions/0047-the-declaration-table.md) removed type parameters, `Map`, `Option` and `Result`
-from 0026's required set, and 0055 landed the arbitrary-precision `Int` that
-[open questions](open-questions.md) still listed as outstanding. it also ships on its own: with
-declarations only and every body `= host`, `import xylem` typechecks and completion, hover and
-go-to-definition work with no rust moved.
+OCI is the likely transport for components and for modules that carry them, since the wasm ecosystem has
+moved to it (see the research note).
 
-it discharges phloem's lazy declaration table, whose own doc says `registered()` returns "the set the crate
-has reached, not the set it will eventually hold", so an out-of-process consumer gets different answers on
-different runs and one coordinate it names is not in the table at all.
+### M-15: the generic builder
 
-## M-11: the IR constructor set
-
-status: complete. the evidence is in [measured](measured.md), and
-[0062](../decisions/0062-the-ir-constructor-set.md) is the record.
-
-round two. [0038](../decisions/0038-represented-rule-bodies.md)'s named first design task — the constructor
-enumeration it explicitly declined to make — plus the canonical encoding, the digest domain, and the
-validator.
-
-*measured claim:* every corpus rule body that can be expressed is expressed, and the round names the ones
-that cannot.
-
-it follows M-9 so the step vocabulary is closed before the encoding fixes it.
-
-what it still owes is the record's unresolved half: the text-splitting constructor both waiting bodies
-need is designed by the record that lands it. the interpreter was not owed here and arrived anyway, as
-the round's follow-on engine commit — the step machine evaluates represented bodies through the existing
-frame protocol, `E-1218` carries declared failures, and `evaluate_with_content` gives `NeedBlob` the
-synchronous entry point the frontend architecture named, so `SortBy`'s stable-sort commitment is priced
-by test and the domain stays at v1.
-
-## M-12: the elaborator and the three graph rules
-
-status: complete. [0063](../decisions/0063-the-frontend-graph-tier.md) records the graph boundary; the
-body-edit cutoff evidence is in [measured](measured.md).
-
-round three, designed in [the frontend architecture](frontend/architecture.md). the syntax, HIR and
-elaborator crates; `interface-of`, `bodies-of` and `index-of`; the derived elaborator revision; the
-`NeedBlob` entry-point question.
-
-*measured claim:* the ABI cutoff — edit a body in A, assert `bodies-of(B)`'s key is byte-identical and the
-reusable lookup hits.
-
-that measurement decides whether the graph tier exists at all. it passes: a written represented-body edit
-moves `bodies-of(A)` while the imported interface surface, ABI, `interface-of(A)`, and `bodies-of(B)` stay
-reusable.
-
-## M-13: the surface notation and the CLI
-
-status: complete. [0064](../decisions/0064-text-breaking.md),
-[0065](../decisions/0065-entry-evaluation-and-the-cli-query-surface.md), and
-[0066](../decisions/0066-frontend-diagnostics-carry-source-identity.md) are the round's records; the
-evidence is in [measured](measured.md).
-
-round four and the CLI half of round six, folded, because a notation nobody can invoke is not testable by a
-person.
-
-*measured claim:* `example-domain` as one `.pi` file producing byte-identical interface encodings and an
-identical contract-test result, plus equal body digests under qualified and unqualified spelling.
-
-this is where `pith check` and the entry construct first become a person-facing evaluation path, and where
-`explain_invalidation`, drive-to-pause action planning and selection — three graph surfaces no other
-language server has, all previously built and unreachable — become commands. The read-only selection path
-and writable SQLite evaluation path share one program binding construction.
-
-## M-14: the module system
-
-The first implementation slice is [module workspaces](modules/workspaces.md): manifests,
-explicit path dependencies, and a runnable multi-module CLI fixture. That slice is complete, and its
-completion does not close M-14. [0067](../decisions/0067-local-module-workspaces.md) is the slice's
-record — declared subjects, `module.pi`, workspace membership, source discovery, module-local bindings,
-and the ABI's subject-based import basis, with its refusal table and acceptance fixture — and it is
-accepted against the evidence in [measured](measured.md).
-
-That evidence corrected one thing the slice thought it already had. Comparing two direct elaborations
-proves equal semantic outputs, not a reusable lookup, so the resolved workspace gained a projection onto
-the frontend graph tier and the cutoff is now measured through the loader a person reaches rather than
-through hand-built inputs. What the projection has not yet changed is the CLI: `pith-query` still
-elaborates a manifest program directly, so no person-facing command reuses a frontend computation. That
-is the seam the registry slice has to feed, which is why it was worth building before any acquired
-source depends on it.
-
-[Module distribution](modules/distribution.md) holds the remaining contracts, their implementation order,
-and the exit witnesses, including the authority, dependency-context, and compatibility decisions needed
-before the next encodings. [Registry integration](modules/registry-integration.md) states how far the
-registry is a part of Pith rather than a service beside it.
-[0068](../decisions/0068-published-surfaces-are-context-bound.md) measured the milestone's first two design
-probes and settled what a registry may publish about a released version.
-[The module registry](modules/registry.md) holds the registry's own design: a signed, append-only,
-metadata-only index in a Git repository, where the registry says which bytes and Git says these are those
-bytes. Publication uploads nothing, so there is no upload credential to steal.
-
-round five, designed in [the module system](modules/system.md). identity and the deferred domain-authority
-question; `module.pi`; the four source kinds as adapters; domain-bound registries with no search order;
-workspaces; the lock; the scoped universe; `pith diff`; the index-versus-no-index fork argued rather than
-assumed.
-
-*measured claim:* publish `example-domain` to a temporary registry and assert byte-identical elaborated IR
-against the local-path entry, plus the two configuration refusals.
-
-## M-15: the generic builder
-
-the peer domain library in the shape of `stdenv.mkDerivation`, authored in `.pi`.
-
-[the language frontend](frontend/language.md) diagnosed this and no milestone covered it: "the missing
-piece is a peer domain library in the shape of `stdenv.mkDerivation`, not a language feature ... it is
-unbuilt work no milestone covers ... and the gap sits between M-4 and anything a person would use." 0045's
-shape — a package's declared build running as one pure rule over xylem's compile and link entries, file by
-file — proves the identity, lock and substitution machinery and is not a packaging story.
+a peer domain library in the shape of `stdenv.mkDerivation`, authored in `.pi`, with host bodies as
+components where it needs them. 0045's shape, a package's build running as one pure rule over xylem's
+compile and link entries file by file, proves the identity, lock and substitution machinery and is not the
+packaging story.
 
 `Opaque`'s step protocol lands here, because a foreign build is the caller that needs it. `Opaque` is
-`pub struct Opaque;` and `effect_category!(Opaque, false)` and nothing else, U-2's gradual adoption is
-unbuildable without it, and [0032](../decisions/0032-action-granularity.md) settled the granularity for an
-import nobody can test. the subtle half is 0032's own: running a foreign build as a plain `Action` works,
-but an `Action`'s contract claims what happened, and for a foreign build that clause is false, so the run
-overclaims in provenance rather than failing.
+currently `pub struct Opaque;` and `effect_category!(Opaque, false)` and nothing else. running a foreign
+build as a plain `Action` works, but an action's contract claims what happened, and for a foreign build
+that claim is false, so the run would overclaim in provenance.
 
-M-8's backstop is a hard prerequisite here — a configure script runs hundreds of small probe programs and a
-hung one is unbounded — and so is the allowlist widening 0028 predicted and has measured twice.
+M-8's backstop is a prerequisite, because a configure script runs hundreds of small probe programs and a
+hung one is otherwise unbounded, and so is the allowlist widening 0028 predicted and has measured twice.
 
-## M-5b: Linux system activation
+### M-5b: Linux system activation
 
-install a composed artifact onto a running machine, and switch to it.
-
-this is the half that needs `Observation` and `Mutation`. its opening record is now M-9 and runs ahead of
-the frontend; what stays here is the prototype, over a designed observation protocol rather than an assumed
-one.
-
-the mechanical cost is enumerable: the new variants M-9 names, a freshness concept that exists nowhere in
-the tree, and a `computations` table that encodes its binary as a nullable digest-column pair and needs a
+install a composed artifact onto a running machine and switch to it. this needs `Mutation`, and uses
+observations as M-9 designed them. the costs are known: new variants in the step and resumption
+vocabulary, and a `computations` table that stores its binary as a nullable digest-column pair and needs a
 shape for five categories. under 0048 no encoding version moves for it; the pre-release database is
 discarded.
 
-## M-6: deployment library
+### M-6: deployment
 
 observe one machine, derive a plan, apply it, confirm the result, and return to an earlier realization.
 secrets use references resolved at the target.
 
-this milestone is blocked by a contradiction in the foundation rather than by missing code, and naming it
-here is cheaper than discovering it at the start of the round. S-4, S-5 and S-6 want a derived operation
-sequence carrying destructive effects, temporary states, preconditions, invariants, compatibility windows,
-completion evidence, and rollback limits. the graph's only sequencing construct is data dependency: `Need`
-orders a child because its value is required, and `NeedAll` declares a batch explicitly independent.
-neither expresses "this must happen before that, and if it fails, undo it." and scope.md says "the project
-is also not an ordered task runner ... users should not have to turn the desired system into a hand-written
-sequence," which is a good principle and is also the reason no ordering primitive exists.
+this is blocked by a contradiction in the foundation. S-4, S-5 and S-6 want a derived operation sequence
+with destructive effects, temporary states, preconditions, invariants, compatibility windows, completion
+evidence and rollback limits. the graph's only sequencing construct is data dependency: `Need` orders a
+child because its value is required, and `NeedAll` declares a batch independent. neither says "this must
+happen before that, and if it fails, undo it". [scope](../foundation/scope.md) says the project "is also
+not an ordered task runner", which is why no ordering primitive exists.
 
-so the first work here is a research round and a record that decides one of two things: whether a
-precondition and a rollback limit are expressible as declared inputs and derived values, keeping scope.md
-intact, or whether scope.md's sentence needs amending. systemd's distinction between ordering and
-requirement dependencies is the sharpest primary source, with Terraform's plan graph and Kubernetes'
-level-triggered reconciliation as the named alternatives.
+the first work is a research round and a record deciding whether a precondition and a rollback limit can
+be declared inputs and derived values, keeping scope intact, or whether scope's sentence needs amending.
+systemd's distinction between ordering and requirement dependencies is the closest primary source, with
+Terraform's plan graph and Kubernetes' level-triggered reconciliation as the alternatives. that round
+depends on nothing else here and can run at any time.
 
-that research round depends on nothing else in this file and can run in parallel from any point. deciding
-it early removes a phantom dependency from everything downstream, the reason the older form of this
-paragraph gave for settling it before M-5b.
+### M-7: broader execution
 
-the time and resource bounds this milestone also needed are M-8 and are no longer owed here.
+remote execution, additional operating systems, multi-machine placement, continuous reconciliation, and
+richer transition protocols.
 
-## M-7: broader execution
+## what the completed milestones still owe
 
-only after the vertical slice works: remote execution, additional operating systems, multi-machine
-placement, continuous reconciliation, and richer transition protocols.
+the evidence is in [measured](measured.md). what is listed here is work, not evidence.
 
-## complete
+M-1 owes nothing. operational support for `Observation` landed in M-9; `Mutation` and `Opaque` wait on
+M-5b and M-15.
 
-M-1 semantic prototype, M-2 action prototype, M-3 first build library, M-4 package and environment
-libraries, M-5a Linux system composition, M-8 the backstop limit, M-9 observation identity,
-M-10 the declaration artifact, M-11 the ir constructor set, M-12 the frontend graph tier and M-13 the
-surface notation and CLI are complete at their own scopes.
-their evidence is in [what the completed milestones measured](measured.md).
+M-2 owed timeouts and partial cancellation. timeouts are done in M-8 and
+[0059](../decisions/0059-a-caller-declared-run-bound.md). partial cancellation is still open, as 0059's
+unresolved section says, and it is what keeps 0022 from being accepted.
 
-what they still owe is a claim about work, not about evidence, so it stays here:
+M-3 owes nothing it named. what remains is scale: the fixture is a handful of files, not a small project.
+multi-language targets and a check concept distinct from a test have no milestone, and M-7 holds remote
+execution.
 
-M-1 owes nothing. persistent storage, change pruning and invalidation explanations went to M-2 as that
-paragraph said they would. operational support for `Observation` landed in M-9; `Mutation` and `Opaque`
-remain scheduled in M-5b and M-15.
+M-4 owes nothing, after the rounds that followed it: 0044, 0045, 0046, 0053 and 0054.
 
-M-2 owed timeouts and partial cancellation. the timeout half is discharged in M-8 and
-[0059](../decisions/0059-a-caller-declared-run-bound.md); the partial-cancellation half stays open beside
-it, as 0059's unresolved section names, and is what still holds 0022 from acceptance.
+M-5a owes nothing.
 
-M-3 owes nothing its own statement named. what remains is scale rather than capability — the fixture is a
-handful of files, not a small project — and M-15 is where a real one comes from. U-5's remainder is
-separate and still partly ownerless: multi-language targets and a check concept distinct from a test have
-no milestone, and M-7 holds the remote-execution half.
+M-8 owes nothing it named. 0059's unresolved section lists what sits beside it: partial cancellation, a
+bound and a cancel signal in one run, the rlimit half of the resource bound, and whether the pure-only
+entry point should carry a bound now that represented bodies run on it.
 
-M-4 owes nothing, after the four rounds that followed its close: 0044, 0045, 0046 and then 0053 and 0054.
+M-10 owes nothing it named. the remaining kernel-change items keep their owners.
 
-M-5a owes nothing. it is the milestone that answered the convergence question M-4 posed, which is why the
-order after it is different from the order before it.
+M-11 owed the text-splitting constructor both waiting bodies needed, which 0064 supplied as `TextBreak`
+and `TextJoin`.
 
-M-8 owes nothing its own statement named. what it leaves beside it is named in 0059's unresolved section:
-partial cancellation, a bound and a cancel signal in one run, the rlimit half of the resource bound, and
-whether the pure-only entry point carries a bound once represented bodies evaluate on it.
+M-13 left entry arguments open: an entry is a name bound to a request with no parameters, so
+`pith run test --filter foo` has nowhere to land. an argument is an input and moves the computation key,
+so it needs its own record.
 
-M-10 owes nothing its own statement named. the kernel-change ledger's remaining items keep their
-owners: interned coordinates, the engine accessors and the read-only state adapter wait on the rounds
-that read them (M-12, M-13), and the `tier` field 0038 owed has its second variant. the action-host
-spelling question the module surface left open was answered by the grammar this round shipped:
-the category is written before `rule`, so a represented body replaces only the `= host` clause.
+## the completed milestones
+
+M-1, the semantic prototype. M-2, the action prototype. M-3, the first build library, `xylem`. M-4, the
+package and environment libraries, `phloem`. M-5a, Linux system composition, `stele`.
+
+M-8, the backstop limit: a caller-declared run bound
+([0059](../decisions/0059-a-caller-declared-run-bound.md)).
+
+M-9, observation identity and freshness
+([0060](../decisions/0060-observation-identity-and-freshness.md)). one thin file-mtime observation
+shipped as the prototype, so the step, the async adapter boundary, the durable record and freshness
+admission were exercised.
+
+M-10, the declaration artifact ([0061](../decisions/0061-the-declaration-artifact.md)): the `.pi`
+declaration grammar, the loader, and the ABI and revision digests. the four crates' live tables and
+their `.pi` counterparts agree digest for digest.
+
+M-11, the IR constructor set ([0062](../decisions/0062-the-ir-constructor-set.md)), with the interpreter
+that followed it. every corpus rule body that could be expressed was expressed.
+
+M-12, the elaborator and the frontend graph tier
+([0063](../decisions/0063-the-frontend-graph-tier.md)). editing a body in A leaves `bodies-of(B)`'s key
+byte-identical and its lookup reusable.
+
+M-13, the surface notation and the CLI ([0064](../decisions/0064-text-breaking.md),
+[0065](../decisions/0065-entry-evaluation-and-the-cli-query-surface.md),
+[0066](../decisions/0066-frontend-diagnostics-carry-source-identity.md)). `pith check`, entries,
+`pith run` and `pith explain` exist, and `example-domain` as one `.pi` file gives byte-identical interface
+encodings.
+
+M-14's first slices: local module workspaces
+([0067](../decisions/0067-local-module-workspaces.md)), the acquisition boundary, and the first routing
+checks, with the published-surface probes of
+[0068](../decisions/0068-published-surfaces-are-context-bound.md).
+
+## how the order got here
+
+### domains first, until M-5a
+
+the first sequence built domain libraries out to deployment before anything read them. M-1 gave the
+reason: "the first implementation should test the kernel through real domain libraries instead of
+polishing syntax around an unproven engine." M-4 made that testable and M-5a answered it. `stele` declared
+twelve types using only constructors that already existed and needed no engine, core or encoding change.
+
+### the frontend before more domains, from 2026-08-21
+
+after M-5a the open questions were no longer about the kernel. `pith-cli` was 240 lines and depended on
+none of `xylem`, `phloem` or `stele`, so the three libraries, about 23,600 lines, were reachable only from
+their own tests, and `explain_invalidation` was implemented in the engine, both state adapters and the
+conformance suite and reachable from no command.
+
+the order was changed to put the frontend ahead of further domain libraries, as M-10 to M-14. three
+mechanisms that had been deferred from milestone to milestone got owners: the backstop limit (M-8),
+`Opaque`'s step protocol (M-15), and the read-only state adapter the CLI needed (M-13). the observation
+record moved ahead of the IR constructor set as M-9, because a variant added to `PureStep` after the IR
+encoding was fixed would have changed every represented body's digest.
+
+before M-10, a spike tested the frontend architecture's latency assumption: that re-elaborating an edited
+module is fast enough without an in-process incremental layer. two hundred generated modules, a
+throwaway parser and elaborator, and the 50 ms keystroke target. the edited module's path measured
+105.6 microseconds at p50 and 117.3 at p99, and the whole set elaborated cold in 21.9 ms. the number is
+recorded in [the frontend architecture](frontend/architecture.md) and the code was discarded.
+
+the labels were kept rather than renumbered, because records cite `M-5b`, `M-6` and `M-7` by name, and
+renumbering would have meant editing records to express an order.
+
+### finishing the design, from 2026-09-29
+
+the order after M-13 continued into the rest of the module system and then into more first-party
+libraries: the generic builder, system activation, deployment. none of that is needed to show an outside
+domain running, and each would have added first-party code that an outside domain could not match, since
+a host body could only be rust compiled into the binary. M-16 removes that restriction, and the rest is
+parked until it is done.

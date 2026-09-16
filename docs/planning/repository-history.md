@@ -27,4 +27,4 @@ evidence of when the work happened.
 dating the work: use the notebook. documents carry front-matter dates, every
 closed milestone records its measurement when it closes, and
 `docs/planning/measured.md` is append-only. those are the timestamps the
-project stands behind, and they are what a reviewer should use.
+project stands behind.
