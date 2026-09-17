@@ -37,7 +37,7 @@ external identity names an identifier a platform assigns, such as a cloud resour
 
 managed-object identity names the durable external object a deployment owns and mutates across observations and mutations. it is continuity of ownership, separate from external identity: a platform may delete and recreate the object under a new external identifier while the managed object persists. the kernel provides the primitive and the provenance machinery; the deployment library and its adapters construct and maintain it, including the rules for adoption, replacement, and rename.
 
-links among these five identities are recorded as provenance. the types prevent accidental substitution.
+links among them are recorded as provenance. the types prevent accidental substitution.
 
 ## immutable storage
 

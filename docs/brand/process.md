@@ -61,9 +61,9 @@ terminal), drafting room (white, light-blue grid, ibm plex), ledger brutal
 (black, bone, international orange, space grotesk). a contrast audit found
 four failing text colors and they were recomputed. the round was discarded
 on two grounds: it read as basic, and several of its layout patterns were
-generated-look tells. a type-led rebuild — a specimen book with an
+generated-look tells. a type-led rebuild (a specimen book with an
 italic-serif herbarium press spread, a departure mono terminal spread, a
-silver standards-manual spread, a wide-open poster spread — met the same
+silver standards-manual spread, a wide-open poster spread) met the same
 verdict.
 
 ### round two — the gold-standard register, discarded as not pith
@@ -76,14 +76,14 @@ not dress like a tech tool. glow, glass, and gradient depth are out.
 
 ### round three — serifs, discarded twice
 
-first the antique print faces — cormorant garamond 300, bodoni moda 800, im
-fell english, eb garamond, a handwriting face for margin notes — across an
+first the antique print faces (cormorant garamond 300, bodoni moda 800, im
+fell english, eb garamond, a handwriting face for margin notes) across an
 engraved botanical plate, an apothecary label, a two-ink riso poster, and
 fashion folios. they read as imitation luxury or novelty. then the premium
-free faces — zodiak, gambetta, boska, marcellus, fraunces — which fixed the
+free faces (zodiak, gambetta, boska, marcellus, fraunces), which fixed the
 license and the cheapness but kept the wrong register. two standing rules
 came out of this round: fully free fonts only, and never plain white or
-plain black — always offwhite or offblack.
+plain black, always offwhite or offblack.
 
 the decisive rejection: the round kept leaning on italic serif, the slanted
 calligraphic style behind lines like "a plant, not a machine." and "medulla
@@ -92,12 +92,12 @@ upright.
 
 ### round four — three upright directions, all three kept
 
-- **monument** — museum-wall type. gloock, a contemporary didone, at up to
+- **monument**: museum-wall type. gloock, a contemporary didone, at up to
   280px; one enormous word on the wall, a small mono label beside it.
-- **soft brutal** — flat poster. bricolage grotesque 800, heavy and soft;
+- **soft brutal**: flat poster. bricolage grotesque 800, heavy and soft;
   cream, chartreuse, warm off-black; no glow, no gradients, flat ink only;
   departure mono for machine labels.
-- **literary** — book covers. instrument serif, hard-shadow boxes, roman
+- **literary**: book covers. instrument serif, hard-shadow boxes, roman
   numerals, the mark as a blind stamp.
 
 all three landed. the ranking put soft brutal first on type and color,
@@ -107,8 +107,8 @@ right.
 
 ## the merge
 
-the final draft folded the ranking together: soft brutal as the base —
-bricolage 800, cream on warm black, chartreuse, flat ink — monument's calm
+the final draft folded the ranking together: soft brutal as the base
+(bricolage 800, cream on warm black, chartreuse, flat ink), monument's calm
 spacing, literary's hard-shadow boxes and roman numerals set in mono. the
 tall serif was retired. the bracketed labels were dropped.
 
@@ -118,7 +118,7 @@ the first lab offered five marks in the merged palette: cell (hexagon),
 spokes (root node, five dependents), rings (stem cross-section), stem (bar,
 leaf, node), seed (pointed oval). all five were rejected with a diagnosis
 that named the missing principle: the nix mark is not a shape, it is a
-**construction** — one unit repeated under a rotation rule, so a fragment of
+**construction**: one unit repeated under a rotation rule, so a fragment of
 it is still unmistakable. these five were decorated primitives.
 
 the second lab followed the recipe: a repeated unit, a rotation rule,
@@ -126,18 +126,17 @@ exactly one chartreuse element, and a fragment test on every card. four
 constructions: vessels (paired bars at 90°), sectors (thick arcs at 120°),
 star (pointed petals at 72°), cell-key (hexagon with an exiting vessel
 pair). sectors and star survived, each refined three ways with fragments as
-honest crops of the full mark's viewbox and every variant in a lockup with
-the wordmark. the runoff came down to three — sectors cut, star marquise,
+crops of the full mark's viewbox and every variant in a lockup with
+the wordmark. the runoff came down to three: sectors cut, star marquise,
 star kernel.
 
-fragments were then retired entirely. they were the proof of the nix
-property — that a crop still names the mark — never a component of the
-brand.
+fragments were then retired entirely. they proved the nix property (a crop
+still names the mark) and were never a component of the brand.
 
 ## the choice
 
 c1, the marquise star: five marquise petals at 72°, one chartreuse, the
 green kernel dot set in the five-pointed void the petals carve. the final
 pass tightened the petal so its curve controls sit at exact thirds of its
-span — the widest point lands on the petal's midpoint and the void comes out
+span: the widest point lands on the petal's midpoint and the void comes out
 even.

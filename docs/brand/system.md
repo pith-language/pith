@@ -21,8 +21,8 @@ relations:
 
 # identity system
 
-this is what stands. how it was chosen — the research and every round of
-rejection — is in [identity process](process.md); the naming vocabulary it
+this is what stands. how it was chosen (the research and every round of
+rejection) is in [identity process](process.md); the naming vocabulary it
 shares is in [name and brand](../foundation/name.md).
 
 ## palette
@@ -37,10 +37,10 @@ shares is in [name and brand](../foundation/name.md).
 
 ## type
 
-- display — bricolage grotesque 800, opsz 96, wdth 88, lowercase wordmark
-- text — gambetta 400–600
-- labels — geist mono, tracked
-- machine — departure mono, `-webkit-font-smoothing: none`, sizes in
+- display: bricolage grotesque 800, opsz 96, wdth 88, lowercase wordmark
+- text: gambetta, weights 400 to 600
+- labels: geist mono, tracked
+- machine: departure mono, `-webkit-font-smoothing: none`, sizes in
   multiples of 12
 
 all faces are free (google fonts and fontshare, ofl). the banner's wordmark
@@ -50,58 +50,56 @@ paths, the period is chartreuse.
 
 ## devices
 
-- hard-shadow boxes — cream cards with a `10px 10px 0` chartreuse-tinted
+- hard-shadow boxes: cream cards with a `10px 10px 0` chartreuse-tinted
   offset shadow and a 1.5px ink border.
-- roman numerals — section numbers set small in mono.
-- flat color only — no gradients, no glow, no glass.
+- roman numerals: section numbers set small in mono.
+- flat color only: no gradients, no glow, no glass.
 
-the hollow numeral from the monument study — a measurement drawn outline-only
-in chartreuse — is not a standing device. it earned its moment inside that
-study, but a number floating in the banner or the hero needs an explanation
-the viewer does not have, which makes it decoration. it was rejected there
-twice: first the golden-angle content, then the rotation angle swapped in to
-replace it. numbers appear where a reader needs them, as in the mark
-specification below, and are set plainly.
+the hollow numeral from the monument study (a measurement drawn outline-only
+in chartreuse) is not a standing device. in the banner or the hero it needs
+an explanation the viewer does not have, which makes it decoration. it was
+rejected there twice: first the golden-angle content, then the rotation
+angle swapped in to replace it. numbers appear where a reader needs them, as
+in the mark specification below, and are set plainly.
 
 ## the mark
 
-unit — one marquise petal, tip radii 41 and 11 on a 100-unit viewbox, curve
+unit: one marquise petal, tip radii 41 and 11 on a 100-unit viewbox, curve
 controls at exact thirds of the span so the widest point sits on the petal's
-midpoint. rule — five at 72°. accent — one petal chartreuse, at 216°.
-kernel — pith green dot, radius 4.2, set in the void. the void is a
-five-pointed star by construction. below 20px the dot folds away.
+midpoint. rule: five at 72°. accent: one petal chartreuse, at 216°.
+kernel: pith green dot, radius 4.2, set in the void. the void is a
+five-pointed star. below 20px the dot folds away.
 
-five petals read as the five sealed effect categories around one kernel —
-the mark says the architecture. any crop of the construction still names
-it, which was the nix test.
+five petals read as the sealed effect categories around one kernel.
+any crop of the construction still names it, which was the nix test.
 
 ## rules
 
-- no generated-look patterns — custom palettes, asymmetric layouts, a
+- no generated-look patterns: custom palettes, asymmetric layouts, a
   component vocabulary of one's own
-- not a tech-tool aesthetic — no glow, no glass, no gradient depth
-- no italic, ever — brand pages carry `em, i { font-style: normal }` as a
-  physical enforcement
+- not a tech-tool aesthetic: no glow, no glass, no gradient depth
+- no italic, ever: brand pages carry `em, i { font-style: normal }` as
+  enforcement
 - no plain sans as the identity face
 - fully free fonts only
 - no cheap-feeling free faces, no newspaper faces
-- no pure white or pure black — always offwhite or offblack
+- no pure white or pure black, always offwhite or offblack
 - departure mono for machine labels only
-- the mark is a construction, not a decorated shape — a repeated unit under
+- the mark is a construction, not a decorated shape: a repeated unit under
   a rotation rule
 - fragments are a test, not a component
 
 ## artifacts
 
-- [`docs/assets/banner.svg`](../assets/banner.svg) — the readme banner,
+- [`docs/assets/banner.svg`](../assets/banner.svg): the readme banner,
   960×240, flipping cream and warm black through `prefers-color-scheme` for
   github's light and dark modes.
-- [`docs/assets/favicon.svg`](../assets/favicon.svg) — the 16px mark:
+- [`docs/assets/favicon.svg`](../assets/favicon.svg): the 16px mark,
   enlarged petals on a warm-black tile, no dot.
 - [`docs/assets/mark.svg`](../assets/mark.svg),
-  [`docs/assets/mark-dark.svg`](../assets/mark-dark.svg) — the canonical
+  [`docs/assets/mark-dark.svg`](../assets/mark-dark.svg): the canonical
   mark in both modes, transparent.
-- [`docs/assets/ledger.svg`](../assets/ledger.svg) — the readme's
-  incremental-build figure, in the palette: cream and warm black flipping
-  with github's scheme, mono labels and numerals, pith green marking the
+- [`docs/assets/ledger.svg`](../assets/ledger.svg): the readme's
+  incremental-build figure in the palette. cream and warm black flip with
+  github's scheme; mono labels and numerals; pith green marks the
   zero-work outcomes.

@@ -59,13 +59,12 @@ the repository separates current design from the evidence and decisions that pro
 
 ## planning
 
-planning notes are named for their subject. the order the work runs in lives in one place, the
-milestones, so that renaming a milestone never renames a design note.
+planning notes are named for their subject. the work order lives in one
+place, the milestones, so renaming a milestone never renames a design note.
 
 - [open questions](planning/open-questions.md)
 - [milestones](planning/milestones.md)
 - [what the completed milestones measured](planning/measured.md)
-- [the reordering](planning/reordering.md)
 - [the cli surface](planning/cli-surface.md)
 - [repository history](planning/repository-history.md)
 

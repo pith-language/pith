@@ -66,7 +66,7 @@ an effect that changes external state.
 
 ## opaque
 
-an effect category for work that has not been modeled into pure, action, observation, or mutation. the engine records that effectful work occurred but does not know its category, declared inputs, or authority. opaque is the adoption on-ramp and the visibly distinct escape hatch permitted by the principles.
+an effect category for work that has not been modeled into pure, action, observation, or mutation. the engine records that effectful work occurred but does not know its category, declared inputs, or authority. opaque is the visibly distinct adoption path permitted by the principles.
 
 ## observation
 

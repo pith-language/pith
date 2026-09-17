@@ -73,7 +73,7 @@ gradual adoption belongs at system boundaries. partially modeled inputs are allo
 
 ## one mechanism per concern
 
-each thing the system does has one way to be expressed. a flag that silently changes semantics, a second api that does the same job under different rules, and a knob that relaxes a check are not features. they are the same defect wearing different clothes.
+each thing the system does has one way to be expressed. a flag that silently changes semantics, a second api that does the same job under different rules, and a knob that relaxes a check are not features. they are one defect.
 
 when the obvious path does not fit a new case, the answer is to extend the one path, not to add a second one that competes with it. this is more design work every time. it is the cost of a system where someone reading two pieces of code can tell whether they do the same thing.
 
