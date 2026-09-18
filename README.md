@@ -1,12 +1,12 @@
-![Pith — a computation kernel for build, package, environment, and system tooling](docs/assets/banner.svg)
+![Pith, a computation kernel for build, package, environment, and system tooling](docs/assets/banner.svg)
 
 Software passes through a chain of tools before it runs. One resolves
 dependencies, another builds them, another assembles an environment, another
 describes a machine, another deploys it. Each tool rebuilds a version of the
 same graph under its own identities, caches, and effect rules, and information
-is lost at every handoff. Pith looks for the mechanism those tools could have
-shared, and for the point where that mechanism has to stop and hand a domain to
-a library.
+is lost at every handoff. Pith is an attempt at the mechanism those tools could
+share, and at the point where that mechanism has to stop and hand the rest to
+a domain library.
 
 [Design notebook](docs/index.md) &nbsp;·&nbsp; [Problem](docs/foundation/problem.md)
 &nbsp;·&nbsp; [Principles](docs/foundation/principles.md) &nbsp;·&nbsp;
@@ -22,15 +22,15 @@ timestamps. Two C sources over a shared header, from
 ![A cold build plans five action computations, editing one source plans three, nothing changed plans none and is reused, and a new process over the same store plans none and is hydrated.](docs/assets/ledger.svg)
 
 Editing one source leaves the other source's header scan and compile answered
-from the durable index; the link runs only because the object it consumes moved.
-The last row is the one that needed a database: close the engine, open a new one
-over the same store, and the build hydrates from the attempt the first engine
-recorded rather than from a copy of it.
+from the durable index; the link runs only because the object it consumes
+moved. The last row is the one that needed a database: close the engine, open a
+new one over the same store, and the build hydrates from the attempt the first
+engine recorded instead of from a copy of it.
 
 ## Effects are where the kernel draws its line
 
 Pure computation and external work share one graph without being given the same
-semantics. Five sealed categories in
+semantics. Sealed categories in
 [`pith-core`](crates/pith-core/src/effect.rs) decide what may be cached, what
 must be declared, and what the scheduler may do with it:
 
@@ -42,14 +42,14 @@ must be declared, and what the scheduler may do with it:
 | `Mutation` | changes external state | no | designed |
 | `Opaque` | unmodeled work behind a fixed-output boundary; the escape hatch | no | designed |
 
-The categories are sealed on purpose. Adding one is a kernel change argued in a
-decision record, not something a library can reach for.
+The categories are sealed: adding one is a kernel change argued in a decision
+record, not something a library can reach for.
 
 An action's contract is checked rather than trusted. The Linux executor stages
 declared inputs and the toolchain closure into a scratch root, runs the child
-under a Landlock ruleset and a seccomp allowlist measured syscall by syscall
-from real compilers, and captures only the declared outputs. An undeclared
-header is unreachable rather than quietly stale.
+under a Landlock ruleset and a seccomp allowlist measured from real compilers,
+and captures only the declared outputs. The child cannot reach an undeclared
+header at all, so it cannot go quietly stale.
 
 ## Domains are libraries, ours included
 
@@ -69,10 +69,10 @@ impl ExampleEngine for Engine {
 Incremental reuse, cross-process hydration, and contract inspection follow from
 those two calls and nothing else. `xylem` (builds), `phloem` (packages and
 environments), and `stele` (system composition) are clients on exactly these
-terms — they take their names from the tissues around a stem's pith — and the
+terms. They take their names from the tissues around a stem's pith, and the
 kernel has no built-in notion of a package, service, machine, or deployment.
 
-That claim is held to a test rather than asserted.
+The claim is checked by a test:
 [`crates/example-domain`](crates/example-domain) is a library the kernel knows
 nothing about, depending on no other domain and named nowhere else in the
 workspace, and it collects the same properties the first-party domains are
@@ -83,21 +83,21 @@ measured on.
 A working prototype, not a tool for general use. There is a source language and
 a command line, and the language has two loading modes that share one grammar:
 a standalone `.pi` file whose identity is its file stem, and a `module.pi`
-manifest declaring a `domain/name` subject with explicit path dependencies —
-the first slice of the module system. The modes are a temporary distinction:
+manifest declaring a `domain/name` subject with explicit path dependencies, the
+first slice of the module system. The modes are a temporary distinction:
 loading a bare source file still resolves imports against neighboring files,
-while manifest mode resolves `use` clauses and a workspace's members, and the
-remaining migration work — registries, locks, version resolution, and retiring
-the file-relative resolver — is what [M-14](docs/planning/milestones.md) still
-owes. What exists is one vertical slice, deep enough that the parts push back:
+while manifest mode resolves `use` clauses and a workspace's members. The
+remaining migration work (registries, locks, version resolution, and retiring
+the file-relative resolver) is what [M-14](docs/planning/milestones.md) still
+owes. What exists is one vertical slice:
 
 - typed rule selection, incremental evaluation, and equality-based pruning when a
   recomputed dependency lands on the value it already had
-- content-addressed blobs and trees, engine state in SQLite, and two state
+- content-addressed blobs and trees, engine state in SQLite, and state
   adapters held to each other by a generated conformance suite
-- confined local execution on Linux, with an 80-syscall allowlist whose every
-  entry was measured from a tool that asked for it
-- builds under two real toolchains with discovered header dependencies; package
+- confined local execution on Linux, with a syscall allowlist measured from
+  the tools themselves
+- builds under real toolchains with discovered header dependencies; package
   resolution, locks, and admitted binary substitution; development environments
   over a lock; and an immutable Linux tree composed from files, users, units,
   and boot configuration
@@ -126,10 +126,10 @@ references.
 | [Problem](docs/foundation/problem.md), [scope](docs/foundation/scope.md) | what this is for, and what it refuses to become |
 | [Design overview](docs/design/overview.md) | the four layers and the kernel boundary |
 | [Principles](docs/foundation/principles.md) | the constraints the architecture answers to |
-| [Research](docs/research/index.md) | Nix, Bazel, Terraform, CUE and others, read closely |
-| [Decisions](docs/decisions) | numbered records, each closed by a measurement |
+| [Research](docs/research/index.md) | Nix, Bazel, Terraform, CUE, and others |
+| [Decisions](docs/decisions) | numbered records, each ending in a measurement |
 
-A record here usually opens with a primary source and closes with a test.
+A record usually opens with a primary source and closes with a test.
 
 ## Working in the repository
 
