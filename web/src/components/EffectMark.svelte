@@ -57,7 +57,7 @@
     });
 
     const petal = "M50,9 C56,19 56,29 50,39 C44,29 44,19 50,9 Z";
-    const accentIndex = 3;
+    const designedIndex = 3;
 
     const focus = (index: number) => () => (active = index);
     const release = () => (active = null);
@@ -76,7 +76,7 @@
                     <path
                         d={petal}
                         transform={`rotate(${i * 72} 50 50)`}
-                        class:accent={i === accentIndex}
+                        class:designed={i === designedIndex}
                         class:recede={active !== null && active !== i}
                     ></path>
                 {/each}
@@ -147,8 +147,8 @@
         opacity: 0.15;
     }
 
-    .mark path.accent {
-        fill: var(--accent);
+    .mark path.designed {
+        fill: var(--rust);
     }
 
     .mark .kernel {
@@ -157,8 +157,7 @@
 
     .cats li {
         border-bottom: 1px solid var(--line);
-        border-left: 3px solid transparent;
-        transition: border-color 240ms cubic-bezier(0.25, 0.7, 0.25, 1);
+        transition: background 240ms cubic-bezier(0.25, 0.7, 0.25, 1);
     }
 
     .cats li:first-child {
@@ -166,16 +165,16 @@
     }
 
     .cats li.on {
-        border-left-color: var(--pith);
+        background: var(--wash);
     }
 
     .cats button {
         display: grid;
-        grid-template-columns: 128px 1fr auto;
-        gap: 6px 20px;
+        grid-template-columns: 1fr auto;
+        gap: 8px 24px;
         align-items: baseline;
         width: 100%;
-        padding: 13px 2px 13px 14px;
+        padding: 13px 14px 15px;
         border: none;
         background: none;
         color: inherit;
@@ -185,7 +184,7 @@
     }
 
     .cats li :global(.label) {
-        letter-spacing: 0.18em;
+        letter-spacing: 0.06em;
     }
 
     .cats .idx {
@@ -193,10 +192,13 @@
     }
 
     .cats .name {
+        grid-area: 1 / 1;
         transition: color 240ms cubic-bezier(0.25, 0.7, 0.25, 1);
     }
 
     .cats .blurb {
+        grid-area: 2 / 1 / 3 / 3;
+        max-width: 56ch;
         font-size: 16.5px;
         line-height: 1.5;
         color: var(--sub);
@@ -204,7 +206,8 @@
     }
 
     .cats .status {
-        color: var(--sub);
+        grid-area: 1 / 2;
+        color: var(--rust);
         white-space: nowrap;
         transition: color 240ms cubic-bezier(0.25, 0.7, 0.25, 1);
     }
@@ -234,8 +237,9 @@
         }
 
         .markwrap {
+            align-self: stretch;
             padding: 22px 0 18px;
-            border-bottom: 1.5px solid var(--line);
+            border-bottom: 1px solid var(--line);
         }
 
         .mark {
@@ -243,6 +247,7 @@
         }
 
         .cats {
+            align-self: stretch;
             position: relative;
             flex: 1;
             pointer-events: none;
@@ -254,6 +259,7 @@
             display: flex;
             align-items: center;
             border: none;
+            background: none;
             opacity: 0;
             transform: translateY(12px);
             transition:
@@ -277,9 +283,15 @@
             color: var(--sub);
         }
 
+        .cats .name,
+        .cats .blurb,
+        .cats .status {
+            grid-area: auto;
+        }
+
         .cats .name {
             font-size: 14px;
-            letter-spacing: 0.24em;
+            letter-spacing: 0.06em;
         }
 
         .cats .blurb {

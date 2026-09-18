@@ -1,18 +1,15 @@
 :root {
-  --ground: #f0ead8;
-  --ink: #23201a;
-  --sub: #4e4936;
-  --line: #938e82;
-  --accent: #c9d96b;
-  --pith: #2e5a3c;
-  --card: #f0ead8;
-  --card-ink: #23201a;
-  --card-sub: #4e4936;
-  --card-line: #938e82;
-  --card-pith: #2e5a3c;
-  --tile: #1a1c17;
-  --tile-ink: #f0ead8;
-  --tile-line: #494b41;
+  --ground: #ebefe0;
+  --ink: #222b20;
+  --sub: #5b6350;
+  --line: #c5cbaf;
+  --rule: #222b20;
+  --pith: #2f5d3a;
+  --rust: #96502c;
+  --tile: #232a21;
+  --tile-ink: #e9e5d4;
+  --tile-line: #454d40;
+  --wash: rgba(47, 93, 58, 0.07);
 
   --font-display: 'Bricolage Grotesque', 'Bricolage Fallback', sans-serif;
   --font-text: 'Gambetta', 'Gambetta Fallback', Georgia, serif;
@@ -22,11 +19,17 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --ground: #1a1c17;
-    --ink: #f0ead8;
-    --sub: #c8c3ac;
-    --line: #494b41;
-    --pith: #5e8a6e;
+    --ground: #161a14;
+    --ink: #ebe7d6;
+    --sub: #a4a892;
+    --line: #383e33;
+    --rule: #ebe7d6;
+    --pith: #7fb07a;
+    --rust: #cf8a5b;
+    --tile: #1e241b;
+    --tile-ink: #ebe7d6;
+    --tile-line: #454d40;
+    --wash: rgba(127, 176, 122, 0.09);
   }
 }
 
@@ -59,8 +62,8 @@ i {
 }
 
 ::selection {
-  background: var(--accent);
-  color: #1a1c17;
+  background: var(--pith);
+  color: var(--ground);
 }
 
 ::-webkit-scrollbar {
@@ -87,7 +90,7 @@ i {
 
 a {
   color: inherit;
-  text-decoration-thickness: 1.5px;
+  text-decoration-thickness: 1px;
   text-underline-offset: 0.2em;
   -webkit-tap-highlight-color: transparent;
 }
@@ -133,10 +136,9 @@ ul {
 
 .label {
   font-family: var(--font-label);
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 500;
-  letter-spacing: 0.32em;
-  text-transform: uppercase;
+  letter-spacing: 0.06em;
   color: var(--sub);
 }
 
@@ -150,32 +152,51 @@ ul {
 code,
 .mono {
   font-family: var(--font-label);
-  font-size: 0.86em;
+  font-size: 0.84em;
+  padding: 0.1em 0.34em 0.12em;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--wash);
+}
+
+pre code {
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  font: inherit;
 }
 
 .dot {
-  color: var(--accent);
+  color: var(--pith);
 }
 
-.box {
-  background: var(--card);
-  color: var(--card-ink);
-  border: 1.5px solid var(--card-ink);
-  box-shadow: 10px 10px 0 var(--accent);
+.plate {
+  border: 1px solid var(--rule);
 }
 
 .terminal {
   background: var(--tile);
   color: var(--tile-ink);
-  border: 1.5px solid var(--tile-line);
+  border: 1px solid var(--tile-line);
 }
 
 .terminal .machine {
   color: var(--tile-ink);
 }
 
+.tile-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--tile-line);
+}
+
 .site-header {
   padding-block: 26px;
+  border-bottom: 1px solid var(--line);
 }
 
 .header-row {
@@ -191,13 +212,13 @@ code,
   align-items: center;
   gap: 12px;
   text-decoration: none;
-  font-size: 30px;
+  font-size: 29px;
   color: var(--ink);
 }
 
 .wordmark .mark {
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   flex: none;
 }
 
@@ -217,8 +238,8 @@ code,
 }
 
 .site-footer {
-  margin-top: clamp(6rem, 12vw, 10rem);
-  border-top: 1.5px solid var(--line);
+  margin-top: 0;
+  border-top: 1px solid var(--line);
   padding-block: 36px 48px;
 }
 
@@ -231,8 +252,8 @@ code,
 }
 
 .footer-row .mark {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
 }
 
 .f-brand {
@@ -251,20 +272,12 @@ code,
 }
 
 .section {
-  margin-block: clamp(4.5rem, 9vw, 7.5rem);
-  display: grid;
-  grid-template-columns: 172px 1fr;
-  gap: 24px 48px;
-  align-items: start;
-}
-
-.rail {
-  position: sticky;
-  top: 24px;
+  padding-block: clamp(3.5rem, 7vw, 6rem);
+  border-top: 1px solid var(--line);
 }
 
 .sec-title {
-  font-size: clamp(28px, 4vw, 42px);
+  font-size: clamp(30px, 4vw, 48px);
   margin-bottom: 1.4rem;
 }
 
@@ -274,16 +287,6 @@ code,
 
 .prose p + p {
   margin-top: 1em;
-}
-
-@media (max-width: 880px) {
-  .section {
-    grid-template-columns: 1fr;
-  }
-
-  .rail {
-    position: static;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

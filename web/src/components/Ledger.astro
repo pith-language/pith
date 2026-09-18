@@ -13,7 +13,7 @@ const rows: Row[] = [
 ];
 ---
 
-<figure class="ledger box">
+<figure class="ledger">
   <figcaption class="label">action computations planned</figcaption>
   <ul>
     {
@@ -31,17 +31,17 @@ const rows: Row[] = [
 
 <style>
   .ledger {
-    padding: 30px 34px 20px;
+    border-top: 2px solid var(--rule);
+    padding-top: 20px;
     max-width: 640px;
   }
 
   .ledger :global(.label) {
-    color: var(--card-sub);
-    letter-spacing: 0.18em;
+    letter-spacing: 0.06em;
   }
 
   ul {
-    margin-top: 18px;
+    margin-top: 12px;
   }
 
   li {
@@ -49,11 +49,7 @@ const rows: Row[] = [
     align-items: baseline;
     gap: 16px;
     padding-block: 14px;
-    border-bottom: 1px solid var(--card-line);
-  }
-
-  li:last-child {
-    border-bottom: none;
+    border-bottom: 1px solid var(--line);
   }
 
   .row-label {
@@ -64,7 +60,7 @@ const rows: Row[] = [
 
   .leader {
     flex: 1;
-    border-bottom: 1px dotted var(--card-line);
+    border-bottom: 1px dotted var(--line);
     transform: translateY(-4px);
     min-width: 24px;
   }
@@ -72,7 +68,7 @@ const rows: Row[] = [
   .num {
     font-family: var(--font-label);
     font-weight: 600;
-    font-size: clamp(40px, 5vw, 56px);
+    font-size: clamp(38px, 5vw, 50px);
     line-height: 1;
     min-width: 1.2ch;
     text-align: right;
@@ -80,14 +76,10 @@ const rows: Row[] = [
 
   li.good .num,
   li.good :global(.label) {
-    color: var(--card-pith);
+    color: var(--pith);
   }
 
   @media (max-width: 560px) {
-    .ledger {
-      padding: 22px 16px 10px;
-    }
-
     li {
       gap: 12px;
     }
@@ -98,12 +90,7 @@ const rows: Row[] = [
     }
 
     .num {
-      font-size: 34px;
-    }
-
-    .ledger :global(.label),
-    .note {
-      letter-spacing: 0.12em;
+      font-size: 32px;
     }
   }
 </style>

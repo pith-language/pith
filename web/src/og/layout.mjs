@@ -3,12 +3,11 @@ import { render } from 'takumi-js';
 import { fromHtml } from 'takumi-js/helpers/html';
 
 export const palette = {
-  ground: '#F0EAD8',
-  ink: '#23201A',
-  sub: '#4E4936',
-  line: '#938E82',
-  accent: '#C9D96B',
-  pith: '#2E5A3C',
+  ground: '#EBEFE0',
+  ink: '#222B20',
+  sub: '#5B6350',
+  line: '#C5CBAF',
+  pith: '#2F5D3A',
 };
 
 export const CARD_WIDTH = 1200;
@@ -19,13 +18,11 @@ const PETAL = 'M50,9 C56,19 56,29 50,39 C44,29 44,19 50,9 Z';
 export function markSvg({
   size = 300,
   petals = palette.ink,
-  accent = palette.accent,
   kernel = palette.pith,
 } = {}) {
   const petal = (deg) => {
     const rotate = deg ? ` transform="rotate(${deg} 50 50)"` : '';
-    const fill = deg === 216 ? ` fill="${accent}"` : '';
-    return `<path d="${PETAL}"${rotate}${fill}/>`;
+    return `<path d="${PETAL}"${rotate}/>`;
   };
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"` +
@@ -37,7 +34,7 @@ export function markSvg({
 }
 
 export async function loadOgFonts() {
-  const [bricolage, gambetta, geist400, geist500] = await Promise.all([
+  const [bricolage, gambetta400, geist400, geist500] = await Promise.all([
     readFile(new URL('../fonts/BricolageGrotesque-VF-latin.woff2', import.meta.url)),
     readFile(new URL('../fonts/Gambetta-400.woff2', import.meta.url)),
     readFile(
@@ -55,7 +52,7 @@ export async function loadOgFonts() {
   ]);
   return [
     { name: 'Bricolage Grotesque', data: bricolage },
-    { name: 'Gambetta', weight: 400, data: gambetta },
+    { name: 'Gambetta', weight: 400, data: gambetta400 },
     { name: 'Geist Mono', weight: 400, data: geist400 },
     { name: 'Geist Mono', weight: 500, data: geist500 },
   ];
@@ -64,7 +61,7 @@ export async function loadOgFonts() {
 const esc = (s) =>
   s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 
-const labelStyle = `font-family:'Geist Mono';font-weight:500;font-size:15px;letter-spacing:0.32em;text-transform:uppercase;color:${palette.sub}`;
+const labelStyle = `font-family:'Geist Mono';font-weight:500;font-size:15px;letter-spacing:0.06em;color:${palette.sub}`;
 
 export function ogCard({ line, wordmarkSize = 176, markSize = 300 }) {
   const html =
@@ -73,12 +70,12 @@ export function ogCard({ line, wordmarkSize = 176, markSize = 300 }) {
     `<div style="flex:1;display:flex;align-items:center;justify-content:space-between;gap:72px;min-height:0;">` +
     `<div style="flex:1;display:flex;flex-direction:column;justify-content:center;max-width:640px;">` +
     `<div style="font-family:'Bricolage Grotesque';font-weight:800;font-size:${wordmarkSize}px;line-height:1;letter-spacing:-0.01em;color:${palette.ink};font-variation-settings:'opsz' 96, 'wdth' 88;">` +
-    `pith<span style="color:${palette.accent};">.</span></div>` +
+    `pith<span style="color:${palette.pith};">.</span></div>` +
     `<p style="font-size:29px;line-height:1.5;color:${palette.sub};margin-top:36px;">${esc(line)}</p>` +
     `</div>` +
     `<img src="og-mark" style="width:${markSize}px;height:${markSize}px;flex:none;"/>` +
     `</div>` +
-    `<div style="border-top:1.5px solid ${palette.line};padding-top:24px;">` +
+    `<div style="border-top:2px solid ${palette.ink};padding-top:24px;">` +
     `<span style="${labelStyle};">pith-lang.org</span>` +
     `</div>` +
     `</div>`;

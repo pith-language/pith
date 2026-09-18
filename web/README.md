@@ -29,8 +29,8 @@ pnpm dev
 Every page's social card renders at build time from one shared frame.
 [`src/og/layout.mjs`](src/og/layout.mjs) owns the identity: the palette from
 `docs/brand/system.md`, the self-hosted faces, the mark's exact petal
-construction as SVG, and the `ogCard()` layout: the wordmark and one summary
-line against the mark, sized to stay legible in small previews. A page
+construction as SVG, and the `ogCard()` layout (the wordmark and one summary
+line against the mark, sized to stay legible in small previews). A page
 supplies only that line. To add a card, compose one in
 [`scripts/generate-og.mjs`](scripts/generate-og.mjs) and pass its path under
 `public/og/` to the `ogImage` prop of `Base.astro`; pages without one fall
@@ -72,4 +72,4 @@ arrives through `@fontsource/geist-mono`; the rest are woff2 files in
 
 ## funding.json
 
-The `funding.json` is emitted by the internal `pith/funding` repository, and should not be edited manually
+The `funding.json` is emitted by the internal `pith/funding` repository and should not be edited manually.
