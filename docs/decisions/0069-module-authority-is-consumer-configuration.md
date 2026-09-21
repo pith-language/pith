@@ -6,7 +6,7 @@ summary: registry bindings and domain routing are written by the consumer and ne
 kind: decision
 status: proposed
 created: 2026-09-06
-updated: 2026-09-06
+updated: 2026-09-21
 tags:
   - modules
   - registries
@@ -32,6 +32,10 @@ relations:
 ---
 
 # a domain is routed to a registry by consumer configuration, a registry entry is a derived cache of the manifest it pins, and a locator is a hint outside the identity
+
+> edit, 2026-09-21: under [0080](0080-inputs-are-parameters.md) locators are written in the project
+> file's `inputs` block. the rules here, that routing is consumer configuration and never inherited, apply to
+> that block unchanged.
 
 > amends [0048](0048-pre-release-version-pinning.md): the rule that every pre-release format version stays
 > pinned at 1 applies to *format versions*. a monotonic rollback counter is not a format version, and the

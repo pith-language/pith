@@ -6,7 +6,7 @@ summary: load one transitive program, register represented rules, synthesize eac
 kind: decision
 status: proposed
 created: 2026-08-28
-updated: 2026-08-28
+updated: 2026-09-21
 tags:
   - cli
   - language
@@ -31,6 +31,11 @@ relations:
 ---
 
 # an entry is a represented pure request and the CLI exposes evaluation, explanation, selection, planning, and provenance without linking a domain
+
+> edit, 2026-09-21: amended by [0083](0083-outputs-and-commands.md). `entry` becomes `output`,
+> which other projects can also reference; `pith run` starts a program declared as `pith.Exec`; `pith exec` is
+> removed; `pith eval` and `pith test` are added. `pith graph select` goes with selection by type
+> ([0082](0082-rules-are-called-by-name-and-functions-are-values.md)).
 
 > amends [0057](0057-the-rule-index.md): one CLI process now constructs two engines over the same rule
 > table semantics. read-only selection registers declarations in a query-only in-memory engine that has

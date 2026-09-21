@@ -6,7 +6,7 @@ summary: module.pi declares a domain/name subject and path dependencies, a modul
 kind: decision
 status: accepted
 created: 2026-09-06
-updated: 2026-09-06
+updated: 2026-09-21
 tags:
   - modules
   - language
@@ -32,6 +32,12 @@ relations:
 ---
 
 # a local module is a declared subject with a manifest, a src tree, and module-local import bindings, loaded from an explicit root without a solver
+
+> edit, 2026-09-21: amended by [0079](0079-a-project-is-one-file.md). a project is one file with its
+> inputs and declarations, split only by `include`; the manifest/source split, source discovery under `src/`
+> and standalone mode are replaced. the declared subject, the subject-based ABI and the refusal to follow
+> symlinks stand. `use ... from path` clauses become the `inputs` block of
+> [0080](0080-inputs-are-parameters.md).
 
 > amends [0061](0061-the-declaration-artifact.md): the module ABI manifest no longer encodes imported module
 > names in module-name order. it encodes a sorted, deduplicated set of imported subject/ABI pairs. a local

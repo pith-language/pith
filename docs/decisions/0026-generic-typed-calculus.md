@@ -6,7 +6,7 @@ summary: one closed structural calculus of scalars, records, declared sums, para
 kind: decision
 status: accepted
 created: 2026-05-13
-updated: 2026-08-28
+updated: 2026-09-21
 tags:
   - types
   - language
@@ -27,6 +27,10 @@ relations:
 ---
 
 # a structural type calculus, with nominal identity, structural uncertainty, and no predicate types
+
+> edit, 2026-09-21: amended by [0081](0081-paths-are-values.md), which adds `Path`, `RelPath` and
+> `HostPath`, and by [0082](0082-rules-are-called-by-name-and-functions-are-values.md), which adds function
+> types and makes `map` a construct beside `fold`. the withdrawal of user-defined generics stands.
 
 > supersedes [0017: structural types by default, nominal by declaration](0017-structural-with-nominal.md), whose structural-default and nominal-by-declaration mechanism becomes one section of the calculus below. 0017 stays in the repository; its proposed direction is replaced by this record. amends [0010: use a typed, pure, terminating declaration language](0010-typed-pure-language.md), whose unresolved list names "nominal versus structural typing, termination checking, row polymorphism, refinement performance, schema evolution, and module compatibility"; this record settles the calculus questions among those and leaves termination (0018), schema evolution, and module compatibility to their own records.
 

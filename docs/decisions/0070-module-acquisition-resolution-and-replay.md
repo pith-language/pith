@@ -6,7 +6,7 @@ summary: two version spellings that compare equal are one version, every source 
 kind: decision
 status: proposed
 created: 2026-09-06
-updated: 2026-09-06
+updated: 2026-09-21
 tags:
   - modules
   - resolution
@@ -32,6 +32,10 @@ relations:
 ---
 
 # a module version is its canonical segment sequence, solving is a computation while consulting a lock is not, and how much authority a command has over its own inputs is one named mode
+
+> edit, 2026-09-21: acquisition starts from the `inputs` block of
+> [0080](0080-inputs-are-parameters.md), and the lock is written beside the project file
+> ([0079](0079-a-project-is-one-file.md)). the replay rules are unchanged.
 
 > amends [0067](0067-local-module-workspaces.md): manifest versions are no longer metadata that nothing
 > resolves against. a version is a canonical segment sequence under a declared scheme, two spellings that

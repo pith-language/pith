@@ -6,7 +6,7 @@ summary: chronological record of accepted and proposed architectural choices
 kind: decision
 status: active
 created: 2026-03-11
-updated: 2026-08-28
+updated: 2026-09-21
 tags:
   - decisions
 relations:
@@ -103,6 +103,12 @@ when an accepted decision changes, a new record supersedes it. the old record st
 - [0076: component execution follows the deterministic profile in a fresh store per computation, fuel is its bound, and exhausting a bound is a host fault that is never cached](0076-component-execution-is-deterministic-and-bounded.md)
 - [0077: until the first release every pith surface is experimental and may change without notice, and its correctness and confinement guarantees hold regardless](0077-pre-release-pith-is-experimental.md)
 - [0078: the kernel and pith:core gain an interface only when a domain being written needs it, in the most general form that serves it, and under the grant model](0078-kernel-surface-grows-on-demand.md)
+- [0079: a project is one file holding its inputs, declarations and outputs, and splits only by naming its other files](0079-a-project-is-one-file.md)
+- [0080: a project's inputs are its parameters, each with a default, and a consumer passes others with `with`](0080-inputs-are-parameters.md)
+- [0081: paths are values of three types, and a project path is identified by the content it names](0081-paths-are-values.md)
+- [0082: rules are called by name, functions are values, and behaviour reaches a library only by being passed](0082-rules-are-called-by-name-and-functions-are-values.md)
+- [0083: an output is a named value other projects and the cli can use, and each command needs an output of one declared type](0083-outputs-and-commands.md)
+- [0084: builtins are the language's own vocabulary, unqualified and fixed per language version, and facts about the machine enter a project only as input defaults](0084-builtins-and-machine-facts.md)
 
 note: 0013 amends 0005 to add a fifth identity type. 0005 stands; the amendment is recorded in 0013.
 
@@ -249,3 +255,7 @@ addition is therefore potentially breaking, the break belongs to a consumer's wh
 the edited module, the publisher's own check cannot see it, and no comparison of two versions of one module
 can prove an addition safe. the differ reports structure, context, and named-consumer evidence separately,
 and an unchanged structural report is not a compatibility proof.
+
+note, 2026-09-21: 0079 to 0084 replace how a project is written. 0082 supersedes the accepted 0015, and 0079
+amends the accepted 0067; both keep their text, with an edit note at the top pointing to the replacement.
+0065, 0026, 0056, 0069, 0070 and 0071 to 0074 carry edit notes for the parts that change.

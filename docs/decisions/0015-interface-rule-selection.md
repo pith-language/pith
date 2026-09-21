@@ -6,7 +6,7 @@ summary: rule selection matches typed requests against declared interfaces; more
 kind: decision
 status: accepted
 created: 2026-04-17
-updated: 2026-08-21
+updated: 2026-09-21
 tags:
   - rules
   - selection
@@ -22,6 +22,10 @@ relations:
 ---
 
 # select rules by interface match and refuse ambiguity
+
+> edit, 2026-09-21: superseded by [0082](0082-rules-are-called-by-name-and-functions-are-values.md).
+> rules are now called by name, and behaviour reaches a library by being passed. selection by interface, `ask`
+> and the ambiguity refusal are removed. the record below is kept as the history of the decision.
 
 ## context
 

@@ -6,7 +6,7 @@ summary: requirement U-10's "tests prove that an external library can replace or
 kind: decision
 status: proposed
 created: 2026-08-17
-updated: 2026-08-17
+updated: 2026-09-21
 tags:
   - libraries
   - kernel
@@ -23,6 +23,10 @@ relations:
 ---
 
 # peerhood is proven by a domain crate the kernel does not name, not by a plugin interface
+
+> edit, 2026-09-21: amended by [0082](0082-rules-are-called-by-name-and-functions-are-values.md).
+> with rules called by name, an external library shows it can replace a first-party one by being passed as an
+> input ([0080](0080-inputs-are-parameters.md)); the claim that the kernel names no domain is unchanged.
 
 > takes the requirement 0009 and 0004 both rest on, which 0021 names as its design criterion ("a new domain implementable without a core patch"), and supplies the evidence U-10 asks for in its own text and the workspace never had. 0009 and 0004 stand. what changes is that their central claim becomes a test that fails when it stops being true.
 
