@@ -50,6 +50,9 @@ each lineage starts with the pressure that created a system. it records the mech
 - [module distribution boundaries](module-distribution.md)
 - [registry supply-chain security](registry-supply-chain-security.md)
 - [wasm components as host code](wasm-components.md)
+- [declaring a project](project-declaration.md)
+- [passing behaviour](passing-behaviour.md)
+- [what run and test execute](run-and-test.md)
 
 the development-environments note draws mkShell from its nixpkgs source, `nix develop` and `nix print-dev-env` from the Nix manual, direnv's caching from its wiki, Guix's shells and containers, Spack's `spack.yaml`/`spack.lock` split, conda's environment files and their lockfile history, rustup's toolchain overrides, mise and asdf's pin files, the devcontainers specification, and PEP 405 from primary sources. it grounds decision 0043 and records the disagreement those systems never settled about whether an environment is a lock consumer, a lock producer, or a lock of its own.
 

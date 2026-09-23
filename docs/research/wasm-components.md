@@ -49,7 +49,7 @@ annotations. point releases now come every two months.
 
 the stability promise comes from the Bytecode Alliance and the subgroup. the component model is still a
 phase 1 proposal in the W3C community group's table (last changed 2026-08-10), the readme still calls
-the WASI releases "Developer Preview", and WASI 1.0 has no date. the explainer states the line: features
+the WASI releases "Developer Preview", and WASI 1.0 has no date. per the explainer, features
 that have shipped in a WASI release "are not open to breaking changes before the final 1.0 release", and
 everything else "may have breaking changes".
 
@@ -112,7 +112,7 @@ an instance's handle table and linear memory persist across calls, so a resource
 its handle until the owning handle is dropped. a `resource frame` with a `step` method would be a direct
 translation of `PureRuleFrame::step` in `crates/pith-engine/src/graph/ir.rs`, using only 0.2 features.
 
-two changes from the last month matter here. PR #705, merged 2026-08-28, removed the `may_enter` flag
+two changes landed in the last month. PR #705, merged 2026-08-28, removed the `may_enter` flag
 and its trap and added tests for re-entrant calls "that used to trap but are now valid". the concurrency
 document now tells hosts to re-enter a component only "when explicitly supported by the component's
 documented API", so a host that must not re-enter a guest mid-step has to enforce it. PR #728, merged
@@ -153,7 +153,7 @@ SIMD, GC and exception handling. aarch64 linux is tier 2 for lack of continuous 
 interpreter is tier 2 pending "more time fuzzing/baking". component-model async, streams, futures and
 WASI 0.3 are not listed in any tier, although Wasmtime 46 turned them on by default in june.
 
-the policy also says what the sandbox promises. a sandbox escape, an out-of-bounds access, or "use of a
+under the same policy, a sandbox escape, an out-of-bounds access, or "use of a
 WASI resource without having been given the associated WASI capability" is a vulnerability. "Execution
 that diverges from Wasm semantics (such as computing incorrect values) are not considered security
 vulnerabilities so long as they remain confined within the sandbox." embedders "should never blindly
@@ -214,6 +214,8 @@ completes. a guest can call `need(request)` and wait. the suspended call holds i
 finishes, and it cannot be serialized.
 
 ## systems that already do this
+
+eleven systems below run third-party wasm as an extension mechanism, grouped by project.
 
 ### Zed
 
@@ -331,37 +333,42 @@ limits, Zed its grants.
 ## result for this project
 
 the decisions are recorded in [0071](../decisions/0071-host-bodies-bind-through-host-adapters.md) to
-[0076](../decisions/0076-component-execution-is-deterministic-and-bounded.md). in the method's terms:
+[0076](../decisions/0076-component-execution-is-deterministic-and-bounded.md).
 
-- types: adopt the invariant through another mechanism. the `.pi` declarations stay the only definition,
-  and the WIT world is generated from them. the boundary is structural, so pith checks every returned
-  value against its declared type, as Wasmtime's policy tells embedders to. recursive types can still
-  cross, because pith allows only direct self-reference and such a value can be written as a node list
-  and a root index. `Int` crosses as a 64-bit case when it fits and as bytes otherwise.
-- determinism: adopt Typst's mechanism and fix its gap. no imports beyond pith's protocol, the
-  deterministic profile's settings, fuel as the only execution bound, and a fresh store per computation.
-- effects: adopt Shopify's split, which pith already has. a body returns requests and action plans, and
-  the engine and executor carry them out.
-- authority: adopt Spin's default. grants are written by the consuming project, per dependency, from the
-  first version, avoiding both Zed's late addition and Spin's all-or-nothing inheritance.
-- security: reject the position that no security claim is needed. pith runs code from unknown authors and
-  caches what it returns. the sandbox is one layer; checking returned values, authorizing plans, confining
-  actions, and running the wasm runtime in a confined process are the others. only tier 1 Wasmtime
-  configurations run third-party code.
-- API versions: adopt Zed's frozen versions. a separately versioned `pith:core` package, one frozen copy
-  per published version, with the host converting older versions to current types.
-- distribution: a component is content. the lock pins its digest, and OCI is a later transport.
-  precompiled artifacts are only produced and read on the machine that compiled them.
-- components or core modules: adopt components, and leave the question open for later adapters. WIT
-  generation gives a typed boundary for the `.pi` declarations, 0.3's async functions match the step
-  protocol, and rust support is best there. the argument in #157709 about maintaining a second ABI should
-  be revisited if the generator turns out to be expensive to maintain.
+for types, pith adopts the invariant through another mechanism. the `.pi` declarations stay the only
+definition and the WIT world is generated from them. because identity at the boundary is structural, pith
+checks every returned value against its declared type, which is also what Wasmtime's policy tells
+embedders to do. recursive types still cross, since pith allows only direct self-reference and such a
+value can be written as a node list and a root index. an `Int` crosses as a 64-bit case when it fits and as
+bytes when it does not.
 
-evidence still missing, all of which pith has to produce:
+for determinism, pith adopts Typst's mechanism and closes its gap: no imports beyond pith's own protocol,
+the deterministic profile's settings, fuel as the only execution bound, and a fresh store for each
+computation. Shopify's split between a function and the effects it requests is one pith already has: a
+body returns requests and action plans, and the engine and executor carry them out.
 
-- the cost of instantiating a component per computation, measured on pith's witness
-- the cost of crossing a process boundary on each step
-- whether 0.3 async, which Wasmtime does not assign a tier, holds up under fuzzing pith runs itself
+for authority, pith adopts Spin's deny-by-default. grants are written by the consuming project, per
+dependency, from the first version. Zed added its grants eighteen months after launch, and Spin's
+dependencies get either nothing or everything; neither is repeated.
+
+rustc's wasm proc-macro proposal lists security guarantees as a non-goal. pith cannot take that position,
+because it runs code from authors it does not know and caches what that code returns. the wasm sandbox is one
+layer. the others are checking returned values, authorizing plans, confining actions, and running the
+wasm runtime in a confined process. only tier 1 Wasmtime configurations run third-party code.
+
+API versions follow Zed: `pith:core` is versioned on its own, each published version is frozen, and the
+host converts results from older versions to current types. a component is content: the lock pins its
+digest, OCI is a later transport, and precompiled artifacts are produced and read only on the machine
+that compiled them.
+
+pith uses components. WIT generation gives the `.pi` declarations a typed boundary, 0.3's async functions
+fit the step protocol, and rust support is best there. the question stays open for later adapters, and
+the argument in rustc draft #157709 about maintaining a second ABI should be revisited if the generator
+turns out to be expensive to maintain.
+
+three pieces of evidence are missing, and pith has to produce them itself: the cost of instantiating a
+component per computation on pith's witness, the cost of crossing a process boundary on each step, and
+how 0.3 async, which Wasmtime assigns no tier, behaves under fuzzing pith runs.
 
 ## sources
 
