@@ -6,7 +6,7 @@ summary: the smallest shared substrate needed by every domain library
 kind: design
 status: proposed
 created: 2026-04-03
-updated: 2026-08-24
+updated: 2026-09-26
 tags:
   - architecture
   - kernel
@@ -60,6 +60,10 @@ the kernel can provide protocols these libraries use. it should not choose one p
 libraries define types, rules, effects, capabilities, planners, and adapters through public interfaces. first-party libraries use the same interfaces.
 
 there is no global mutable plugin registry. the loader resolves explicit imports before the kernel receives declarations and rules. typed provider selection determines which registered implementation answers a request; ambiguity is an error with an explanation.
+
+> edit, 2026-09-26: under [0082](../decisions/0082-rules-are-called-by-name-and-functions-are-values.md) there is
+> no provider selection. a call names its rule, locally or through an input, and behaviour a library needs is
+> passed to it as a value or an input ([0080](../decisions/0080-inputs-are-parameters.md)).
 
 ## design test
 

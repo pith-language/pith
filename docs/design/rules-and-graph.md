@@ -6,7 +6,7 @@ summary: typed requests, deterministic rule selection, and tracked dynamic depen
 kind: design
 status: proposed
 created: 2026-04-06
-updated: 2026-04-06
+updated: 2026-09-26
 tags:
   - rules
   - incrementality
@@ -20,6 +20,11 @@ relations:
 ---
 
 # rules and graph
+
+> edit, 2026-09-26: [0082](../decisions/0082-rules-are-called-by-name-and-functions-are-values.md)
+> replaces selection by type. a rule is called by name, locally or through an input, and functions are
+> values. the selection sentence and the "which rule can provide a type" query below describe the earlier
+> design.
 
 a request asks for a typed result. a rule explains how to derive one from input values and other requests.
 

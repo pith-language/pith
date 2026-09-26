@@ -6,7 +6,7 @@ summary: requirements for domain independence, evaluation, dependencies, effects
 kind: requirements
 status: proposed
 created: 2026-03-16
-updated: 2026-03-16
+updated: 2026-09-26
 tags:
   - requirements
   - kernel
@@ -48,6 +48,10 @@ effects require explicit scoped capabilities. authority propagates through compo
 ## K-7: deterministic rule resolution
 
 rule and provider selection returns one explained result or an ambiguity error. load and registration order cannot select behavior.
+
+> edit, 2026-09-26: under [0082](../decisions/0082-rules-are-called-by-name-and-functions-are-values.md) every
+> call names its rule, so there is no selection for load or registration order to influence, and the
+> requirement holds.
 
 ## K-8: public extension surface
 
