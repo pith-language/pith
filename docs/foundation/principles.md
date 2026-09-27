@@ -6,7 +6,7 @@ summary: the small set of rules constraining the architecture
 kind: foundation
 status: proposed
 created: 2026-02-26
-updated: 2026-02-26
+updated: 2026-09-27
 tags:
   - principles
   - semantics
@@ -44,6 +44,8 @@ the system should be able to answer where a value came from, which rule changed 
 rules declare what they need. effects declare what they can access. components declare the capabilities they require and provide.
 
 ambient filesystem access, environment variables, credentials, network access, and global registries are hidden dependencies. the normal path should make them impossible.
+
+behaviour a library needs is passed to it, as an argument, a value in its data, or an input its user supplies. what runs is never chosen by searching what is loaded. (added 2026-09-27, with [0082](../decisions/0082-rules-are-called-by-name-and-functions-are-values.md).)
 
 ## reject ambiguous composition
 

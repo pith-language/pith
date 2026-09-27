@@ -6,7 +6,7 @@ summary: working meanings for terms used across the design
 kind: foundation
 status: active
 created: 2026-03-25
-updated: 2026-03-25
+updated: 2026-09-27
 tags:
   - glossary
 relations:
@@ -80,9 +80,31 @@ a dependency on a source of variation outside the declared deterministic inputs:
 
 one concrete value or arrangement satisfying a declaration and its constraints.
 
+## function value
+
+a rule's identity plus arguments already bound to it. it is ordinary data, so it can be part of a computation key. a lambda is an anonymous rule identified by its body digest. (added 2026-09-27, [0082](../decisions/0082-rules-are-called-by-name-and-functions-are-values.md).)
+
+## input
+
+a parameter of a project: another project or a typed value, with a default, that a consumer can replace with `with`. (added 2026-09-27, [0080](../decisions/0080-inputs-are-parameters.md).)
+
+## output
+
+a named value a project provides to the command line and to other projects. it is a root in the graph and computes nothing until asked for. (added 2026-09-27, [0083](../decisions/0083-outputs-and-commands.md).)
+
+## path
+
+a value naming a location. `Path` is inside the project and identified by its content, `RelPath` is inside a tree, `HostPath` is on the machine. (added 2026-09-27, [0081](../decisions/0081-paths-are-values.md).)
+
+## project
+
+one file holding a project's inputs, declarations and outputs, plus the files it names with `include`. (added 2026-09-27, [0079](../decisions/0079-a-project-is-one-file.md).)
+
 ## rule
 
 a typed recipe for deriving a value from inputs and requests tracked by the graph.
+
+> edit, 2026-09-27: a rule is called by name and is a function value; see [0082](../decisions/0082-rules-are-called-by-name-and-functions-are-values.md).
 
 ## semantic identity
 
