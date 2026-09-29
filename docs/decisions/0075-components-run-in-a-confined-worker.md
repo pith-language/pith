@@ -62,7 +62,7 @@ sandbox escape in april 2026 and lacks the verified lowering rules Cranelift has
 third-party code.
 
 component-model async is used although it has no tier, and Wasmtime does not treat its bugs as
-vulnerabilities. the worker boundary is what pith relies on to contain them.
+vulnerabilities. pith relies on the worker boundary to contain them.
 
 ### precompiled artifacts
 
@@ -74,17 +74,17 @@ machine.
 
 ## alternatives considered
 
-running Wasmtime in the engine's process is faster and simpler. it puts untiered runtime code between
-third-party components and the engine's store, credentials and files.
+running Wasmtime in the engine's process is faster and simpler, but it leaves only untiered runtime code
+between third-party components and the engine's store, credentials and files.
 
 an opt-in in-process mode for trusted components would be a setting that weakens a check, which the
 principles rule out.
 
-one worker shared by all components would cost less. a component that escaped the sandbox could then
-read other domains' inputs.
+one worker shared by all components would cost less, but a component that escaped the sandbox could read
+other domains' inputs.
 
-compiling in the engine's process would expose it to compiler bugs; Wasmtime counts memory unsafety at
-compile time as a vulnerability, so such bugs exist in its threat model.
+compiling in the engine's process would expose it to compiler bugs. Wasmtime counts memory unsafety at
+compile time as a vulnerability, so its threat model includes such bugs.
 
 ## evidence
 

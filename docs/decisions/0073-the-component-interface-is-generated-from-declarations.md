@@ -26,13 +26,18 @@ relations:
 
 # a module's WIT world is generated from its declarations, and every value a component returns is checked against its declared type
 
+> edit, 2026-09-29: under [0082](0082-rules-are-called-by-name-and-functions-are-values.md) there is one
+> typed import per rule a body may call, where this record had one per requested interface, and a body that
+> receives a function value needs a typed import to call it. `Path`, `RelPath` and `HostPath`
+> ([0081](0081-paths-are-values.md)) need rows in the type table.
+
 ## context
 
 under [0071](0071-host-bodies-bind-through-host-adapters.md) a module's `.pi` declarations define its
 types and interfaces, and a host adapter binds its `= host` bodies. for the component adapter that
 binding needs a WIT world.
 
-[the research note](../research/wasm-components.md) records three facts that decide its shape. WIT has no
+[the research note](../research/wasm-components.md) records three facts that constrain it. WIT has no
 recursive types and no unbounded integer. type identity at the component boundary is structural: a
 record's name is not part of its type, so a WIT name cannot carry a pith nominal type. and Wasmtime's
 security policy tells embedders they "should never blindly trust values from the guest".
@@ -52,8 +57,8 @@ the world imports:
 - one typed import per interface in each host declaration's request list (0071)
 
 it exports one function per host declaration: an `async func` for a pure rule, and `plan` and `complete`
-for an action rule. because each allowed request is a separate import, a component that tries to request
-an undeclared interface fails to link.
+for an action rule. each allowed request is a separate import, so a component that requests an undeclared
+interface fails to link.
 
 ### names
 
@@ -100,7 +105,7 @@ the generator targets one WASI release at a time, currently 0.3.1. it uses async
 `stream`, and `implements` once a grant takes the form of an import. it does not use `map`, because pith
 has no map type (0047 removed it).
 
-the unshipped features are decided now, so that a new release only requires regenerating worlds:
+the use of each unshipped feature is decided now, so a new release only requires regenerating worlds:
 
 | feature | use |
 | --- | --- |
@@ -127,11 +132,11 @@ hand-written WIT beside the `.pi` declarations would be a second definition of t
 drift from the first.
 
 a generic `value` type in `pith:core`, with every request and result passed as encoded bytes, would avoid
-per-interface imports. it would also make the WIT boundary untyped, leaving `is_type` as the only check,
-and a guest could request any interface.
+per-interface imports. the WIT boundary would be untyped, `is_type` would be the only check, and a guest
+could request any interface.
 
-refusing recursive types at the boundary would be simpler. pith allows only direct self-reference, so the
-flattened form is mechanical, and refusing would rule out tree-shaped domain values.
+refusing recursive types at the boundary would be simpler, but it would rule out tree-shaped domain
+values. flattening is mechanical because pith allows only direct self-reference.
 
 `Int` as `s64`, refusing values that do not fit, would give up 0055's unbounded integer at the boundary.
 

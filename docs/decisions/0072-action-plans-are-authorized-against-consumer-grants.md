@@ -24,6 +24,10 @@ relations:
 
 # an action plan is authorized against grants written by the consuming project, and no module has authority without one
 
+> edit, 2026-09-29: amended by [0080](0080-inputs-are-parameters.md). grants are written on the input
+> they apply to, in the project file. the rules below stand: only the root project grants, no module has a
+> default grant, and a dependency cannot grant.
+
 ## context
 
 the engine has an authorization step. `ActionPolicy::authorize` in `crates/pith-engine/src/policy.rs`
@@ -35,7 +39,7 @@ can plan actions, whether through a represented body or a host adapter (0071), i
 principle that authority is explicit and with T-3, which asks that rules and adapters receive only the
 capabilities the current request needs.
 
-the systems in [the research note](../research/wasm-components.md) show two ways this goes wrong. Zed
+two systems in [the research note](../research/wasm-components.md) got this wrong in different ways. Zed
 shipped extensions without grants, reverted its first design the day after it landed, and added user-side
 grants about eighteen months after launch, with a warning that restricting them "will likely make many
 extensions non-functional". Spin denies by default, but a dependency either gets no resources or, with
@@ -64,7 +68,7 @@ root gets none so that everything a project allows is written in one place.
 ### a dependency cannot grant
 
 a dependency's manifest cannot grant anything, to itself or to another module. 0069 draws the same line
-for registry routing: authority a dependency can extend is authority the consumer cannot review. a grant
+for registry routing, because the consumer cannot review authority that a dependency extends. a grant
 clause in a dependency's manifest is diagnosed when the dependency is loaded.
 
 ### grants replace AllowAllActions
@@ -72,13 +76,13 @@ clause in a dependency's manifest is diagnosed when the dependency is loaded.
 the cli authorizes plans against the root's grants. `AllowAllActions` remains for tests of the engine
 itself.
 
-grants apply to plans whatever produced them: a represented body, a component, or the rust adapter. the
-engine authorizes the plan, so how the plan was computed does not change what it may use.
+grants apply to a plan whether a represented body, a component or the rust adapter produced it. the
+engine authorizes the plan itself, and how the plan was computed does not change what it may use.
 
 ### refusals say what is missing
 
-a refused plan reports the module, each requirement not covered, and the grant that would cover it, so the
-fix can be copied into the manifest after reading it. the authorization, allowed or denied, is recorded in
+a refused plan reports the module, each requirement not covered, and the grant that would cover it, which
+can be copied into the manifest. the authorization, allowed or denied, is recorded in
 the action's provenance, as T-3 requires of capability scopes.
 
 ### grants that become imports
@@ -91,14 +95,14 @@ first version; components import only `pith:core` and their declared requests (0
 ## alternatives considered
 
 keeping `AllowAllActions` until a registry exists would leave path dependencies, the only kind that works
-today, with full authority. a module copied from anywhere would have it.
+today, with full authority, including any module copied into a project from elsewhere.
 
-a grant set declared by the module itself and approved by the user is Zed's current model. it puts the
-first draft of authority in the dependency's hands, and approval prompts tend to be accepted without
-reading. writing the grant in the consumer's manifest keeps it in reviewed, committed text.
+a grant set declared by the module itself and approved by the user is Zed's current model. the dependency
+writes the first draft of its own authority, and approval prompts tend to be accepted without reading. a
+grant in the consumer's manifest is committed text that goes through the consumer's review.
 
-implicit grants for the first-party domains would be simpler for the first run of `xylem`. they would also
-be the privilege 0004 rules out.
+implicit grants for the first-party domains would make the first run of `xylem` simpler, but they are the
+privilege 0004 rules out.
 
 ## evidence
 

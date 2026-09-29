@@ -30,8 +30,8 @@ the milestones so far built the kernel together with three first-party domains, 
 `stele`, and planned more. the next milestone instead makes it possible for a domain written outside the
 repository to run (0071 to 0076), and leaves further first-party domains for later.
 
-that raises the question of how the kernel and `pith:core` grow once outside authors use them. without a
-rule, interfaces get added because they might be useful, or shaped around the first domain that asked.
+this record decides how the kernel and `pith:core` grow once outside authors use them. without a rule,
+interfaces get added because they might be useful, or shaped around the first domain that asked.
 
 ## decision
 
@@ -43,8 +43,8 @@ what it could not do.
 
 ### the general form
 
-the interface is stated in terms that do not mention the domain that asked for it. `ActionSpec` is the
-model: it describes running a program with declared inputs, outputs, capabilities and network policy, and
+the interface is stated in terms that do not mention the domain that asked for it, as `ActionSpec` is:
+it describes running a program with declared inputs, outputs, capabilities and network policy, and
 knows nothing about compilers. a request for "compile C" becomes whatever general interface compiling C
 needs, if the existing ones are not enough.
 

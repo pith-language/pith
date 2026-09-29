@@ -28,6 +28,12 @@ relations:
 
 # a host body binds through a host adapter named in the module's manifest, and its revision is derived from the artifact
 
+> edit, 2026-09-29: the `host` clause moves into the project file
+> ([0079](0079-a-project-is-one-file.md)) and names the component with a path value, `host wasm-component
+> ./host/render.wasm` ([0081](0081-paths-are-values.md)). read `module.pi` below as the project file. the
+> request list becomes the list of rules a host body may call, since requests are calls of named rules
+> ([0082](0082-rules-are-called-by-name-and-functions-are-values.md)).
+
 ## context
 
 a module written outside this repository can declare types and rules in `.pi`, and its represented pure
@@ -35,11 +41,11 @@ bodies run. its `= host` declarations do not. `bind_module` in `crates/pith-quer
 each of them to a diagnostic reading "the CLI links no domain crate", and 0065 lists host implementation
 binding as unresolved. the only host code pith can run is rust compiled into the binary, so only domains
 in this repository can have host bodies. 0004 and U-10 require that first-party code has no path that
-third-party code lacks, and this is one.
+third-party code lacks, and linking into the binary is such a path.
 
 host revisions are also maintained by hand. a host rule carries a `BodyRevision(u32)` that its author has
 to bump when the body's meaning changes. if the author forgets, caches keep serving results computed by
-the old body, and nothing detects it.
+the old body, and no check catches it.
 
 this record defines how any host body is bound. [0073](0073-the-component-interface-is-generated-from-declarations.md)
 through [0076](0076-component-execution-is-deterministic-and-bounded.md) define the first adapter, for
@@ -76,8 +82,8 @@ module acme/render 0.1.0
 host wasm-component from path "host/render.wasm"
 ```
 
-the adapter is named explicitly and not inferred from a file extension. a module has at most one `host`
-clause.
+the adapter is named explicitly; pith does not infer it from a file extension. a module has at most one
+`host` clause.
 
 the path is relative to the module root, and the file is part of the module's source content, admitted
 and identified the same way as its `.pi` files. the module's content identity covers it, so the manifest
@@ -91,9 +97,9 @@ registered.
 ### a host declaration lists what it may request
 
 the engine can see every request a represented body makes, because the body is data. a host body is
-opaque, and nothing currently says what it may ask for. a host declaration therefore lists the interfaces
-its body may request. the list is part of the rule's revision and not of the module's ABI, since callers
-depend on a rule's answer and not on how it is computed. the notation decides how the list is spelled;
+opaque, and nothing currently says what it may ask for, so a host declaration lists the interfaces its
+body may request. the list is part of the rule's revision. it is not part of the module's ABI, because
+callers depend on a rule's answer and the list only describes how the answer is computed. the notation decides how the list is spelled;
 this record only requires that it exists and is complete.
 
 an adapter must make an undeclared request impossible or refuse it. the component adapter does it at
@@ -102,29 +108,29 @@ link time (0073); the rust adapter checks each request against the list at run t
 ### the revision is derived from the artifact
 
 the revision of a rule served by an artifact is a digest over the adapter's name and protocol version,
-the artifact's content identity, the export name, the declared request list and the interface. a rule
-cannot change meaning without changing revision, because the revision is computed from the bytes that
-implement it. `BodyRevision` remains only for the rust adapter.
+the artifact's content identity, the export name, the declared request list and the interface. since it
+is computed from the bytes that implement the rule, the rule cannot change meaning without changing
+revision. `BodyRevision` remains only for the rust adapter.
 
-this is coarse. any change to an artifact changes the revision of every rule it serves, and their results
-are recomputed. the engine's existing equality pruning limits how far that goes, since a dependent whose
+the cost is coarseness. any change to an artifact changes the revision of every rule it serves, and
+their results are recomputed. the engine's existing equality pruning limits the spread: a dependent whose
 inputs come back equal is reused.
 
 ### domains meet through requests
 
 an artifact cannot link against another domain's artifact. domains reach each other through requests,
-which the engine records, caches and can explain; linking artifacts directly would bypass all three.
+which the engine records, caches and can explain. a direct link between artifacts would do none of these.
 
 ## alternatives considered
 
-keeping `BodyRevision` for artifacts would let an author ship a changed component under an old revision.
-the digest is available, so there is no reason to trust a hand-maintained number instead.
+keeping `BodyRevision` for artifacts would let an author ship a changed component under an old revision,
+and the digest already gives a revision without author upkeep.
 
-inferring the adapter from the artifact's file extension or magic bytes would work for one adapter and
-turn a second one into a guess.
+inferring the adapter from the artifact's file extension or magic bytes works while there is one adapter
+and becomes ambiguous once there are two.
 
 letting each host declaration name its own artifact would allow one module to mix adapters. nothing needs
-that yet, and one `host` clause per module keeps the revision rule and the load-time checks simple.
+that yet, and with one `host` clause per module the revision rule and the load-time checks stay simple.
 
 ## evidence
 
@@ -141,4 +147,4 @@ this record. for binding specifically:
 the spelling of the request list belongs to the notation.
 
 whether the in-tree domains move to components, stay on the rust adapter, or become `.pi` with
-represented bodies is open. with the rust adapter, none of them has to move for this record to hold.
+represented bodies is open. the rust adapter means none of them has to move for this record to hold.

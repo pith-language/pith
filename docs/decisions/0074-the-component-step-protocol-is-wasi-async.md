@@ -24,6 +24,9 @@ relations:
 
 # a component body requests computations by awaiting WASI 0.3 async imports, and requests issued before any is answered form a batch
 
+> edit, 2026-09-29: a request is now a call of a named rule
+> ([0082](0082-rules-are-called-by-name-and-functions-are-values.md)). the batching and ordering below are unchanged.
+
 ## context
 
 a host pure rule in the engine is a `PureRuleFrame` whose `step` takes the previous answer and returns the
@@ -48,14 +51,14 @@ so they are treated as a declared batch in the sense of 0029.
 
 the adapter runs the guest until all of its tasks are waiting, collects the requests issued in that time
 in issue order, and yields them to the engine: `Need` for one request, `NeedAll` for several pure
-requests. requests of mixed kinds are yielded as consecutive steps in issue order, which gives up
-parallelism and does not change the result.
+requests. requests of mixed kinds are yielded as consecutive steps in issue order. this gives up
+parallelism; the result is the same.
 
 ### answers are delivered in a fixed order
 
 when the engine resumes, all answers of the batch are delivered in issue order before the guest runs
-again. what the guest observes therefore depends only on its inputs and not on the order in which the
-engine finished the requests.
+again, so what the guest observes does not depend on the order in which the engine finished the
+requests.
 
 ### no re-entrance
 
@@ -74,8 +77,8 @@ a synchronous `frame` resource with a `step` method maps directly onto `PureRule
 machine and build batches by hand. it is the fallback if the async protocol fails the fuzzing below. if
 adopted, it replaces the async protocol; the two are not offered side by side.
 
-delivering answers as they complete would let a guest start work earlier. it would also make the guest's
-execution depend on engine scheduling, which 0076's determinism rules out.
+delivering answers as they complete would let a guest start work earlier, but the guest's execution would
+then depend on engine scheduling, which 0076's determinism rules out.
 
 ## evidence
 

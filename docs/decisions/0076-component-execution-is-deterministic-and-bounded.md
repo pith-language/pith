@@ -30,12 +30,12 @@ relations:
 pith caches a pure rule's result under its computation key and replays it. a component's result is safe
 to cache only if it depends on nothing but the rule's inputs and answers.
 
-[the research note](../research/wasm-components.md) records the relevant facts. the WebAssembly 3.0
+from [the research note](../research/wasm-components.md): the WebAssembly 3.0
 specification defines a deterministic profile covering NaN bit patterns and relaxed SIMD. threads, stack
 exhaustion and host imports remain sources of nondeterminism. Typst reuses plugin instances and cannot
 detect a plugin that keeps state between calls. Wasmtime documents fuel as deterministic, but its fuel
-accounting changed in versions 46 and 49. and Wasmtime does not count a wrong result that stays inside
-the sandbox as a vulnerability.
+accounting changed in versions 46 and 49. Wasmtime does not count a wrong result that stays inside the
+sandbox as a vulnerability.
 
 ## decision
 
@@ -74,13 +74,13 @@ and compares the results. it runs only when asked for and does not affect cache 
 
 ## alternatives considered
 
-epoch interruption alone is faster, up to two or three times by Wasmtime's measurements, and is driven by
-a timer, so whether a body finishes would depend on machine load.
+epoch interruption alone is faster, up to two or three times by Wasmtime's measurements, but it is driven
+by a timer, so whether a body finishes would depend on machine load.
 
 caching a fuel exhaustion as a failure would make a result depend on the Wasmtime release that produced
 it.
 
-reusing instances between computations of one component would save instantiation time and allow state to
+reusing instances between computations of one component would save instantiation time, but state could
 leak between computations, as it can in Typst.
 
 ## evidence
@@ -88,7 +88,7 @@ leak between computations, as it can in Typst.
 - the cost of instantiating a component per computation is measured on the witness, with a target stated
   before measuring. the only published figure, 5 microseconds for one core module in 2022, does not cover
   components
-- a component that runs out of fuel, memory or stack produces a host fault and leaves no cached result
+- a component that runs out of fuel, memory or stack produces a host fault, and nothing is cached
 - a component that writes global state in one computation cannot observe it in the next
 - the verification query reports a mismatch when one backend is made to return a different value
 
@@ -97,5 +97,5 @@ leak between computations, as it can in Typst.
 there is no default fuel budget. Shopify's instruction limit is its users' most frequent complaint, and
 pith's default should come from the witness's measured use.
 
-the second backend for verification is not chosen. Pulley is the obvious candidate and is tier 2, which is
+the second backend for verification is not chosen. Pulley is the likely candidate. it is tier 2, which is
 acceptable for a check that runs inside the worker and only compares.
