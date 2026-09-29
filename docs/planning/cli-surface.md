@@ -6,7 +6,7 @@ summary: one binary whose commands are thin clients of one query api, a grouping
 kind: planning
 status: draft
 created: 2026-08-25
-updated: 2026-08-28
+updated: 2026-09-29
 tags:
   - planning
   - tooling
@@ -22,6 +22,11 @@ relations:
 ---
 
 # the cli surface
+
+> edit, 2026-09-29: [0083](../decisions/0083-outputs-and-commands.md) changes the daily loop. entries become
+> outputs; `pith eval` shows a value; `pith run` starts an output declared as `pith.Exec`; `pith exec` is
+> removed; `pith test` reports outputs declared as `pith.Verdict`. `pith graph select` is removed with selection
+> by type. the tables below describe the earlier surface.
 
 this is the cli half of round six of [the language frontend](frontend/language.md), folded into M-13
 because a notation has to be invocable before a person can test it. M-13 implements this surface through

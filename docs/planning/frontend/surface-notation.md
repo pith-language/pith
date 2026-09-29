@@ -6,7 +6,7 @@ summary: five request constructs matching the step protocol, rules whose interfa
 kind: planning
 status: draft
 created: 2026-08-18
-updated: 2026-08-24
+updated: 2026-09-29
 tags:
   - planning
   - language
@@ -24,6 +24,11 @@ relations:
 ---
 
 # the surface notation
+
+> edit, 2026-09-29: [0082](../../decisions/0082-rules-are-called-by-name-and-functions-are-values.md) removes the
+> `ask` request constructs: a rule is called by name, and `map` joins `fold` as a construct.
+> [0083](../../decisions/0083-outputs-and-commands.md) replaces entry points with outputs. the constructs below
+> describe the earlier notation.
 
 this is the surface notation, round four of [the language frontend](language.md).
 

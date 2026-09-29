@@ -6,7 +6,7 @@ summary: three layers from a bare name to bytes, sources as routes rather than i
 kind: planning
 status: draft
 created: 2026-08-17
-updated: 2026-09-06
+updated: 2026-09-29
 tags:
   - planning
   - language
@@ -24,6 +24,11 @@ relations:
 ---
 
 # the module system
+
+> edit, 2026-09-29: [0079](../../decisions/0079-a-project-is-one-file.md) and
+> [0080](../../decisions/0080-inputs-are-parameters.md) replace the manifest and `src/` layout with one project
+> file holding its inputs and declarations. the parts below about manifests, source discovery and `use`
+> clauses describe the earlier layout.
 
 this is round five of [the language frontend](../frontend/language.md), and its subject is modules, imports
 and dependencies.

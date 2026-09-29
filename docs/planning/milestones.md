@@ -28,16 +28,56 @@ outside domains need them ([0078](../decisions/0078-kernel-surface-grows-on-dema
 
 ## the order
 
-M-16 is next. nothing else is scheduled. the rest of M-14, and M-15, M-5b, M-6 and M-7, are parked and
-have no order among themselves.
+M-17 is next, then M-16. nothing else is scheduled. the rest of M-14, and M-15, M-5b, M-6 and M-7, are
+parked and have no order among themselves.
+
+> edit, 2026-09-29: M-17 was added ahead of M-16, because M-16's witness is written in the project form
+> M-17 introduces.
 
 M-1 to M-5a and M-8 to M-13 are complete, and M-14 is complete as far as local workspaces, the acquisition
 boundary and the first routing checks. the evidence is in
 [what the completed milestones measured](measured.md).
 
-labels are identities and do not say where a milestone sits. the order is the one stated in this section.
+labels identify milestones and do not encode their order, which is stated in this section.
+
+## M-17: the explicit project model
+
+a project is one file with its inputs, declarations and outputs; inputs are parameters with defaults;
+paths are values; rules are called by name and functions are values; commands need an output of a declared
+type; builtins are the language's own vocabulary, and facts about the machine enter only through inputs.
+
+the records:
+
+- [0079](../decisions/0079-a-project-is-one-file.md): one project file, `include`, the lock beside it
+- [0080](../decisions/0080-inputs-are-parameters.md): inputs as parameters, `with`, grants on inputs
+- [0081](../decisions/0081-paths-are-values.md): `Path`, `RelPath` and `HostPath`
+- [0082](../decisions/0082-rules-are-called-by-name-and-functions-are-values.md): calls by name and
+  function values, replacing selection by type
+- [0083](../decisions/0083-outputs-and-commands.md): outputs, `pith eval`, `pith run`, `pith test`, test
+  caching and `pith env`
+- [0084](../decisions/0084-builtins-and-machine-facts.md): builtins and machine facts
+
+the evidence behind them is in [declaring a project](../research/project-declaration.md),
+[passing behaviour](../research/passing-behaviour.md) and [what run and test execute](../research/run-and-test.md).
+
+*measured claim:* the local-workspace example rewritten as two project files, one using the other's
+outputs and passing it an argument, gives the same results as today's form. an edit to one source file
+recomputes exactly the computations that read it, a lambda with a bound value is cached and recomputed when
+the value changes, and each refusal the records list is a test.
+
+the likely order of work inside it:
+
+1. the project file grammar, `include`, and the lock, replacing the manifest and `src/` loading
+2. path values and their admission into the content store
+3. calls by name, function values and `map`, and removing selection by type from the engine and the CLI
+4. inputs as parameters, `with`, the replacement check, and grants on inputs
+5. outputs and the commands, including test caching and `pith env`
+6. the builtin rules and machine facts
 
 ## M-16: an external domain runs
+
+> edit, 2026-09-29: M-16 now follows M-17, and its witness is written as a project file. the `host` clause
+> and grants move into that file (edits on 0071 and 0072).
 
 a module outside the workspace declares its types and rules in `.pi`, ships its host bodies as a
 WebAssembly component, is loaded by path, and runs.
@@ -67,8 +107,8 @@ three costs are measured, each against a target stated before measuring: instant
 computation, one step across the worker boundary, and a batch of requests compared with the same requests
 one at a time.
 
-M-16 uses only the module system that exists now, path dependencies and workspaces. it needs none of the
-parked M-14 work.
+M-16 uses only the module system that exists now, path dependencies and workspaces, and none of the parked
+M-14 work.
 
 the likely order of work inside it:
 
@@ -112,16 +152,31 @@ moved to it (see the research note).
 
 a peer domain library in the shape of `stdenv.mkDerivation`, authored in `.pi`, with host bodies as
 components where it needs them. 0045's shape, a package's build running as one pure rule over xylem's
-compile and link entries file by file, proves the identity, lock and substitution machinery and is not the
-packaging story.
+compile and link entries file by file, proves the identity, lock and substitution machinery; it is not a
+packaging design.
 
-`Opaque`'s step protocol lands here, because a foreign build is the caller that needs it. `Opaque` is
-currently `pub struct Opaque;` and `effect_category!(Opaque, false)` and nothing else. running a foreign
-build as a plain `Action` works, but an action's contract claims what happened, and for a foreign build
-that claim is false, so the run would overclaim in provenance.
+`Opaque`'s step protocol lands here, because a foreign build is the caller that needs it. `Opaque`
+currently consists of `pub struct Opaque;` and `effect_category!(Opaque, false)`. a foreign build can run
+as a plain `Action`, but an action's contract claims what happened, and for a foreign build that claim is
+false, so its provenance would claim more than happened.
 
-M-8's backstop is a prerequisite, because a configure script runs hundreds of small probe programs and a
-hung one is otherwise unbounded, and so is the allowlist widening 0028 predicted and has measured twice.
+two things are prerequisites: M-8's backstop, because a configure script runs hundreds of small probe
+programs and a hung one is otherwise unbounded, and the allowlist widening 0028 predicted and has measured
+twice.
+
+> edit, 2026-09-29: notes from the discussion of packaging toolchains with pith, for when this resumes.
+>
+> - packaging toolchains, recipes, the bootstrap seed and the choice of install location are domain work.
+>   the kernel is asked for two things, under 0078 when a domain needs them: action inputs and outputs at
+>   declared absolute paths inside a private mount namespace, and fetching allowed only with a declared
+>   output digest the engine checks.
+> - a configure-and-make build sandboxed over declared trees has an accurate contract, so it is a coarse
+>   `Action`, not an `Opaque`. 0032's rule that one action is one tool invocation assumed confinement by
+>   host paths and needs amending. `Opaque` stays for work that cannot be sandboxed.
+> - 0019 says an `Opaque` is cached like a Nix derivation, while `effect.rs` has `CACHEABLE_AS_RESULT =
+>   false`; the record that builds `Opaque` settles which.
+> - with toolchains as content, xylem no longer needs `nix path-info` at run time; importing a Nix closure
+>   becomes one way to obtain a toolchain tree, as 0020 intends.
 
 ### M-5b: Linux system activation
 
@@ -156,7 +211,7 @@ richer transition protocols.
 
 ## what the completed milestones still owe
 
-the evidence is in [measured](measured.md). what is listed here is work, not evidence.
+the evidence is in [measured](measured.md); this section lists the remaining work.
 
 M-1 owes nothing. operational support for `Observation` landed in M-9; `Mutation` and `Opaque` wait on
 M-5b and M-15.
@@ -223,11 +278,13 @@ checks, with the published-surface probes of
 
 ## how the order got here
 
+the order has changed three times. each change is kept here with the reason given at the time.
+
 ### domains first, until M-5a
 
 the first sequence built domain libraries out to deployment before anything read them. M-1 gave the
 reason: "the first implementation should test the kernel through real domain libraries instead of
-polishing syntax around an unproven engine." M-4 made that testable and M-5a answered it. `stele` declared
+polishing syntax around an unproven engine." M-4 made that testable, and M-5a answered it: `stele` declared
 twelve types using only constructors that already existed and needed no engine, core or encoding change.
 
 ### the frontend before more domains, from 2026-08-21
@@ -244,18 +301,18 @@ record moved ahead of the IR constructor set as M-9, because a variant added to 
 encoding was fixed would have changed every represented body's digest.
 
 before M-10, a spike tested the frontend architecture's latency assumption: that re-elaborating an edited
-module is fast enough without an in-process incremental layer. two hundred generated modules, a
+module is fast enough without an in-process incremental layer. it used two hundred generated modules, a
 throwaway parser and elaborator, and the 50 ms keystroke target. the edited module's path measured
 105.6 microseconds at p50 and 117.3 at p99, and the whole set elaborated cold in 21.9 ms. the number is
 recorded in [the frontend architecture](frontend/architecture.md) and the code was discarded.
 
-the labels were kept rather than renumbered, because records cite `M-5b`, `M-6` and `M-7` by name, and
-renumbering would have meant editing records to express an order.
+the labels were not renumbered, because records cite `M-5b`, `M-6` and `M-7` by name and would have had to
+be edited to express an order.
 
 ### finishing the design, from 2026-09-29
 
-the order after M-13 continued into the rest of the module system and then into more first-party
-libraries: the generic builder, system activation, deployment. none of that is needed to show an outside
+the order after M-13 went on to the rest of the module system and then to more first-party libraries:
+the generic builder, system activation, deployment. none of these is needed to show an outside
 domain running, and each would have added first-party code that an outside domain could not match, since
 a host body could only be rust compiled into the binary. M-16 removes that restriction, and the rest is
 parked until it is done.

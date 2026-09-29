@@ -6,7 +6,7 @@ summary: explicit manifests, declared subjects, path dependencies, and workspace
 kind: planning
 status: draft
 created: 2026-09-06
-updated: 2026-09-06
+updated: 2026-09-29
 tags:
   - planning
   - language
@@ -23,6 +23,11 @@ relations:
 ---
 
 # module workspaces
+
+> edit, 2026-09-29: [0079](../../decisions/0079-a-project-is-one-file.md) and
+> [0080](../../decisions/0080-inputs-are-parameters.md) replace the manifest and `src/` layout with one project
+> file holding its inputs and declarations. the parts below about manifests, source discovery and `use`
+> clauses describe the earlier layout.
 
 this is the first implementation slice of M-14, not the whole milestone. a person can declare two
 local modules, import a dependency through a manifest binding, run a pure entry, and inspect its reuse
