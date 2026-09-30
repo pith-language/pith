@@ -136,17 +136,19 @@ fn child_sandbox_hook(paths: &SandboxPaths, filter: &SeccompFilter) -> io::Resul
 /// Expand a list of `libc` syscall constants into `(number, name)` pairs. The
 /// name is the constant's own spelling, so the two cannot disagree.
 #[cfg(target_arch = "x86_64")]
-macro_rules! allowlist {
+macro_rules! syscall_pairs {
     ($($syscall:ident),+ $(,)?) => {
         &[$((libc::$syscall, stringify!($syscall))),+]
     };
 }
 
 /// The syscalls a build action may issue on x86_64. Deny-by-default: an entry
-/// here is permission, and anything absent is `SIGSYS`. Drawn from measurement;
-/// another architecture needs its own list, not a translation of this one.
+/// here is permission, and anything absent is `SIGSYS` unless
+/// [`DEGRADED_SYSCALLS`] names it, which gets an errno instead. Drawn from
+/// measurement; another architecture needs its own list, not a translation of
+/// this one.
 #[cfg(target_arch = "x86_64")]
-const ALLOWED_SYSCALLS: &[(libc::c_long, &str)] = allowlist![
+const ALLOWED_SYSCALLS: &[(libc::c_long, &str)] = syscall_pairs![
     // Byte and file-descriptor I/O, the floor for any program. `newfstatat`
     // is the form glibc actually issues, rather than the plain `fstat`;
     // `statx` is what modern coreutils probe with.
@@ -258,6 +260,9 @@ const ALLOWED_SYSCALLS: &[(libc::c_long, &str)] = allowlist![
     SYS_getegid,
     SYS_getresuid,
     SYS_getresgid,
+    // The supplementary-group member of the identity family above. Measured
+    // caller: coreutils `id`.
+    SYS_getgroups,
     // `sh` reads the kernel release at startup, and the reply says nothing
     // about the filesystem the ruleset confines.
     SYS_uname,
@@ -276,6 +281,19 @@ const ALLOWED_SYSCALLS: &[(libc::c_long, &str)] = allowlist![
     // the nscd door during an ordinary compile. `connect` follows because no
     // other socket can exist to connect.
     SYS_connect,
+];
+
+/// The syscalls the filter refuses with `ENOSYS` rather than a kill: the
+/// send and receive halves of the nscd conversation the allowlist opens the
+/// door for. glibc falls back to local files, as on a host without nscd.
+#[cfg(target_arch = "x86_64")]
+const DEGRADED_SYSCALLS: &[(libc::c_long, &str)] = syscall_pairs![
+    SYS_sendto,
+    SYS_sendmsg,
+    SYS_recvfrom,
+    SYS_recvmsg,
+    SYS_readv,
+    SYS_poll,
 ];
 
 /// The syscalls allowed only for a particular first argument. Each is emitted
@@ -372,6 +390,10 @@ fn build_program() -> Vec<libc::sock_filter> {
     for &(number, _name) in ALLOWED_SYSCALLS {
         program.push(compare(syscall_word(number), 0, 1));
         program.push(ret(libc::SECCOMP_RET_ALLOW));
+    }
+    for &(number, _name) in DEGRADED_SYSCALLS {
+        program.push(compare(syscall_word(number), 0, 1));
+        program.push(ret(errno_action(libc::ENOSYS)));
     }
     for entry in ARGUMENT_FILTERED_SYSCALLS {
         // Each block reloads `nr` so it does not depend on what the block
@@ -499,6 +521,18 @@ mod tests {
     }
 
     #[test]
+    fn the_degraded_list_errors_instead_of_killing() {
+        let program = build_program();
+        for &(number, name) in DEGRADED_SYSCALLS {
+            assert_eq!(
+                run(&program, number, 0),
+                errno_action(libc::ENOSYS),
+                "{name} is degraded but the program does not refuse it with ENOSYS"
+            );
+        }
+    }
+
+    #[test]
     fn an_argument_filtered_syscall_is_allowed_only_for_its_argument() {
         let program = build_program();
         for entry in ARGUMENT_FILTERED_SYSCALLS {
@@ -560,6 +594,7 @@ mod tests {
         let mut numbers: Vec<libc::c_long> = ALLOWED_SYSCALLS
             .iter()
             .map(|&(n, _)| n)
+            .chain(DEGRADED_SYSCALLS.iter().map(|&(n, _)| n))
             .chain(ARGUMENT_FILTERED_SYSCALLS.iter().map(|e| e.number))
             .collect();
         numbers.sort_unstable();
@@ -568,7 +603,7 @@ mod tests {
         assert_eq!(
             numbers.len(),
             count,
-            "the allowlist repeats a syscall number"
+            "the syscall lists repeat a number across their boundaries"
         );
     }
 

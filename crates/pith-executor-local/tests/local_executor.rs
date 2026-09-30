@@ -217,6 +217,32 @@ async fn a_forbidden_syscall_kills_the_child() {
 }
 
 #[tokio::test]
+async fn a_local_name_lookup_degrades_instead_of_killing_the_child() {
+    let executor = LocalExecutor::new();
+    if !shell_present() {
+        eprintln!("skipping: /bin/sh is not readable");
+        return;
+    }
+    // `id` resolves the user by name, so the confined child runs the nscd
+    // conversation the filter must degrade rather than kill (decision 0028).
+    let invocation = invocation("id > result", "x");
+    let captured = executor
+        .execute(&invocation)
+        .await
+        .expect("a child that looks a name up completes");
+    let output = captured.report.outputs.first().expect("one output");
+    let bytes = match &output.content {
+        pith_engine::CapturedOutputContent::Blob(bytes) => bytes,
+        _ => unreachable!("the fixture declares a blob output"),
+    };
+    let text = String::from_utf8_lossy(bytes);
+    assert!(
+        text.starts_with("uid="),
+        "id should have reported the user, got: {text}"
+    );
+}
+
+#[tokio::test]
 async fn an_undeclared_path_is_denied_by_the_ruleset() {
     let executor = LocalExecutor::new();
     if !shell_present() {
