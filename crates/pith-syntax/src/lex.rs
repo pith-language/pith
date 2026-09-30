@@ -62,9 +62,11 @@ pub(crate) const KEYWORDS: &[&str] = &[
     "inputs", "include",
 ];
 
-/// The clause-opening words of the header grammar, for the item parser's
-/// wrong-document diagnostic: a file that holds declarations only cannot
-/// open any of them.
+/// The clause-opening words of the header grammar, in the header's fixed
+/// order, for the item parser's wrong-document diagnostic: a file that
+/// holds declarations only cannot open any of them. The parser holds the
+/// same words with the stage each opens, and a unit test there keeps the
+/// two lists one list.
 pub(crate) const HEADER_CLAUSES: &[&str] = &["module", "inputs", "host", "workspace", "include"];
 
 pub(crate) fn lex(source: &Arc<SourceFile>) -> (Vec<Token>, Vec<Diag>) {

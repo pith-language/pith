@@ -412,3 +412,20 @@ fn set_singleton<T>(
         *slot = Some(parsed);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ORDERED_CLAUSES;
+
+    /// The lexer's wrong-document diagnostic and this parser's ordering
+    /// spell the same words in the same order, so a clause added to one
+    /// table and not the other fails here rather than passing silently.
+    #[test]
+    fn the_header_clause_tables_are_one_list() {
+        let ordered = ORDERED_CLAUSES
+            .iter()
+            .map(|(word, _)| *word)
+            .collect::<Vec<_>>();
+        assert_eq!(ordered.as_slice(), crate::lex::HEADER_CLAUSES);
+    }
+}
