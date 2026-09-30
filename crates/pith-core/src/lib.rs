@@ -26,14 +26,17 @@ pub use body_codec::BODY_ENCODING_VERSION;
 pub use declaration::{
     Coordinate, Declaration, DeclarationBody, DeclarationError, DeclarationTable,
 };
-pub use effect::{Action, EffectCategory, Mutation, Observation, Opaque, Pure};
+pub use effect::{
+    Action, ComputationCategory, EffectCategory, EffectKind, Mutation, Observation, Opaque, Pure,
+};
 pub use int::{Int, OutOfRangeError};
 pub use pith_ids::BodyIrDigest;
 pub use pith_ids::DeclarationDigest;
+pub use pith_ids::ManifestDigest;
 pub use pith_ids::{RuleIdentity, RuleRevision};
 pub use rule::{
-    ActionComputationKey, BodyRevision, Interface, ObservationComputationKey, PureComputationKey,
-    Request, Rule, RuleArena, RuleId, RuleTable, RuleTier, SelectOutcome,
+    ActionComputationKey, BodyRevision, ComputationKey, Interface, ObservationComputationKey,
+    PureComputationKey, Request, Rule, RuleArena, RuleId, RuleTable, RuleTier, SelectOutcome,
 };
 pub use value::{
     DuplicateNameError, NominalType, RecordField, SumConstructor, SumType, Type, Value, ValueArena,

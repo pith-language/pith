@@ -377,15 +377,46 @@ fn hash_bytes(hasher: &mut blake3::Hasher, bytes: &[u8]) {
     hasher.update(bytes);
 }
 
+mod private {
+    pub trait Sealed {}
+}
+
+/// A digest kind whose domain the kernel fixes: each digests a canonical
+/// manifest under a prefix of its own, so the same manifest under two kinds
+/// yields unrelated digests. Sealed like the effect categories.
+///
+/// ```compile_fail
+/// use pith_ids::{ContentDigest, ManifestDigest};
+///
+/// #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+/// struct Custom(ContentDigest);
+///
+/// impl ManifestDigest for Custom {
+///     fn of_manifest(manifest: &[u8]) -> Self {
+///         Self(ContentDigest::of_bytes(manifest))
+///     }
+/// }
+/// ```
+pub trait ManifestDigest:
+    private::Sealed + Copy + std::fmt::Debug + PartialEq + Eq + std::hash::Hash + PartialOrd + Ord
+{
+    /// Digest `manifest` under this kind's domain-separation prefix.
+    fn of_manifest(manifest: &[u8]) -> Self;
+}
+
 /// Stable digest of a canonical pure rule application.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PureComputationDigest(ContentDigest);
 
-impl PureComputationDigest {
-    pub fn of_manifest(manifest: &[u8]) -> Self {
+impl private::Sealed for PureComputationDigest {}
+
+impl ManifestDigest for PureComputationDigest {
+    fn of_manifest(manifest: &[u8]) -> Self {
         Self(ContentId::with_domain(domain::PURE_COMPUTATION, manifest))
     }
+}
 
+impl PureComputationDigest {
     /// Restore a digest read back from a persistence adapter. See
     /// [`ActionSpecDigest::from_digest`] for why restoration is distinct from
     /// derivation.
@@ -508,11 +539,15 @@ impl std::fmt::Debug for ModuleAbiDigest {
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ActionComputationDigest(ContentDigest);
 
-impl ActionComputationDigest {
-    pub fn of_manifest(manifest: &[u8]) -> Self {
+impl private::Sealed for ActionComputationDigest {}
+
+impl ManifestDigest for ActionComputationDigest {
+    fn of_manifest(manifest: &[u8]) -> Self {
         Self(ContentId::with_domain(domain::ACTION_COMPUTATION, manifest))
     }
+}
 
+impl ActionComputationDigest {
     /// Restore a digest read back from a persistence adapter. See
     /// [`ActionSpecDigest::from_digest`] for why restoration is distinct from
     /// derivation.
@@ -541,14 +576,18 @@ impl std::fmt::Debug for ActionComputationDigest {
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ObservationComputationDigest(ContentDigest);
 
-impl ObservationComputationDigest {
-    pub fn of_manifest(manifest: &[u8]) -> Self {
+impl private::Sealed for ObservationComputationDigest {}
+
+impl ManifestDigest for ObservationComputationDigest {
+    fn of_manifest(manifest: &[u8]) -> Self {
         Self(ContentId::with_domain(
             domain::OBSERVATION_COMPUTATION,
             manifest,
         ))
     }
+}
 
+impl ObservationComputationDigest {
     /// Restore a digest read back from a persistence adapter. See
     /// [`ActionSpecDigest::from_digest`] for why restoration is distinct from
     /// derivation.

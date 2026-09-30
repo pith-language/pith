@@ -1,8 +1,8 @@
 //! Additional identity and digest tests.
 
 use pith_ids::{
-    ActionSpecDigest, ContentDigest, ContentId, DIGEST_LEN, PureComputationDigest, RuleIdentity,
-    RuleRevision,
+    ActionSpecDigest, ContentDigest, ContentId, DIGEST_LEN, ManifestDigest, PureComputationDigest,
+    RuleIdentity, RuleRevision,
 };
 
 #[test]

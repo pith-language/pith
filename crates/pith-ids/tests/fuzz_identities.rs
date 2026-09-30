@@ -6,7 +6,8 @@
 //! digest round-trips through its `from_digest`/`from_parts` constructor.
 
 use pith_ids::{
-    ActionSpecDigest, ContentDigest, ContentId, PureComputationDigest, RuleIdentity, RuleRevision,
+    ActionSpecDigest, ContentDigest, ContentId, ManifestDigest, PureComputationDigest,
+    RuleIdentity, RuleRevision,
 };
 use proptest::prelude::*;
 

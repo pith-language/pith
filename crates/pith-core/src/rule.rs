@@ -4,15 +4,15 @@ use indexmap::IndexMap;
 use pith_arena::define_arena;
 use pith_diag::{Diag, EngineCode, Span};
 use pith_ids::{
-    ActionComputationDigest, ActionSpecDigest, ObservationComputationDigest, PureComputationDigest,
-    RuleIdentity, RuleRevision,
+    ActionComputationDigest, ActionSpecDigest, ManifestDigest, ObservationComputationDigest,
+    PureComputationDigest, RuleIdentity, RuleRevision,
 };
 use pith_output::dto::{InterfaceRepr, TierRepr};
 use smallvec::SmallVec;
 use std::marker::PhantomData;
 
 use crate::{
-    Action, Coordinate, EffectCategory, Observation, Pure, Type, Value,
+    Action, ComputationCategory, Coordinate, EffectCategory, Observation, Pure, Type, Value,
     manifest::encode_length,
     value_codec::{encode_type_payload, encode_value_payload},
 };
@@ -90,17 +90,35 @@ impl From<&Interface> for InterfaceRepr {
     }
 }
 
-/// Persistent identity for a pure rule application over the current semantic
-/// IR subset.
+/// Persistent identity for one rule application: which rule, at which
+/// revision, was applied to which typed inputs, hashed under the category's
+/// own digest domain.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct PureComputationKey {
+pub struct ComputationKey<K: ComputationCategory> {
     pub rule_identity: RuleIdentity,
     pub rule_revision: RuleRevision,
-    /// Digest of the rule identity, revision, request interface, and inputs.
-    pub digest: PureComputationDigest,
+    /// Digest of the shared application manifest and what the category
+    /// appends to it.
+    pub digest: K::Digest,
 }
 
-impl PureComputationKey {
+/// Persistent identity for a pure rule application over the current semantic
+/// IR subset.
+pub type PureComputationKey = ComputationKey<Pure>;
+
+/// Persistent identity for an action rule application: which rule, at which
+/// revision, was applied to which inputs, and what contract it planned from
+/// them. Execution facts (resolved platform, confinement, produced content)
+/// are knowable only after running; when reuse is considered they are tested
+/// against a recorded attempt.
+pub type ActionComputationKey = ComputationKey<Action>;
+
+/// Cache-invalidating identity of one observation rule application, on the
+/// same split the action key uses: the world half, the revision an observer
+/// attested, is tested when a recorded attempt is considered for reuse.
+pub type ObservationComputationKey = ComputationKey<Observation>;
+
+impl ComputationKey<Pure> {
     pub fn new(rule: &Rule<Pure>, request: &Request<Pure>) -> Self {
         Self {
             rule_identity: rule.identity,
@@ -110,21 +128,7 @@ impl PureComputationKey {
     }
 }
 
-/// Persistent identity for an action rule application: which rule, at which
-/// revision, was applied to which inputs, and what contract it planned from
-/// them. Execution facts (resolved platform, confinement, produced content)
-/// are knowable only after running; when reuse is considered they are tested
-/// against a recorded attempt.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ActionComputationKey {
-    pub rule_identity: RuleIdentity,
-    pub rule_revision: RuleRevision,
-    /// Digest of the rule identity, revision, request interface, inputs, and
-    /// the digest of the contract the rule planned from those inputs.
-    pub digest: ActionComputationDigest,
-}
-
-impl ActionComputationKey {
+impl ComputationKey<Action> {
     /// `spec_digest` is the digest of the contract `rule` planned from
     /// `request`, which the caller computed to validate the plan. An action
     /// body completes its result from the inputs as well as from the
@@ -165,19 +169,7 @@ impl ActionComputationKey {
     }
 }
 
-/// Cache-invalidating identity of one observation rule application, on the
-/// same split the action key uses: the world half, the revision an observer
-/// attested, is tested when a recorded attempt is considered for reuse.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ObservationComputationKey {
-    pub rule_identity: RuleIdentity,
-    pub rule_revision: RuleRevision,
-    /// Digest of the rule identity, revision, request interface, inputs, and
-    /// the subject the rule derived from those inputs.
-    pub digest: ObservationComputationDigest,
-}
-
-impl ObservationComputationKey {
+impl ComputationKey<Observation> {
     /// `subject` names what is observed, derived from `request`'s inputs the
     /// way an action rule plans a contract. The key commits to it and to the
     /// request inputs.
