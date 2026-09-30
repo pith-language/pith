@@ -218,7 +218,8 @@ impl ProjectStore for RegistryStore {
         location: &Self::Location,
         path: &str,
     ) -> Result<AcquiredSource, AcquireFailure> {
-        let on_disk = self.sources_directory(location).join(path);
+        let directory = self.sources_directory(location);
+        let on_disk = acquire::resolve_within(&directory, path, acquire::Target::File)?;
         let text = std::fs::read_to_string(&on_disk)
             .map_err(|error| AcquireFailure::unreadable("read the include", &on_disk, &error))?;
         self.file_sets

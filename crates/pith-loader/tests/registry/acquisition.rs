@@ -39,6 +39,48 @@ fn an_entry_whose_cached_fields_disagree_with_the_pinned_revision_refuses() -> T
     Ok(())
 }
 
+/// A revision whose project file names an include outside its own tree is
+/// refused at the read: the consuming machine never follows a path a
+/// published tree wrote, whatever the index pins.
+#[test]
+fn a_pinned_include_cannot_read_outside_the_store() -> TestResult {
+    let registry = serving_registry()?;
+    let dep_index = registry.path().join("index/example/dep");
+    let text = fs::read_to_string(&dep_index)?;
+    let revision = text
+        .split(' ')
+        .find(|token| token.len() == 64 && token.chars().all(|c| c.is_ascii_hexdigit()))
+        .unwrap_or_else(|| unreachable!("the line names its revision digest"))
+        .to_string();
+    let stored = registry
+        .path()
+        .join("sources")
+        .join(&revision)
+        .join("pith.pi");
+    let original = fs::read_to_string(&stored)?;
+    fs::write(
+        &stored,
+        original.replace(
+            "include \"types.pi\"",
+            "include \"../escape.pi\"\ninclude \"types.pi\"",
+        ),
+    )?;
+    fs::write(
+        registry.path().join("sources/escape.pi"),
+        "nominal Stolen = Text\n",
+    )?;
+
+    let diagnostics = match resolved_through(registry.path()) {
+        Ok(_) => unreachable!("an escaping include was served from a pinned tree"),
+        Err(diagnostics) => diagnostics,
+    };
+    assert!(
+        carries(&diagnostics, FrontendCode::EscapingPath),
+        "the escape is refused by name: {diagnostics:?}"
+    );
+    Ok(())
+}
+
 #[test]
 fn fetched_bytes_whose_tree_disagrees_with_the_entry_refuse() -> TestResult {
     let registry = serving_registry()?;

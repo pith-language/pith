@@ -50,7 +50,11 @@ pub fn write_lock(workspace: &Workspace, root_project: &Path) -> Result<(), Lock
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
     let path = parent.join(LOCK_NAME);
-    if std::fs::read_to_string(&path).ok().as_deref() == Some(rendered.as_str()) {
+    let unchanged = std::fs::symlink_metadata(&path)
+        .map(|metadata| metadata.file_type().is_file())
+        .unwrap_or(false)
+        && std::fs::read_to_string(&path).ok().as_deref() == Some(rendered.as_str());
+    if unchanged {
         return Ok(());
     }
     replace(&path, rendered.as_bytes()).map_err(LockWriteError::Io)

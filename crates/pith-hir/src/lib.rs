@@ -120,6 +120,7 @@ pub enum FrontendCode {
     MissingSubject = 69,
     UnsupportedInput = 70,
     UnboundHost = 71,
+    EscapingPath = 72,
 }
 
 impl FrontendCode {

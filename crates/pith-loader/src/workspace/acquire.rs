@@ -32,6 +32,11 @@ pub struct AcquiredSource {
 pub enum AcquireFailure {
     /// The route names a source kind this store does not serve.
     Unsupported { kind: &'static str },
+    /// A path a project named leaves the location that named it: an
+    /// absolute spelling, a `..` component, or a spelling with no named
+    /// component where a file was required. A project owns its own
+    /// directory and nothing else.
+    Escaping { path: Box<str> },
     /// The location could not be reached, listed, or read.
     Unreadable { message: Box<str> },
     /// A symlink inside a project's file set: following it would let a
@@ -61,6 +66,7 @@ impl AcquireFailure {
     pub(crate) const fn diagnostic_code(&self) -> Option<FrontendCode> {
         match self {
             Self::Unsupported { .. } => Some(FrontendCode::UnsupportedSource),
+            Self::Escaping { .. } => Some(FrontendCode::EscapingPath),
             Self::Symlink { .. } => Some(FrontendCode::SymlinkedSource),
             Self::Irregular { .. } => Some(FrontendCode::IrregularSource),
             Self::Refused { code, .. } => Some(*code),
@@ -77,6 +83,11 @@ impl AcquireFailure {
             Self::Unsupported { kind } => format!(
                 "this loader acquires no `{kind}` source; the route names a source kind \
                  it does not serve"
+            )
+            .into(),
+            Self::Escaping { path } => format!(
+                "`{path}` leaves the declaring project's directory, and a project owns its own \
+                 directory and nothing else"
             )
             .into(),
             Self::Unreadable { message } => message.clone(),
@@ -183,6 +194,107 @@ pub trait ProjectStore {
     }
 }
 
+/// What the final component of a contained path must be.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Target {
+    File,
+    Directory,
+}
+
+/// The named components of a path a project wrote, refusing the spellings
+/// that leave the location before any filesystem call: an absolute path, a
+/// `..` component, a filesystem prefix.
+pub(crate) fn contained_names(relative: &str) -> Result<Vec<std::ffi::OsString>, AcquireFailure> {
+    let mut names = Vec::new();
+    for component in Path::new(relative).components() {
+        match component {
+            std::path::Component::Normal(name) => names.push(name.to_owned()),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir
+            | std::path::Component::RootDir
+            | std::path::Component::Prefix(_) => {
+                return Err(AcquireFailure::Escaping {
+                    path: relative.into(),
+                });
+            }
+        }
+    }
+    Ok(names)
+}
+
+/// A lexically contained path, joined but not inspected: the write-side
+/// half of [`resolve_within`], for a file that does not exist yet.
+pub(crate) fn contained_path(base: &Path, relative: &str) -> Result<PathBuf, AcquireFailure> {
+    let mut walked = base.to_path_buf();
+    for name in contained_names(relative)? {
+        walked.push(name);
+    }
+    Ok(walked)
+}
+
+/// A path a project names, resolved inside the location that named it: the
+/// named components are joined one at a time and each is inspected, so an
+/// absolute spelling, a `..` component, or a symlinked component is refused
+/// before it can name anything outside the location.
+pub(crate) fn resolve_within(
+    base: &Path,
+    relative: &str,
+    target: Target,
+) -> Result<PathBuf, AcquireFailure> {
+    let names = contained_names(relative)?;
+    if names.is_empty() {
+        // A spelling with no named component holds the location itself: a
+        // file read has nothing to read, and a route naming its own project
+        // is a cycle the walk reports.
+        return match target {
+            Target::File => Err(AcquireFailure::Escaping {
+                path: relative.into(),
+            }),
+            Target::Directory => Ok(base.to_path_buf()),
+        };
+    }
+    let total = names.len();
+    let mut walked = base.to_path_buf();
+    for (position, name) in names.iter().enumerate() {
+        walked.push(name);
+        let metadata = fs::symlink_metadata(&walked)
+            .map_err(|error| AcquireFailure::unreadable("inspect", &walked, &error))?;
+        let file_type = metadata.file_type();
+        if file_type.is_symlink() {
+            return Err(AcquireFailure::Symlink {
+                path: walked.display().to_string().into(),
+            });
+        }
+        let last = position == total.saturating_sub(1);
+        let wanted_directory = !last || target == Target::Directory;
+        if wanted_directory && !file_type.is_dir() {
+            return Err(AcquireFailure::Unreadable {
+                message: format!(
+                    "`{}` is not a directory, and a path names its components through it",
+                    walked.display()
+                )
+                .into(),
+            });
+        }
+        if !wanted_directory && !file_type.is_file() {
+            return Err(if file_type.is_dir() {
+                AcquireFailure::Unreadable {
+                    message: format!(
+                        "`{}` is a directory, and an include names a file",
+                        walked.display()
+                    )
+                    .into(),
+                }
+            } else {
+                AcquireFailure::Irregular {
+                    path: walked.display().to_string().into(),
+                }
+            });
+        }
+    }
+    Ok(walked)
+}
+
 /// The local filesystem: the store for `path` locators and for the root a
 /// person names on the command line.
 pub struct LocalFiles;
@@ -199,10 +311,7 @@ impl ProjectStore for LocalFiles {
             Route::Path { path } | Route::Member { path } => *path,
             route => return Err(AcquireFailure::Unsupported { kind: route.kind() }),
         };
-        let joined = base.0.join(path);
-        fs::canonicalize(&joined)
-            .map(LocalDirectory)
-            .map_err(|error| AcquireFailure::unreadable("resolve", &joined, &error))
+        resolve_within(&base.0, path, Target::Directory).map(LocalDirectory)
     }
 
     fn project(&mut self, location: &Self::Location) -> Result<AcquiredProject, AcquireFailure> {
@@ -223,33 +332,14 @@ impl ProjectStore for LocalFiles {
         location: &Self::Location,
         path: &str,
     ) -> Result<AcquiredSource, AcquireFailure> {
-        let on_disk = location.0.join(path);
-        read_regular(&on_disk, path)
+        let on_disk = resolve_within(&location.0, path, Target::File)?;
+        let text = fs::read_to_string(&on_disk)
+            .map_err(|error| AcquireFailure::unreadable("read the include", &on_disk, &error))?;
+        Ok(AcquiredSource {
+            path: path.into(),
+            text: text.into(),
+        })
     }
-}
-
-/// One named include, read as a regular file: a symlink or a special file
-/// spelling an include is refused before the read.
-fn read_regular(on_disk: &Path, path: &str) -> Result<AcquiredSource, AcquireFailure> {
-    let metadata = fs::symlink_metadata(on_disk)
-        .map_err(|error| AcquireFailure::unreadable("inspect", on_disk, &error))?;
-    let file_type = metadata.file_type();
-    if file_type.is_symlink() {
-        return Err(AcquireFailure::Symlink {
-            path: on_disk.display().to_string().into(),
-        });
-    }
-    if !file_type.is_file() {
-        return Err(AcquireFailure::Irregular {
-            path: on_disk.display().to_string().into(),
-        });
-    }
-    let text = fs::read_to_string(on_disk)
-        .map_err(|error| AcquireFailure::unreadable("read the include", on_disk, &error))?;
-    Ok(AcquiredSource {
-        path: path.into(),
-        text: text.into(),
-    })
 }
 
 /// A canonical directory holding a project file.

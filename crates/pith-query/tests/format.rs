@@ -106,6 +106,39 @@ fn corpus_env() -> TestResult<ImportEnv> {
     Ok(imports)
 }
 
+/// `fmt` writes only inside the project directory: an include spelling
+/// `..` that names a valid but non-canonical file outside the project is
+/// refused, and the outside file's bytes are left alone.
+#[test]
+fn fmt_writes_only_inside_the_project_directory() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let project = root.path().join("project");
+    std::fs::create_dir_all(&project)?;
+    std::fs::write(
+        project.join("pith.pi"),
+        "module example/root 0.1.0\n\ninputs {\n}\n\ninclude \"../victim.pi\"\n",
+    )?;
+    let victim = root.path().join("victim.pi");
+    std::fs::write(&victim, "nominal   Victim   =   Text\n")?;
+
+    let error = format(&project.join("pith.pi"), FormatMode::Write)
+        .err()
+        .ok_or("the escaping include formatted")?;
+    assert!(
+        error.diagnostics().iter().any(|diagnostic| diagnostic
+            .message
+            .0
+            .contains("leaves the declaring project's directory")),
+        "the refusal names the escape: {error:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&victim)?,
+        "nominal   Victim   =   Text\n",
+        "fmt rewrote a file outside the project directory"
+    );
+    Ok(())
+}
+
 /// Formatting moves no ABI digest and no body digest, in either direction: a
 /// formatted module and its original are the same module to every reader
 /// below the frontend.

@@ -34,8 +34,11 @@ impl<S: ProjectStore> Resolution<S> {
             let location = match self.store.locate(root_location, &route) {
                 Ok(location) => location,
                 Err(failure) => {
+                    let code = failure
+                        .diagnostic_code()
+                        .unwrap_or(FrontendCode::MissingProject);
                     self.diagnostics.push(at(
-                        FrontendCode::MissingProject,
+                        code,
                         member.span,
                         root_source,
                         format!(

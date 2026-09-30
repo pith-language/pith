@@ -109,6 +109,10 @@ impl Host {
         std::fs::create_dir_all(&revision)?;
         std::fs::write(revision.join(PROJECT_NAME), draft.project().as_bytes())?;
         for (path, text) in draft.includes() {
+            // Containment at the write side too: a tree is materialized
+            // inside its revision, whatever produced the draft.
+            crate::workspace::acquire::contained_path(&revision, path)
+                .map_err(|failure| io::Error::other(failure.describe().to_string()))?;
             std::fs::create_dir_all(revision.join(parent_of(path)))?;
             std::fs::write(revision.join(path.as_ref()), text.as_bytes())?;
         }
