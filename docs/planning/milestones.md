@@ -106,6 +106,18 @@ the likely order of work inside it:
 > exercised. the parity fixtures are the gate — the declaration tables, the rule revisions and the
 > elaborated digests must agree across the change before step 4 starts, the same agreement that held
 > through the M-14 slices.
+>
+> edit, 2026-09-30: [0085](../decisions/0085-typed-literals.md) and
+> [0086](../decisions/0086-names-are-scoped-per-file.md) are proposed against the remaining slices. slice 2
+> builds 0085's token rule and tag set with the path values it already owns, and respells the header. a
+> slice 2b follows it for 0086: `use` replaces `include` and `import`, visibility becomes per file, and the
+> project's file set becomes the closure of its uses. both keep the parity fixtures' digests, so they can
+> land before step 3.
+>
+> edit, 2026-09-30: [0087](../decisions/0087-function-types-carry-effects.md) lands with step 3,
+> with function values. the second edit to [0080](../decisions/0080-inputs-are-parameters.md), on the lock
+> and one version per subject, lands with step 4, and [0088](../decisions/0088-outputs-are-public.md)
+> and [0089](../decisions/0089-exec-and-platform-types.md) land with step 5.
 
 ## M-16: an external domain runs
 

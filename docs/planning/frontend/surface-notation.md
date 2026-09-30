@@ -6,7 +6,7 @@ summary: five request constructs matching the step protocol, rules whose interfa
 kind: planning
 status: draft
 created: 2026-08-18
-updated: 2026-09-29
+updated: 2026-09-30
 tags:
   - planning
   - language
@@ -24,6 +24,12 @@ relations:
 ---
 
 # the surface notation
+
+> edit, 2026-09-30: [0088](../../decisions/0088-outputs-are-public.md) replaces "every declaration is
+> public". its reason was selection by type, and another project now reaches only outputs. 0088 also carries
+> the rule that only the root's entries are invocable, for outputs.
+> [0087](../../decisions/0087-function-types-carry-effects.md) revisits "the effect category is not
+> part of an interface" for function types, which carry a category inferred from the body they refer to.
 
 > edit, 2026-09-29: [0082](../../decisions/0082-rules-are-called-by-name-and-functions-are-values.md) removes the
 > `ask` request constructs: a rule is called by name, and `map` joins `fold` as a construct.

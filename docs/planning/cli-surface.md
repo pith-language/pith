@@ -6,7 +6,7 @@ summary: one binary whose commands are thin clients of one query api, a grouping
 kind: planning
 status: draft
 created: 2026-08-25
-updated: 2026-09-29
+updated: 2026-09-30
 tags:
   - planning
   - tooling
@@ -22,6 +22,11 @@ relations:
 ---
 
 # the cli surface
+
+> edit, 2026-09-30: [0088](../decisions/0088-outputs-are-public.md) makes command arguments paths that
+> descend into record outputs and limits `pith run` and `pith test` to the root's outputs, with `pith test`
+> reporting every verdict under its path. [0089](../decisions/0089-exec-and-platform-types.md)
+> gives `pith.Exec` a program, typed arguments and an environment.
 
 > edit, 2026-09-29: [0083](../decisions/0083-outputs-and-commands.md) changes the daily loop. entries become
 > outputs; `pith eval` shows a value; `pith run` starts an output declared as `pith.Exec`; `pith exec` is
