@@ -6,7 +6,7 @@ summary: pi declaration text has explicit effect categories, scoped imports, pha
 kind: decision
 status: proposed
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-09-30
 tags:
   - language
   - declarations
@@ -29,6 +29,11 @@ relations:
 ---
 
 # a source artifact elaborates into a typed host-binding surface and a semantic ABI
+
+> edit, 2026-09-30: the `import` clause is removed by [0086](0086-names-are-scoped-per-file.md): inputs and
+> files are named by `use` clauses scoped to the file that writes them; the implementation had merged
+> imports across a module's files. items 2 and 4 of the module ABI manifest are computed from the project's outputs
+> ([0088](0088-outputs-are-public.md)), so a private declaration changes no ABI digest.
 
 > amends 0018: the host escape hatch is written at the rule declaration, not at a call site. module and interface linkage belongs to the loader; the kernel receives elaborated declarations and rules.
 

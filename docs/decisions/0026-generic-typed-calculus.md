@@ -6,7 +6,7 @@ summary: one closed structural calculus of scalars, records, declared sums, para
 kind: decision
 status: accepted
 created: 2026-05-13
-updated: 2026-09-21
+updated: 2026-09-30
 tags:
   - types
   - language
@@ -27,6 +27,12 @@ relations:
 ---
 
 # a structural type calculus, with nominal identity, structural uncertainty, and no predicate types
+
+> edit, 2026-09-30: amended by [0085](0085-typed-literals.md), which adds a `guarded` attribute to nominal
+> declarations, naming a check, so that a guarded nominal can be constructed only by the project that
+> declares it and only when its check passes, and by [0087](0087-function-types-carry-effects.md),
+> under which a function type carries an effect category inferred from its body, the one place a value type
+> carries one.
 
 > edit, 2026-09-21: amended by [0081](0081-paths-are-values.md), which adds `Path`, `RelPath` and
 > `HostPath`, and by [0082](0082-rules-are-called-by-name-and-functions-are-values.md), which adds function

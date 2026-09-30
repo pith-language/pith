@@ -29,6 +29,14 @@ relations:
 
 # a project is one file holding its inputs, declarations and outputs, and splits only by naming its other files
 
+> edit, 2026-09-30: amended by [0085](0085-typed-literals.md), which respells the header's locators and
+> workspace members as tagged literals (`path"modules/greeting"`), by
+> [0086](0086-names-are-scoped-per-file.md), which replaces `include` and its one-level rule with per-file
+> `use`, and by [0088](0088-outputs-are-public.md), which allows outputs only in the project file. the
+> decision section's `include` clause and its list of declarations any file may hold no longer describe the
+> grammar. [0080](0080-inputs-are-parameters.md)'s second edit extends the lock line of the implementation
+> round below to every project instance in the graph.
+
 > edit, 2026-09-21: the research this record said was owed is [declaring a project](../research/project-declaration.md). its consequences are in the edit section below.
 
 > amends [0067](0067-local-module-workspaces.md): its manifest/source split, its ownership of every `.pi`

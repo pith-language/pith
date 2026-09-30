@@ -6,7 +6,7 @@ summary: a builtin must be total, pure, defined by the evaluator, and free of do
 kind: decision
 status: proposed
 created: 2026-09-21
-updated: 2026-09-21
+updated: 2026-09-30
 tags:
   - language
   - compatibility
@@ -22,6 +22,11 @@ relations:
 ---
 
 # builtins are the language's own vocabulary, unqualified and fixed per language version, and facts about the machine enter a project only as input defaults
+
+> edit, 2026-09-30: [0085](0085-typed-literals.md) fixes the tag set per language version beside the
+> builtins and adds `pith.Url`, `pith.Digest` and `pith.PublicKey` to the types under `pith.`.
+> [0089](0089-exec-and-platform-types.md) gives `pith.Platform` its fields and defines `pith.Exec`
+> with its `Program`, `Arg` and `Env` types.
 
 ## context
 

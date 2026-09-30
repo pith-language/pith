@@ -6,7 +6,7 @@ summary: the component adapter generates one WIT world per module from the `.pi`
 kind: decision
 status: proposed
 created: 2026-09-29
-updated: 2026-09-29
+updated: 2026-09-30
 tags:
   - wasm
   - types
@@ -25,6 +25,10 @@ relations:
 ---
 
 # a module's WIT world is generated from its declarations, and every value a component returns is checked against its declared type
+
+> edit, 2026-09-30: amended by [0085](0085-typed-literals.md). a value of a guarded nominal returned across
+> the component boundary is checked again, with the check its declaration names, before the engine accepts
+> it, beside the type check of the returned-values section.
 
 > edit, 2026-09-29: under [0082](0082-rules-are-called-by-name-and-functions-are-values.md) there is one
 > typed import per rule a body may call, where this record had one per requested interface, and a body that

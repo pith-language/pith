@@ -6,7 +6,7 @@ summary: a call names its rule, locally or through an input; a function value is
 kind: decision
 status: proposed
 created: 2026-09-21
-updated: 2026-09-21
+updated: 2026-09-30
 tags:
   - language
   - graph
@@ -33,6 +33,12 @@ relations:
 ---
 
 # rules are called by name, functions are values, and behaviour reaches a library only by being passed
+
+> edit, 2026-09-30: function types carry an effect category inferred from the body they refer to
+> ([0087](0087-function-types-carry-effects.md)), so the `compile: (Path) -> Object` field of the
+> `Source` example is written `(Path) -> action Object`, and `build` as a value has an action type. a rule
+> of another project, such as `greetings.message(g)`, is reachable only when that project publishes it as an
+> output ([0088](0088-outputs-are-public.md)).
 
 > edit, 2026-09-21: after [passing behaviour](../research/passing-behaviour.md), a function value pins the revision it refers to, identities are defined for named rules and lambdas, captures are visible and bounded, and some types cannot be captured. see the edit section.
 

@@ -6,7 +6,7 @@ summary: an input is another project or a typed value, each with a default; the 
 kind: decision
 status: proposed
 created: 2026-09-21
-updated: 2026-09-21
+updated: 2026-09-30
 tags:
   - modules
   - language
@@ -24,9 +24,16 @@ relations:
   supersedes: []
   amends:
     - decision-0072-action-plans-are-authorized-against-consumer-grants
+    - decision-0079-a-project-is-one-file
 ---
 
 # a project's inputs are its parameters, each with a default, and a consumer passes others with `with`
+
+> edit, 2026-09-30: [0085](0085-typed-literals.md) respells locators as tagged literals and answers the
+> `--input` question; [0087](0087-function-types-carry-effects.md) adds the root's own `grant` clause;
+> the lock and one version per subject are settled in the second edit section, which amends the lock line of
+> [0079](0079-a-project-is-one-file.md)'s edit. the examples' `path "../..."` locators are refused under
+> 0079's path containment; a sibling project is a workspace member or a git or registry input.
 
 > edit, 2026-09-21: after [declaring a project](../research/project-declaration.md), locators and revisions are literals, arguments not declared by the input are refused, instances are keyed by their arguments, and replacement below a direct input is left to the root. see the edit section.
 
@@ -128,6 +135,24 @@ the research changes four points of the decision above, whose original text is k
   Nix's `follows` bugs are in that mechanism (nix#4808, #5790). how the root names a deep input is left to
   the implementation round.
 
+## edit, 2026-09-30: the lock and versions
+
+[0079](0079-a-project-is-one-file.md)'s implementation-round edit defines a lock line with each input's
+subject, canonical version and file-set identity. this edit extends it. the lock beside the root project file
+records every project instance in the graph, not only the root's direct inputs: its subject, version, the
+commit or digest it resolved to, its file-set identity, and the digest of the arguments it was given. only
+the root's lock is read. a dependency's own lock, if it has one, has no effect, because only the root decides
+what the graph resolves to.
+
+one graph holds one version of each subject, as 0067, 0070 and the module-system plan require: a type
+reached through two versions of one project would be two types printed the same way. two routes that
+resolve one subject to different versions are refused, naming both. when the conflict involves a direct
+input's own input, the root settles it by passing one instance to that input with `with`; a conflict deeper
+in the graph waits on the open question of how the root names a deep input.
+
+two instances of one version with different arguments share their types, since a nominal is identified by
+its declaration and the declaration does not depend on the arguments.
+
 ## alternatives considered
 
 a literal-only inputs section, as in flakes, would be simpler to read without evaluating. evaluating the
@@ -151,7 +176,7 @@ does not mention the replacement.
 ## unresolved
 
 how value inputs are passed from the command line (`--input name=value`) needs a rule for which types can
-be written as text.
+be written as text. (answered by 0085; see the 2026-09-30 note.)
 
 the research note owed by [0079](0079-a-project-is-one-file.md) covers flakes' inputs and `follows`, and
 should confirm or refute that a scoping rule is enough where flakes chose a sublanguage.

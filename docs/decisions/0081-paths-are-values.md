@@ -6,7 +6,7 @@ summary: Path names a file or directory inside the project and is taken into the
 kind: decision
 status: proposed
 created: 2026-09-21
-updated: 2026-09-21
+updated: 2026-09-30
 tags:
   - types
   - language
@@ -27,6 +27,12 @@ relations:
 ---
 
 # paths are values of three types, and a project path is identified by the content it names
+
+> edit, 2026-09-30: [0085](0085-typed-literals.md) makes `rel"..."` and `host"..."` two tags of its closed
+> set of tagged literals. every path is resolved against the project root, as this record already resolves
+> `Path`, and [0086](0086-names-are-scoped-per-file.md) applies the same rule to `use` paths written in any
+> file. the unresolved question of how `ActionSpec`'s string fields become typed is answered by
+> [0089](0089-exec-and-platform-types.md).
 
 > edit, 2026-09-21: after [declaring a project](../research/project-declaration.md), a path is admitted when it is used, a literal to a missing file is refused, and loading does not depend on version-control state. see the edit section.
 

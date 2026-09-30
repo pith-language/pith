@@ -6,7 +6,7 @@ summary: the root project's manifest grants each module the host programs, toolc
 kind: decision
 status: proposed
 created: 2026-09-29
-updated: 2026-09-29
+updated: 2026-09-30
 tags:
   - security
   - capabilities
@@ -23,6 +23,11 @@ relations:
 ---
 
 # an action plan is authorized against grants written by the consuming project, and no module has authority without one
+
+> edit, 2026-09-30: amended by [0087](0087-function-types-carry-effects.md). a plan is authorized
+> against the grant the root wrote on the input instance whose rule planned it, including when the rule is
+> reached through a function value or a lambda written in another project. the root's grant to its own
+> rules is written in a header `grant` clause, which has no effect when the project is loaded as an input.
 
 > edit, 2026-09-29: amended by [0080](0080-inputs-are-parameters.md). grants are written on the input
 > they apply to, in the project file. the rules below stand: only the root project grants, no module has a

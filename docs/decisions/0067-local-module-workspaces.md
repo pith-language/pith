@@ -6,7 +6,7 @@ summary: module.pi declares a domain/name subject and path dependencies, a modul
 kind: decision
 status: accepted
 created: 2026-09-06
-updated: 2026-09-21
+updated: 2026-09-30
 tags:
   - modules
   - language
@@ -32,6 +32,9 @@ relations:
 ---
 
 # a local module is a declared subject with a manifest, a src tree, and module-local import bindings, loaded from an explicit root without a solver
+
+> edit, 2026-09-30: the `import name` clause that source files keep here is replaced by per-file `use`
+> ([0086](0086-names-are-scoped-per-file.md)), and an input is visible only in the files that use it.
 
 > edit, 2026-09-30: the project-file round that implemented [0079](0079-a-project-is-one-file.md) broke
 > this record's kept invariant, "its refusal to follow symlinks": the include read checked only the

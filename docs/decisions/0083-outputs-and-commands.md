@@ -6,7 +6,7 @@ summary: output replaces entry and can be referenced from other projects; pith e
 kind: decision
 status: proposed
 created: 2026-09-21
-updated: 2026-09-21
+updated: 2026-09-30
 tags:
   - cli
   - language
@@ -26,6 +26,13 @@ relations:
 ---
 
 # an output is a named value other projects and the cli can use, and each command needs an output of one declared type
+
+> edit, 2026-09-30: amended by [0088](0088-outputs-are-public.md). outputs are declared only in the
+> project file, as values, `output rule` or `output type`. command arguments are paths that descend into
+> record outputs, and `pith test` reports every verdict under the path it is given. only the root's outputs
+> run or are tested, and an output may not share a name with an input. under
+> [0089](0089-exec-and-platform-types.md) `pith.Exec` becomes a program, typed arguments and an
+> environment, replacing the program-and-arguments shape this record takes from 0065.
 
 > edit, 2026-09-21: after [what run and test execute](../research/run-and-test.md), test caching, reruns, interactive tests, the environment of `pith.Exec`, and what `pith run` passes through are specified. see the edit section.
 

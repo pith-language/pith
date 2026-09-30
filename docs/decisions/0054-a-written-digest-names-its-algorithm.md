@@ -6,7 +6,7 @@ id: decision-0054-a-written-digest-names-its-algorithm
 kind: decision
 status: proposed
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-09-30
 tags:
   - lock
   - digests
@@ -29,6 +29,10 @@ relations:
 ---
 
 # a written digest names its algorithm
+
+> edit, 2026-09-30: the payload of [0085](0085-typed-literals.md)'s `digest"..."` literal is this record's
+> written form with lower-case hex, so a digest in the project header is spelled as in the lock, and the
+> algorithms it admits are this record's one constant.
 
 > takes a mislabel no record ever chose. every written form since 0041's prototype has spelled its digest fields `sha256:`, a look borrowed from go.sum and flake.lock, while every digest in the kernel is blake3. `pith-ids` wraps blake3; nothing in the workspace computes or verifies a SHA-256. the correction raised a question this record answers: should a written digest name its algorithm at all?
 

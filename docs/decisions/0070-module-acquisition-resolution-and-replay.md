@@ -6,7 +6,7 @@ summary: two version spellings that compare equal are one version, every source 
 kind: decision
 status: proposed
 created: 2026-09-06
-updated: 2026-09-21
+updated: 2026-09-30
 tags:
   - modules
   - resolution
@@ -32,6 +32,11 @@ relations:
 ---
 
 # a module version is its canonical segment sequence, solving is a computation while consulting a lock is not, and how much authority a command has over its own inputs is one named mode
+
+> edit, 2026-09-30: amended by [0085](0085-typed-literals.md). a git input names exactly one revision kind,
+> `commit"..."`, `tag"..."` or `branch"..."`, and the lock pins the commit it resolved to; one revision
+> string meaning either a commit or a ref no longer holds for `git` routes. a locked read fetches the
+> recorded commit and checks nothing about the tag, and `pith update` reports a moved tag as conflicted.
 
 > edit, 2026-09-21: acquisition starts from the `inputs` block of
 > [0080](0080-inputs-are-parameters.md), and the lock is written beside the project file

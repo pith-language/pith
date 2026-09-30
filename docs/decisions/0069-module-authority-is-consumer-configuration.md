@@ -6,7 +6,7 @@ summary: registry bindings and domain routing are written by the consumer and ne
 kind: decision
 status: proposed
 created: 2026-09-06
-updated: 2026-09-21
+updated: 2026-09-30
 tags:
   - modules
   - registries
@@ -32,6 +32,10 @@ relations:
 ---
 
 # a domain is routed to a registry by consumer configuration, a registry entry is a derived cache of the manifest it pins, and a locator is a hint outside the identity
+
+> edit, 2026-09-30: amended by [0085](0085-typed-literals.md). a registry's root key is written
+> `key"ed25519:..."`, whose payload is the `ed25519:<hex>` spelling recorded in the evidence section with
+> lower-case hex, and a quoted key is refused.
 
 > edit, 2026-09-21: under [0080](0080-inputs-are-parameters.md) locators are written in the project
 > file's `inputs` block. the rules here, that routing is consumer configuration and never inherited, apply to

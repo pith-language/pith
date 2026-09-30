@@ -6,7 +6,7 @@ summary: load one transitive program, register represented rules, synthesize eac
 kind: decision
 status: proposed
 created: 2026-08-28
-updated: 2026-09-21
+updated: 2026-09-30
 tags:
   - cli
   - language
@@ -31,6 +31,12 @@ relations:
 ---
 
 # an entry is a represented pure request and the CLI exposes evaluation, explanation, selection, planning, and provenance without linking a domain
+
+> edit, 2026-09-30: `pith.Exec`'s `{ arguments: List<Text>, program: Text }` shape is replaced by a program,
+> typed arguments and an environment ([0089](0089-exec-and-platform-types.md)). the rule that only
+> the root's entries are invocable, stated in the [surface
+> notation](../planning/frontend/surface-notation.md), is carried for outputs by
+> [0088](0088-outputs-are-public.md).
 
 > edit, 2026-09-21: amended by [0083](0083-outputs-and-commands.md). `entry` becomes `output`,
 > which other projects can also reference; `pith run` starts a program declared as `pith.Exec`; `pith exec` is

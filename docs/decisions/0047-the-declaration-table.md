@@ -6,7 +6,7 @@ summary: nominal types, declared sums, and structural aliases are declared once 
 kind: decision
 status: proposed
 created: 2026-07-22
-updated: 2026-08-14
+updated: 2026-09-30
 tags:
   - types
   - language
@@ -27,6 +27,14 @@ relations:
 ---
 
 # a declaration table in the core, with type identity by coordinate and revision by digest
+
+> edit, 2026-09-30: [0085](0085-typed-literals.md)'s guarded nominals narrow the forgeable-value residual of
+> the section on types carrying their declaration, for values built in pith source or returned by a host
+> rule or component: a guarded declaration names its check, the declaration digest covers it, and every
+> construction and every returned value runs it. a value built by an in-process crate keeps the residual,
+> as every unguarded nominal does. the constructor-set audit here removed effect categories from value types;
+> [0087](0087-function-types-carry-effects.md) amends it and returns them in one place, the function
+> type.
 
 > amends [0026: the generic structural type calculus](0026-generic-typed-calculus.md) twice: it builds the declaration site 0026 kept deferring ("the declaration site that would carry one does not exist yet"), and it audits the constructor set 0026 closed, removing the constructors that fail 0026's own inclusion test. 0026 stands; its constructor list is corrected the way its closure rule requires, by a record.
 

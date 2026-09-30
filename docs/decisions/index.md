@@ -6,7 +6,7 @@ summary: chronological record of accepted and proposed architectural choices
 kind: decision
 status: active
 created: 2026-03-11
-updated: 2026-09-21
+updated: 2026-09-30
 tags:
   - decisions
 relations:
@@ -109,6 +109,11 @@ when an accepted decision changes, a new record supersedes it. the old record st
 - [0082: rules are called by name, functions are values, and behaviour reaches a library only by being passed](0082-rules-are-called-by-name-and-functions-are-values.md)
 - [0083: an output is a named value other projects and the cli can use, and each command needs an output of one declared type](0083-outputs-and-commands.md)
 - [0084: builtins are the language's own vocabulary, unqualified and fixed per language version, and facts about the machine enter a project only as input defaults](0084-builtins-and-machine-facts.md)
+- [0085: values narrower than text are written as tagged literals from a closed set checked at load](0085-typed-literals.md)
+- [0086: each file names what it uses, and a name is visible only in the file that uses it](0086-names-are-scoped-per-file.md)
+- [0087: function types carry their effect category, and an action is authorized against the root's grant on the input whose rule plans it](0087-function-types-carry-effects.md)
+- [0088: outputs are declared in the project file and are all that another project or the command line can reach](0088-outputs-are-public.md)
+- [0089: the command line's types hold paths, arguments, environments and platforms as typed values](0089-exec-and-platform-types.md)
 
 note: 0013 amends 0005 to add a fifth identity type. 0005 stands; the amendment is recorded in 0013.
 
@@ -259,3 +264,10 @@ and an unchanged structural report is not a compatibility proof.
 note, 2026-09-21: 0079 to 0084 replace how a project is written. 0082 supersedes the accepted 0015, and 0079
 amends the accepted 0067; both keep their text, with an edit note at the top pointing to the replacement.
 0065, 0026, 0056, 0069, 0070 and 0071 to 0074 carry edit notes for the parts that change.
+
+note, 2026-09-30: 0085 and 0086 amend how a project file is written. 0085 respells the header's locators,
+revisions, digests, keys and members as tagged literals and adds guarded nominals; 0086 replaces `include`
+and `import` with per-file `use`. 0079 is accepted and keeps its text; 0085, 0086 and 0088 amend it. 0026 and
+0067, also accepted, keep their text too: 0085 and 0087 amend 0026, and 0086 amends 0067.
+0087 puts effect categories in function types and gives the root a header `grant` clause, 0088 makes outputs
+the only surface a project shows, and 0089 types `pith.Exec`, `pith.Platform` and `ActionSpec`'s fields.
