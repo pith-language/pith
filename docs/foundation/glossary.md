@@ -6,7 +6,7 @@ summary: working meanings for terms used across the design
 kind: foundation
 status: active
 created: 2026-03-25
-updated: 2026-09-27
+updated: 2026-09-30
 tags:
   - glossary
 relations:
@@ -84,6 +84,10 @@ one concrete value or arrangement satisfying a declaration and its constraints.
 
 a rule's identity plus arguments already bound to it. it is ordinary data, so it can be part of a computation key. a lambda is an anonymous rule identified by its body digest. (added 2026-09-27, [0082](../decisions/0082-rules-are-called-by-name-and-functions-are-values.md).)
 
+## guarded nominal
+
+a nominal type that only the project declaring it can construct, and whose declaration names a check that runs at every construction. the `pith.` types that tagged literals produce are guarded. (added 2026-09-30, [0085](../decisions/0085-typed-literals.md).)
+
 ## input
 
 a parameter of a project: another project or a typed value, with a default, that a consumer can replace with `with`. (added 2026-09-27, [0080](../decisions/0080-inputs-are-parameters.md).)
@@ -92,6 +96,8 @@ a parameter of a project: another project or a typed value, with a default, that
 
 a named value a project provides to the command line and to other projects. it is a root in the graph and computes nothing until asked for. (added 2026-09-27, [0083](../decisions/0083-outputs-and-commands.md).)
 
+> edit, 2026-09-30: an output is a value, a rule or a type, declared only in the project file, and it is all another project or the command line can reach; see [0088](../decisions/0088-outputs-are-public.md).
+
 ## path
 
 a value naming a location. `Path` is inside the project and identified by its content, `RelPath` is inside a tree, `HostPath` is on the machine. (added 2026-09-27, [0081](../decisions/0081-paths-are-values.md).)
@@ -99,6 +105,8 @@ a value naming a location. `Path` is inside the project and identified by its co
 ## project
 
 one file holding a project's inputs, declarations and outputs, plus the files it names with `include`. (added 2026-09-27, [0079](../decisions/0079-a-project-is-one-file.md).)
+
+> edit, 2026-09-30: a project's files are its project file and the files reached through `use`; see [0086](../decisions/0086-names-are-scoped-per-file.md).
 
 ## rule
 
@@ -109,6 +117,14 @@ a typed recipe for deriving a value from inputs and requests tracked by the grap
 ## semantic identity
 
 the stable identity of what a value represents, independent of its current contents, file location, or external provider address.
+
+## tagged literal
+
+a string literal with a tag written directly before it, such as `url"https://..."`, where the tag names the value's type. the tags are a closed set, and each literal is checked at load. (added 2026-09-30, [0085](../decisions/0085-typed-literals.md).)
+
+## use
+
+a clause at the head of a file naming a file of the project or an input that the file uses. what it binds is visible only in the file that writes it. (added 2026-09-30, [0086](../decisions/0086-names-are-scoped-per-file.md).)
 
 ## world
 
