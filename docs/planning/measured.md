@@ -546,3 +546,17 @@ value inputs, and a used `host` clause are parsed then refused. the loader requi
 clause of every loaded project. the lock is written, never read back; drift reporting and pinned
 reads are the registry round's. `pith fmt` still formats an include file on its own, which no record
 forbids.
+a review round after the slice audited path handling and found one root cause behind four live escapes,
+each reproduced against the built CLI before the fix: an include spelling `..` read a declaration file
+outside the project directory and elaborated it into the module, an include through a symlinked directory
+component loaded through the link (the include read checked only the final component), `pith fmt` wrote
+the canonical spelling of an included file reached by `..` outside the project, and a dependency's own
+input route resolved outside the dependency's directory. `containment.rs` now holds the refusals
+(`E-3072` for the escape, `E-3039` for the symlink), `fmt_writes_only_inside_the_project_directory`
+holds the write half in the query suite, and `a_pinned_include_cannot_read_outside_the_store` holds the
+registry's serving half, where the tampered-tree check fired only after the outside read had happened.
+every refusal test was run against the unguarded read paths first and failed by loading what it now
+refuses, which is the evidence the tests name the bugs rather than the fix. the same guard closes the
+absolute-member route and the publication materialization write. the suite grows to 1176 tests and the
+elaborator digest is re-recorded at `ELABORATOR_SEMANTIC_VERSION` 1, unchanged: the guard moves
+acquisition, never elaboration, and the digest-parity fixtures above pass unchanged through it.

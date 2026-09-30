@@ -114,6 +114,20 @@ without them an include. and the lock records each input's subject, canonical ve
 identity of its file set, leaving the route in the declarations, which already hold it; a path input
 stays live and unwitnessed, so the lock records what resolved and pins nothing.
 
+## edit, 2026-09-30: path containment
+
+a review of the implementation round found the include read checking only the final path component for
+symlinks and no check holding any named path inside the project's directory, so an include spelling
+`..`, a symlinked directory component, an input route leaving the input target's own directory, and an
+absolute workspace member all read or wrote outside the project; `pith fmt` inherited the same reach in
+its writes. the fix is one guard at the store boundary, the rule this record's splitting section already
+implied: the project's source content is exactly the project file and the files it includes, so every
+path a project names resolves inside the directory of the project that named it, with `..`, absolute
+spellings, and symlinked components refused (`E-3072`, `E-3039`) before anything is read or written
+through them. the registry's serving store and its publication materialization pass the same guard. the
+finding is recorded against [0067](0067-local-module-workspaces.md), whose symlink refusal this record
+kept standing.
+
 ## alternatives considered
 
 keeping 0067's directory layout leaves the problem in the context: no file says which source files make up

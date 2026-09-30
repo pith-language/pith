@@ -33,6 +33,17 @@ relations:
 
 # a local module is a declared subject with a manifest, a src tree, and module-local import bindings, loaded from an explicit root without a solver
 
+> edit, 2026-09-30: the project-file round that implemented [0079](0079-a-project-is-one-file.md) broke
+> this record's kept invariant, "its refusal to follow symlinks": the include read checked only the
+> final path component, so a symlinked directory component was followed, and no check anywhere held a
+> path inside the directory of the project that named it, so an include, an input route, or a member
+> spelling `..` or an absolute path read outside it. both are restored at the store boundary: every
+> component of every path a project names is inspected, and `..`, absolute spellings, and symlinked
+> components are refused (`E-3072` for the escape, `E-3039` for the symlink). this also amends the
+> paragraph below that says "`..` is permitted" for dependency paths: under 0079 a route stays inside
+> the declaring project's directory, which is the boundary [0081](0081-paths-are-values.md) generalizes
+> to path values.
+
 > edit, 2026-09-21: amended by [0079](0079-a-project-is-one-file.md). a project is one file with its
 > inputs and declarations, split only by `include`; the manifest/source split, source discovery under `src/`
 > and standalone mode are replaced. the declared subject, the subject-based ABI and the refusal to follow
