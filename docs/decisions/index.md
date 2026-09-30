@@ -37,6 +37,7 @@ when an accepted decision changes, a new record supersedes it. the old record st
 - [0033: a consumer of an action revalidates by re-planning it](0033-consumer-of-action-reuse.md)
 - [0041: the written lock is a text projection of the lock value, and writing it is a caller effect](0041-the-written-lock.md)
 - [0067: a local module is a declared subject with a manifest, a src tree, and module-local import bindings, loaded from an explicit root without a solver](0067-local-module-workspaces.md)
+- [0079: a project is one file holding its inputs, declarations and outputs, and splits only by naming its other files](0079-a-project-is-one-file.md)
 
 ## proposed
 
@@ -103,7 +104,6 @@ when an accepted decision changes, a new record supersedes it. the old record st
 - [0076: component execution follows the deterministic profile in a fresh store per computation, fuel is its bound, and exhausting a bound is a host fault that is never cached](0076-component-execution-is-deterministic-and-bounded.md)
 - [0077: until the first release every pith surface is experimental and may change without notice, and its correctness and confinement guarantees hold regardless](0077-pre-release-pith-is-experimental.md)
 - [0078: the kernel and pith:core gain an interface only when a domain being written needs it, in the most general form that serves it, and under the grant model](0078-kernel-surface-grows-on-demand.md)
-- [0079: a project is one file holding its inputs, declarations and outputs, and splits only by naming its other files](0079-a-project-is-one-file.md)
 - [0080: a project's inputs are its parameters, each with a default, and a consumer passes others with `with`](0080-inputs-are-parameters.md)
 - [0081: paths are values of three types, and a project path is identified by the content it names](0081-paths-are-values.md)
 - [0082: rules are called by name, functions are values, and behaviour reaches a library only by being passed](0082-rules-are-called-by-name-and-functions-are-values.md)

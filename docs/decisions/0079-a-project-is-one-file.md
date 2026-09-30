@@ -4,9 +4,9 @@ id: decision-0079-a-project-is-one-file
 title: a project is one file holding its inputs, declarations and outputs, and splits only by naming its other files
 summary: a project file starts with an optional module clause, its inputs and its host clause, and continues with types, rules, private values and outputs; other files join only through include; there is no manifest separate from source, no source discovery under src, and no standalone mode; a lock is written beside the file
 kind: decision
-status: proposed
+status: accepted
 created: 2026-09-21
-updated: 2026-09-21
+updated: 2026-09-30
 tags:
   - modules
   - language
@@ -93,6 +93,27 @@ and Go (go.mod) all ran into this. so the parser keeps comments and layout, and
 [0080](0080-inputs-are-parameters.md) makes locators literals, which tools can rewrite without evaluating
 anything.
 
+## edit, 2026-09-30: the implementation round
+
+the round took both choices the unresolved section held open, and drew three boundaries the loader needs.
+
+the conventional file name is `pith.pi`.
+
+a workspace keeps 0067's explicit membership, spelled as 0067 spelled it: a
+`workspace { members: [...] }` clause in the root project file's header, after `host` and before
+`include`, each member naming a directory that holds a `pith.pi`. no discovery happens. the alternative
+rejected was dropping the clause and letting the inputs alone spell membership, which would delete 0067's
+member validation instead of answering this record's question; a separate workspace file was rejected
+because it reintroduces the second root file this record removes.
+
+the boundaries. the loader requires the `module` clause of every project it loads, root or input target:
+0067's subject-based ABI, which this record keeps standing, keys on a subject a subject-less file does
+not declare, and a later slice can relax this once it gives such a project an identity. the `inputs`
+block is required in a project file, which is what makes a file with header clauses a project and a file
+without them an include. and the lock records each input's subject, canonical version, and the measured
+identity of its file set, leaving the route in the declarations, which already hold it; a path input
+stays live and unwitnessed, so the lock records what resolved and pins nothing.
+
 ## alternatives considered
 
 keeping 0067's directory layout leaves the problem in the context: no file says which source files make up
@@ -110,17 +131,16 @@ the witness for [M-17](../planning/milestones.md) is written in this form: a pro
 included file, and outputs used by a second project.
 
 - a project whose source content is its file plus its includes gives the same ABI and body digests as the
-  same declarations in 0067's layout
-- a `.pi` file in the project directory that no include names does not affect any digest
-- an included file containing a header clause is refused, naming the clause
+  same declarations in 0067's layout: `a_projects_file_plus_includes_give_the_source_sets_digests`
+- a `.pi` file in the project directory that no include names does not affect any digest:
+  `a_file_no_include_names_affects_no_digest`
+- an included file containing a header clause is refused, naming the clause:
+  `a_header_clause_in_an_include_is_refused_naming_the_clause`
+
+the slice's measurements are in [measured](../planning/measured.md#m-17-the-explicit-project-model--the-project-file-slice),
+and the record is accepted against them.
 
 ## unresolved
 
-the conventional file name is not chosen; `pith.pi` is the placeholder used in examples.
-
-the research note on how other systems split dependencies from build logic (flakes, Zig's `build.zig` and
-`build.zig.zon`, Bazel's `MODULE.bazel`, Cargo, CMake, Dhall) is owed and should be written before this
-record is accepted.
-
-workspaces, several projects developed together, keep 0067's explicit membership; how a workspace is
-spelled in the one-file form is left to the implementation round.
+none. the implementation round of the [M-17](../planning/milestones.md) first slice took both open
+choices; see the edit below.

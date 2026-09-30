@@ -81,15 +81,14 @@ measured on.
 ## What runs today
 
 A working prototype, not a tool for general use. There is a source language and
-a command line, and the language has two loading modes that share one grammar:
-a standalone `.pi` file whose identity is its file stem, and a `module.pi`
-manifest declaring a `domain/name` subject with explicit path dependencies, the
-first slice of the module system. The modes are a temporary distinction:
-loading a bare source file still resolves imports against neighboring files,
-while manifest mode resolves `use` clauses and a workspace's members. The
-remaining migration work (registries, locks, version resolution, and retiring
-the file-relative resolver) is what [M-14](docs/planning/milestones.md) still
-owes. What exists is one vertical slice:
+a command line. A project is one file, `pith.pi`: a header declaring its
+`domain/name` subject, its `inputs` (today path dependencies), its workspace
+membership, and the files it `include`s, followed by the declarations
+themselves. The first command that resolves a project's inputs writes a lock
+beside the file. The remaining module-system work (registries, version
+resolution, argument passing) is what [M-14](docs/planning/milestones.md) and
+[M-17](docs/planning/milestones.md) still owe. What exists is one vertical
+slice:
 
 - typed rule selection, incremental evaluation, and equality-based pruning when a
   recomputed dependency lands on the value it already had
@@ -101,9 +100,9 @@ owes. What exists is one vertical slice:
   resolution, locks, and admitted binary substitution; development environments
   over a lock; and an immutable Linux tree composed from files, users, units,
   and boot configuration
-- multi-module programs: `examples/local-workspace` declares two local modules,
-  imports a dependency through a manifest binding, and runs a pure entry that
-  computes once and hydrates in the next process
+- multi-module programs: `examples/local-workspace` declares two projects, one
+  inputting the other by path, and runs a pure entry that computes once and
+  hydrates in the next process
 
 Observation identity and freshness now run in the kernel. An observation rule
 derives a typed subject, an observer returns a value and revision, and a pure

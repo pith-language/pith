@@ -69,7 +69,7 @@ the declaration surface is buildable today.
 
 four sibling documents carry the designs these rounds discharge. [the module surface](../modules/surface.md)
 holds the declaration artifact: the encoders, the digests, the `.pi` declaration grammar, the loader, and the
-two-phase intra-module pass. [the module system](../modules/system.md) holds identity, `module.pi`, the four
+two-phase intra-module pass. [the module system](../modules/system.md) holds identity, the project file, the four
 source kinds, the registries, the lock, and the scoped universe. [the frontend architecture](architecture.md)
 holds the syntax, HIR and elaborator crates, the three graph rules, the IR constructor set they produce, and
 the tooling and query surface built over them. [the surface notation](surface-notation.md) holds the
@@ -198,7 +198,7 @@ step one inside round one, and the two body migrations as their own rounds after
    claim:* `example-domain` (four nominals, one interface, two rules, built so that no crate names it) as
    one `.pi` file producing byte-identical interface encodings and an identical contract-test result, plus
    equal body digests under qualified and unqualified spelling.
-5. [the module system](../modules/system.md). identity and the deferred domain-authority question; `module.pi`;
+5. [the module system](../modules/system.md). identity and the deferred domain-authority question; the project file;
    the four source kinds as adapters; configured forge sugar; domain-bound registries with no search order;
    workspaces as the bootstrap locator; the lock; the scoped universe; `pith diff`; and the
    index-versus-no-index fork argued rather than assumed. *measured claim:* publish `example-domain` to a

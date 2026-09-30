@@ -6,7 +6,7 @@ summary: what comes next, what is parked, what the completed milestones still ow
 kind: planning
 status: draft
 created: 2026-03-23
-updated: 2026-09-29
+updated: 2026-09-30
 tags:
   - planning
   - milestones
@@ -26,6 +26,12 @@ repository is loaded and runs its rules, including actions. after that, pith is 
 ([0077](../decisions/0077-pre-release-pith-is-experimental.md)) and interfaces are added as the first
 outside domains need them ([0078](../decisions/0078-kernel-surface-grows-on-demand.md)).
 
+> edit, 2026-09-30: named so it stays a decision rather than an omission: between experimental and
+> usable by a stranger sit the install story, the outsider-facing documentation, and the error messages
+> a person meets before any design does. [usability](../requirements/usability.md) holds the
+> requirements; none of it is scheduled, under 0078's rule that the first outside domains set the
+> order, and the trigger to plan it is the first such domain arriving.
+
 ## the order
 
 M-17 is next, then M-16. nothing else is scheduled. the rest of M-14, and M-15, M-5b, M-6 and M-7, are
@@ -39,6 +45,15 @@ boundary and the first routing checks. the evidence is in
 [what the completed milestones measured](measured.md).
 
 labels identify milestones and do not encode their order, which is stated in this section.
+
+> edit, 2026-09-30: the order carries no dates either, by the same discipline, and two size facts are
+> worth writing down while both milestones are still ahead. M-17 and M-16 are each larger than any
+> completed milestone: M-17's six steps are each milestone-sized against a history in which M-8 was one
+> mechanism. and the completed record is the only honest forecast there is — M-1 to M-13 closed between
+> late february and late august, with the M-14 slices running on into september — which puts
+> experimental months away, not weeks. the convention that follows: when each of the two opens, state an
+> appetite, how much time it is worth, and descope against the appetite rather than a deadline, so the
+> calendar serves the design instead of the reverse.
 
 ## M-17: the explicit project model
 
@@ -73,6 +88,24 @@ the likely order of work inside it:
 4. inputs as parameters, `with`, the replacement check, and grants on inputs
 5. outputs and the commands, including test caching and `pith env`
 6. the builtin rules and machine facts
+
+> edit, 2026-09-30: M-17 closes the way M-14 does, slice by slice. each step above is a slice with its
+> own measured claim, recorded in [measured](measured.md) when it closes, and the milestone's claim is
+> the six together. the reason is size: against a history in which M-8 was one mechanism, each of the
+> six steps is milestone-sized on its own, and a milestone that closes nothing for months is a drift a
+> solo project has no instrument to notice.
+>
+> edit, 2026-09-30: slice 1 is complete. the project file grammar, `include`, and the lock replace the
+> manifest and `src/` loading and the standalone mode, and [0079](../decisions/0079-a-project-is-one-file.md)
+> is accepted against the slice's measurements in
+> [measured](measured.md#m-17-the-explicit-project-model-the-project-file-slice). slice 2, path values
+> and their admission into the content store, is next.
+>
+> step 3 is the riskiest item in the plan: it removes selection by type from the engine and the CLI,
+> the mechanism [0015](../decisions/0015-interface-rule-selection.md) marked accepted and four domains
+> exercised. the parity fixtures are the gate — the declaration tables, the rule revisions and the
+> elaborated digests must agree across the change before step 4 starts, the same agreement that held
+> through the M-14 slices.
 
 ## M-16: an external domain runs
 
@@ -112,12 +145,19 @@ M-14 work.
 
 the likely order of work inside it:
 
-1. the host adapter boundary and the rust adapter, with `bind_module` binding through it
-2. grants and the refusal of ungranted plans, which also applies to represented bodies and in-tree crates
-3. WIT generation and the type mapping, tested against the corpus's declarations
-4. the worker process and its measured seccomp allowlist
-5. the component adapter, the step protocol and the witness
-6. the three measurements, the fuzzing harness, and the experimental notice from 0077
+> edit, 2026-09-30: a spike now opens the milestone, for the reason the frontend spike set before
+> M-10: the research note reads the component model as of one day, and the step protocol on WASI 0.3
+> async is the assumption every later step builds on.
+
+1. a throwaway spike: one hand-written component driven through wasmtime on WASI 0.3 async, taking one
+   step across the boundary and returning, then discarded. it answers in code what the research note
+   can only answer in reading, before the adapter boundary and the worker are built against it
+2. the host adapter boundary and the rust adapter, with `bind_module` binding through it
+3. grants and the refusal of ungranted plans, which also applies to represented bodies and in-tree crates
+4. WIT generation and the type mapping, tested against the corpus's declarations
+5. the worker process and its measured seccomp allowlist
+6. the component adapter, the step protocol and the witness
+7. the three measurements, the fuzzing harness, and the experimental notice from 0077
 
 ## parked
 
@@ -203,6 +243,11 @@ be declared inputs and derived values, keeping scope intact, or whether scope's 
 systemd's distinction between ordering and requirement dependencies is the closest primary source, with
 Terraform's plan graph and Kubernetes' level-triggered reconciliation as the alternatives. that round
 depends on nothing else here and can run at any time.
+
+> edit, 2026-09-30: that round is the one parked item with a standing invitation rather than a gate.
+> it is the cooldown task: cheap, independent of the sequence, and it settles a foundation
+> contradiction before any deployment work is built on it. it runs in a gap between M-17's slices or
+> after M-16, whenever a break from either is wanted.
 
 ### M-7: broader execution
 

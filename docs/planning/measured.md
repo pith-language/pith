@@ -6,7 +6,7 @@ summary: evidence recorded when completed milestones close
 kind: planning
 status: active
 created: 2026-08-21
-updated: 2026-08-28
+updated: 2026-09-30
 tags:
   - planning
   - milestones
@@ -504,3 +504,45 @@ and checked for satisfiability, but one signature is verified; multi-signature r
 0069's open question. The admission-value calculus — `Stale`, `Unreachable`, `Conflicted`,
 `Unchecked` — the lock document, the withdrawal-replay probe, any snapshot or git transport, and
 any person-facing command remain with the slices that own them.
+
+## M-17: the explicit project model, the project file slice
+
+status: the milestone is open. this is its first slice: the project file grammar, `include`, and the
+lock, which [0079](../decisions/0079-a-project-is-one-file.md) records and which replaces 0067's
+manifest-plus-`src/` loading and its standalone mode.
+
+evidence: the record's three claims are measured in `pith-loader`'s `project_files` suite.
+`a_projects_file_plus_includes_give_the_source_sets_digests` elaborates the same declarations as a
+project file with two includes and as a declarations-only source set under one subject, and the ABI,
+the interface surface, and every represented body digest agree; a second spelling, with the same
+declarations moved into the project file itself, leaves the ABI unmoved, so the split is a spelling.
+`a_file_no_include_names_affects_no_digest` drops a stray `.pi` file into the project directory and
+shows the resolved ABI identical to the same project without it: a project's source content is exactly
+its file plus its includes. `a_header_clause_in_an_include_is_refused_naming_the_clause` refuses an
+included file carrying header clauses both at the grammar and through a load, naming `module` and
+carrying the offending file's identity. `resolving_inputs_writes_and_rewrites_the_lock_beside_the_project`
+holds the lock's contract: the first resolution writes `pith.lock` beside the project file with one
+line per input, recording subject, canonical version, and the measured identity of the input's file
+set, and content that moved rewrites it, because a path input pins nothing.
+
+the loading properties 0067 measured survive the change of shape, adapted where the locator made the
+old property unmeasurable. the workspace suite still passes dependency-first resolution with includes
+sorted canonically, the diamond loaded once, member isolation, and relocation and enumeration
+permutation, now over project files; the registry round trip still gives equal ABIs, surfaces, and,
+for the identically-spelled dependency, equal file identities through the local and registry stores.
+one property moved in kind and is recorded as such: a route that conflicts now reads its target
+before refusing, because a locator names content and the subject it claims is declared by the project
+the route reaches, so `route_claims` asserts the conflict names both clauses and that the target's
+includes were never acquired. `an_unbound_host_rule_in_a_later_file_points_there` keeps multi-file
+span attribution through an include. the local-workspace fixture runs end to end in the project form
+with a committed lock. `just ci` passes at 1169 tests; the suite stood at 1171 before the slice, and
+the difference is the refusal rows the new grammar cannot express (an empty source set; a range on a
+path dependency) against the new refusals added (a missing subject on an input target, a typed value
+input, `with` and `grant`, an unbound `host` clause).
+
+limitations, stated so the section is not read past its scope. only `path` inputs resolve; `git`,
+`archive`, and registry locators parse and refuse at acquisition, and `with` arguments, grants, typed
+value inputs, and a used `host` clause are parsed then refused. the loader requires the `module`
+clause of every loaded project. the lock is written, never read back; drift reporting and pinned
+reads are the registry round's. `pith fmt` still formats an include file on its own, which no record
+forbids.
