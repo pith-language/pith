@@ -9,6 +9,7 @@ mod roots;
 mod session;
 mod source;
 mod state;
+mod view;
 
 pub use entry::ExecInvocation;
 pub use error::{FailureKind, QueryError};

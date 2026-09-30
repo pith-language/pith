@@ -1,10 +1,7 @@
-//! A root module and its transitive dependencies, loaded once and ready to
-//! bind onto either engine authority. Standalone source files resolve
-//! file-relative imports; a `module.pi` manifest selects manifest mode
-//! unconditionally, never falling back to source mode.
-
-use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+//! A root project and its transitive dependencies, loaded once and ready
+//! to bind onto either engine authority. Loading begins from the supplied
+//! project file; there is no file-relative import resolution and no
+//! fallback mode.
 
 use pith_core::{Action, BodyRevision, Rule, RuleId, Value};
 use pith_diag::{Diag, DiagnosticSink, EngineCode, PithResult, Text};
@@ -12,13 +9,9 @@ use pith_engine::{
     ActionExecution, ActionRule, Engine, EngineStateReader, PureRule, PureRuleFrame, PureStep,
     Resumption,
 };
-use pith_loader::{
-    EntryDeclaration, ImportEnv, LoadedModule, ModuleSource, ParsedModule, RuleDeclaration,
-    Workspace, elaborate_module, parse_module,
-};
+use pith_loader::{EntryDeclaration, LoadedModule, RuleDeclaration, Workspace, write_lock};
 
 use crate::error::QueryError;
-use crate::source::read_module;
 
 pub(crate) struct Program {
     root: LoadedModule,
@@ -26,38 +19,8 @@ pub(crate) struct Program {
 }
 
 impl Program {
-    pub(crate) fn load(path: &Path) -> Result<Self, QueryError> {
-        if is_manifest(path) {
-            Self::load_workspace(path)
-        } else {
-            Self::load_standalone(path)
-        }
-    }
-
-    fn load_standalone(path: &Path) -> Result<Self, QueryError> {
-        let source = read_module(path)?;
-        let mut imports = builtin_environment()?;
-        let mut loading = BTreeSet::from([path.to_path_buf()]);
-        let mut dependencies = Vec::new();
-        let parsed = populate_imports(
-            path,
-            &source,
-            &mut imports,
-            &mut loading,
-            Some(&mut dependencies),
-        )?;
-        let root = elaborate_module(parsed, &imports).map_err(|diagnostics| {
-            QueryError::user(format!("`{}` does not elaborate", path.display()))
-                .with_diagnostics(diagnostics)
-        })?;
-        Ok(Self {
-            root,
-            dependencies: dependencies.into(),
-        })
-    }
-
-    fn load_workspace(root_manifest: &Path) -> Result<Self, QueryError> {
-        let workspace = resolve_workspace(root_manifest)?;
+    pub(crate) fn load(path: &std::path::Path) -> Result<Self, QueryError> {
+        let workspace = load_workspace(path)?;
         let (root, dependencies) = workspace
             .elaborate()
             .map_err(elaborate_failure)?
@@ -106,36 +69,27 @@ impl Program {
     }
 }
 
-/// The import environment `source` elaborates under, together with `source`'s
-/// own parse, so the caller elaborates the root without parsing it twice.
-pub(crate) fn prepared_imports(
-    path: &Path,
-    source: &ModuleSource,
-) -> Result<(ImportEnv, ParsedModule), QueryError> {
-    let mut imports = builtin_environment()?;
-    let mut loading = BTreeSet::from([path.to_path_buf()]);
-    let parsed = populate_imports(path, source, &mut imports, &mut loading, None)?;
-    Ok((imports, parsed))
-}
-
-/// Whether `path` names a manifest. The file name alone decides; every other
-/// file loads as standalone source.
-pub(crate) fn is_manifest(path: &Path) -> bool {
-    path.file_name()
-        .is_some_and(|name| name == pith_loader::MANIFEST_NAME)
-}
-
-fn resolve_workspace(root_manifest: &Path) -> Result<Workspace, QueryError> {
-    Workspace::load(root_manifest).map_err(|diagnostics| {
+/// Resolve the workspace whose root project file is `path`, then write the
+/// lock beside it: the first command that resolves inputs is the one that
+/// records them.
+pub(crate) fn load_workspace(path: &std::path::Path) -> Result<Workspace, QueryError> {
+    let workspace = Workspace::load(path).map_err(|diagnostics| {
         QueryError::user(format!(
-            "`{}` does not resolve as a workspace root",
-            root_manifest.display()
+            "`{}` does not resolve as a project root",
+            path.display()
         ))
         .with_diagnostics(diagnostics)
-    })
+    })?;
+    write_lock(&workspace, path).map_err(|error| {
+        QueryError::user(format!(
+            "cannot write the lock beside `{}`: {error}",
+            path.display()
+        ))
+    })?;
+    Ok(workspace)
 }
 
-/// What `check` reports for a manifest-rooted program: the root's subject,
+/// What `check` reports for a project-rooted program: the root's subject,
 /// the root's ABI when it elaborated, and every module's diagnostics. A
 /// module whose dependency failed reports no diagnostics of its own, so one
 /// refusal cannot cascade into missing-binding noise.
@@ -145,12 +99,14 @@ pub(crate) struct WorkspaceCheck {
     pub(crate) diagnostics: Vec<Diag>,
 }
 
-pub(crate) fn check_workspace(root_manifest: &Path) -> Result<WorkspaceCheck, QueryError> {
-    let checked = match Workspace::load(root_manifest) {
-        Ok(workspace) => workspace.check().map_err(elaborate_failure)?,
+pub(crate) fn check_project(root_project: &std::path::Path) -> Result<WorkspaceCheck, QueryError> {
+    let workspace = match Workspace::load(root_project) {
+        Ok(workspace) => workspace,
         Err(diagnostics) => {
+            // A root that does not resolve still reports: the check command's
+            // contract is a record either way.
             return Ok(WorkspaceCheck {
-                root: root_manifest
+                root: root_project
                     .file_stem()
                     .and_then(|stem| stem.to_str())
                     .unwrap_or_default()
@@ -160,6 +116,13 @@ pub(crate) fn check_workspace(root_manifest: &Path) -> Result<WorkspaceCheck, Qu
             });
         }
     };
+    write_lock(&workspace, root_project).map_err(|error| {
+        QueryError::user(format!(
+            "cannot write the lock beside `{}`: {error}",
+            root_project.display()
+        ))
+    })?;
+    let checked = workspace.check().map_err(elaborate_failure)?;
     Ok(WorkspaceCheck {
         root: checked.root,
         abi_digest: checked.root_abi,
@@ -181,75 +144,6 @@ fn elaborate_failure(error: pith_loader::ElaborateError) -> QueryError {
             QueryError::internal(format!("cannot construct builtin types: {error}"))
         }
     }
-}
-
-fn builtin_environment() -> Result<ImportEnv, QueryError> {
-    ImportEnv::with_builtins()
-        .map_err(|error| QueryError::internal(format!("cannot construct builtin types: {error}")))
-}
-
-/// Resolve and load `source`'s transitive imports in dependency order, then
-/// hand the caller its parse. Every module in the graph is parsed exactly
-/// once.
-fn populate_imports(
-    path: &Path,
-    source: &ModuleSource,
-    imports: &mut ImportEnv,
-    loading: &mut BTreeSet<PathBuf>,
-    mut loaded_modules: Option<&mut Vec<LoadedModule>>,
-) -> Result<ParsedModule, QueryError> {
-    let parsed = parse_module(source);
-    for module in parsed.imports() {
-        if imports.get(module).is_some() {
-            continue;
-        }
-        let Some(import_path) = resolve_import(path, module)? else {
-            continue;
-        };
-        if !loading.insert(import_path.clone()) {
-            continue;
-        }
-        let imported_source = read_module(&import_path)?;
-        let imported = populate_imports(
-            &import_path,
-            &imported_source,
-            imports,
-            loading,
-            loaded_modules.as_deref_mut(),
-        )?;
-        let loaded = elaborate_module(imported, imports).map_err(|diagnostics| {
-            QueryError::user(format!("imported module `{module}` does not elaborate"))
-                .with_diagnostics(diagnostics)
-        })?;
-        imports.insert_loaded(&loaded);
-        if let Some(modules) = loaded_modules.as_deref_mut() {
-            modules.push(loaded);
-        }
-        let _ = loading.remove(&import_path);
-    }
-    Ok(parsed)
-}
-
-fn resolve_import(path: &Path, module: &str) -> Result<Option<PathBuf>, QueryError> {
-    let directory = path.parent().unwrap_or_else(|| Path::new("."));
-    let filename = format!("{module}.pi");
-    let mut candidates = vec![directory.join(&filename)];
-    if let Some(parent) = directory.parent() {
-        candidates.push(parent.join(module).join(&filename));
-    }
-    for candidate in candidates {
-        match candidate.try_exists() {
-            Ok(true) if candidate != path => return Ok(Some(candidate)),
-            Ok(_) => {}
-            Err(error) => {
-                return Err(QueryError::user(format!(
-                    "cannot inspect import path `{}`: {error}",
-                    candidate.display()
-                )));
-            }
-        }
-    }
-    Ok(None)
 }
 
 fn bind_module<S>(module: &LoadedModule, engine: &mut Engine<S>) -> Result<(), QueryError>
