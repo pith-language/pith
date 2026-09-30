@@ -83,6 +83,32 @@ fn write(directory: &Path, name: &str, text: &str) -> io::Result<PathBuf> {
     Ok(path)
 }
 
+/// A scratch project file: the header every loaded project carries, plus
+/// the given declarations.
+fn project_file(directory: &Path, declarations: &str) -> io::Result<PathBuf> {
+    write(
+        directory,
+        "pith.pi",
+        &format!("module test/root 0.1.0\n\ninputs {{\n}}\n\n{declarations}"),
+    )
+}
+
+/// A scratch project wrapping a corpus file as its one include, so the
+/// checked-in domain corpora stay reachable from the commands that load a
+/// project.
+fn corpus_project(directory: &Path, corpus: &Path) -> io::Result<PathBuf> {
+    let name = corpus
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    std::fs::copy(corpus, directory.join(name))?;
+    write(
+        directory,
+        "pith.pi",
+        &format!("module test/root 0.1.0\n\ninputs {{\n}}\n\ninclude \"{name}\"\n"),
+    )
+}
+
 /// A throwaway directory. Used both as a store root and as a place to put
 /// fixture files, so the ambient home never takes part.
 fn scratch() -> io::Result<TempDir> {
@@ -96,7 +122,8 @@ fn test_error(message: impl Into<String>) -> Box<dyn std::error::Error> {
 #[test]
 fn a_module_that_elaborates_succeeds_and_reports_its_abi() -> TestResult {
     let home = scratch()?;
-    let module = workspace_file("crates/xylem/xylem.pi");
+    let source = scratch()?;
+    let module = corpus_project(source.path(), &workspace_file("crates/xylem/xylem.pi"))?;
 
     let run = pith(
         home.path(),
@@ -129,7 +156,7 @@ fn a_module_that_elaborates_succeeds_and_reports_its_abi() -> TestResult {
 fn a_module_that_does_not_elaborate_still_reports_before_failing() -> TestResult {
     let home = scratch()?;
     let source = scratch()?;
-    let module = write(source.path(), "broken.pi", "nominal Thing = Nope\n")?;
+    let module = project_file(source.path(), "nominal Thing = Nope\n")?;
 
     let run = pith(
         home.path(),
@@ -158,7 +185,8 @@ fn a_module_that_does_not_elaborate_still_reports_before_failing() -> TestResult
 #[test]
 fn denying_warnings_changes_the_exit_code_and_not_the_report() -> TestResult {
     let home = scratch()?;
-    let module = workspace_file("crates/xylem/xylem.pi");
+    let source = scratch()?;
+    let module = corpus_project(source.path(), &workspace_file("crates/xylem/xylem.pi"))?;
     let path = module.display().to_string();
 
     let permissive = pith(home.path(), &["--output", "json", "check", &path])?;
@@ -182,7 +210,8 @@ fn denying_warnings_changes_the_exit_code_and_not_the_report() -> TestResult {
 #[test]
 fn explore_reports_the_tier_that_answers_each_rule() -> TestResult {
     let home = scratch()?;
-    let module = workspace_file("crates/xylem/xylem.pi");
+    let source = scratch()?;
+    let module = corpus_project(source.path(), &workspace_file("crates/xylem/xylem.pi"))?;
 
     let run = pith(
         home.path(),
@@ -210,9 +239,8 @@ fn explore_reports_the_tier_that_answers_each_rule() -> TestResult {
 fn entry_commands_share_the_versioned_evaluation_and_recorded_graph() -> TestResult {
     let home = scratch()?;
     let source = scratch()?;
-    let module = write(
+    let module = project_file(
         source.path(),
-        "root.pi",
         "pure rule echo(value: Text) -> Text = { value }\n\nentry main : Text = ask (\"hello\")\n",
     )?;
     let path = module.display().to_string();
@@ -228,7 +256,7 @@ fn entry_commands_share_the_versioned_evaluation_and_recorded_graph() -> TestRes
         selected
             .query()?
             .and_then(|query| query.get("rule").cloned()),
-        Some(serde_json::Value::from("root::entry.main"))
+        Some(serde_json::Value::from("test/root::entry.main"))
     );
     assert!(
         !home.path().join("state.db").exists(),
@@ -308,9 +336,8 @@ fn entry_commands_share_the_versioned_evaluation_and_recorded_graph() -> TestRes
 fn graph_plan_refuses_an_unbound_domain_action_by_coordinate() -> TestResult {
     let home = scratch()?;
     let source = scratch()?;
-    let module = write(
+    let module = project_file(
         source.path(),
-        "root.pi",
         "action rule compile(Text) -> Text = host\n\npure rule build(name: Text) -> Text = {\n  run Text (name)\n}\n\nentry main : Text = ask (\"input\")\n",
     )?;
 
@@ -326,7 +353,11 @@ fn graph_plan_refuses_an_unbound_domain_action_by_coordinate() -> TestResult {
     )?;
 
     assert_eq!(run.code(), 1, "{}", run.stderr());
-    assert!(run.stderr().contains("root.compile"), "{}", run.stderr());
+    assert!(
+        run.stderr().contains("test/root.compile"),
+        "{}",
+        run.stderr()
+    );
     assert!(
         run.stderr().contains("links no domain crate"),
         "{}",
@@ -339,9 +370,8 @@ fn graph_plan_refuses_an_unbound_domain_action_by_coordinate() -> TestResult {
 fn exec_reports_the_only_return_from_process_replacement() -> TestResult {
     let home = scratch()?;
     let source = scratch()?;
-    let module = write(
+    let module = project_file(
         source.path(),
-        "root.pi",
         "import pith\n\npure rule command(program: Text) -> pith.Exec = {\n  Exec({arguments: [\"fixture\"], program: program})\n}\n\nentry main : pith.Exec = ask (\"/path/that/does/not/exist\")\n",
     )?;
 
@@ -592,11 +622,7 @@ fn fmt_writes_the_canonical_spelling_and_check_verifies_it() -> TestResult {
 fn a_formatted_module_keeps_its_abi_digest() -> TestResult {
     let home = scratch()?;
     let source = scratch()?;
-    let module = write(
-        source.path(),
-        "xylem.pi",
-        &std::fs::read_to_string(workspace_file("crates/xylem/xylem.pi"))?,
-    )?;
+    let module = corpus_project(source.path(), &workspace_file("crates/xylem/xylem.pi"))?;
     let before = pith(
         home.path(),
         &["--output", "json", "check", &module.display().to_string()],
@@ -625,7 +651,8 @@ fn a_formatted_module_keeps_its_abi_digest() -> TestResult {
 #[test]
 fn the_three_exit_codes_are_distinguishable() -> TestResult {
     let home = scratch()?;
-    let module = workspace_file("crates/xylem/xylem.pi");
+    let source = scratch()?;
+    let module = corpus_project(source.path(), &workspace_file("crates/xylem/xylem.pi"))?;
     let absent = "0".repeat(64);
 
     let success = pith(home.path(), &["check", &module.display().to_string()])?;
@@ -684,7 +711,8 @@ fn the_store_flag_overrides_only_its_half() -> TestResult {
 #[test]
 fn json_output_is_one_versioned_record_per_line() -> TestResult {
     let home = scratch()?;
-    let module = workspace_file("crates/xylem/xylem.pi");
+    let source = scratch()?;
+    let module = corpus_project(source.path(), &workspace_file("crates/xylem/xylem.pi"))?;
 
     let run = pith(
         home.path(),
@@ -713,7 +741,8 @@ fn json_output_is_one_versioned_record_per_line() -> TestResult {
 #[test]
 fn pretty_output_and_help_adapt_to_every_supported_color_depth() -> TestResult {
     let home = scratch()?;
-    let module = workspace_file("crates/xylem/xylem.pi");
+    let source = scratch()?;
+    let module = corpus_project(source.path(), &workspace_file("crates/xylem/xylem.pi"))?;
     let arguments = ["--output", "pretty", "check", &module.display().to_string()];
 
     let unforced = pith(home.path(), &arguments)?;
@@ -939,7 +968,7 @@ fn the_local_workspace_fixture_checks_explores_and_hydrates() -> TestResult {
 
     let checked = query_in(
         home.path(),
-        &["--output", "json", "check", "module.pi"],
+        &["--output", "json", "check", "pith.pi"],
         &root,
     )?;
     assert_eq!(
@@ -958,7 +987,7 @@ fn the_local_workspace_fixture_checks_explores_and_hydrates() -> TestResult {
 
     let explored = query_in(
         home.path(),
-        &["--output", "json", "explore", "module.pi"],
+        &["--output", "json", "explore", "pith.pi"],
         &root,
     )?;
     assert_eq!(
@@ -971,7 +1000,7 @@ fn the_local_workspace_fixture_checks_explores_and_hydrates() -> TestResult {
 
     let formatted = run_in(
         home.path(),
-        &["--output", "json", "fmt", "--check", "module.pi"],
+        &["--output", "json", "fmt", "--check", "pith.pi"],
         &root,
     )?;
     assert_eq!(formatted.code(), 0, "{}", formatted.stderr());
@@ -981,8 +1010,8 @@ fn the_local_workspace_fixture_checks_explores_and_hydrates() -> TestResult {
         .filter(|record| record.get("kind").and_then(serde_json::Value::as_str) == Some("query"))
         .count();
     assert_eq!(
-        files, 2,
-        "fmt reports the manifest and the root's own source file, nothing else"
+        files, 1,
+        "fmt reports the root's project file, which holds all its declarations"
     );
 
     let first = run_in(home.path(), &["--output", "json", "run", "hello"], &root)?;
@@ -1039,8 +1068,8 @@ fn the_local_workspace_fixture_checks_explores_and_hydrates() -> TestResult {
     Ok(())
 }
 
-/// The fixture's commands run from the workspace's own root, which is what
-/// their default `--module module.pi` names.
+/// The fixture's commands run from the project's own root, which is what
+/// their default `--module pith.pi` names.
 fn run_in(home: &Path, arguments: &[&str], root: &Path) -> TestResult<Run> {
     let output = pith_command(home, arguments).current_dir(root).output()?;
     Ok(Run { output })
@@ -1052,8 +1081,8 @@ fn query_in(home: &Path, arguments: &[&str], root: &Path) -> TestResult<serde_js
     run.query()?.ok_or_else(|| test_error("no query record"))
 }
 
-/// Manifest-mode selection reads state without creating it, exactly as the
-/// standalone tier does.
+/// Project-mode selection reads state without creating it, exactly as the
+/// standalone tier did.
 ///
 /// Each read-only command gets its own store, so one of them creating a
 /// database cannot be hidden by another that legitimately would. `fmt
@@ -1062,12 +1091,12 @@ fn query_in(home: &Path, arguments: &[&str], root: &Path) -> TestResult<serde_js
 #[test]
 fn the_read_only_manifest_commands_create_no_state_database() -> TestResult {
     let root = workspace_file("examples/local-workspace");
-    let before = std::fs::read(root.join("src/main.pi"))?;
+    let before = std::fs::read(root.join("pith.pi"))?;
     for arguments in [
         ["--output", "json", "graph", "select", "hello"].as_slice(),
         ["--output", "json", "check", "module.pi"].as_slice(),
         ["--output", "json", "explore", "module.pi"].as_slice(),
-        ["--output", "json", "fmt", "--check", "module.pi"].as_slice(),
+        ["--output", "json", "fmt", "--check", "pith.pi"].as_slice(),
     ] {
         let home = scratch()?;
         let run = run_in(home.path(), arguments, &root)?;
@@ -1079,7 +1108,7 @@ fn the_read_only_manifest_commands_create_no_state_database() -> TestResult {
     }
     assert_eq!(
         before,
-        std::fs::read(root.join("src/main.pi"))?,
+        std::fs::read(root.join("pith.pi"))?,
         "fmt --check rewrote the file it was asked to report on"
     );
     Ok(())
@@ -1101,25 +1130,30 @@ fn a_rule_added_to_one_dependency_breaks_a_consumer_that_imports_another() -> Te
     let project = scratch()?;
     let root = project.path();
 
-    for directory in ["src", "one/src", "two/src"] {
+    for directory in ["one", "two"] {
         std::fs::create_dir_all(root.join(directory))?;
     }
     write(
         root,
-        "module.pi",
-        "module example/root 0.1.0\n\nuse one = example/one from path \"one\"\nuse two = example/two from path \"two\"\n",
+        "pith.pi",
+        &format!(
+            "module example/root 0.1.0\n\ninputs {{\n  one = path \"one\",\n  two = path \
+             \"two\",\n}}\n\n{CONSUMER}"
+        ),
     )?;
-    write(&root.join("src"), "main.pi", CONSUMER)?;
-    write(&root.join("one"), "module.pi", "module example/one 0.1.0\n")?;
     write(
-        &root.join("one/src"),
-        "rules.pi",
-        "pure rule yes(value: Text) -> Bool = { true }\n",
+        &root.join("one"),
+        "pith.pi",
+        "module example/one 0.1.0\n\ninputs {\n}\n\npure rule yes(value: Text) -> Bool = { \
+         true }\n",
     )?;
-    write(&root.join("two"), "module.pi", "module example/two 0.1.0\n")?;
-    write(&root.join("two/src"), "types.pi", "nominal Marker = Text\n")?;
+    write(
+        &root.join("two"),
+        "pith.pi",
+        "module example/two 0.1.0\n\ninputs {\n}\n\nnominal Marker = Text\n",
+    )?;
 
-    let manifest = root.join("module.pi").display().to_string();
+    let manifest = root.join("pith.pi").display().to_string();
     let before = pith(
         home.path(),
         &["--output", "json", "run", "hello", "--module", &manifest],
@@ -1142,13 +1176,16 @@ fn a_rule_added_to_one_dependency_breaks_a_consumer_that_imports_another() -> Te
     // already provides. Neither module declares a duplicate of its own, and the
     // consumer's source is untouched.
     write(
-        &root.join("two/src"),
-        "types.pi",
-        "nominal Marker = Text\npure rule no(value: Text) -> Bool = { false }\n",
+        &root.join("two"),
+        "pith.pi",
+        "module example/two 0.1.0\n\ninputs {\n}\n\nnominal Marker = Text\npure rule \
+         no(value: Text) -> Bool = { false }\n",
     )?;
     assert_eq!(
-        std::fs::read_to_string(root.join("src/main.pi"))?,
-        CONSUMER,
+        std::fs::read_to_string(root.join("pith.pi"))?,
+        format!(
+            "module example/root 0.1.0\n\ninputs {{\n  one = path \"one\",\n  two = path \"two\",\n}}\n\n{CONSUMER}"
+        ),
         "the probe edited the consumer; it must only edit a dependency"
     );
 
@@ -1193,9 +1230,8 @@ fn a_rule_added_to_one_dependency_breaks_a_consumer_that_imports_another() -> Te
 fn two_rules_providing_one_interface_in_one_module_are_refused_at_elaboration() -> TestResult {
     let home = scratch()?;
     let project = scratch()?;
-    let module = write(
+    let module = project_file(
         project.path(),
-        "root.pi",
         "pure rule yes(value: Text) -> Bool = { true }\npure rule no(value: Text) -> Bool = { false }\n\nentry hello : Bool = ask (\"x\")\n",
     )?;
 
@@ -1213,14 +1249,27 @@ fn two_rules_providing_one_interface_in_one_module_are_refused_at_elaboration() 
     Ok(())
 }
 
-/// The first-party module that imports another, still loading the way a
-/// standalone module always has: file-relative, by name, no manifest. A
-/// `.pi` source file and a `module.pi` are different documents, and neither
-/// falls back to the other.
+/// A project inputs another project by path and imports it by name: the
+/// corpus's phloem-over-xylem pair, spelled in the project form.
 #[test]
-fn the_standalone_importing_module_still_checks_by_file_relative_route() -> TestResult {
+fn a_project_inputs_another_by_path_and_imports_it_by_name() -> TestResult {
     let home = scratch()?;
-    let module = workspace_file("crates/phloem/phloem.pi");
+    let source = scratch()?;
+    let xylem = source.path().join("xylem");
+    std::fs::create_dir_all(&xylem)?;
+    corpus_project(&xylem, &workspace_file("crates/xylem/xylem.pi"))?;
+    let phloem = source.path().join("phloem");
+    std::fs::create_dir_all(&phloem)?;
+    std::fs::copy(
+        workspace_file("crates/phloem/phloem.pi"),
+        phloem.join("phloem.pi"),
+    )?;
+    let module = write(
+        &phloem,
+        "pith.pi",
+        "module test/phloem 0.1.0\n\ninputs {\n  xylem = path \"../xylem\",\n}\n\ninclude \
+         \"phloem.pi\"\n",
+    )?;
 
     let run = pith(
         home.path(),
@@ -1231,20 +1280,20 @@ fn the_standalone_importing_module_still_checks_by_file_relative_route() -> Test
     let query = run.query()?.ok_or_else(|| test_error("no query record"))?;
     assert_eq!(
         query.get("module").and_then(serde_json::Value::as_str),
-        Some("phloem"),
-        "a standalone file's identity is still its file stem: {query}"
+        Some("test/phloem"),
+        "the project's identity is its declared subject: {query}"
     );
     assert_eq!(
         query.get("errors").and_then(serde_json::Value::as_u64),
         Some(0),
-        "phloem elaborates over its imported xylem: {query}"
+        "phloem elaborates over its input xylem: {query}"
     );
     assert!(
         query
             .get("abi_digest")
             .and_then(serde_json::Value::as_str)
             .is_some(),
-        "the ABI is absent, so `import xylem` did not resolve file-relatively: {query}"
+        "the ABI is absent, so `import xylem` did not resolve through the input: {query}"
     );
     Ok(())
 }
@@ -1258,26 +1307,20 @@ fn an_edited_dependency_body_revalidates_the_entry() -> TestResult {
     let home = scratch()?;
     let project = scratch()?;
     let directory = project.path();
-    std::fs::create_dir_all(directory.join("src"))?;
-    std::fs::create_dir_all(directory.join("dep/src"))?;
+    std::fs::create_dir_all(directory.join("dep"))?;
     std::fs::write(
-        directory.join("module.pi"),
-        "module example/root 0.1.0\n\nuse dep = example/dep from path \"dep\"\n",
+        directory.join("pith.pi"),
+        "module example/root 0.1.0\n\ninputs {\n  dep = path \"dep\",\n}\n\nimport \
+         dep\n\nentry hello : Text = ask (Message(\"hello\"))\n",
     )?;
     std::fs::write(
-        directory.join("src/main.pi"),
-        "import dep\n\nentry hello : Text = ask (Message(\"hello\"))\n",
+        directory.join("dep").join("pith.pi"),
+        "module example/dep 0.1.0\n\ninputs {\n}\n\ninclude \"types.pi\"\ninclude \
+         \"rules.pi\"\n",
     )?;
+    std::fs::write(directory.join("dep/types.pi"), "nominal Message = Text\n")?;
     std::fs::write(
-        directory.join("dep/module.pi"),
-        "module example/dep 0.1.0\n",
-    )?;
-    std::fs::write(
-        directory.join("dep/src/types.pi"),
-        "nominal Message = Text\n",
-    )?;
-    std::fs::write(
-        directory.join("dep/src/rules.pi"),
+        directory.join("dep/rules.pi"),
         "pure rule speak(who: Message) -> Text = { \"first\" }\n",
     )?;
 
@@ -1298,7 +1341,7 @@ fn an_edited_dependency_body_revalidates_the_entry() -> TestResult {
     );
 
     std::fs::write(
-        directory.join("dep/src/rules.pi"),
+        directory.join("dep/rules.pi"),
         "pure rule speak(who: Message) -> Text = { \"second\" }\n",
     )?;
     let second = run_in(

@@ -237,31 +237,31 @@ fn formatting_preserves_file_permissions() -> TestResult {
 /// spelling of the manifest and the root's own sources is a function of
 /// those files, and a missing dependency directory cannot refuse it.
 #[test]
-fn formatting_a_manifest_resolves_no_dependencies() -> TestResult {
+fn formatting_a_project_resolves_no_dependencies() -> TestResult {
     let root = tempfile::tempdir()?;
     let directory = root.path();
-    std::fs::create_dir_all(directory.join("src"))?;
     std::fs::write(
-        directory.join("module.pi"),
-        "module example/root 0.1.0\n\nuse ghost = example/ghost from path \"ghost\"\n",
+        directory.join("pith.pi"),
+        "module example/root 0.1.0\n\ninputs {\n  ghost = path \"ghost\",\n}\n\ninclude \
+         \"main.pi\"\n",
     )?;
     std::fs::write(
-        directory.join("src/main.pi"),
+        directory.join("main.pi"),
         "import ghost\nnominal   T   =   Text\n",
     )?;
 
-    let reports = format(&directory.join("module.pi"), FormatMode::Write)?;
+    let reports = format(&directory.join("pith.pi"), FormatMode::Write)?;
 
-    assert_eq!(reports.len(), 2, "the manifest and the one source file");
-    let [manifest, source] = reports.as_slice() else {
+    assert_eq!(reports.len(), 2, "the project file and the one include");
+    let [project, include] = reports.as_slice() else {
         unreachable!("two reports");
     };
-    assert_eq!(manifest.status, FmtStatus::Unchanged);
-    assert_eq!(source.status, FmtStatus::Formatted);
+    assert_eq!(project.status, FmtStatus::Unchanged);
+    assert_eq!(include.status, FmtStatus::Formatted);
     assert_eq!(
-        std::fs::read_to_string(directory.join("src/main.pi"))?,
+        std::fs::read_to_string(directory.join("main.pi"))?,
         "import ghost\n\nnominal T = Text\n",
-        "the source file was not written canonically"
+        "the include was not written canonically"
     );
     Ok(())
 }

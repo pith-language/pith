@@ -1,3 +1,0 @@
-import greeting
-
-entry hello : Text = ask Text (Message("hello"))

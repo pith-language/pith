@@ -5,9 +5,12 @@ use pith_query::{ReadOnly, Roots, Session, Writable, explore};
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
-fn module(directory: &Path, text: &str) -> TestResult<std::path::PathBuf> {
-    let path = directory.join("root.pi");
-    std::fs::write(&path, text)?;
+fn project(directory: &Path, declarations: &str) -> TestResult<std::path::PathBuf> {
+    let path = directory.join("pith.pi");
+    std::fs::write(
+        &path,
+        format!("module test/root 0.1.0\n\ninputs {{\n}}\n\n{declarations}"),
+    )?;
     Ok(path)
 }
 
@@ -18,7 +21,7 @@ fn writable(home: &Path) -> TestResult<Session<Writable>> {
 #[test]
 fn explore_includes_entries_and_about_metadata() -> TestResult {
     let source = tempfile::tempdir()?;
-    let path = module(
+    let path = project(
         source.path(),
         "-- module facts\nabout {\n  description: \"entry fixture\",\n  maintainers: [\"query\"],\n}\n\npure rule echo(value: Text) -> Text = { value }\n\n-- default request\nentry main : Text = ask (\"hello\")\n",
     )?;
@@ -28,7 +31,7 @@ fn explore_includes_entries_and_about_metadata() -> TestResult {
     let [entry] = explored.entries.as_ref() else {
         return Err("explore omitted the entry".into());
     };
-    assert_eq!(entry.coordinate.as_ref(), "root::entry.main");
+    assert_eq!(entry.coordinate.as_ref(), "test/root::entry.main");
     assert!(matches!(entry.tier, TierRepr::Represented));
     assert_eq!(entry.documentation.as_ref(), "default request");
     let [about] = explored.about.as_ref() else {
@@ -49,7 +52,7 @@ fn explore_includes_entries_and_about_metadata() -> TestResult {
 fn an_entry_evaluates_and_hydrates_by_its_body_digest() -> TestResult {
     let source = tempfile::tempdir()?;
     let home = tempfile::tempdir()?;
-    let path = module(
+    let path = project(
         source.path(),
         "pure rule echo(value: Text) -> Text = { value }\n\nentry main : Text = ask (\"hello\")\n",
     )?;
@@ -67,7 +70,7 @@ fn an_entry_evaluates_and_hydrates_by_its_body_digest() -> TestResult {
 fn entry_selection_is_read_only_and_names_the_synthetic_coordinate() -> TestResult {
     let source = tempfile::tempdir()?;
     let home = tempfile::tempdir()?;
-    let path = module(
+    let path = project(
         source.path(),
         "pure rule echo(value: Text) -> Text = { value }\n\nentry main : Text = ask (\"hello\")\n",
     )?;
@@ -75,7 +78,7 @@ fn entry_selection_is_read_only_and_names_the_synthetic_coordinate() -> TestResu
     let selected =
         Session::<ReadOnly>::open(Roots::under(home.path()))?.select_entry(&path, "main")?;
 
-    assert_eq!(selected.rule.as_ref(), "root::entry.main");
+    assert_eq!(selected.rule.as_ref(), "test/root::entry.main");
     assert!(!home.path().join("state.db").exists());
     Ok(())
 }
@@ -84,7 +87,7 @@ fn entry_selection_is_read_only_and_names_the_synthetic_coordinate() -> TestResu
 fn a_colliding_entry_teaches_that_its_name_is_not_a_preference() -> TestResult {
     let source = tempfile::tempdir()?;
     let home = tempfile::tempdir()?;
-    let path = module(
+    let path = project(
         source.path(),
         "pure rule answer() -> Text = { \"hello\" }\n\nentry main : Text = ask ()\n",
     )?;
@@ -104,7 +107,7 @@ fn a_colliding_entry_teaches_that_its_name_is_not_a_preference() -> TestResult {
 fn an_unbound_host_rule_names_the_coordinate() -> TestResult {
     let source = tempfile::tempdir()?;
     let home = tempfile::tempdir()?;
-    let path = module(
+    let path = project(
         source.path(),
         "pure rule echo(Text) -> Text = host\n\nentry main : Text = ask (\"hello\")\n",
     )?;
@@ -115,7 +118,7 @@ fn an_unbound_host_rule_names_the_coordinate() -> TestResult {
         .ok_or("the unbound host rule evaluated")?;
 
     assert!(error.diagnostics().iter().any(|diagnostic| {
-        diagnostic.message.0.contains("root.echo")
+        diagnostic.message.0.contains("test/root.echo")
             && diagnostic.message.0.contains("links no domain crate")
     }));
     Ok(())
@@ -125,7 +128,7 @@ fn an_unbound_host_rule_names_the_coordinate() -> TestResult {
 fn the_builtin_exec_type_is_evaluated_before_the_caller_effect() -> TestResult {
     let source = tempfile::tempdir()?;
     let home = tempfile::tempdir()?;
-    let path = module(
+    let path = project(
         source.path(),
         "import pith\n\npure rule command(name: Text) -> pith.Exec = {\n  Exec({arguments: [name], program: \"/bin/echo\"})\n}\n\nentry dev : pith.Exec = ask (\"hello\")\n",
     )?;
@@ -137,34 +140,35 @@ fn the_builtin_exec_type_is_evaluated_before_the_caller_effect() -> TestResult {
     Ok(())
 }
 
-/// A host rule in a dependency's second file refuses with that file's own
-/// label and a file-local span, at the declaration rather than a module-wide
-/// offset.
+/// A host rule in a dependency's second file (an include) refuses with that
+/// file's own label and a file-local span, at the declaration rather than a
+/// module-wide offset.
 #[test]
 fn an_unbound_host_rule_in_a_later_file_points_there() -> TestResult {
     let source = tempfile::tempdir()?;
     let home = tempfile::tempdir()?;
     let directory = source.path();
     let dependency = directory.join("dep");
-    std::fs::create_dir_all(dependency.join("src"))?;
-    std::fs::write(dependency.join("module.pi"), "module example/dep 0.1.0\n")?;
-    std::fs::write(dependency.join("src/types.pi"), "nominal Message = Text\n")?;
+    std::fs::create_dir_all(&dependency)?;
     std::fs::write(
-        dependency.join("src/rules.pi"),
+        dependency.join("pith.pi"),
+        "module example/dep 0.1.0\n\ninputs {\n}\n\ninclude \"types.pi\"\ninclude \
+         \"rules.pi\"\n",
+    )?;
+    std::fs::write(dependency.join("types.pi"), "nominal Message = Text\n")?;
+    std::fs::write(
+        dependency.join("rules.pi"),
         "-- speaks a message\npure rule speak(who: Message) -> Text = host\n",
     )?;
-    std::fs::create_dir_all(directory.join("root/src"))?;
+    std::fs::create_dir_all(directory.join("root"))?;
     std::fs::write(
-        directory.join("root/module.pi"),
-        "module example/root 0.1.0\n\nuse dep = example/dep from path \"../dep\"\n",
-    )?;
-    std::fs::write(
-        directory.join("root/src/main.pi"),
-        "import dep\n\nentry main : Text = ask (Message(\"hello\"))\n",
+        directory.join("root").join("pith.pi"),
+        "module example/root 0.1.0\n\ninputs {\n  dep = path \"../dep\"\n}\n\nimport \
+         dep\n\nentry main : Text = ask (Message(\"hello\"))\n",
     )?;
 
     let error = writable(home.path())?
-        .run_entry(&directory.join("root/module.pi"), "main")
+        .run_entry(&directory.join("root").join("pith.pi"), "main")
         .err()
         .ok_or("the unbound host rule evaluated")?;
 
@@ -177,7 +181,7 @@ fn an_unbound_host_rule_in_a_later_file_points_there() -> TestResult {
         .source
         .as_ref()
         .ok_or("the refusal carries its source")?;
-    assert_eq!(source_file.label.as_ref(), "src/rules.pi");
+    assert_eq!(source_file.label.as_ref(), "rules.pi");
     let (line, column) = source_file.line_col(refusal.span.start);
     assert_eq!(
         (line, column),

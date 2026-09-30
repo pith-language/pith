@@ -1,0 +1,7 @@
+module example/greeting 0.1.0
+
+inputs {
+}
+
+include "types.pi"
+include "rules.pi"

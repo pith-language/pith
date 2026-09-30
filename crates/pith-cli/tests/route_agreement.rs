@@ -6,36 +6,36 @@ use std::process::{Command, Output};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
-fn module(root: &Path, name: &str, manifest: &str) -> std::io::Result<()> {
+fn project(root: &Path, name: &str, subject: &str, inputs: &str) -> std::io::Result<()> {
     let directory = root.join(name);
-    fs::create_dir_all(directory.join("src"))?;
-    fs::write(directory.join("module.pi"), manifest)?;
-    fs::write(directory.join("src/main.pi"), "nominal Name = Text\n")
+    fs::create_dir_all(&directory)?;
+    fs::write(
+        directory.join("pith.pi"),
+        format!("module {subject} 1\n\ninputs {{\n{inputs}}}\n\nnominal Name = Text\n"),
+    )
 }
 
 fn fixture(root: &Path, right: &str) -> std::io::Result<()> {
-    module(
+    project(
         root,
         "",
-        "module example/root 1\nuse left = example/left from path \"left\"\nuse right = example/right from path \"right\"\n",
+        "example/root",
+        "  left = path \"left\"\n  right = path \"right\"\n",
     )?;
-    module(
-        root,
-        "left",
-        "module example/left 1\nuse dep = example/dep from path \"../dep\"\n",
-    )?;
-    module(
+    project(root, "left", "example/left", "  dep = path \"../dep\"\n")?;
+    project(
         root,
         "right",
-        &format!("module example/right 1\nuse dep = example/dep from path \"{right}\"\n"),
+        "example/right",
+        &format!("  dep = path \"{right}\"\n"),
     )?;
-    module(root, "dep", "module example/dep 1\n")?;
-    module(root, "other", "module example/dep 2\n")
+    project(root, "dep", "example/dep", "")?;
+    project(root, "other", "example/dep", "")
 }
 
 fn check(root: &Path, home: &Path) -> std::io::Result<Output> {
     Command::new(env!("CARGO_BIN_EXE_pith"))
-        .args(["--output", "json", "check", "module.pi"])
+        .args(["--output", "json", "check", "pith.pi"])
         .current_dir(root)
         .env("PITH_HOME", home)
         .env_remove("PITH_STORE")
@@ -71,7 +71,7 @@ fn check_accepts_equivalent_real_paths_without_creating_state() -> TestResult {
 }
 
 #[test]
-fn check_reports_conflicting_real_paths_with_both_manifest_sources() -> TestResult {
+fn check_reports_conflicting_real_paths_with_both_project_sources() -> TestResult {
     let directory = tempfile::tempdir()?;
     let root = directory.path().join("project");
     let home = directory.path().join("home");
@@ -95,8 +95,8 @@ fn check_reports_conflicting_real_paths_with_both_manifest_sources() -> TestResu
     assert_eq!(
         labels,
         [
-            root.join("right/module.pi").to_string_lossy(),
-            root.join("left/module.pi").to_string_lossy()
+            root.join("right/pith.pi").to_string_lossy(),
+            root.join("left/pith.pi").to_string_lossy()
         ]
     );
     assert!(!home.exists());

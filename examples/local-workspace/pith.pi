@@ -1,0 +1,13 @@
+module example/hello 0.1.0
+
+inputs {
+  greeting = path "modules/greeting",
+}
+
+workspace {
+  members: ["modules/greeting"],
+}
+
+import greeting
+
+entry hello : Text = ask Text (Message("hello"))
