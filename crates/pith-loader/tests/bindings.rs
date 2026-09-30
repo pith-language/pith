@@ -27,10 +27,10 @@ fn shadowed_alias(directory: &Path) -> TestResult {
     )?;
     file(
         &directory.join("alpha").join("pith.pi"),
-        "module example/alpha 0.1.0\n\ninputs {\n  helper = path \"../beta\"\n}\n\nimport          helper\n\nnominal Alpha = Text\n\npure rule wrap(helper.Beta) -> Alpha = host\n",
+        "module example/alpha 0.1.0\n\ninputs {\n  helper = path \"beta\"\n}\n\nimport          helper\n\nnominal Alpha = Text\n\npure rule wrap(helper.Beta) -> Alpha = host\n",
     )?;
     file(
-        &directory.join("beta").join("pith.pi"),
+        &directory.join("alpha").join("beta").join("pith.pi"),
         "module example/beta 0.1.0\n\ninputs {\n}\n\nnominal Beta = Text\n",
     )?;
     Ok(())

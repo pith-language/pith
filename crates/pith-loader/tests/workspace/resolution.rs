@@ -49,23 +49,21 @@ fn a_two_module_project_resolves_dependencies_first_and_sorts_includes() -> Test
 fn a_diamond_loads_the_shared_dependency_once() -> TestResult {
     let root = tempfile::tempdir()?;
     let directory = root.path();
+    // The shared dependency lives inside `b`'s tree: a route stays inside
+    // the directory of the project that declared it, so sharing across
+    // siblings is reached from the directory both routes can name.
     project(
         directory,
-        "module example/root 0.1.0\n\ninputs {\n  b = path \"b\"\n  c = path \"c\"\n}",
-        &[("main.pi", "import b\nimport c\n")],
+        "module example/root 0.1.0\n\ninputs {\n  b = path \"b\"\n  shared = path \"b/shared\"\n}",
+        &[("main.pi", "import b\nimport shared\n")],
     )?;
     project(
         &directory.join("b"),
-        "module example/b 0.1.0\n\ninputs {\n  shared = path \"../shared\"\n}",
+        "module example/b 0.1.0\n\ninputs {\n  shared = path \"shared\"\n}",
         &[("b.pi", "import shared\n")],
     )?;
     project(
-        &directory.join("c"),
-        "module example/c 0.1.0\n\ninputs {\n  shared = path \"../shared\"\n}",
-        &[("c.pi", "import shared\n")],
-    )?;
-    project(
-        &directory.join("shared"),
+        &directory.join("b/shared"),
         "module example/shared 0.1.0\n\ninputs {\n}",
         &[("s.pi", "nominal T = Text\n")],
     )?;
@@ -80,7 +78,6 @@ fn a_diamond_loads_the_shared_dependency_once() -> TestResult {
         [
             subject("example/shared"),
             subject("example/b"),
-            subject("example/c"),
             subject("example/root")
         ]
     );

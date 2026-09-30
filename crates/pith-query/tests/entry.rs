@@ -148,7 +148,7 @@ fn an_unbound_host_rule_in_a_later_file_points_there() -> TestResult {
     let source = tempfile::tempdir()?;
     let home = tempfile::tempdir()?;
     let directory = source.path();
-    let dependency = directory.join("dep");
+    let dependency = directory.join("root").join("dep");
     std::fs::create_dir_all(&dependency)?;
     std::fs::write(
         dependency.join("pith.pi"),
@@ -163,7 +163,7 @@ fn an_unbound_host_rule_in_a_later_file_points_there() -> TestResult {
     std::fs::create_dir_all(directory.join("root"))?;
     std::fs::write(
         directory.join("root").join("pith.pi"),
-        "module example/root 0.1.0\n\ninputs {\n  dep = path \"../dep\"\n}\n\nimport \
+        "module example/root 0.1.0\n\ninputs {\n  dep = path \"dep\"\n}\n\nimport \
          dep\n\nentry main : Text = ask (Message(\"hello\"))\n",
     )?;
 

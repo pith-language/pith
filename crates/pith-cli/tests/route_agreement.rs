@@ -15,6 +15,8 @@ fn project(root: &Path, name: &str, subject: &str, inputs: &str) -> std::io::Res
     )
 }
 
+/// Left reaches its dependency inside its own tree; right reaches one at
+/// the path `right` names inside right's tree, both declaring `example/dep`.
 fn fixture(root: &Path, right: &str) -> std::io::Result<()> {
     project(
         root,
@@ -22,15 +24,17 @@ fn fixture(root: &Path, right: &str) -> std::io::Result<()> {
         "example/root",
         "  left = path \"left\"\n  right = path \"right\"\n",
     )?;
-    project(root, "left", "example/left", "  dep = path \"../dep\"\n")?;
+    project(root, "left", "example/left", "  dep = path \"dep\"\n")?;
+    project(root, "left/dep", "example/dep", "")?;
     project(
         root,
         "right",
         "example/right",
         &format!("  dep = path \"{right}\"\n"),
     )?;
-    project(root, "dep", "example/dep", "")?;
-    project(root, "other", "example/dep", "")
+    project(root, "right/other", "example/dep", "")?;
+    let _ = right;
+    Ok(())
 }
 
 fn check(root: &Path, home: &Path) -> std::io::Result<Output> {
@@ -44,28 +48,32 @@ fn check(root: &Path, home: &Path) -> std::io::Result<Output> {
         .output()
 }
 
+/// Real filesystem containment, driven through the check command: a
+/// dependency path spelling `..` leaves the declaring project's directory
+/// and is refused by name, with no engine state created on the way.
 #[test]
-fn check_accepts_equivalent_real_paths_without_creating_state() -> TestResult {
+fn check_refuses_a_dependency_path_that_leaves_the_project() -> TestResult {
     let directory = tempfile::tempdir()?;
     let root = directory.path().join("project");
     let home = directory.path().join("home");
-    fixture(&root, "../left/../dep")?;
+    fixture(&root, "../left/dep")?;
     let output = check(&root, &home)?;
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert!(!output.status.success());
     let records: Vec<serde_json::Value> = String::from_utf8(output.stdout)?
         .lines()
         .map(serde_json::from_str)
         .collect::<Result<_, _>>()?;
-    assert!(records.iter().any(|record| {
-        record
-            .pointer("/query/errors")
-            .and_then(serde_json::Value::as_u64)
-            == Some(0)
-    }));
+    let diagnostics = records
+        .iter()
+        .find_map(|record| record.pointer("/query/diagnostics"))
+        .and_then(serde_json::Value::as_array)
+        .ok_or("check must report its diagnostics")?;
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diag| diag.get("code").and_then(serde_json::Value::as_u64) == Some(3072)),
+        "the escape is refused by name: {diagnostics:?}"
+    );
     assert!(!home.exists(), "check must not initialize engine state");
     Ok(())
 }
@@ -75,7 +83,7 @@ fn check_reports_conflicting_real_paths_with_both_project_sources() -> TestResul
     let directory = tempfile::tempdir()?;
     let root = directory.path().join("project");
     let home = directory.path().join("home");
-    fixture(&root, "../other")?;
+    fixture(&root, "other")?;
     let output = check(&root, &home)?;
     assert!(!output.status.success());
     let records: Vec<serde_json::Value> = String::from_utf8(output.stdout)?

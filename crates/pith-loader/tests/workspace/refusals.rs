@@ -65,27 +65,25 @@ fn an_input_target_that_declares_no_subject_is_refused() -> TestResult {
     Ok(())
 }
 
+/// A route that stays inside its directory can only descend, so a cycle
+/// among local routes is a project naming its own directory; the registry
+/// routes, which address by subject, carry the general case.
 #[test]
 fn a_dependency_cycle_names_the_chain() -> TestResult {
     let root = tempfile::tempdir()?;
     let directory = root.path();
     project(
         directory,
-        "module example/a 0.1.0\n\ninputs {\n  b = path \"b\"\n}",
-        &[("a.pi", "import b\n")],
-    )?;
-    project(
-        &directory.join("b"),
-        "module example/b 0.1.0\n\ninputs {\n  a = path \"..\"\n}",
-        &[("b.pi", "import a\n")],
+        "module example/a 0.1.0\n\ninputs {\n  self = path \".\"\n}",
+        &[("a.pi", "import self\n")],
     )?;
 
     let diagnostics = load_err(directory);
     assert!(has_code(&diagnostics, FrontendCode::DependencyCycle));
     let message = message_of(&diagnostics, FrontendCode::DependencyCycle);
     assert!(
-        message.contains("example/a") && message.contains("example/b"),
-        "the chain names both subjects: {message}"
+        message.contains("example/a"),
+        "the chain names the subject on the route: {message}"
     );
     Ok(())
 }
@@ -147,6 +145,7 @@ fn a_symlinked_include_is_refused() -> TestResult {
         outside.join("outside.pi"),
         directory.join("modules/greeting/linked.pi"),
     )?;
+    let _ = outside;
     let greeting = directory.join("modules/greeting");
     let project_text = fs::read_to_string(greeting.join(PROJECT_NAME))?;
     file(

@@ -1255,11 +1255,10 @@ fn two_rules_providing_one_interface_in_one_module_are_refused_at_elaboration() 
 fn a_project_inputs_another_by_path_and_imports_it_by_name() -> TestResult {
     let home = scratch()?;
     let source = scratch()?;
-    let xylem = source.path().join("xylem");
+    let phloem = source.path().join("phloem");
+    let xylem = phloem.join("xylem");
     std::fs::create_dir_all(&xylem)?;
     corpus_project(&xylem, &workspace_file("crates/xylem/xylem.pi"))?;
-    let phloem = source.path().join("phloem");
-    std::fs::create_dir_all(&phloem)?;
     std::fs::copy(
         workspace_file("crates/phloem/phloem.pi"),
         phloem.join("phloem.pi"),
@@ -1267,7 +1266,7 @@ fn a_project_inputs_another_by_path_and_imports_it_by_name() -> TestResult {
     let module = write(
         &phloem,
         "pith.pi",
-        "module test/phloem 0.1.0\n\ninputs {\n  xylem = path \"../xylem\",\n}\n\ninclude \
+        "module test/phloem 0.1.0\n\ninputs {\n  xylem = path \"xylem\",\n}\n\ninclude \
          \"phloem.pi\"\n",
     )?;
 
