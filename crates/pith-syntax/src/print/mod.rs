@@ -9,17 +9,16 @@
 mod expression;
 mod items;
 mod layout;
-mod manifest;
 mod names;
+mod project;
 mod request;
 mod types;
 
-pub use manifest::print_manifest;
-
 use pith_diag::{SourceFile, Span};
 use pith_hir::{
-    ParsedSurface, SurfaceAbout, SurfaceComment, SurfaceDeclaration, SurfaceEntry, SurfaceImport,
-    SurfaceLocal, SurfaceRule,
+    InputsBlock, ParsedSurface, ProjectHost, ProjectInclude, ProjectModule, ProjectWorkspace,
+    SurfaceAbout, SurfaceComment, SurfaceDeclaration, SurfaceEntry, SurfaceImport, SurfaceLocal,
+    SurfaceRule,
 };
 
 use layout::{Spacing, slice};
@@ -49,6 +48,11 @@ struct Printer<'a> {
 
 enum ModuleEvent<'a> {
     Comment(&'a SurfaceComment),
+    Module(&'a ProjectModule),
+    Inputs(&'a InputsBlock),
+    Host(&'a ProjectHost),
+    Workspace(&'a ProjectWorkspace),
+    Include(&'a ProjectInclude),
     Import(&'a SurfaceImport),
     Declaration(&'a SurfaceDeclaration),
     Rule(&'a SurfaceRule),
@@ -61,6 +65,11 @@ impl ModuleEvent<'_> {
     fn start(&self) -> u32 {
         match self {
             Self::Comment(comment) => comment.span.start.0,
+            Self::Module(module) => module.span.start.0,
+            Self::Inputs(block) => block.span.start.0,
+            Self::Host(host) => host.span.start.0,
+            Self::Workspace(workspace) => workspace.span.start.0,
+            Self::Include(include) => include.span.start.0,
             Self::Import(import) => import.span.start.0,
             Self::Declaration(declaration) => declaration.name_span.start.0,
             Self::Rule(rule) => rule.span.start.0,
@@ -76,7 +85,7 @@ impl<'a> Printer<'a> {
     /// comments attached to the text they describe without requiring a
     /// token-preserving concrete syntax tree.
     fn module(&mut self) {
-        let mut events = Vec::new();
+        let mut events = self.header_events();
         events.extend(self.surface.comments.iter().map(ModuleEvent::Comment));
         events.extend(self.surface.imports.iter().map(ModuleEvent::Import));
         events.extend(
@@ -97,6 +106,13 @@ impl<'a> Printer<'a> {
                     self.trailing_comment(comment.span)
                 }
                 ModuleEvent::Comment(comment) => self.leading_comment(comment.span),
+                ModuleEvent::Module(module) => self.item(|printer| printer.module_clause(module)),
+                ModuleEvent::Inputs(block) => self.item(|printer| printer.inputs(block)),
+                ModuleEvent::Host(host) => self.item(|printer| printer.host_clause(host)),
+                ModuleEvent::Workspace(workspace) => {
+                    self.item(|printer| printer.workspace_clause(workspace))
+                }
+                ModuleEvent::Include(include) => self.item(|printer| printer.include(include)),
                 ModuleEvent::Import(import) => self.item(|printer| printer.import(import)),
                 ModuleEvent::Declaration(declaration) => {
                     self.item(|printer| printer.declaration(declaration))

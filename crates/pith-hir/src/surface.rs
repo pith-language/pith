@@ -5,6 +5,7 @@ use pith_diag::Span;
 
 use crate::RuleCategory;
 use crate::body::{SurfaceRequest, SurfaceValue, SurfaceWrittenBody};
+use crate::project::DocumentHeader;
 
 define_arena!(
     SurfaceTypeId,
@@ -14,6 +15,9 @@ define_arena!(
 );
 
 pub struct ParsedSurface {
+    /// The header the file carried: a project's clauses, or `Include` for a
+    /// file that holds declarations only.
+    pub header: DocumentHeader,
     pub types: SurfaceTypeArena<SurfaceTypeNode>,
     pub exprs: crate::body::SurfaceExprArena<crate::body::SurfaceExpr>,
     pub fields: Vec<SurfaceField>,

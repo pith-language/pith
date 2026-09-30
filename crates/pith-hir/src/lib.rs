@@ -1,8 +1,10 @@
 mod body;
-mod manifest;
+mod identity;
 mod merge;
 mod position;
+mod project;
 mod surface;
+mod version;
 
 use pith_diag::StableCode;
 
@@ -11,19 +13,22 @@ pub use body::{
     SurfaceExprId, SurfaceOperator, SurfaceRequest, SurfaceStatement, SurfaceValue,
     SurfaceValueField, SurfaceWrittenBody,
 };
-pub use manifest::{
-    DependencySource, EmptyVersion, InvalidVersionSpelling, Manifest, ManifestDomain,
-    ManifestMember, ManifestModule, ManifestRegistry, ManifestUse, ManifestVersion,
-    ManifestWorkspace, MissingModule, ModuleSubject, ParsedManifest, RootKey, RootKeyError,
-    SegmentError, SubjectError, SubjectSegment, VersionBound, VersionRange,
-};
+pub use identity::{ModuleSubject, SegmentError, SubjectError, SubjectSegment};
 pub use merge::{MergedModule, ModuleFiles, merge_module_files};
 pub use position::{DefinitionKind, DefinitionLocation, PositionSidecar, ReferenceSite};
+pub use project::{
+    DocumentHeader, InputLocator, InputsBlock, MissingSubject, Project, ProjectDomain,
+    ProjectHeader, ProjectHost, ProjectInclude, ProjectInput, ProjectMember, ProjectModule,
+    ProjectRegistry, ProjectWorkspace, RootKey, RootKeyError,
+};
 pub use surface::{
     ParsedSurface, SurfaceAbout, SurfaceAboutValue, SurfaceBody, SurfaceComment,
     SurfaceConstructor, SurfaceDeclaration, SurfaceEntry, SurfaceField, SurfaceImport,
     SurfaceLocal, SurfaceParam, SurfaceRule, SurfaceRuleBody, SurfaceTypeArena, SurfaceTypeId,
     SurfaceTypeNode,
+};
+pub use version::{
+    EmptyVersion, InvalidVersionSpelling, ModuleVersion, VersionBound, VersionRange,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -71,14 +76,14 @@ pub enum FrontendCode {
     TypeMismatch = 25,
     DuplicateBinder = 26,
     WrongDocument = 27,
-    DuplicateManifestClause = 28,
+    DuplicateClause = 28,
     InvalidSubject = 29,
     InvalidVersion = 30,
     UnsupportedSource = 31,
     InvalidPath = 32,
     DuplicateBinding = 33,
     DuplicateMember = 34,
-    MissingManifest = 35,
+    MissingProject = 35,
     NestedWorkspace = 36,
     DuplicateSubject = 37,
     DependencyCycle = 38,
@@ -112,6 +117,9 @@ pub enum FrontendCode {
     StaleLockEntry = 66,
     ModeExceeded = 67,
     MalformedResolution = 68,
+    MissingSubject = 69,
+    UnsupportedInput = 70,
+    UnboundHost = 71,
 }
 
 impl FrontendCode {

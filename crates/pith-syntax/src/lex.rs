@@ -30,9 +30,9 @@ pub(crate) enum TokenKind {
     Slash,
     Lt,
     Gt,
-    /// Manifest-only: `<=` and `>=` spell version-range bounds. The source
-    /// grammar keeps them two tokens, where `List<Int>=` would otherwise
-    /// lex its closing bracket into a comparison.
+    /// Header-only: `<=` and `>=` spell version-range bounds. The
+    /// declaration grammar keeps them two tokens, where `List<Int>=` would
+    /// otherwise lex its closing bracket into a comparison.
     LtEq,
     GtEq,
     LParen,
@@ -44,41 +44,49 @@ pub(crate) enum TokenKind {
     End,
 }
 
-/// Which document the token stream spells. The manifest grammar writes
-/// subjects and hyphenated names as single identifiers; the source grammar
-/// keeps `-` an operator and `/` out of the language entirely.
+/// Which region of a file the token stream spells. A project file's header
+/// writes subjects and hyphenated names as single identifiers and `<=` and
+/// `>=` as single tokens; the declarations of any file keep `-` an operator
+/// and `/` out of the language entirely, so the same body text parses the
+/// same way as a project file, as an include, and on its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Document {
-    Source,
-    Manifest,
+    Project,
+    Include,
 }
 
 pub(crate) const KEYWORDS: &[&str] = &[
     "import", "nominal", "sum", "type", "pure", "action", "rule", "host", "List", "Unit", "Bool",
     "Int", "Text", "Bytes", "Blob", "ask", "all", "run", "of", "bytes", "let", "for", "in", "if",
-    "else", "match", "entry", "about", "true", "false", "fold", "from", "unwrap",
+    "else", "match", "entry", "about", "true", "false", "fold", "from", "unwrap", "module",
+    "inputs", "include",
 ];
 
-/// The clause-opening words of the manifest grammar, for the source parser's
-/// wrong-document diagnostic.
-pub(crate) const MANIFEST_CLAUSES: &[&str] = &["module", "workspace", "use", "registry", "domain"];
-
-/// The item-opening words of the source grammar, for the manifest parser's
-/// wrong-document diagnostic.
-pub(crate) const SOURCE_ITEMS: &[&str] = &[
-    "import", "nominal", "sum", "type", "pure", "action", "let", "entry", "about",
-];
+/// The clause-opening words of the header grammar, for the item parser's
+/// wrong-document diagnostic: a file that holds declarations only cannot
+/// open any of them.
+pub(crate) const HEADER_CLAUSES: &[&str] = &["module", "inputs", "host", "workspace", "include"];
 
 pub(crate) fn lex(source: &Arc<SourceFile>) -> (Vec<Token>, Vec<Diag>) {
-    lex_in(source, Document::Source)
+    lex_from(source, Document::Include, 0)
 }
 
 pub(crate) fn lex_in(source: &Arc<SourceFile>, document: Document) -> (Vec<Token>, Vec<Diag>) {
+    lex_from(source, document, 0)
+}
+
+/// Lex `source` from byte `from` in `document`'s region, spans staying
+/// absolute over the whole file.
+pub(crate) fn lex_from(
+    source: &Arc<SourceFile>,
+    document: Document,
+    from: usize,
+) -> (Vec<Token>, Vec<Diag>) {
     let text = source.source_text();
     let bytes = text.as_bytes();
     let mut tokens = Vec::new();
     let mut diagnostics = Vec::new();
-    let mut position = 0usize;
+    let mut position = from;
 
     while let Some(remaining) = bytes.get(position..) {
         let Some((&byte, after_first)) = remaining.split_first() else {
@@ -154,11 +162,11 @@ pub(crate) fn lex_in(source: &Arc<SourceFile>, document: Document) -> (Vec<Token
                 b'*' => single(TokenKind::Star, &mut position, start),
                 b'|' => single(TokenKind::Pipe, &mut position, start),
                 b'/' => single(TokenKind::Slash, &mut position, start),
-                b'<' if document == Document::Manifest && after_first.first() == Some(&b'=') => {
+                b'<' if document == Document::Project && after_first.first() == Some(&b'=') => {
                     position = start.saturating_add(2);
                     (TokenKind::LtEq, None)
                 }
-                b'>' if document == Document::Manifest && after_first.first() == Some(&b'=') => {
+                b'>' if document == Document::Project && after_first.first() == Some(&b'=') => {
                     position = start.saturating_add(2);
                     (TokenKind::GtEq, None)
                 }
@@ -249,7 +257,7 @@ fn is_ident_start(byte: u8) -> bool {
 fn is_ident_continue(byte: u8, document: Document) -> bool {
     byte.is_ascii_alphanumeric()
         || byte == b'_'
-        || (document == Document::Manifest && (byte == b'-' || byte == b'/'))
+        || (document == Document::Project && (byte == b'-' || byte == b'/'))
 }
 
 struct StringError {
