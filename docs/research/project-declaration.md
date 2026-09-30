@@ -7,7 +7,7 @@ kind: research
 status: researching
 evidence: preliminary
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-09-30
 tags:
   - research
   - modules
@@ -22,6 +22,11 @@ relations:
 ---
 
 # declaring a project
+
+> edit, 2026-09-30: the paths paragraph of the result below adopts Nix's resolution against the file's own
+> directory. [0081](../decisions/0081-paths-are-values.md) and
+> [0086](../decisions/0086-names-are-scoped-per-file.md) resolve every path against the project root instead,
+> from whichever file it is written in.
 
 [0079](../decisions/0079-a-project-is-one-file.md), [0080](../decisions/0080-inputs-are-parameters.md) and
 [0081](../decisions/0081-paths-are-values.md) propose one project file whose `inputs` block is ordinary

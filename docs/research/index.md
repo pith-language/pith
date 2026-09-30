@@ -7,7 +7,7 @@ kind: research
 status: active
 evidence: preliminary
 created: 2026-03-02
-updated: 2026-09-06
+updated: 2026-09-30
 tags:
   - research
 relations:
@@ -53,6 +53,7 @@ each lineage starts with the pressure that created a system. it records the mech
 - [declaring a project](project-declaration.md)
 - [passing behaviour](passing-behaviour.md)
 - [what run and test execute](run-and-test.md)
+- [typed literals](typed-literals.md)
 
 the development-environments note draws mkShell from its nixpkgs source, `nix develop` and `nix print-dev-env` from the Nix manual, direnv's caching from its wiki, Guix's shells and containers, Spack's `spack.yaml`/`spack.lock` split, conda's environment files and their lockfile history, rustup's toolchain overrides, mise and asdf's pin files, the devcontainers specification, and PEP 405 from primary sources. it grounds decision 0043 and records the disagreement those systems never settled about whether an environment is a lock consumer, a lock producer, or a lock of its own.
 
@@ -100,3 +101,5 @@ the diagnostic-spans note draws rustc's span and diagnostics chapters from the r
 the dispatch note draws the JVM specification's method-resolution section, the Common Lisp HyperSpec's effective-method procedure, the Julia manual and its developer documentation on method tables, SWI-Prolog's just-in-time clause indexing, the GHC user's guide on instance resolution with the rough-match note from GHC's own source, and the GNU make manual's pattern-matching rule from primary sources. it grounds decision 0057 and finds the six agreeing on the question and splitting on one rule: the JVM demands an exact signature and looks the answer up, the other five admit inexact matches, and a ranking forces a search that an index can only shorten. it also records where they disagree at a tie (an error naming the candidates in Julia and GHC, the first line of the makefile in make, the first clause in Prolog) and that no system in the set is both exact and dynamic, which is the position 0015 put pith in.
 
 the language-frontend note draws .NET reference assemblies, bazel's `ijar` and its `BzlLoadFunction` source comment, GHC's recompilation-avoidance wiki and `primops.txt.pp`, swift's module-interface loader, typescript's `--isolatedDeclarations` announcement, go's shallow-export-data issue and minimal version selection, deno's http-imports retrospective, bazel's `compatibility_level` removal issue, elm's diff implementation, lean's FFI documentation, nix's missing-`derivation`-builtin issue, sorbet's performance writing, roslyn's red-green trees, dhall's union-elimination typing, starlark's specification, and nickel's merge manual from primary sources. it grounds [the language frontend](../planning/frontend/language.md) and finds an unusual unanimity (every batch compiler that got cross-module parallelism made a canonicalized interface the unit crossing a module boundary and its digest the downstream key) beside two deletions: bazel adopted and then removed the enforcement mechanism that makes minimal version selection safe, and bazel and buck2 both declined to put their own frontend's parsed form in their own graph for want of an equality relation that ignores formatting, which is the relation 0038 specifies.
+
+the typed-literals note draws Bazel's label and macro documentation and its bzlmod issues, Buck2's `cmd_args`, Nix's string-context manual, path-value tutorial, hash and platform documentation and its `ref`/`rev` issues, Cargo's git-dependency keys and default-branch discussion, the Terraform 0.12 upgrade guide, CMake's language manual and CMP0054, typelevel's literally, bytestring #140 and modern-uri, cppreference on user-defined literals, the template literal revision, PEP 750, SE-0354 and two Swift forum threads, Rust RFC 3101, Dhall's import standard, Pkl's language reference, CUE #2432, YAML 1.1 and StrictYAML, and the LLVM, Rust and Zig discussions of target triples. it grounds decisions 0085 and 0089. it finds that where a type was kept inside a string the system added a way out and a rule for leaks, that users asked for fields holding several kinds to be separated, and that Rust and Python reserved or narrowed literal prefixes for the language.
