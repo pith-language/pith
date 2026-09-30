@@ -15,7 +15,8 @@ pub(crate) const PUBLISHER_SEED: [u8; 32] = [3; 32];
 pub(crate) const SUCCESSOR_SEED: [u8; 32] = [5; 32];
 pub(crate) const ADMITTED: u64 = 1_757_000_000;
 
-pub(crate) const DEP_MANIFEST: &str = "module example/dep 1.2.0\n";
+pub(crate) const DEP_PROJECT: &str =
+    "module example/dep 1.2.0\n\ninputs {\n}\n\ninclude \"types.pi\"\ninclude \"rules.pi\"\n";
 pub(crate) const DEP_TYPES: &str = "nominal Message = Text\n";
 pub(crate) const DEP_RULES: &str = "pure rule speak(who: Message) -> Text = { \"first\" }\n";
 pub(crate) const ROOT_MAIN: &str = "import dep\n\nentry hello : Text = ask (Message(\"hello\"))\n";
@@ -39,16 +40,11 @@ pub(crate) fn pinned_key() -> RootKey {
 
 /// The project every fixture stages: a dependency and a root that
 /// imports it.
-pub(crate) fn staged_project(
-    staging: &Path,
-    dep_manifest: &str,
-    root_manifest: &str,
-) -> TestResult {
-    file(&staging.join("module.pi"), root_manifest)?;
-    file(&staging.join("src/main.pi"), ROOT_MAIN)?;
-    file(&staging.join("dep/module.pi"), dep_manifest)?;
-    file(&staging.join("dep/src/types.pi"), DEP_TYPES)?;
-    file(&staging.join("dep/src/rules.pi"), DEP_RULES)?;
+pub(crate) fn staged_project(staging: &Path, dep_project: &str, root_project: &str) -> TestResult {
+    file(&staging.join("pith.pi"), root_project)?;
+    file(&staging.join("dep").join("pith.pi"), dep_project)?;
+    file(&staging.join("dep/types.pi"), DEP_TYPES)?;
+    file(&staging.join("dep/rules.pi"), DEP_RULES)?;
     Ok(())
 }
 
@@ -56,8 +52,8 @@ pub(crate) fn staged_project(
 /// root key pinned, the domain bound, the dependency ranged.
 pub(crate) fn routed_root() -> String {
     format!(
-        "module example/root 0.1.0\n\nregistry fixture = \"dir\" root \"{}\"\ndomain example \
-         from fixture\nuse dep = example/dep >= 1.2\n",
+        "module example/root 0.1.0\n\ninputs {{\n  registry fixture = \"dir\" root \"{}\"\n  \
+         domain example from fixture\n  dep = example/dep >= 1.2\n}}\n\n{ROOT_MAIN}",
         root().public().spelling()
     )
 }
@@ -101,7 +97,7 @@ pub(crate) fn serving_registry_with(
     let host = Host::new(registry.path());
     host.initialize(&root())?;
     let staging = tempfile::tempdir()?;
-    staged_project(staging.path(), DEP_MANIFEST, &routed_root())?;
+    staged_project(staging.path(), DEP_PROJECT, &routed_root())?;
     publish(&host, staging.path())?;
     Ok(registry)
 }
@@ -140,7 +136,7 @@ pub(crate) fn resolved_through(directory: &Path) -> Result<Workspace, Box<[pith_
     let root = store.locate_subject(&subject).map_err(|failure| {
         Box::from([pith_diag::Diag::new(
             pith_diag::Severity::Error,
-            FrontendCode::MissingManifest.stable(),
+            FrontendCode::MissingProject.stable(),
             pith_diag::Span::none(),
             failure.describe(),
         )])

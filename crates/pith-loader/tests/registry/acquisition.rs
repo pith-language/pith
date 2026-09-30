@@ -26,8 +26,8 @@ fn an_entry_whose_cached_fields_disagree_with_the_pinned_revision_refuses() -> T
         .path()
         .join("sources")
         .join(&revision)
-        .join("module.pi");
-    fs::write(&stored, "module example/dep 2.0.0\n")?;
+        .join("pith.pi");
+    fs::write(&stored, "module example/dep 2.0.0\n\ninputs {\n}\n")?;
     let diagnostics = match resolved_through(registry.path()) {
         Ok(_) => unreachable!("a wrong cache is refused, never reconciled"),
         Err(diagnostics) => diagnostics,
@@ -53,7 +53,7 @@ fn fetched_bytes_whose_tree_disagrees_with_the_entry_refuse() -> TestResult {
         .path()
         .join("sources")
         .join(&revision)
-        .join("src/rules.pi");
+        .join("rules.pi");
     fs::write(
         &stored,
         "pure rule speak(who: Message) -> Text = { \"second\" }\n",
@@ -75,7 +75,7 @@ fn a_withdrawn_release_is_refused_with_its_reason_named() -> TestResult {
     Host::new(registry.path()).withdraw(
         &ModuleSubject::parse("example/dep")
             .unwrap_or_else(|_| unreachable!("the fixture subject parses")),
-        pith_hir::ManifestVersion::parse("1.2.0")?,
+        pith_hir::ModuleVersion::parse("1.2.0")?,
         "withdrawn for the fixture",
         &publisher(),
     )?;

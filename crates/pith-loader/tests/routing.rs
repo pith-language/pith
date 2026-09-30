@@ -4,7 +4,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use pith_loader::{
-    AcquireFailure, AcquiredManifest, AcquiredSource, FrontendCode, ModuleStore, Route, Workspace,
+    AcquireFailure, AcquiredProject, AcquiredSource, FrontendCode, PROJECT_NAME, ProjectStore,
+    Route, Workspace,
 };
 
 #[derive(Clone, Default)]
@@ -16,7 +17,7 @@ struct Store {
     reads: Reads,
 }
 
-impl ModuleStore for Store {
+impl ProjectStore for Store {
     type Location = String;
 
     fn locate(&self, _: &String, route: &Route<'_>) -> Result<String, AcquireFailure> {
@@ -27,21 +28,21 @@ impl ModuleStore for Store {
                 assert_eq!(registry.root_key().material(), "A");
                 registry.subject().to_string()
             }
-            Route::Path { subject, .. } => subject.to_string(),
+            Route::Path { path } | Route::Member { path } => (*path).to_string(),
             _ => return Err(AcquireFailure::Unsupported { kind: route.kind() }),
         };
         self.reads.0.borrow_mut().push(format!("locate {target}"));
         Ok(target)
     }
 
-    fn manifest(&mut self, location: &String) -> Result<AcquiredManifest, AcquireFailure> {
+    fn project(&mut self, location: &String) -> Result<AcquiredProject, AcquireFailure> {
         self.reads
             .0
             .borrow_mut()
-            .push(format!("manifest {location}"));
-        Ok(AcquiredManifest {
-            label: format!("{location}/module.pi").into(),
-            text: if location == "root" {
+            .push(format!("project {location}"));
+        Ok(AcquiredProject {
+            label: format!("{location}/{PROJECT_NAME}").into(),
+            text: if location == "root" || location == "." {
                 self.root.clone()
             } else {
                 self.dependency.clone()
@@ -50,25 +51,25 @@ impl ModuleStore for Store {
         })
     }
 
-    fn sources(&mut self, location: &String) -> Result<Vec<AcquiredSource>, AcquireFailure> {
+    fn include(&mut self, location: &String, path: &str) -> Result<AcquiredSource, AcquireFailure> {
         self.reads
             .0
             .borrow_mut()
-            .push(format!("sources {location}"));
-        Ok(vec![AcquiredSource {
-            path: "src/main.pi".into(),
+            .push(format!("include {location}"));
+        Ok(AcquiredSource {
+            path: path.into(),
             text: "nominal Name = Text\n".into(),
-        }])
+        })
     }
 }
 
 const BINDING: &str = "registry trusted = \"memory:trusted\" root \"ed25519:A\"\n";
 
-fn resolve(clauses: &str, dependency: &str) -> (Result<Workspace, Box<[pith_diag::Diag]>>, Reads) {
+fn resolve(entries: &str, dependency: &str) -> (Result<Workspace, Box<[pith_diag::Diag]>>, Reads) {
     let reads = Reads::default();
     let result = Workspace::resolve(
         Store {
-            root: format!("module example/root 1\n{clauses}"),
+            root: format!("module example/root 1\n\ninputs {{\n{entries}}}\n"),
             dependency: dependency.into(),
             reads: reads.clone(),
         },
@@ -77,14 +78,14 @@ fn resolve(clauses: &str, dependency: &str) -> (Result<Workspace, Box<[pith_diag
     (result, reads)
 }
 
-fn refused(clauses: &str, code: FrontendCode) -> Box<[pith_diag::Diag]> {
-    let (result, reads) = resolve(clauses, "module example/dep 1\n");
+fn refused(entries: &str, code: FrontendCode) -> Box<[pith_diag::Diag]> {
+    let (result, reads) = resolve(entries, "module example/dep 1\n\ninputs {\n}\n");
     let diagnostics = result
         .err()
         .unwrap_or_else(|| unreachable!("the configuration must refuse"));
     assert_eq!(
         *reads.0.borrow(),
-        ["manifest root"],
+        ["project root"],
         "no adapter call follows the root read"
     );
     assert!(
@@ -94,7 +95,7 @@ fn refused(clauses: &str, code: FrontendCode) -> Box<[pith_diag::Diag]> {
     assert!(diagnostics.iter().all(|diag| {
         diag.source
             .as_ref()
-            .is_some_and(|source| source.label.as_ref() == "root/module.pi")
+            .is_some_and(|source| source.label.as_ref() == format!("root/{PROJECT_NAME}"))
     }));
     diagnostics
 }
@@ -103,7 +104,8 @@ fn refused(clauses: &str, code: FrontendCode) -> Box<[pith_diag::Diag]> {
 fn duplicate_domains_name_both_clauses_before_member_or_dependency_io() {
     let diagnostics = refused(
         &format!(
-            "{BINDING}domain example from trusted\ndomain example from trusted\nworkspace {{ members: [\"member\"] }}\nuse dep = example/dep\n"
+            "{BINDING}domain example from trusted\ndomain example from trusted\ndep = \
+             example/dep\n"
         ),
         FrontendCode::DuplicateRegistry,
     );
@@ -129,9 +131,7 @@ fn an_unknown_registry_in_a_domain_clause_refuses_without_a_dependency() {
 #[test]
 fn missing_domains_do_not_fall_back_to_a_configured_registry() {
     let diagnostics = refused(
-        &format!(
-            "{BINDING}domain other from trusted\nuse local = example/local from path \"local\"\nuse dep = example/dep\n"
-        ),
+        &format!("{BINDING}domain other from trusted\nlocal = path \"local\"\ndep = example/dep\n"),
         FrontendCode::UnroutedDomain,
     );
     assert!(
@@ -144,20 +144,21 @@ fn missing_domains_do_not_fall_back_to_a_configured_registry() {
 #[test]
 fn an_unknown_explicit_registry_does_not_fall_back_to_the_domain_route() {
     refused(
-        &format!(
-            "{BINDING}domain example from trusted\nuse dep = example/dep from registry missing\n"
-        ),
+        &format!("{BINDING}domain example from trusted\ndep = example/dep from registry missing\n"),
         FrontendCode::UnroutedDomain,
     );
 }
 
 #[test]
 fn domain_and_explicit_routes_deliver_the_consumers_binding() {
-    for route in [
-        "domain example from trusted\nuse dep = example/dep\n",
-        "use dep = example/dep from registry trusted\n",
+    for entries in [
+        "domain example from trusted\ndep = example/dep\n",
+        "dep = example/dep from registry trusted\n",
     ] {
-        let (result, _) = resolve(&format!("{BINDING}{route}"), "module example/dep 1\n");
+        let (result, _) = resolve(
+            &format!("{BINDING}{entries}"),
+            "module example/dep 1\n\ninputs {\n}\n",
+        );
         assert!(result.is_ok(), "{:?}", result.err());
     }
 }
@@ -165,16 +166,17 @@ fn domain_and_explicit_routes_deliver_the_consumers_binding() {
 #[test]
 fn dependency_authority_cannot_trigger_its_own_acquisition() {
     let dependency = format!(
-        "module example/dep 1\n{BINDING}domain hostile from trusted\nuse child = hostile/child\n"
+        "module example/dep 1\n\ninputs {{\n{BINDING}domain hostile from trusted\nchild = \
+         hostile/child\n}}\n"
     );
-    let (result, reads) = resolve("use dep = example/dep from path \"dep\"\n", &dependency);
+    let (result, reads) = resolve("dep = path \"dep\"\n", &dependency);
     let diagnostics = result.err().expect("dependency authority is refused");
     assert!(diagnostics.iter().any(|diag| {
         diag.code == FrontendCode::DependencySuppliedAuthority.stable()
             && diag
                 .source
                 .as_ref()
-                .is_some_and(|source| source.label.as_ref() == "example/dep/module.pi")
+                .is_some_and(|source| source.label.as_ref() == format!("dep/{PROJECT_NAME}"))
     }));
     assert!(
         !reads

@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use pith_diag::Diag;
 use pith_loader::{
-    AcquireFailure, AcquiredManifest, AcquiredSource, ModuleStore, Route, Workspace,
+    AcquireFailure, AcquiredProject, AcquiredSource, PROJECT_NAME, ProjectStore, Route, Workspace,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -31,7 +31,7 @@ pub enum Request {
 impl Request {
     fn of(route: &Route<'_>) -> Self {
         match route {
-            Route::Path { path, .. } | Route::Member { path } => Self::Path((*path).into()),
+            Route::Path { path } | Route::Member { path } => Self::Path((*path).into()),
             Route::Git {
                 url,
                 revision,
@@ -45,15 +45,13 @@ impl Request {
 }
 
 pub struct Module {
-    pub manifest: String,
-    pub source: String,
+    pub project: String,
 }
 
 #[derive(Default)]
 pub struct Reads {
     pub located: Vec<(Location, Request)>,
-    pub manifests: Vec<Location>,
-    pub sources: Vec<Location>,
+    pub projects: Vec<Location>,
 }
 
 #[derive(Default)]
@@ -71,7 +69,7 @@ impl Store {
     }
 }
 
-impl ModuleStore for Store {
+impl ProjectStore for Store {
     type Location = Location;
 
     fn locate(&self, base: &Location, route: &Route<'_>) -> Result<Location, AcquireFailure> {
@@ -85,31 +83,27 @@ impl ModuleStore for Store {
             })
     }
 
-    fn manifest(&mut self, location: &Location) -> Result<AcquiredManifest, AcquireFailure> {
-        self.reads.borrow_mut().manifests.push(location.clone());
+    fn project(&mut self, location: &Location) -> Result<AcquiredProject, AcquireFailure> {
+        self.reads.borrow_mut().projects.push(location.clone());
         self.modules
             .get(location)
-            .map(|module| AcquiredManifest {
-                label: format!("{location}/module.pi").into(),
-                text: module.manifest.clone().into(),
+            .map(|module| AcquiredProject {
+                label: format!("{location}/{PROJECT_NAME}").into(),
+                text: module.project.clone().into(),
             })
             .ok_or_else(|| AcquireFailure::Unreadable {
-                message: format!("no manifest at {location}").into(),
+                message: format!("no project at {location}").into(),
             })
     }
 
-    fn sources(&mut self, location: &Location) -> Result<Vec<AcquiredSource>, AcquireFailure> {
-        self.reads.borrow_mut().sources.push(location.clone());
-        self.modules
-            .get(location)
-            .map(|module| {
-                vec![AcquiredSource {
-                    path: "src/main.pi".into(),
-                    text: module.source.clone().into(),
-                }]
-            })
-            .ok_or_else(|| AcquireFailure::Unreadable {
-                message: format!("no sources at {location}").into(),
-            })
+    fn include(
+        &mut self,
+        _location: &Location,
+        path: &str,
+    ) -> Result<AcquiredSource, AcquireFailure> {
+        Ok(AcquiredSource {
+            path: path.into(),
+            text: String::new().into(),
+        })
     }
 }

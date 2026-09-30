@@ -56,7 +56,7 @@ proptest! {
             for order in [&first, &last] {
                 for naming in Naming::variations() {
                     let (result, _) = build(&case, kind, order, Change::Unreachable(chosen), naming).run();
-                    check::refused(result, FrontendCode::MissingManifest)?;
+                    check::refused(result, FrontendCode::MissingProject)?;
                 }
             }
         }

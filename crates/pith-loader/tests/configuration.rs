@@ -5,9 +5,9 @@ use std::rc::Rc;
 
 use pith_diag::{Diag, SourceId};
 use pith_loader::{
-    AcquireFailure, AcquiredManifest, AcquiredSource, BindingOrigin, BindingPolicy, FrontendCode,
-    ManifestSource, ModuleStore, Route, UserBindings, Workspace, WorkspaceResolution,
-    parse_manifest,
+    AcquireFailure, AcquiredProject, AcquiredSource, BindingOrigin, BindingPolicy, FrontendCode,
+    PROJECT_NAME, ProjectSource, ProjectStore, Route, UserBindings, Workspace, WorkspaceResolution,
+    parse_project_file,
 };
 
 type ResultOf<T> = Result<T, Box<[Diag]>>;
@@ -23,7 +23,7 @@ struct Store {
     observed: Rc<RefCell<Vec<Observed>>>,
 }
 
-impl ModuleStore for Store {
+impl ProjectStore for Store {
     type Location = String;
 
     fn locate(&self, _: &String, route: &Route<'_>) -> Result<String, AcquireFailure> {
@@ -37,31 +37,31 @@ impl ModuleStore for Store {
         Ok(registry.subject().to_string())
     }
 
-    fn manifest(&mut self, location: &String) -> Result<AcquiredManifest, AcquireFailure> {
-        Ok(AcquiredManifest {
-            label: format!("{location}/module.pi").into(),
+    fn project(&mut self, location: &String) -> Result<AcquiredProject, AcquireFailure> {
+        Ok(AcquiredProject {
+            label: format!("{location}/{PROJECT_NAME}").into(),
             text: if location == "root" {
                 self.root.clone()
             } else {
-                format!("module {location} 1\n")
+                format!("module {location} 1\n\ninputs {{\n}}\n")
             }
             .into(),
         })
     }
 
-    fn sources(&mut self, _: &String) -> Result<Vec<AcquiredSource>, AcquireFailure> {
-        Ok(vec![AcquiredSource {
-            path: "src/main.pi".into(),
+    fn include(&mut self, _: &String, path: &str) -> Result<AcquiredSource, AcquireFailure> {
+        Ok(AcquiredSource {
+            path: path.into(),
             text: "nominal Name = Text\n".into(),
-        }])
+        })
     }
 }
 
 fn user(clauses: &str) -> ResultOf<UserBindings> {
-    UserBindings::try_from(&parse_manifest(&ManifestSource::new(
+    UserBindings::try_from(&parse_project_file(&ProjectSource::new(
         SourceId::from_raw(0),
         "user.pi",
-        format!("module config/user 1\n{clauses}"),
+        format!("module config/user 1\n\ninputs {{\n{clauses}}}\n"),
     )))
 }
 
@@ -78,7 +78,7 @@ fn resolve(
     let result = user(user_clauses).and_then(|user| {
         Workspace::resolve_configured(
             Store {
-                root: format!("module example/root 1\n{project}"),
+                root: format!("module example/root 1\n\ninputs {{\n{project}}}\n"),
                 observed: Rc::clone(&observed),
             },
             &"root".to_string(),
@@ -93,7 +93,7 @@ fn resolve(
 #[test]
 fn user_authority_supplies_an_unbound_domain() {
     let (result, observed) = resolve(
-        "use dep = example/dep\n",
+        "dep = example/dep\n",
         &format!("{}domain example from registry\n", binding("user")),
         BindingPolicy::AllowUser,
     );
@@ -111,7 +111,7 @@ fn user_authority_supplies_an_unbound_domain() {
 fn project_override_retains_both_sources_and_warns() {
     let (result, observed) = resolve(
         &format!(
-            "{}domain example from registry\nuse dep = example/dep\n",
+            "{}domain example from registry\ndep = example/dep\n",
             binding("project")
         ),
         &format!("{}domain example from registry\n", binding("user")),
@@ -129,7 +129,7 @@ fn project_override_retains_both_sources_and_warns() {
     for collision in resolved.overrides() {
         assert_eq!(
             collision.project().source().label.as_ref(),
-            "root/module.pi"
+            format!("root/{PROJECT_NAME}").as_str()
         );
         assert_eq!(collision.user().source().label.as_ref(), "user.pi");
         assert_ne!(
@@ -148,7 +148,7 @@ fn project_override_retains_both_sources_and_warns() {
 #[test]
 fn a_project_registry_name_cannot_capture_a_user_domain_route() {
     let (result, observed) = resolve(
-        &format!("{}use dep = example/dep\n", binding("project")),
+        &format!("{}dep = example/dep\n", binding("project")),
         &format!("{}domain example from registry\n", binding("user")),
         BindingPolicy::AllowUser,
     );
@@ -165,8 +165,8 @@ fn a_project_registry_name_cannot_capture_a_user_domain_route() {
 #[test]
 fn project_only_authority_refuses_user_domain_and_explicit_routes_before_locate() {
     for requirement in [
-        "use dep = example/dep\n",
-        "use dep = example/dep from registry registry\n",
+        "dep = example/dep\n",
+        "dep = example/dep from registry registry\n",
     ] {
         let (result, observed) = resolve(
             requirement,
@@ -187,7 +187,7 @@ fn project_only_authority_refuses_user_domain_and_explicit_routes_before_locate(
 fn project_owned_selection_is_allowed_with_unused_user_configuration() {
     let (result, _) = resolve(
         &format!(
-            "{}domain example from registry\nuse dep = example/dep\n",
+            "{}domain example from registry\ndep = example/dep\n",
             binding("project")
         ),
         &format!("{}domain other from registry\n", binding("user")),
@@ -200,7 +200,7 @@ fn project_owned_selection_is_allowed_with_unused_user_configuration() {
 fn invalid_user_configuration_is_not_hidden_by_a_project_override() {
     let (result, observed) = resolve(
         &format!(
-            "{}domain example from registry\nuse dep = example/dep\n",
+            "{}domain example from registry\ndep = example/dep\n",
             binding("project")
         ),
         &format!(
@@ -225,7 +225,7 @@ fn invalid_user_configuration_is_not_hidden_by_a_project_override() {
 #[test]
 fn a_project_domain_cannot_silently_inherit_a_user_registry() {
     let (result, observed) = resolve(
-        "domain example from registry\nuse dep = example/dep\n",
+        "domain example from registry\ndep = example/dep\n",
         &binding("user"),
         BindingPolicy::AllowUser,
     );

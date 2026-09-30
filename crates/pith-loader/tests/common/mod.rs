@@ -59,10 +59,8 @@ pub(crate) fn semantics(workspace: &Workspace) -> TestResult<BTreeMap<Box<str>, 
         .map_err(|error| format!("the workspace projects: {error}"))?;
     let mut semantics = BTreeMap::new();
     for ((module, projected), elaborated_module) in projection.modules().zip(elaborated.modules()) {
-        let mut source_ids = module
-            .sources()
-            .files()
-            .iter()
+        let mut source_ids = std::iter::once(module.files().project())
+            .chain(module.files().includes().files())
             .map(|file| file.content_id())
             .collect::<Vec<_>>();
         source_ids.sort_by_key(|id| id.digest());

@@ -10,12 +10,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use pith_hir::ModuleSubject;
-use pith_loader::{FrontendCode, Workspace};
+use pith_loader::{FrontendCode, PROJECT_NAME, Workspace};
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
-const HELLO: &str = "module example/hello 0.1.0";
-const GREETING: &str = "module example/greeting 0.1.0";
+const HELLO: &str =
+    "module example/hello 0.1.0\n\ninputs {\n  greeting = path \"modules/greeting\"\n}";
+const GREETING: &str = "module example/greeting 0.1.0\n\ninputs {\n}";
 
 fn subject(spelling: &str) -> ModuleSubject {
     ModuleSubject::parse(spelling).unwrap_or_else(|error| unreachable!("{error}"))
@@ -31,31 +32,39 @@ fn file(path: &Path, text: &str) -> TestResult {
     Ok(())
 }
 
-/// A module directory: manifest plus the given `src/` files.
-fn module(directory: &Path, manifest: &str, sources: &[(&str, &str)]) -> TestResult {
-    file(&directory.join("module.pi"), manifest)?;
-    for (relative, text) in sources {
-        file(&directory.join("src").join(relative), text)?;
+/// A project directory: the project file plus the includes it names.
+fn project(directory: &Path, header: &str, includes: &[(&str, &str)]) -> TestResult {
+    file(
+        &directory.join(PROJECT_NAME),
+        &format!("{header}\n\n{}\n", include_clauses(includes)),
+    )?;
+    for (relative, text) in includes {
+        file(&directory.join(relative), text)?;
     }
     Ok(())
+}
+
+fn include_clauses(includes: &[(&str, &str)]) -> String {
+    includes
+        .iter()
+        .map(|(path, _)| format!("include \"{path}\"\n"))
+        .collect::<String>()
+        .trim_end()
+        .to_string()
 }
 
 /// The two-module project of the acceptance fixture.
 fn fixture() -> TestResult<(tempfile::TempDir, PathBuf)> {
     let root = tempfile::tempdir()?;
     let directory = root.path().join("local-workspace");
-    module(
-        &directory,
+    file(
+        &directory.join(PROJECT_NAME),
         &format!(
-            "{HELLO}\n\nworkspace {{\n  members: [\"modules/greeting\"],\n}}\n\nuse greeting = \
-             example/greeting from path \"modules/greeting\"\n"
+            "{HELLO}\n\nworkspace {{\n  members: [\"modules/greeting\"],\n}}\n\nimport \
+             greeting\nnominal Message = greeting.Message\n"
         ),
-        &[(
-            "main.pi",
-            "import greeting\nnominal Message = greeting.Message\n",
-        )],
     )?;
-    module(
+    project(
         &directory.join("modules/greeting"),
         GREETING,
         &[
@@ -67,14 +76,14 @@ fn fixture() -> TestResult<(tempfile::TempDir, PathBuf)> {
 }
 
 fn load(directory: &Path) -> Workspace {
-    match Workspace::load(&directory.join("module.pi")) {
+    match Workspace::load(&directory.join(PROJECT_NAME)) {
         Ok(workspace) => workspace,
         Err(diagnostics) => unreachable!("the workspace loads: {diagnostics:?}"),
     }
 }
 
 fn load_err(directory: &Path) -> Box<[pith_diag::Diag]> {
-    match Workspace::load(&directory.join("module.pi")) {
+    match Workspace::load(&directory.join(PROJECT_NAME)) {
         Err(diagnostics) => diagnostics,
         Ok(_) => unreachable!("the workspace refuses this project"),
     }

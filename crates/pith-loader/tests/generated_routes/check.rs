@@ -13,26 +13,20 @@ pub fn accepted(case: &Case, workspace: &Workspace, reads: &Reads) -> TestCaseRe
         .modules()
         .find(|module| module.subject().to_string() == "example/dep")
         .ok_or_else(|| TestCaseError::fail("selected dependency is absent"))?;
-    let version = dependency.manifest().version().canonical_spelling();
+    let version = dependency.project().version().canonical_spelling();
     prop_assert_eq!(version.as_ref(), case.content.version.to_string());
-    let file = dependency
-        .sources()
-        .files()
-        .first()
-        .ok_or_else(|| TestCaseError::fail("selected source is absent"))?;
-    prop_assert_eq!(file.text(), case.content.source());
+    prop_assert!(
+        dependency
+            .files()
+            .project()
+            .text()
+            .contains(case.content.source().as_str()),
+        "the selected dependency's declarations are its project file's"
+    );
     let canonical = Location::Source(case.canonical.clone());
     prop_assert_eq!(
         reads
-            .manifests
-            .iter()
-            .filter(|location| *location == &canonical)
-            .count(),
-        1
-    );
-    prop_assert_eq!(
-        reads
-            .sources
+            .projects
             .iter()
             .filter(|location| *location == &canonical)
             .count(),
@@ -86,7 +80,12 @@ pub fn refused(
             .source_text()
             .get(span.start.0 as usize..span.end.0 as usize)
             .ok_or_else(|| TestCaseError::fail("refusal span is outside its source"))?;
-        prop_assert!(text.starts_with("from"), "refusal points at {text:?}");
+        prop_assert!(
+            ["path", "git", "archive", "example/"]
+                .iter()
+                .any(|opener| text.starts_with(opener)),
+            "refusal points at a locator, found {text:?}"
+        );
     }
     Ok(())
 }

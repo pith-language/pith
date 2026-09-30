@@ -37,7 +37,7 @@ pub fn build(case: &Case, kind: Kind, order: &[usize], change: Change, naming: N
             "A"
         };
         registries.push_str(&format!(
-            "registry {alias} = \"registry-{endpoint}\" root \"ed25519:{root_key}\"\n"
+            "  registry {alias} = \"registry-{endpoint}\" root \"ed25519:{root_key}\"\n"
         ));
         let (clause, request) = route(kind, &alias, token, endpoint);
         let location = Location::Branch(index, branch.depth);
@@ -53,7 +53,7 @@ pub fn build(case: &Case, kind: Kind, order: &[usize], change: Change, naming: N
         }
         store
             .modules
-            .insert(location, node(index, branch.depth, "example/dep", &clause));
+            .insert(location, node(index, branch.depth, &clause));
         for depth in 0..branch.depth {
             let next_depth = depth.saturating_add(1);
             let current = Location::Branch(index, depth);
@@ -61,35 +61,26 @@ pub fn build(case: &Case, kind: Kind, order: &[usize], change: Change, naming: N
             store
                 .routes
                 .insert((current.clone(), Request::Path("next".into())), next);
-            store.modules.insert(
-                current,
-                node(
-                    index,
-                    depth,
-                    &subject(index, next_depth),
-                    "from path \"next\"",
-                ),
-            );
+            store
+                .modules
+                .insert(current, node(index, depth, "path \"next\""));
         }
         store.routes.insert(
             (Location::Root, Request::Path(format!("branch{index}"))),
             Location::Branch(index, 0),
         );
     }
-    let uses = order
+    let inputs = order
         .iter()
-        .map(|index| {
-            format!(
-                "use branch{index} = {} from path \"branch{index}\"\n",
-                subject(*index, 0)
-            )
-        })
+        .map(|index| format!("  branch{index} = path \"branch{index}\"\n"))
         .collect::<String>();
     store.modules.insert(
         Location::Root,
         Module {
-            manifest: format!("module example/root 1\n{registries}{uses}"),
-            source: "nominal Root = Bool\n".into(),
+            project: format!(
+                "module example/root 1\n\ninputs {{\n{registries}{inputs}}}\n\nnominal Root \
+                 = Bool\n"
+            ),
         },
     );
     store
@@ -97,8 +88,11 @@ pub fn build(case: &Case, kind: Kind, order: &[usize], change: Change, naming: N
 
 fn content(content: &Content) -> Module {
     Module {
-        manifest: format!("module example/dep {}\n", content.version),
-        source: content.source(),
+        project: format!(
+            "module example/dep {}\n\ninputs {{\n}}\n\n{}",
+            content.version,
+            content.source()
+        ),
     }
 }
 
@@ -106,32 +100,31 @@ fn subject(index: usize, depth: u8) -> String {
     format!("example/branch{index}n{depth}")
 }
 
-fn node(index: usize, depth: u8, dependency: &str, route: &str) -> Module {
+fn node(index: usize, depth: u8, locator: &str) -> Module {
     Module {
-        manifest: format!(
-            "module {} 1\nuse child = {dependency} {route}\n",
+        project: format!(
+            "module {} 1\n\ninputs {{\n  child = {locator}\n}}\n\nnominal Node = Bool\n",
             subject(index, depth)
         ),
-        source: "nominal Node = Bool\n".into(),
     }
 }
 
 fn route(kind: Kind, alias: &str, token: &str, endpoint: &str) -> (String, Request) {
     match kind {
         Kind::Path => (
-            format!("from path \"dep-{token}\""),
+            format!("path \"dep-{token}\""),
             Request::Path(format!("dep-{token}")),
         ),
         Kind::Git => (
-            format!("from git \"repo-{endpoint}\" revision \"{token}\""),
+            format!("git \"repo-{endpoint}\" at \"{token}\""),
             Request::Git(format!("repo-{endpoint}"), token.into(), None),
         ),
         Kind::Archive => (
-            format!("from archive \"archive-{endpoint}\" digest \"{token}\""),
+            format!("archive \"archive-{endpoint}\" digest \"{token}\""),
             Request::Archive(format!("archive-{endpoint}"), token.into()),
         ),
         Kind::Registry => (
-            format!("from registry {alias}"),
+            format!("example/dep from registry {alias}"),
             Request::Registry(format!("registry-{endpoint}")),
         ),
     }

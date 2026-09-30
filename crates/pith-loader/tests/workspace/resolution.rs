@@ -7,10 +7,10 @@ use std::fs;
 use pith_hir::ModuleSubject;
 use pith_loader::Workspace;
 
-use super::{TestResult, file, fixture, load, module, subject};
+use super::{PROJECT_NAME, TestResult, file, fixture, load, project, subject};
 
 #[test]
-fn a_two_module_project_resolves_dependencies_first_and_sorts_sources() -> TestResult {
+fn a_two_module_project_resolves_dependencies_first_and_sorts_includes() -> TestResult {
     let (_guard, directory) = fixture()?;
     let workspace = load(&directory);
 
@@ -25,12 +25,13 @@ fn a_two_module_project_resolves_dependencies_first_and_sorts_sources() -> TestR
     assert_eq!(workspace.root().subject(), &subject("example/hello"));
     assert_eq!(
         workspace.module(&subject("example/greeting")).map(|m| m
-            .sources()
+            .files()
+            .includes()
             .files()
             .iter()
             .map(|f| f.path())
             .collect::<Vec<_>>()),
-        Some(vec!["src/rules.pi", "src/types.pi"])
+        Some(vec!["rules.pi", "types.pi"])
     );
     let bindings = workspace
         .root()
@@ -48,24 +49,24 @@ fn a_two_module_project_resolves_dependencies_first_and_sorts_sources() -> TestR
 fn a_diamond_loads_the_shared_dependency_once() -> TestResult {
     let root = tempfile::tempdir()?;
     let directory = root.path();
-    module(
+    project(
         directory,
-        "module example/root 0.1.0\nuse b = example/b from path \"b\"\nuse c = example/c from path \"c\"\n",
+        "module example/root 0.1.0\n\ninputs {\n  b = path \"b\"\n  c = path \"c\"\n}",
         &[("main.pi", "import b\nimport c\n")],
     )?;
-    module(
+    project(
         &directory.join("b"),
-        "module example/b 0.1.0\nuse shared = example/shared from path \"../shared\"\n",
+        "module example/b 0.1.0\n\ninputs {\n  shared = path \"../shared\"\n}",
         &[("b.pi", "import shared\n")],
     )?;
-    module(
+    project(
         &directory.join("c"),
-        "module example/c 0.1.0\nuse shared = example/shared from path \"../shared\"\n",
+        "module example/c 0.1.0\n\ninputs {\n  shared = path \"../shared\"\n}",
         &[("c.pi", "import shared\n")],
     )?;
-    module(
+    project(
         &directory.join("shared"),
-        "module example/shared 0.1.0",
+        "module example/shared 0.1.0\n\ninputs {\n}",
         &[("s.pi", "nominal T = Text\n")],
     )?;
 
@@ -89,16 +90,15 @@ fn a_diamond_loads_the_shared_dependency_once() -> TestResult {
 #[test]
 fn an_unrelated_member_is_validated_but_its_sources_are_never_acquired() -> TestResult {
     let (_guard, directory) = fixture()?;
-    // An empty source set is a refusal only for the selected closure; a
-    // member the root does not depend on contributes no rules and no error.
-    module(
+    // A member the root does not input contributes no rules and no error.
+    project(
         &directory.join("modules/unused"),
-        "module example/unused 0.1.0",
+        "module example/unused 0.1.0\n\ninputs {\n}",
         &[],
     )?;
-    let root = fs::read_to_string(directory.join("module.pi"))?;
+    let root = fs::read_to_string(directory.join(PROJECT_NAME))?;
     file(
-        &directory.join("module.pi"),
+        &directory.join(PROJECT_NAME),
         &root.replace(
             "members: [\"modules/greeting\"],",
             "members: [\"modules/greeting\", \"modules/unused\"],",
@@ -111,34 +111,25 @@ fn an_unrelated_member_is_validated_but_its_sources_are_never_acquired() -> Test
 }
 
 #[test]
-fn relocation_keeps_subjects_and_module_relative_source_sets() -> TestResult {
+fn relocation_keeps_subjects_and_module_relative_file_sets() -> TestResult {
     let (_guard, directory) = fixture()?;
     let first = load(&directory);
 
     let relocated = tempfile::tempdir()?;
     let other = relocated.path().join("elsewhere/deeper");
-    module(
-        &other,
-        &fs::read_to_string(directory.join("module.pi"))?,
-        &[(
-            "main.pi",
-            &fs::read_to_string(directory.join("src/main.pi"))?,
-        )],
+    fs::create_dir_all(&other)?;
+    fs::copy(directory.join(PROJECT_NAME), other.join(PROJECT_NAME))?;
+    fs::create_dir_all(other.join("modules/greeting"))?;
+    fs::copy(
+        directory.join("modules/greeting").join(PROJECT_NAME),
+        other.join("modules/greeting").join(PROJECT_NAME),
     )?;
-    module(
-        &other.join("modules/greeting"),
-        &fs::read_to_string(directory.join("modules/greeting/module.pi"))?,
-        &[
-            (
-                "types.pi",
-                &fs::read_to_string(directory.join("modules/greeting/src/types.pi"))?,
-            ),
-            (
-                "rules.pi",
-                &fs::read_to_string(directory.join("modules/greeting/src/rules.pi"))?,
-            ),
-        ],
-    )?;
+    for name in ["types.pi", "rules.pi"] {
+        fs::copy(
+            directory.join("modules/greeting").join(name),
+            other.join("modules/greeting").join(name),
+        )?;
+    }
     let second = load(&other);
 
     type Identity = (ModuleSubject, Vec<(String, pith_ids::ContentId)>);
@@ -149,7 +140,8 @@ fn relocation_keeps_subjects_and_module_relative_source_sets() -> TestResult {
                 (
                     module.subject().clone(),
                     module
-                        .sources()
+                        .files()
+                        .includes()
                         .files()
                         .iter()
                         .map(|file| (file.path().to_string(), file.content_id()))
@@ -166,14 +158,14 @@ fn relocation_keeps_subjects_and_module_relative_source_sets() -> TestResult {
 fn member_enumeration_order_moves_no_resolved_identity() -> TestResult {
     let (_guard, directory) = fixture()?;
     let first = load(&directory);
-    module(
+    project(
         &directory.join("modules/unused"),
-        "module example/unused 0.1.0",
+        "module example/unused 0.1.0\n\ninputs {\n}",
         &[("u.pi", "nominal U = Text\n")],
     )?;
-    let root = fs::read_to_string(directory.join("module.pi"))?;
+    let root = fs::read_to_string(directory.join(PROJECT_NAME))?;
     file(
-        &directory.join("module.pi"),
+        &directory.join(PROJECT_NAME),
         &root.replace(
             "members: [\"modules/greeting\"],",
             "members: [\"modules/unused\", \"modules/greeting\"],",
@@ -184,7 +176,12 @@ fn member_enumeration_order_moves_no_resolved_identity() -> TestResult {
     let identities = |workspace: &Workspace| {
         workspace
             .modules()
-            .map(|module| (module.subject().clone(), module.sources().files().len()))
+            .map(|module| {
+                (
+                    module.subject().clone(),
+                    module.files().includes().files().len(),
+                )
+            })
             .collect::<Vec<_>>()
     };
     assert_eq!(identities(&first), identities(&second));

@@ -155,7 +155,7 @@ fn key_rotation_enrolls_the_successor_and_retires_the_old_key() -> TestResult {
     let staging = tempfile::tempdir()?;
     staged_project(
         staging.path(),
-        "module example/other 1.0.0\n",
+        "module example/other 1.0.0\n\ninputs {\n}\n",
         "module example/root 0.1.0\n",
     )?;
     let other = derive_module(&staging.path().join("dep"))?;
@@ -186,7 +186,10 @@ fn two_entries_for_one_canonical_version_refuse() -> TestResult {
         // The same release under a spelling that compares equal: `1.2`
         // against `1.2.0`, so a person reads one version where the index
         // would carry two.
-        file(&staging.join("dep/module.pi"), "module example/dep 1.2\n")?;
+        file(
+            &staging.join("dep").join("pith.pi"),
+            "module example/dep 1.2\n\ninputs {\n}\n",
+        )?;
         let respelled = derive_module(&staging.join("dep"))?;
         host.publish(&respelled, &publisher(), ADMITTED + 30)?;
         Ok(())

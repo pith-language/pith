@@ -12,12 +12,27 @@ use pith_store::MemoryContentStore;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
-const ROOT_MANIFEST: &str =
-    "module example/root 0.1.0\n\nuse dep = example/dep from path \"dep\"\n";
-const DEP_MANIFEST: &str = "module example/dep 0.1.0\n";
+const ROOT_PROJECT: &str = "module example/root 0.1.0
+
+inputs {
+  dep = path \"dep\"
+}
+
+import dep
+
+entry \
+     hello : Text = ask (Message(\"hello\"))
+";
+const DEP_PROJECT: &str = "module example/dep 0.1.0
+
+inputs {
+}
+
+include \"types.pi\"
+include \"rules.pi\"
+";
 const DEP_TYPES: &str = "nominal Message = Text\n";
 const DEP_RULES: &str = "pure rule speak(who: Message) -> Text = { \"first\" }\n";
-const ROOT_MAIN: &str = "import dep\n\nentry hello : Text = ask (Message(\"hello\"))\n";
 
 /// A body edit: the rule's text moves, its signature does not.
 const DEP_RULES_BODY_EDIT: &str = "pure rule speak(who: Message) -> Text = { \"second\" }\n";
@@ -35,11 +50,10 @@ fn file(path: &Path, text: &str) -> TestResult {
 }
 
 fn project(directory: &Path) -> TestResult {
-    file(&directory.join("module.pi"), ROOT_MANIFEST)?;
-    file(&directory.join("src/main.pi"), ROOT_MAIN)?;
-    file(&directory.join("dep/module.pi"), DEP_MANIFEST)?;
-    file(&directory.join("dep/src/types.pi"), DEP_TYPES)?;
-    file(&directory.join("dep/src/rules.pi"), DEP_RULES)?;
+    file(&directory.join("pith.pi"), ROOT_PROJECT)?;
+    file(&directory.join("dep").join("pith.pi"), DEP_PROJECT)?;
+    file(&directory.join("dep/types.pi"), DEP_TYPES)?;
+    file(&directory.join("dep/rules.pi"), DEP_RULES)?;
     Ok(())
 }
 
@@ -53,7 +67,7 @@ fn engine() -> Engine {
 }
 
 fn load(directory: &Path) -> TestResult<Workspace> {
-    Workspace::load(&directory.join("module.pi")).map_err(
+    Workspace::load(&directory.join("pith.pi")).map_err(
         |diagnostics| -> Box<dyn std::error::Error> {
             format!("the fixture resolves: {diagnostics:?}").into()
         },
@@ -119,10 +133,7 @@ fn a_dependency_body_edit_leaves_the_consumer_bodies_reusable() -> TestResult {
         EvaluationSource::Computed
     );
 
-    file(
-        &directory.path().join("dep/src/rules.pi"),
-        DEP_RULES_BODY_EDIT,
-    )?;
+    file(&directory.path().join("dep/rules.pi"), DEP_RULES_BODY_EDIT)?;
     let workspace = load(directory.path())?;
     let after = projected(&workspace, &mut engine)?;
 
@@ -174,7 +185,7 @@ fn a_public_representation_edit_moves_the_consumer_inputs() -> TestResult {
     );
 
     file(
-        &directory.path().join("dep/src/types.pi"),
+        &directory.path().join("dep/types.pi"),
         DEP_TYPES_REPRESENTATION_EDIT,
     )?;
     let workspace = load(directory.path())?;

@@ -12,29 +12,26 @@ use std::path::Path;
 use common::{TestResult, file, module_of, semantics};
 use pith_hir::FrontendCode;
 use pith_loader::{
-    AcquireFailure, AcquiredManifest, AcquiredSource, ModuleStore, Route, Workspace,
+    AcquireFailure, AcquiredProject, AcquiredSource, PROJECT_NAME, ProjectStore, Route, Workspace,
 };
 
-const ROOT_MANIFEST: &str =
-    "module example/root 0.1.0\n\nuse dep = example/dep from path \"dep\"\n";
-const DEP_MANIFEST: &str = "module example/dep 1.2.0\n";
+const ROOT_PROJECT: &str = "module example/root 0.1.0\n\ninputs {\n  dep = path \"dep\"\n}\n\nimport dep\n\nentry      hello : Text = ask (Message(\"hello\"))\n";
+const DEP_PROJECT: &str =
+    "module example/dep 1.2.0\n\ninputs {\n}\n\ninclude \"types.pi\"\ninclude \"rules.pi\"\n";
 const DEP_TYPES: &str = "nominal Message = Text\n";
 const DEP_RULES: &str = "pure rule speak(who: Message) -> Text = { \"first\" }\n";
-const ROOT_MAIN: &str = "import dep\n\nentry hello : Text = ask (Message(\"hello\"))\n";
-
 /// The on-disk fixture: a root and one path dependency.
 fn local_project(directory: &Path) -> TestResult {
-    file(&directory.join("module.pi"), ROOT_MANIFEST)?;
-    file(&directory.join("src/main.pi"), ROOT_MAIN)?;
-    file(&directory.join("dep/module.pi"), DEP_MANIFEST)?;
-    file(&directory.join("dep/src/types.pi"), DEP_TYPES)?;
-    file(&directory.join("dep/src/rules.pi"), DEP_RULES)?;
+    file(&directory.join(PROJECT_NAME), ROOT_PROJECT)?;
+    file(&directory.join("dep").join(PROJECT_NAME), DEP_PROJECT)?;
+    file(&directory.join("dep/types.pi"), DEP_TYPES)?;
+    file(&directory.join("dep/rules.pi"), DEP_RULES)?;
     Ok(())
 }
 
-/// The root manifest with its dependency routed at a registry: same clause,
-/// registry source, and a range the release satisfies.
-const REGISTRY_ROOT: &str = "module example/root 0.1.0\nregistry fixture = \"memory:fixture\" root \"ed25519:A\"\ndomain example from fixture\nuse dep = example/dep >= 1.2\n";
+/// The root project with its dependency routed at a registry: registry
+/// locator, and a range the release satisfies.
+const REGISTRY_ROOT: &str = "module example/root 0.1.0\n\ninputs {\n  registry fixture = \"memory:fixture\" root \"ed25519:A\"\n  domain example from fixture\n  dep = example/dep >= 1.2\n}\n\nimport dep\n\nentry hello : Text = ask (Message(\"hello\"))\n";
 
 /// A store serving modules by subject, the registry's shape. Manifest
 /// labels carry the store's identity, which is the diagnostic identity a
@@ -46,8 +43,8 @@ struct RegistryFixture {
 
 #[derive(Clone)]
 struct FixtureModule {
-    manifest: Box<str>,
-    sources: Vec<(Box<str>, Box<str>)>,
+    project: Box<str>,
+    includes: Vec<(Box<str>, Box<str>)>,
 }
 
 /// A fixture location: the subject it serves. Two routes to one subject
@@ -70,17 +67,17 @@ impl RegistryFixture {
                 (
                     "example/root".into(),
                     FixtureModule {
-                        manifest: REGISTRY_ROOT.into(),
-                        sources: vec![("src/main.pi".into(), ROOT_MAIN.into())],
+                        project: REGISTRY_ROOT.into(),
+                        includes: Vec::new(),
                     },
                 ),
                 (
                     "example/dep".into(),
                     FixtureModule {
-                        manifest: DEP_MANIFEST.into(),
-                        sources: vec![
-                            ("src/types.pi".into(), DEP_TYPES.into()),
-                            ("src/rules.pi".into(), DEP_RULES.into()),
+                        project: DEP_PROJECT.into(),
+                        includes: vec![
+                            ("types.pi".into(), DEP_TYPES.into()),
+                            ("rules.pi".into(), DEP_RULES.into()),
                         ],
                     },
                 ),
@@ -91,7 +88,11 @@ impl RegistryFixture {
     fn with_dep_version(version: &str) -> Self {
         let mut store = Self::with_root_bytes();
         if let Some(dep) = store.modules.get_mut("example/dep") {
-            dep.manifest = format!("module example/dep {version}\n").into();
+            dep.project = format!(
+                "module example/dep {version}\n\ninputs {{\n}}\n\ninclude \"types.pi\"\ninclude \
+                 \"rules.pi\"\n"
+            )
+            .into();
         }
         store
     }
@@ -99,7 +100,7 @@ impl RegistryFixture {
     fn with_unparsable_dep() -> Self {
         let mut store = Self::with_root_bytes();
         if let Some(dep) = store.modules.get_mut("example/dep") {
-            dep.manifest = "module example/dep 1.2.0\nmodule example/other 1.0.0\n".into();
+            dep.project = "module example/dep 1.2.0\nmodule example/other 1.0.0\n".into();
         }
         store
     }
@@ -109,7 +110,7 @@ impl RegistryFixture {
     }
 }
 
-impl ModuleStore for RegistryFixture {
+impl ProjectStore for RegistryFixture {
     type Location = FixtureLocation;
 
     fn locate(
@@ -132,37 +133,41 @@ impl ModuleStore for RegistryFixture {
         }
     }
 
-    fn manifest(&mut self, location: &Self::Location) -> Result<AcquiredManifest, AcquireFailure> {
+    fn project(&mut self, location: &Self::Location) -> Result<AcquiredProject, AcquireFailure> {
         let module =
             self.modules
                 .get(location.0.as_ref())
                 .ok_or_else(|| AcquireFailure::Unreadable {
                     message: format!("the index carries no release at {location}").into(),
                 })?;
-        Ok(AcquiredManifest {
-            label: format!("{location}/module.pi").into(),
-            text: module.manifest.clone(),
+        Ok(AcquiredProject {
+            label: format!("{location}/{PROJECT_NAME}").into(),
+            text: module.project.clone(),
         })
     }
 
-    fn sources(
+    fn include(
         &mut self,
         location: &Self::Location,
-    ) -> Result<Vec<AcquiredSource>, AcquireFailure> {
+        path: &str,
+    ) -> Result<AcquiredSource, AcquireFailure> {
         let module =
             self.modules
                 .get(location.0.as_ref())
                 .ok_or_else(|| AcquireFailure::Unreadable {
                     message: format!("the index carries no release at {location}").into(),
                 })?;
-        Ok(module
-            .sources
+        module
+            .includes
             .iter()
+            .find(|(include, _)| include.as_ref() == path)
             .map(|(path, text)| AcquiredSource {
                 path: path.clone(),
                 text: text.clone(),
             })
-            .collect())
+            .ok_or_else(|| AcquireFailure::Unreadable {
+                message: format!("the release at {location} names no include {path}").into(),
+            })
     }
 }
 
@@ -170,7 +175,7 @@ impl ModuleStore for RegistryFixture {
 fn the_same_module_bytes_through_two_stores_produce_equal_semantic_artifacts() -> TestResult {
     let root = tempfile::tempdir()?;
     local_project(root.path())?;
-    let local = Workspace::load(&root.path().join("module.pi"))
+    let local = Workspace::load(&root.path().join(PROJECT_NAME))
         .map_err(|diagnostics| format!("the local project resolves: {diagnostics:?}"))?;
 
     let store = RegistryFixture::with_root_bytes();
@@ -184,10 +189,15 @@ fn the_same_module_bytes_through_two_stores_produce_equal_semantic_artifacts() -
         let through_registry = acquired_semantics
             .get(subject)
             .unwrap_or_else(|| unreachable!("{subject} resolved through the registry too"));
-        assert_eq!(
-            local.source_ids, through_registry.source_ids,
-            "{subject}'s source identities are store-independent"
-        );
+        // The two roots spell their locators differently, so their project
+        // files differ as content; the dependency's bytes are the same
+        // through both stores, and every module's semantics are.
+        if subject.as_ref() == "example/dep" {
+            assert_eq!(
+                local.source_ids, through_registry.source_ids,
+                "{subject}'s file identities are store-independent"
+            );
+        }
         assert_eq!(
             local.abi, through_registry.abi,
             "{subject}'s ABI is store-independent"
@@ -214,7 +224,14 @@ fn a_registry_routed_range_reaches_the_admission_decision() -> TestResult {
     let workspace = Workspace::resolve(admitted, &admitted_root).map_err(|diagnostics| {
         format!("a release inside the written range admits: {diagnostics:?}")
     })?;
-    assert!(module_of(&workspace, "example/dep").sources().files().len() == 2);
+    assert!(
+        module_of(&workspace, "example/dep")
+            .files()
+            .includes()
+            .files()
+            .len()
+            == 2
+    );
 
     // A release outside the written range is refused at acquisition, by
     // the same admission either source kind passes, naming both sides.
@@ -222,8 +239,8 @@ fn a_registry_routed_range_reaches_the_admission_decision() -> TestResult {
     refused.modules.insert(
         "example/root".into(),
         FixtureModule {
-            manifest: REGISTRY_ROOT.replace(">= 1.2", "< 2").into(),
-            sources: vec![("src/main.pi".into(), ROOT_MAIN.into())],
+            project: REGISTRY_ROOT.replace(">= 1.2", "< 2").into(),
+            includes: Vec::new(),
         },
     );
     let refused_root = refused.root();
@@ -241,7 +258,7 @@ fn a_registry_routed_range_reaches_the_admission_decision() -> TestResult {
 }
 
 #[test]
-fn a_registry_served_manifest_carries_the_stores_diagnostic_identity() -> TestResult {
+fn a_registry_served_project_carries_the_stores_diagnostic_identity() -> TestResult {
     let store = RegistryFixture::with_unparsable_dep();
     let root = store.root();
     let diagnostics = match Workspace::resolve(store, &root) {
@@ -250,7 +267,7 @@ fn a_registry_served_manifest_carries_the_stores_diagnostic_identity() -> TestRe
     };
     let unparsable = diagnostics
         .iter()
-        .find(|diagnostic| diagnostic.code == FrontendCode::DuplicateManifestClause.stable())
+        .find(|diagnostic| diagnostic.code == FrontendCode::DuplicateClause.stable())
         .unwrap_or_else(|| {
             unreachable!("the clause-level parse refusal is reported: {diagnostics:?}")
         });

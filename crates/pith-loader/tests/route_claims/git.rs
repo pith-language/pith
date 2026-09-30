@@ -1,11 +1,12 @@
 use super::fixture::{Read, Request, Scenario};
+use pith_loader::PROJECT_NAME;
 
 #[test]
 fn identical_symbolic_references_to_distinct_repositories_refuse_in_either_order() {
     for (left, right, unread) in [("first", "second", "v2"), ("second", "first", "v1")] {
         let outcome = Scenario::diamond(
-            &format!("from git \"{left}\" revision \"main\""),
-            &format!("from git \"{right}\" revision \"main\""),
+            &format!("git \"{left}\" at \"main\""),
+            &format!("git \"{right}\" at \"main\""),
         )
         .bind(Request::git("first", "main", None), "v1")
         .bind(Request::git("second", "main", None), "v2")
@@ -20,8 +21,8 @@ fn identical_symbolic_references_to_distinct_repositories_refuse_in_either_order
 fn mirrors_and_distinct_reference_spellings_can_resolve_to_one_source() {
     for (left, right) in [("full", "full"), ("abbreviation", "full")] {
         let outcome = Scenario::diamond(
-            &format!("from git \"first\" revision \"{left}\""),
-            &format!("from git \"mirror\" revision \"{right}\""),
+            &format!("git \"first\" at \"{left}\""),
+            &format!("git \"mirror\" at \"{right}\""),
         )
         .bind(Request::git("first", left, None), "v1")
         .bind(Request::git("mirror", right, None), "v1")
@@ -36,8 +37,8 @@ fn mirrors_and_distinct_reference_spellings_can_resolve_to_one_source() {
 fn subpaths_and_revisions_at_one_repository_select_distinct_sources() {
     for (reference, subpath) in [("other", "one"), ("same", "two")] {
         let outcome = Scenario::diamond(
-            "from git \"repo\" revision \"same\" subpath \"one\"",
-            &format!("from git \"repo\" revision \"{reference}\" subpath \"{subpath}\""),
+            "git \"repo\" at \"same\" subpath \"one\"",
+            &format!("git \"repo\" at \"{reference}\" subpath \"{subpath}\""),
         )
         .bind(Request::git("repo", "same", Some("one")), "v1")
         .bind(Request::git("repo", reference, Some(subpath)), "v2")
@@ -51,8 +52,8 @@ fn subpaths_and_revisions_at_one_repository_select_distinct_sources() {
 fn an_unvalidated_reference_reaches_the_adapter_instead_of_becoming_an_identity() {
     for reference in ["", "main", "abc"] {
         let outcome = Scenario::diamond(
-            &format!("from git \"first\" revision \"{reference}\""),
-            &format!("from git \"refused\" revision \"{reference}\""),
+            &format!("git \"first\" at \"{reference}\""),
+            &format!("git \"refused\" at \"{reference}\""),
         )
         .bind(Request::git("first", reference, None), "v1")
         .run();
@@ -64,11 +65,10 @@ fn an_unvalidated_reference_reaches_the_adapter_instead_of_becoming_an_identity(
             .expect("adapter refusal must survive reuse");
         assert!(diagnostics.iter().any(|diag| {
             diag.message.0.contains("adapter refuses")
-                && diag
-                    .source
-                    .as_ref()
-                    .is_some_and(|source| source.label.as_ref() == "right/module.pi")
+                && diag.source.as_ref().is_some_and(|source| {
+                    source.label.as_ref() == format!("right/{PROJECT_NAME}").as_str()
+                })
         }));
-        assert!(!outcome.reads.contains(&Read::Manifest("refused".into())));
+        assert!(!outcome.reads.contains(&Read::Project("refused".into())));
     }
 }

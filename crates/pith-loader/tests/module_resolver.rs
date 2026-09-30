@@ -4,7 +4,7 @@
 //! function of its value inputs alone.
 
 use pith_engine::{Engine, MemoryEngineStateStore};
-use pith_hir::{ManifestVersion, ModuleSubject, VersionBound, VersionRange};
+use pith_hir::{ModuleSubject, ModuleVersion, VersionBound, VersionRange};
 use pith_loader::{
     ModuleCandidate, ModuleConstraint, ModuleRequirement, ModuleResolution, ModuleSelection,
     ModuleUniverse, Preference, RegisterModuleResolver, SolveRequest, resolve_request,
@@ -31,8 +31,8 @@ fn subject(spelling: &str) -> ModuleSubject {
     ModuleSubject::parse(spelling).unwrap_or_else(|error| unreachable!("{error}"))
 }
 
-fn version(spelling: &str) -> ManifestVersion {
-    ManifestVersion::parse(spelling).unwrap_or_else(|error| unreachable!("{error}"))
+fn version(spelling: &str) -> ModuleVersion {
+    ModuleVersion::parse(spelling).unwrap_or_else(|error| unreachable!("{error}"))
 }
 
 fn exactly(spelling: &str) -> VersionRange {

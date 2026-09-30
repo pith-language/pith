@@ -4,7 +4,8 @@ use std::rc::Rc;
 
 use pith_diag::Diag;
 use pith_loader::{
-    AcquireFailure, AcquiredManifest, AcquiredSource, FrontendCode, ModuleStore, Route, Workspace,
+    AcquireFailure, AcquiredProject, AcquiredSource, FrontendCode, PROJECT_NAME, ProjectStore,
+    Route, Workspace,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -40,14 +41,14 @@ impl Request {
 
     fn of(route: &Route<'_>) -> Result<Self, AcquireFailure> {
         Ok(match route {
-            Route::Path { path, .. } => Self::Path((*path).into()),
+            Route::Path { path } => Self::Path((*path).into()),
             Route::Git {
                 url,
                 revision,
                 subpath,
                 ..
             } => Self::git(url, revision, *subpath),
-            Route::Archive { url, digest, .. } => Self::archive(url, digest),
+            Route::Archive { url, digest } => Self::archive(url, digest),
             Route::Registry(registry) => Self::Registry(registry.locator().into()),
             Route::Member { .. } => return Err(AcquireFailure::Unsupported { kind: route.kind() }),
         })
@@ -57,8 +58,8 @@ impl Request {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Read {
     Locate(Request),
-    Manifest(String),
-    Sources(String),
+    Project(String),
+    Include(String),
 }
 
 pub struct Scenario {
@@ -74,20 +75,29 @@ pub struct Outcome {
 
 impl Scenario {
     pub fn diamond(left: &str, right: &str) -> Self {
-        let root = "module example/root 1\nregistry primary = \"registry\" root \"ed25519:A\"\nregistry alias = \"registry\" root \"ed25519:A\"\nregistry rotated = \"registry\" root \"ed25519:B\"\nregistry other = \"other\" root \"ed25519:A\"\ndomain example from primary\nuse left = example/left from path \"left\"\nuse right = example/right from path \"right\"\n";
+        let root = "module example/root 1\n\ninputs {\n  registry primary = \"registry\" root \
+         \"ed25519:A\"\n  registry alias = \"registry\" root \"ed25519:A\"\n  registry rotated = \
+         \"registry\" root \"ed25519:B\"\n  registry other = \"other\" root \"ed25519:A\"\n  domain \
+         example from primary\n  left = path \"left\"\n  right = path \"right\"\n}\n";
         Self {
             modules: BTreeMap::from([
                 ("root".into(), root.into()),
                 (
                     "left".into(),
-                    format!("module example/left 1\nuse dep = example/dep {left}\n"),
+                    format!("module example/left 1\n\ninputs {{\n  dep = {left}\n}}\n"),
                 ),
                 (
                     "right".into(),
-                    format!("module example/right 1\nuse dep = example/dep {right}\n"),
+                    format!("module example/right 1\n\ninputs {{\n  dep = {right}\n}}\n"),
                 ),
-                ("v1".into(), "module example/dep 1\n".into()),
-                ("v2".into(), "module example/dep 2\n".into()),
+                (
+                    "v1".into(),
+                    "module example/dep 1\n\ninputs {\n}\n\nnominal Name = Bool\n".into(),
+                ),
+                (
+                    "v2".into(),
+                    "module example/dep 2\n\ninputs {\n}\n\nnominal Name = Text\n".into(),
+                ),
             ]),
             locations: BTreeMap::from([
                 (Request::Path("left".into()), "left".into()),
@@ -112,7 +122,7 @@ impl Scenario {
     }
 }
 
-impl ModuleStore for Scenario {
+impl ProjectStore for Scenario {
     type Location = String;
 
     fn locate(&self, _: &String, route: &Route<'_>) -> Result<String, AcquireFailure> {
@@ -126,30 +136,29 @@ impl ModuleStore for Scenario {
             })
     }
 
-    fn manifest(&mut self, location: &String) -> Result<AcquiredManifest, AcquireFailure> {
+    fn project(&mut self, location: &String) -> Result<AcquiredProject, AcquireFailure> {
         self.reads
             .borrow_mut()
-            .push(Read::Manifest(location.clone()));
+            .push(Read::Project(location.clone()));
         self.modules
             .get(location)
-            .map(|text| AcquiredManifest {
-                label: format!("{location}/module.pi").into(),
+            .map(|text| AcquiredProject {
+                label: format!("{location}/{PROJECT_NAME}").into(),
                 text: text.clone().into(),
             })
             .ok_or_else(|| AcquireFailure::Unreadable {
-                message: format!("no manifest at {location}").into(),
+                message: format!("no project at {location}").into(),
             })
     }
 
-    fn sources(&mut self, location: &String) -> Result<Vec<AcquiredSource>, AcquireFailure> {
+    fn include(&mut self, location: &String, path: &str) -> Result<AcquiredSource, AcquireFailure> {
         self.reads
             .borrow_mut()
-            .push(Read::Sources(location.clone()));
-        let body = if location == "v2" { "Text" } else { "Bool" };
-        Ok(vec![AcquiredSource {
-            path: "src/main.pi".into(),
-            text: format!("nominal Name = {body}\n").into(),
-        }])
+            .push(Read::Include(location.clone()));
+        Ok(AcquiredSource {
+            path: path.into(),
+            text: "nominal Name = Bool\n".into(),
+        })
     }
 }
 
@@ -165,27 +174,32 @@ impl Outcome {
             .filter(|diag| diag.code == FrontendCode::ConflictingRoutes.stable())
             .filter_map(|diag| diag.source.as_ref().map(|source| source.label.as_ref()))
             .collect();
-        assert_eq!(labels, ["right/module.pi", "left/module.pi"]);
+        assert_eq!(
+            labels,
+            [
+                format!("right/{PROJECT_NAME}").as_str(),
+                format!("left/{PROJECT_NAME}").as_str()
+            ]
+        );
     }
 
     pub fn assert_read_once(&self, location: &str) {
-        for read in [
-            Read::Manifest(location.into()),
-            Read::Sources(location.into()),
-        ] {
-            assert_eq!(
-                self.reads
-                    .iter()
-                    .filter(|observed| *observed == &read)
-                    .count(),
-                1,
-                "{read:?}"
-            );
-        }
+        assert_eq!(
+            self.reads
+                .iter()
+                .filter(|observed| **observed == Read::Project(location.into()))
+                .count(),
+            1,
+            "the location's project file is read once"
+        );
     }
 
+    /// A route that conflicts still reads its target: a locator names
+    /// content, so the subject it claims is declared by the project the
+    /// route reaches, and reading it is how the conflict is found. What a
+    /// conflict must never do is *acquire* the target's includes.
     pub fn assert_not_read(&self, location: &str) {
-        assert!(!self.reads.contains(&Read::Manifest(location.into())));
+        assert!(!self.reads.contains(&Read::Include(location.into())));
     }
 
     pub fn assert_located(&self, request: Request) {

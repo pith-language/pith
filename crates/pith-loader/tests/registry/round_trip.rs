@@ -3,10 +3,10 @@
 //! origin moving.
 
 use crate::fixture::{
-    DEP_MANIFEST, TestResult, module_of, resolved_through, semantics, serving_registry,
+    DEP_PROJECT, ROOT_MAIN, TestResult, module_of, resolved_through, semantics, serving_registry,
     staged_project,
 };
-use pith_loader::Workspace;
+use pith_loader::{PROJECT_NAME, Workspace};
 
 #[test]
 fn the_same_module_bytes_locally_and_through_the_signed_index_elaborate_identically() -> TestResult
@@ -14,10 +14,10 @@ fn the_same_module_bytes_locally_and_through_the_signed_index_elaborate_identica
     let local = tempfile::tempdir()?;
     staged_project(
         local.path(),
-        DEP_MANIFEST,
-        "module example/root 0.1.0\n\nuse dep = example/dep from path \"dep\"\n",
+        DEP_PROJECT,
+        &format!("module example/root 0.1.0\n\ninputs {{\n  dep = path \"dep\"\n}}\n\n{ROOT_MAIN}"),
     )?;
-    let local_workspace = Workspace::load(&local.path().join("module.pi"))
+    let local_workspace = Workspace::load(&local.path().join(PROJECT_NAME))
         .map_err(|diagnostics| format!("the local project resolves: {diagnostics:?}"))?;
 
     let registry = serving_registry()?;
@@ -30,10 +30,15 @@ fn the_same_module_bytes_locally_and_through_the_signed_index_elaborate_identica
         let through_registry = acquired_semantics
             .get(subject)
             .unwrap_or_else(|| unreachable!("{subject} resolved through the registry too"));
-        assert_eq!(
-            local.source_ids, through_registry.source_ids,
-            "{subject}'s source identities are store-independent"
-        );
+        // The two roots spell their locators differently, so their project
+        // files differ as content; the dependency's bytes are the same
+        // through both stores.
+        if subject.as_ref() == "example/dep" {
+            assert_eq!(
+                local.source_ids, through_registry.source_ids,
+                "{subject}'s file identities are store-independent"
+            );
+        }
         assert_eq!(
             local.abi, through_registry.abi,
             "{subject}'s ABI is store-independent"

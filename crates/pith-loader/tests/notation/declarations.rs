@@ -95,7 +95,12 @@ fn run_error_mentions_the_effect(diagnostics: &[pith_diag::Diag]) -> bool {
 
 #[test]
 fn builtins_cannot_be_shadowed() {
-    let binder = load_err("pure rule f(module: Int) -> Int = { module }\n");
+    // `module` opens a header clause and cannot be spelled as a binder at
+    // all; the other builtin names parse and are refused at elaboration.
+    let keyword = load_err("pure rule f(module: Int) -> Int = { 0 }\n");
+    assert!(!keyword.is_empty(), "`module` is a reserved word");
+
+    let binder = load_err("pure rule f(describe: Int) -> Int = { describe }\n");
     assert!(has_code(&binder, FrontendCode::BuiltinShadowed));
 
     let local = load_err("let describe : Int = 1\n");

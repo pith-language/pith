@@ -1,4 +1,4 @@
-//! Alias environments are module-local: an alias scopes inside one module,
+//! Input environments are module-local: an input name scopes inside one module,
 //! a subject is what crosses a boundary. One alias may mean different
 //! subjects in different modules, and a module may not name a subject its
 //! own manifest did not bind, however its dependencies reached it.
@@ -18,43 +18,26 @@ fn file(path: &Path, text: &str) -> TestResult {
     Ok(())
 }
 
-fn module(directory: &Path, manifest: &str, sources: &[(&str, &str)]) -> TestResult {
-    file(&directory.join("module.pi"), manifest)?;
-    for (path, text) in sources {
-        file(&directory.join("src").join(path), text)?;
-    }
-    Ok(())
-}
-
 /// Root and its dependency both bind `helper`, to different subjects; each
 /// names a declaration only its own binding provides.
 fn shadowed_alias(directory: &Path) -> TestResult {
-    module(
-        directory,
-        "module example/root 0.1.0\n\nuse helper = example/alpha from path \"alpha\"\n",
-        &[(
-            "main.pi",
-            "import helper\n\npure rule top(helper.Alpha) -> Text = host\n",
-        )],
+    file(
+        &directory.join("pith.pi"),
+        "module example/root 0.1.0\n\ninputs {\n  helper = path \"alpha\"\n}\n\nimport          helper\n\npure rule top(helper.Alpha) -> Text = host\n",
     )?;
-    module(
-        &directory.join("alpha"),
-        "module example/alpha 0.1.0\n\nuse helper = example/beta from path \"../beta\"\n",
-        &[(
-            "alpha.pi",
-            "import helper\n\nnominal Alpha = Text\n\npure rule wrap(helper.Beta) -> Alpha = host\n",
-        )],
+    file(
+        &directory.join("alpha").join("pith.pi"),
+        "module example/alpha 0.1.0\n\ninputs {\n  helper = path \"../beta\"\n}\n\nimport          helper\n\nnominal Alpha = Text\n\npure rule wrap(helper.Beta) -> Alpha = host\n",
     )?;
-    module(
-        &directory.join("beta"),
-        "module example/beta 0.1.0\n",
-        &[("beta.pi", "nominal Beta = Text\n")],
+    file(
+        &directory.join("beta").join("pith.pi"),
+        "module example/beta 0.1.0\n\ninputs {\n}\n\nnominal Beta = Text\n",
     )?;
     Ok(())
 }
 
 fn load(directory: &Path) -> TestResult<Workspace> {
-    Workspace::load(&directory.join("module.pi")).map_err(
+    Workspace::load(&directory.join("pith.pi")).map_err(
         |diagnostics| -> Box<dyn std::error::Error> {
             format!("the fixture resolves: {diagnostics:?}").into()
         },
@@ -105,8 +88,8 @@ fn an_undeclared_transitive_import_is_refused() -> TestResult {
     let directory = tempfile::tempdir()?;
     shadowed_alias(directory.path())?;
     file(
-        &directory.path().join("src/main.pi"),
-        "import helper\nimport beta\n\npure rule top(helper.Alpha) -> Text = host\n",
+        &directory.path().join("pith.pi"),
+        "module example/root 0.1.0\n\ninputs {\n  helper = path \"alpha\"\n}\n\nimport          helper\nimport beta\n\npure rule top(helper.Alpha) -> Text = host\n",
     )?;
 
     let workspace = load(directory.path())?;

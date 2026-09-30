@@ -12,7 +12,7 @@ use pith_engine::ExecutionPlatform;
 use pith_hir::{ModuleSubject, VersionRange};
 use pith_ids::ContentId;
 use pith_loader::{
-    AdmissionClause, AdmissionRequest, ManifestSource, admit_source, parse_manifest,
+    AdmissionClause, AdmissionRequest, ProjectSource, admit_source, parse_project_file,
 };
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
@@ -24,14 +24,14 @@ fn renders<C: std::fmt::Display>(refusal: &Refusal<C>) -> String {
 
 /// A module source declaring a subject other than the route names.
 fn refused_source() -> Refusal<AdmissionClause> {
-    let parsed = parse_manifest(&ManifestSource::new(
+    let parsed = parse_project_file(&ProjectSource::new(
         pith_diag::SourceId::from_raw(0),
-        "module.pi",
-        "module example/other 1.2\n",
+        "pith.pi",
+        "module example/other 1.2\n\ninputs {\n}\n",
     ));
     let manifest = parsed
         .validated()
-        .unwrap_or_else(|error| unreachable!("the fixture manifest parses: {error:?}"));
+        .unwrap_or_else(|error| unreachable!("the fixture project parses: {error:?}"));
     let request = AdmissionRequest::new(
         ModuleSubject::parse("example/greeter")
             .unwrap_or_else(|error| unreachable!("a fixed subject spelling parses: {error}")),
