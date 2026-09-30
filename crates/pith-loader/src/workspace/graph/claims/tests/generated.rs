@@ -17,9 +17,9 @@ proptest! {
             store.location.set(*attempt);
             let result = request.locate(&mut claims, &store, archive);
             match attempt {
-                None => prop_assert!(matches!(result, Err(Failure::Acquire(_)))),
+                None => prop_assert!(matches!(result, Err(failure::TestFailure::Acquire))),
                 Some(location) if *location == original => prop_assert!(matches!(result, Ok(location) if location == original)),
-                Some(_) => prop_assert!(matches!(result, Err(Failure::Conflict(_)))),
+                Some(_) => prop_assert!(matches!(result, Err(failure::TestFailure::Conflict))),
             }
         }
         store.location.set(Some(original));

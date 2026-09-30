@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use pith_diag::{Diag, SourceFile};
 use pith_hir::{
-    DependencySource, FrontendCode, Manifest, ManifestUse, ModuleSubject, RootKey, SubjectSegment,
+    FrontendCode, InputLocator, ModuleSubject, Project, ProjectInput, RootKey, SubjectSegment,
 };
 
 use super::acquire::Route;
@@ -67,7 +67,7 @@ pub(super) struct Routing {
 
 impl Routing {
     pub(super) fn from_root(
-        root: &Manifest,
+        root: &Project,
         source: &Arc<SourceFile>,
         user: Option<UserBindings>,
         policy: BindingPolicy,
@@ -81,38 +81,33 @@ impl Routing {
 
     pub(super) fn route<'a>(
         &'a self,
-        use_: &'a ManifestUse,
+        input: &'a ProjectInput,
         source: &Arc<SourceFile>,
     ) -> Result<Route<'a>, Diag> {
-        let subject = &use_.subject;
-        Ok(match &use_.source {
-            DependencySource::Registry { registry, .. } => {
-                Route::Registry(self.registry(use_, registry.as_deref(), source)?)
-            }
-            DependencySource::Path { path, .. } => Route::Path { subject, path },
-            DependencySource::Git {
+        Ok(match &input.locator {
+            InputLocator::Registry {
+                subject, registry, ..
+            } => Route::Registry(self.registry(subject, registry.as_deref(), input, source)?),
+            InputLocator::Path { path, .. } => Route::Path { path },
+            InputLocator::Git {
                 url,
                 revision,
                 subpath,
                 ..
             } => Route::Git {
-                subject,
                 url,
                 revision,
                 subpath: subpath.as_deref(),
             },
-            DependencySource::Archive { url, digest, .. } => Route::Archive {
-                subject,
-                url,
-                digest,
-            },
+            InputLocator::Archive { url, digest, .. } => Route::Archive { url, digest },
         })
     }
 
     fn registry<'a>(
         &'a self,
-        use_: &'a ManifestUse,
+        subject: &'a ModuleSubject,
         name: Option<&str>,
+        input: &ProjectInput,
         source: &Arc<SourceFile>,
     ) -> Result<RegistryRoute<'a>, Diag> {
         let selected = match name {
@@ -122,10 +117,11 @@ impl Routing {
                 .map(|registry| (registry.as_ref(), None)),
             None => self
                 .domains
-                .get(use_.subject.domain())
+                .get(subject.domain())
                 .map(|domain| (domain.registry.as_ref(), Some(&domain.site))),
         };
-        let (binding, domain) = selected.ok_or_else(|| self.unrouted(use_, name, source))?;
+        let (binding, domain) =
+            selected.ok_or_else(|| self.unrouted(subject, name, input, source))?;
         if matches!(self.policy, BindingPolicy::ProjectOnly)
             && std::iter::once(&binding.site)
                 .chain(domain)
@@ -133,23 +129,28 @@ impl Routing {
         {
             return Err(at(
                 FrontendCode::ModeExceeded,
-                use_.source_span(),
+                input.locator.span(),
                 source,
                 format!(
-                    "project-only authority refuses user-owned binding for `{}` from `{}`",
-                    use_.subject,
+                    "project-only authority refuses user-owned binding for `{subject}` from `{}`",
                     binding.site.source().label
                 ),
             ));
         }
         Ok(RegistryRoute {
-            subject: &use_.subject,
+            subject,
             binding,
             domain,
         })
     }
 
-    fn unrouted(&self, use_: &ManifestUse, name: Option<&str>, source: &Arc<SourceFile>) -> Diag {
+    fn unrouted(
+        &self,
+        subject: &ModuleSubject,
+        name: Option<&str>,
+        input: &ProjectInput,
+        source: &Arc<SourceFile>,
+    ) -> Diag {
         let configured = self
             .domains
             .iter()
@@ -163,12 +164,12 @@ impl Routing {
             .collect::<Vec<_>>()
             .join(", ");
         let requested = name.map_or_else(
-            || format!("domain `{}`", use_.subject.domain().as_str()),
+            || format!("domain `{}`", subject.domain().as_str()),
             |name| format!("registry `{name}`"),
         );
         at(
             FrontendCode::UnroutedDomain,
-            use_.source_span(),
+            input.locator.span(),
             source,
             format!(
                 "no registry configured for {requested}; configured domain bindings: [{configured}]"

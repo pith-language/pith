@@ -1,32 +1,33 @@
-//! Publication: derive an entry from the module it releases.
+//! Publication: derive an entry from the project it releases.
 //!
-//! Every cached field is read from the module's manifest, never authored.
-//! A module holding a path dependency is refused: a path makes no
-//! witnessed-content claim to publish.
+//! Every cached field is read from the project's header, never authored.
+//! A project holding an input this registry cannot serve is refused: a
+//! path makes no witnessed-content claim to publish, and a git or archive
+//! route names content the index does not carry.
 
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use pith_diag::{Diag, Severity, SourceFile, SourceId};
-use pith_hir::{FrontendCode, Manifest, ManifestVersion, ModuleSubject};
+use pith_diag::{Diag, Severity, SourceFile};
+use pith_hir::{FrontendCode, InputLocator, ModuleSubject, ModuleVersion};
 
 use super::keys::Signing;
 use super::line::{Pin, Release};
-use super::tree::{Measured, measure};
+use super::{Measured, measure};
 use crate::workspace::graph::sourceless;
-use crate::{AcquiredSource, LocalDirectory, LocalFiles, ModuleRequirement, ModuleStore};
+use crate::{AcquiredProject, LocalDirectory, LocalFiles, ModuleRequirement, ProjectStore};
 
 /// A release waiting on a signature: everything an entry caches, derived
-/// from one module directory, with the measured tree that names the
+/// from one project directory, with the measured tree that names the
 /// revision.
 pub struct Draft {
     subject: ModuleSubject,
-    version: ManifestVersion,
+    version: ModuleVersion,
     requires: Box<[ModuleRequirement]>,
     measured: Measured,
-    manifest: Box<str>,
-    sources: BTreeMap<Box<str>, Box<str>>,
+    project: Box<str>,
+    includes: BTreeMap<Box<str>, Box<str>>,
 }
 
 impl Draft {
@@ -36,7 +37,7 @@ impl Draft {
     }
 
     #[must_use]
-    pub const fn version(&self) -> &ManifestVersion {
+    pub const fn version(&self) -> &ModuleVersion {
         &self.version
     }
 
@@ -50,16 +51,16 @@ impl Draft {
         self.measured
     }
 
-    /// The module's manifest text, as acquired.
+    /// The project file's text, as acquired.
     #[must_use]
-    pub fn manifest(&self) -> &str {
-        &self.manifest
+    pub fn project(&self) -> &str {
+        &self.project
     }
 
-    /// The module's source files in canonical module-relative order.
+    /// The project's includes in canonical order.
     #[must_use]
-    pub fn sources(&self) -> &BTreeMap<Box<str>, Box<str>> {
-        &self.sources
+    pub fn includes(&self) -> &BTreeMap<Box<str>, Box<str>> {
+        &self.includes
     }
 
     /// The release this draft becomes, signed by `publisher`, admitted at
@@ -77,104 +78,104 @@ impl Draft {
     }
 }
 
-/// Derives a release draft from the module rooted at `directory`.
+/// Derives a release draft from the project rooted at `directory`.
 ///
 /// # Errors
-/// Returns why the directory is not a publishable module: it cannot be
-/// read, its manifest does not parse, or it holds a path dependency.
+/// Returns why the directory is not a publishable project: it cannot be
+/// read, its project file does not parse, or it holds an input this
+/// registry cannot serve.
 pub fn derive(directory: &Path) -> Result<Draft, Box<[Diag]>> {
     let canonical = std::fs::canonicalize(directory).map_err(|error| {
         Box::from([sourceless(
             FrontendCode::UnreadableSource,
             format!(
-                "cannot resolve the module directory `{}`: {error}",
+                "cannot resolve the project directory `{}`: {error}",
                 directory.display()
             ),
         )])
     })?;
     let location = LocalDirectory::new(canonical);
     let mut store = LocalFiles;
-    let acquired = store.manifest(&location).map_err(|failure| {
+    let acquired = store.project(&location).map_err(|failure| {
         Box::from([sourceless(
             FrontendCode::UnreadableSource,
             failure.describe(),
         )])
     })?;
-    let sources = store.sources(&location).map_err(|failure| {
-        Box::from([sourceless(
-            FrontendCode::UnreadableSource,
-            failure.describe(),
-        )])
-    })?;
-    let (manifest, source) = parse_manifest(&acquired.label, &acquired.text)?;
-    let refusals = path_dependencies(&manifest, &source);
+    let (project, source) = parse_project(&acquired)?;
+    let refusals = unservable_inputs(&project, &source);
     if !refusals.is_empty() {
         return Err(refusals.into());
     }
-    let sources = source_map(&sources);
+    let mut includes = BTreeMap::new();
+    for include in project.includes() {
+        let acquired = store.include(&location, &include.path).map_err(|failure| {
+            Box::from([sourceless(
+                FrontendCode::UnreadableSource,
+                failure.describe(),
+            )])
+        })?;
+        includes.insert(acquired.path, acquired.text);
+    }
     Ok(Draft {
-        subject: manifest.subject().clone(),
-        version: manifest.version().clone(),
-        requires: manifest
-            .uses()
+        subject: project.subject().clone(),
+        version: project.version().clone(),
+        requires: project
+            .inputs()
             .iter()
-            .map(|use_| ModuleRequirement {
-                subject: use_.subject.clone(),
-                range: use_.range.clone(),
+            .filter_map(|input| match &input.locator {
+                InputLocator::Registry { subject, range, .. } => Some(ModuleRequirement {
+                    subject: subject.clone(),
+                    range: range.clone(),
+                }),
+                _ => None,
             })
             .collect(),
-        measured: measure(&acquired.text, &sources),
-        manifest: acquired.text,
-        sources,
+        measured: measure(&acquired.text, &includes),
+        project: acquired.text,
+        includes,
     })
 }
 
-/// The manifest of a module about to be published, with the source its
+/// The project of a module about to be published, with the source its
 /// refusals attach to.
 ///
 /// # Errors
 /// Returns the parse's diagnostics.
-fn parse_manifest(label: &str, text: &str) -> Result<(Manifest, Arc<SourceFile>), Box<[Diag]>> {
-    let source = Arc::new(SourceFile::new(
-        SourceId::from_raw(0),
-        label.to_string(),
-        text.to_string(),
-    ));
-    let parsed = crate::source::parse_manifest(&crate::source::ManifestSource::new(
-        SourceId::from_raw(0),
-        label.to_string(),
-        text.to_string(),
+fn parse_project(
+    acquired: &AcquiredProject,
+) -> Result<(pith_hir::Project, Arc<SourceFile>), Box<[Diag]>> {
+    let parsed = crate::source::parse_project_file(&crate::source::ProjectSource::new(
+        pith_diag::SourceId::from_raw(0),
+        acquired.label.as_ref(),
+        acquired.text.as_ref(),
     ));
     match parsed.validated() {
-        Ok(manifest) => Ok((manifest, source)),
+        Ok(project) => Ok((project, Arc::clone(parsed.source()))),
         Err(_) => Err(parsed.diagnostics().to_vec().into()),
     }
 }
 
-fn path_dependencies(manifest: &Manifest, source: &Arc<SourceFile>) -> Vec<Diag> {
-    manifest
-        .uses()
+fn unservable_inputs(project: &pith_hir::Project, source: &Arc<SourceFile>) -> Vec<Diag> {
+    project
+        .inputs()
         .iter()
-        .filter(|use_| use_.path().is_some())
-        .map(|use_| {
+        .filter(|input| !input.locator.resolves_versions())
+        .map(|input| {
             Diag::new(
                 Severity::Error,
                 FrontendCode::UnpublishablePath.stable(),
-                use_.source_span(),
+                input.locator.span(),
                 format!(
-                    "the dependency `{}` comes from a path, and a release cannot carry one: a \
-                     path is a live local input, not witnessed content",
-                    use_.alias
+                    "the input `{}` comes from a {} route, and a release resolves its inputs \
+                     through the registry: a {} route is a live or unwitnessed reference, not \
+                     witnessed content",
+                    input.name,
+                    input.locator.kind(),
+                    input.locator.kind()
                 ),
             )
             .with_source(Arc::clone(source))
         })
-        .collect()
-}
-
-fn source_map(sources: &[AcquiredSource]) -> BTreeMap<Box<str>, Box<str>> {
-    sources
-        .iter()
-        .map(|source| (source.path.clone(), source.text.clone()))
         .collect()
 }

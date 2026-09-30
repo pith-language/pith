@@ -1,13 +1,13 @@
 //! A withdrawal line: one version marked unfit, with a reason.
 
-use pith_hir::ManifestVersion;
+use pith_hir::ModuleVersion;
 
 use super::super::keys::{Detached, Public, Signing};
 use super::{BY, REASON, SIG, WITHDRAW};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Withdrawal {
-    pub(super) version: ManifestVersion,
+    pub(super) version: ModuleVersion,
     pub(super) reason: Box<str>,
     pub(super) signer: Public,
     pub(super) signature: Detached,
@@ -15,7 +15,7 @@ pub struct Withdrawal {
 
 impl Withdrawal {
     #[must_use]
-    pub fn version(&self) -> &ManifestVersion {
+    pub fn version(&self) -> &ModuleVersion {
         &self.version
     }
 
@@ -51,7 +51,7 @@ impl Withdrawal {
 
     #[must_use]
     pub fn from_claims(
-        version: ManifestVersion,
+        version: ModuleVersion,
         reason: Box<str>,
         signer: Public,
         signature: Detached,
@@ -66,7 +66,7 @@ impl Withdrawal {
 
     /// The withdrawal those claims describe, signed by `issuer`.
     #[must_use]
-    pub fn signed(version: ManifestVersion, reason: Box<str>, issuer: &Signing) -> Self {
+    pub fn signed(version: ModuleVersion, reason: Box<str>, issuer: &Signing) -> Self {
         let unsigned = unsigned(&version, &reason, &issuer.public());
         Self::from_claims(
             version,
@@ -77,7 +77,7 @@ impl Withdrawal {
     }
 }
 
-fn unsigned(version: &ManifestVersion, reason: &str, signer: &Public) -> String {
+fn unsigned(version: &ModuleVersion, reason: &str, signer: &Public) -> String {
     format!(
         "{WITHDRAW} {} {REASON} {} {BY} {}",
         version.canonical_spelling(),

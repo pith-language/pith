@@ -7,7 +7,7 @@
 use std::collections::BTreeSet;
 
 use pith_diag::{ByteOffset, Span};
-use pith_hir::{ManifestVersion, ModuleSubject};
+use pith_hir::{ModuleSubject, ModuleVersion};
 use pith_ids::ContentDigest;
 
 use super::keys::{Detached, Public};
@@ -259,9 +259,9 @@ fn public(token: Option<&Token>) -> Result<Public, Malformed> {
     })
 }
 
-fn version(token: Option<&Token>, line: &str) -> Result<ManifestVersion, Malformed> {
+fn version(token: Option<&Token>, line: &str) -> Result<ModuleVersion, Malformed> {
     let spelling = field(token, line)?;
-    ManifestVersion::parse(spelling).map_err(|_| Malformed {
+    ModuleVersion::parse(spelling).map_err(|_| Malformed {
         message: format!("the {line} version `{spelling}` is dotted numeric segments"),
         span: token.map_or_else(Span::none, |token| token.span),
     })

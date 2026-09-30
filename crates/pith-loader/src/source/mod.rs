@@ -1,17 +1,17 @@
 //! A module's text, its parse, and the canonical spelling `pith fmt`
-//! writes, for one file or a whole source set; the manifest document's
-//! parse and spelling live beside them. Positions are collected here: the
-//! sidecar is a property of the parse, not of elaboration.
+//! writes, for one file, a whole source set, or a project file with its
+//! includes. Positions are collected here: the sidecar is a property of
+//! the parse, not of elaboration.
 
-mod manifest;
 mod module;
 mod multi;
+mod project;
 
-pub use manifest::{
-    InvalidManifest, ManifestSource, ParsedManifestFile, format_manifest, parse_manifest,
-};
 pub use module::{ModuleSource, ParsedModule, format_module, parse_module};
-pub use multi::parse_module_sources;
+pub use multi::{parse_module_sources, parse_project_files};
+pub use project::{
+    InvalidProject, ParsedProjectFile, ProjectSource, format_project_file, parse_project_file,
+};
 
 use pith_core::Coordinate;
 use pith_diag::Span;

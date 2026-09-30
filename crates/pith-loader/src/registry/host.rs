@@ -7,13 +7,13 @@ use std::collections::BTreeSet;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use pith_hir::{ManifestVersion, ModuleSubject};
+use pith_hir::{ModuleSubject, ModuleVersion};
 
 use super::keys::{Public, Signing};
 use super::line::{KeySet, Withdrawal};
 use super::publish::Draft;
 use super::{DOMAINS_DIRECTORY, INDEX_DIRECTORY, ROOT_FILE, SOURCES_DIRECTORY};
-use crate::{MANIFEST_NAME, SOURCE_DIRECTORY};
+use crate::PROJECT_NAME;
 
 /// A registry hosted by one directory.
 #[derive(Debug)]
@@ -90,7 +90,7 @@ impl Host {
     pub fn withdraw(
         &self,
         subject: &ModuleSubject,
-        version: ManifestVersion,
+        version: ModuleVersion,
         reason: &str,
         issuer: &Signing,
     ) -> io::Result<()> {
@@ -106,9 +106,9 @@ impl Host {
         if revision.exists() {
             return Ok(());
         }
-        std::fs::create_dir_all(revision.join(SOURCE_DIRECTORY))?;
-        std::fs::write(revision.join(MANIFEST_NAME), draft.manifest().as_bytes())?;
-        for (path, text) in draft.sources() {
+        std::fs::create_dir_all(&revision)?;
+        std::fs::write(revision.join(PROJECT_NAME), draft.project().as_bytes())?;
+        for (path, text) in draft.includes() {
             std::fs::create_dir_all(revision.join(parent_of(path)))?;
             std::fs::write(revision.join(path.as_ref()), text.as_bytes())?;
         }

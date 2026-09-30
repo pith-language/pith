@@ -1,21 +1,21 @@
-//! The acquisition path that formats a manifest: the root manifest and its
-//! own source files, and nothing else.
+//! The acquisition path that formats a project: the root project file and
+//! the includes it names, and nothing else.
 
 use std::path::{Path, PathBuf};
 
 use pith_diag::{Diag, Severity, Span};
 use pith_hir::{FrontendCode, ModuleSubject};
 
-use super::acquire::{AcquireFailure, LocalDirectory, LocalFiles, ModuleStore};
-use super::module::{ModuleFile, SourceSet};
+use super::acquire::{AcquireFailure, LocalDirectory, LocalFiles, ProjectStore};
+use super::module::{ModuleFile, ProjectFiles};
 
-/// The files `fmt` writes: the root manifest and the root module's own
-/// source set. Nothing else is read, since their canonical spelling is a
+/// The files `fmt` writes: the root project file and the files it
+/// includes. Nothing else is read, since their canonical spelling is a
 /// function of these files alone.
 pub struct RootFiles {
     directory: PathBuf,
     subject: ModuleSubject,
-    sources: SourceSet,
+    files: ProjectFiles,
 }
 
 impl RootFiles {
@@ -24,64 +24,86 @@ impl RootFiles {
         &self.subject
     }
 
-    /// The canonical directory the manifest was read from; each source
-    /// file's write path is this directory joined with its module-relative
-    /// path.
+    /// The canonical directory the project file was read from; each
+    /// include's write path is this directory joined with its path.
     #[must_use]
     pub fn directory(&self) -> &Path {
         &self.directory
     }
 
     #[must_use]
-    pub fn sources(&self) -> &SourceSet {
-        &self.sources
+    pub fn files(&self) -> &ProjectFiles {
+        &self.files
     }
 
-    /// Acquire the root manifest and its own source files.
+    /// Acquire the root project file and the includes it names.
     ///
     /// # Errors
-    /// The manifest's parse diagnostics, and acquisition refusals for its
-    /// source tree (symlinked, irregular, or unreadable files), each
-    /// attached to the manifest that owns the tree.
-    pub fn acquire(root_manifest: &Path) -> Result<Self, Box<[Diag]>> {
-        let directory = root_directory(root_manifest)?;
+    /// The project file's parse diagnostics, and acquisition refusals for
+    /// its includes (symlinked, irregular, or unreadable files), each
+    /// attached to the clause that named the file.
+    pub fn acquire(root_project: &Path) -> Result<Self, Box<[Diag]>> {
+        let directory = root_directory(root_project)?;
         let location = LocalDirectory::new(directory.clone());
         let mut store = LocalFiles;
         let mut diagnostics = Vec::new();
-        let manifest = store
-            .manifest(&location)
-            .map_err(|failure| root_manifest_refused(root_manifest, &failure))?;
-        let parsed = crate::source::parse_manifest(&crate::source::ManifestSource::new(
+        let project = store
+            .project(&location)
+            .map_err(|failure| root_project_refused(root_project, &failure))?;
+        let parsed = crate::source::parse_project_file(&crate::source::ProjectSource::new(
             pith_diag::SourceId::from_raw(0),
-            manifest.label,
-            manifest.text,
+            project.label,
+            project.text.clone(),
         ));
         diagnostics.extend(parsed.diagnostics().iter().cloned());
         let Some(view) = parsed.validated().ok() else {
+            if parsed.diagnostics().is_empty() {
+                diagnostics.push(Diag::new(
+                    Severity::Error,
+                    FrontendCode::MissingSubject.stable(),
+                    Span::point(pith_diag::ByteOffset(
+                        u32::try_from(parsed.source().source_text().len()).unwrap_or(0),
+                    )),
+                    "the root project declares no `module` clause, and a loaded project names \
+                     its subject",
+                ));
+            }
             return Err(diagnostics.into());
         };
-        let span = view.span();
         let source = parsed.source().clone();
-        let files = match store.sources(&location) {
-            Ok(files) => files,
-            Err(failure) => {
-                diagnostics.push(source_tree_refused(span, &source, &failure));
-                return Err(diagnostics.into());
+        let mut includes = Vec::new();
+        for include in view.includes() {
+            match store.include(&location, &include.path) {
+                Ok(acquired) => includes.push(ModuleFile::new(acquired.path, acquired.text)),
+                Err(failure) => {
+                    let code = failure
+                        .diagnostic_code()
+                        .unwrap_or(FrontendCode::UnreadableSource);
+                    diagnostics.push(
+                        Diag::new(
+                            Severity::Error,
+                            code.stable(),
+                            include.span,
+                            format!(
+                                "cannot read the include `{}`, which the project names: {}",
+                                include.path,
+                                failure.describe()
+                            ),
+                        )
+                        .with_source(source.clone()),
+                    );
+                }
             }
-        };
-        let sources = SourceSet::new(
-            files
-                .into_iter()
-                .map(|file| ModuleFile::new(file.path, file.text)),
-        );
-        let sources = match sources {
-            Ok(sources) => sources,
+        }
+        let files = ProjectFiles::new(project.text, includes);
+        let files = match files {
+            Ok(files) => files,
             Err(error) => {
                 diagnostics.push(Diag::new(
                     Severity::Error,
                     FrontendCode::UnreadableSource.stable(),
-                    span,
-                    format!("the source set is not canonical: {error}"),
+                    view.span(),
+                    format!("the file set is not canonical: {error}"),
                 ));
                 return Err(diagnostics.into());
             }
@@ -92,51 +114,30 @@ impl RootFiles {
         Ok(Self {
             directory,
             subject: view.subject().clone(),
-            sources,
+            files,
         })
     }
 }
 
-/// Why the root manifest could not be read, as the one diagnostic that
+/// Why the root project file could not be read, as the one diagnostic that
 /// names the path a person typed.
-fn root_manifest_refused(root_manifest: &Path, failure: &AcquireFailure) -> Box<[Diag]> {
+fn root_project_refused(root_project: &Path, failure: &AcquireFailure) -> Box<[Diag]> {
     Box::from([Diag::new(
         Severity::Error,
-        FrontendCode::MissingManifest.stable(),
+        FrontendCode::MissingProject.stable(),
         Span::none(),
         format!(
-            "cannot read the root manifest `{}`: {}",
-            root_manifest.display(),
+            "cannot read the root project `{}`: {}",
+            root_project.display(),
             failure.describe()
         ),
     )])
 }
 
-/// A source-tree refusal, attached to the manifest that owns the tree.
-fn source_tree_refused(
-    span: Span,
-    source: &std::sync::Arc<pith_diag::SourceFile>,
-    failure: &AcquireFailure,
-) -> Diag {
-    let code = failure
-        .diagnostic_code()
-        .unwrap_or(FrontendCode::UnreadableSource);
-    Diag::new(
-        Severity::Error,
-        code.stable(),
-        span,
-        format!(
-            "cannot acquire the source tree of the root manifest: {}",
-            failure.describe()
-        ),
-    )
-    .with_source(source.clone())
-}
-
-/// The canonical directory the root manifest's parent names. Loading begins
-/// here; nothing searches upward from it.
-pub(super) fn root_directory(root_manifest: &Path) -> Result<PathBuf, Box<[Diag]>> {
-    let declared = root_manifest
+/// The canonical directory the root project file's parent names. Loading
+/// begins here; nothing searches upward from it.
+pub(super) fn root_directory(root_project: &Path) -> Result<PathBuf, Box<[Diag]>> {
+    let declared = root_project
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
@@ -144,6 +145,6 @@ pub(super) fn root_directory(root_manifest: &Path) -> Result<PathBuf, Box<[Diag]
         let failure = AcquireFailure::Unreadable {
             message: format!("cannot resolve `{}`: {error}", declared.display()).into(),
         };
-        root_manifest_refused(root_manifest, &failure)
+        root_project_refused(root_project, &failure)
     })
 }

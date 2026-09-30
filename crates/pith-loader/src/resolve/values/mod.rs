@@ -18,7 +18,7 @@ pub use range::{range_from_value, range_type, range_value};
 
 use pith_core::{Coordinate, Int, NominalType, RecordField, SumConstructor, SumType, Type, Value};
 use pith_diag::{DiagnosticSink, PithResult, Severity, Span};
-use pith_hir::{FrontendCode, ManifestVersion, ModuleSubject};
+use pith_hir::{FrontendCode, ModuleSubject, ModuleVersion};
 
 /// The module coordinate every resolver type is named under.
 pub const MODULES_MODULE: &str = "modules";
@@ -144,7 +144,7 @@ pub(super) fn subject_of(value: &Value) -> PithResult<ModuleSubject> {
 }
 
 /// A version from its canonical dotted spelling.
-pub(super) fn version_of(value: &Value) -> PithResult<ManifestVersion> {
+pub(super) fn version_of(value: &Value) -> PithResult<ModuleVersion> {
     let spelling = text_of(value, "version")?;
-    ManifestVersion::parse(&spelling).map_err(|_| decode_error("a version spelling", value))
+    ModuleVersion::parse(&spelling).map_err(|_| decode_error("a version spelling", value))
 }

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use pith_diag::{Diag, SourceFile, Span};
 use pith_hir::{FrontendCode, ModuleSubject, RootKey};
 
-use super::super::acquire::{AcquireFailure, ModuleStore, Route};
+use super::super::acquire::{AcquireFailure, ProjectStore, Route};
 use super::at;
 
 #[derive(PartialEq, Eq)]
@@ -18,13 +18,13 @@ enum Authority {
 }
 
 #[derive(PartialEq, Eq)]
-struct LocatedSource<L> {
+pub(super) struct LocatedSource<L> {
     location: L,
     authority: Authority,
 }
 
 impl<L> LocatedSource<L> {
-    fn acquire<S: ModuleStore<Location = L>>(
+    pub(super) fn acquire<S: ProjectStore<Location = L>>(
         store: &S,
         base: &L,
         route: &Route<'_>,
@@ -40,6 +40,10 @@ impl<L> LocatedSource<L> {
             location,
             authority,
         })
+    }
+
+    pub(super) fn location(&self) -> &L {
+        &self.location
     }
 }
 
@@ -58,30 +62,31 @@ impl<L> Default for Claims<L> {
 }
 
 pub(super) enum Failure {
-    Acquire(AcquireFailure),
     Conflict(Box<[Diag; 2]>),
 }
 
 impl<L: Clone + Ord> Claims<L> {
-    pub(super) fn locate<S: ModuleStore<Location = L>>(
+    /// Record that `subject` was satisfied by `located`, reached through
+    /// the clause at `span` of `source`. A second route for one subject
+    /// that disagrees with the first is a contradiction in the consumer's
+    /// own configuration, refused across the whole resolution with both
+    /// clauses named; one that agrees is one module seen twice.
+    pub(super) fn claim(
         &mut self,
-        store: &S,
-        base: &L,
-        route: &Route<'_>,
         subject: &ModuleSubject,
+        located: LocatedSource<L>,
         source: &Arc<SourceFile>,
         span: Span,
-    ) -> Result<L, Failure> {
-        let located = LocatedSource::acquire(store, base, route).map_err(Failure::Acquire)?;
+    ) -> Result<(), Failure> {
         match self.0.entry(subject.clone()) {
             Entry::Occupied(prior) => prior.get().agree(&located, subject, source, span),
             Entry::Vacant(entry) => {
-                let claim = entry.insert(Claim {
+                entry.insert(Claim {
                     located,
                     source: Arc::clone(source),
                     span,
                 });
-                Ok(claim.located.location.clone())
+                Ok(())
             }
         }
     }
@@ -94,9 +99,9 @@ impl<L: Clone + PartialEq> Claim<L> {
         subject: &ModuleSubject,
         source: &Arc<SourceFile>,
         span: Span,
-    ) -> Result<L, Failure> {
+    ) -> Result<(), Failure> {
         if &self.located == located {
-            return Ok(self.located.location.clone());
+            return Ok(());
         }
         Err(Failure::Conflict(Box::new([
             at(

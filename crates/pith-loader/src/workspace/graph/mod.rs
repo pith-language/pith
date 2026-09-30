@@ -1,8 +1,9 @@
-//! Validation and resolution over the acquired manifests: membership,
-//! identity, cycles, and source sets. Every refusal here names the clause
-//! that caused it, in the manifest that caused it; this is what separates
-//! this half from [`super::acquire`], where failures carry no span of their
-//! own and are attached by the caller that reached for the file.
+//! Validation and resolution over the acquired projects: membership,
+//! identity, cycles, and file sets. Every refusal here names the clause
+//! that caused it, in the project file that caused it; this is what
+//! separates this half from [`super::acquire`], where failures carry no
+//! span of their own and are attached by the caller that reached for the
+//! file.
 
 mod bootstrap;
 mod claims;
@@ -14,29 +15,30 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use pith_diag::{Diag, Severity, SourceFile, Span};
-use pith_hir::{FrontendCode, Manifest, ModuleSubject};
+use pith_hir::{FrontendCode, ModuleSubject, Project};
 
-use super::acquire::{AcquireFailure, ModuleStore};
-use super::module::{ResolvedModule, SourceSet};
-use crate::source::{ManifestSource, ParsedManifestFile};
+use super::acquire::{AcquireFailure, ProjectStore};
+use super::module::{ProjectFiles, ResolvedModule};
+use crate::source::{ParsedProjectFile, ProjectSource};
 
-/// A parsed manifest shared by every route reaching it.
-pub(super) struct ManifestFile {
-    pub(super) parsed: ParsedManifestFile,
+/// A parsed project file shared by every route reaching it.
+pub(super) struct ProjectFile {
+    pub(super) parsed: ParsedProjectFile,
 }
 
-/// A module mid-resolution: manifest read and validated, source set not yet
-/// acquired.
+/// A module mid-resolution: project file read and validated, includes not
+/// yet acquired.
 pub(super) struct PendingModule<L> {
     pub(super) location: L,
-    pub(super) file: Arc<ManifestFile>,
-    pub(super) view: Manifest,
-    pub(super) sources: SourceSet,
+    pub(super) file: Arc<ProjectFile>,
+    pub(super) view: Project,
+    pub(super) files: ProjectFiles,
+    pub(super) bindings: Vec<(Box<str>, ModuleSubject)>,
 }
 
 /// The resolution state: which locations were read, which subjects they
 /// declared, and the dependency route currently being walked.
-pub(super) struct Resolution<S: ModuleStore> {
+pub(super) struct Resolution<S: ProjectStore> {
     pub(super) store: S,
     pub(super) routing: super::routing::Routing,
     claims: claims::Claims<S::Location>,
@@ -48,29 +50,29 @@ pub(super) struct Resolution<S: ModuleStore> {
     /// locations mirror it for membership.
     pub(super) stack: Vec<ModuleSubject>,
     pub(super) stack_locations: BTreeSet<S::Location>,
-    /// Every manifest read so far, member or dependency, by location, so a
-    /// diamond reads one.
-    pub(super) read: BTreeMap<S::Location, Arc<ManifestFile>>,
+    /// Every project file read so far, member or dependency, by location,
+    /// so a diamond reads one.
+    pub(super) read: BTreeMap<S::Location, Arc<ProjectFile>>,
     pub(super) next_source_id: u32,
     pub(super) diagnostics: Vec<Diag>,
 }
 
-impl<S: ModuleStore> Resolution<S> {
-    /// Read and parse a directory's manifest. Parse diagnostics join the
-    /// resolution's; the read failure is the caller's to attach, because
-    /// only the caller knows which clause reached for the file.
+impl<S: ProjectStore> Resolution<S> {
+    /// Read and parse a location's project file. Parse diagnostics join
+    /// the resolution's; the read failure is the caller's to attach,
+    /// because only the caller knows which clause reached for the file.
     pub(super) fn read(
         &mut self,
         location: &S::Location,
-    ) -> Result<Arc<ManifestFile>, AcquireFailure> {
+    ) -> Result<Arc<ProjectFile>, AcquireFailure> {
         if let Some(read) = self.read.get(location) {
             return Ok(Arc::clone(read));
         }
-        let acquired = self.store.manifest(location)?;
+        let acquired = self.store.project(location)?;
         let source_id = pith_diag::SourceId::from_raw(self.next_source_id);
         self.next_source_id = self.next_source_id.saturating_add(1);
-        let file = Arc::new(ManifestFile {
-            parsed: crate::source::parse_manifest(&ManifestSource::new(
+        let file = Arc::new(ProjectFile {
+            parsed: crate::source::parse_project_file(&ProjectSource::new(
                 source_id,
                 acquired.label,
                 acquired.text,
@@ -96,14 +98,15 @@ impl<S: ModuleStore> Resolution<S> {
             .map(|module| ResolvedModule {
                 subject: module.view.subject().clone(),
                 origin: module.location.to_string().into(),
-                manifest: module.view,
-                sources: module.sources,
+                project: module.view,
+                files: module.files,
+                bindings: module.bindings.into(),
             })
             .collect::<Vec<_>>();
         let workspace = super::Closure::from_dependency_order(modules).ok_or_else(|| {
             Box::from([sourceless(
-                FrontendCode::MissingManifest,
-                "the resolution reached no root manifest",
+                FrontendCode::MissingProject,
+                "the resolution reached no root project",
             )])
         })?;
         Ok(super::WorkspaceResolution {
@@ -113,10 +116,10 @@ impl<S: ModuleStore> Resolution<S> {
     }
 }
 
-/// The validated view of a read manifest, when its parse allows one. Both
-/// failure halves are already diagnosed by the parse, so there is no second
-/// diagnostic to push here.
-pub(super) fn view_of(file: &ManifestFile) -> Option<Manifest> {
+/// The validated view of a read project file, when its parse allows one.
+/// Both failure halves are already diagnosed by the parse, so there is no
+/// second diagnostic to push here.
+pub(super) fn view_of(file: &ProjectFile) -> Option<Project> {
     file.parsed.validated().ok()
 }
 
@@ -125,7 +128,7 @@ pub(crate) fn sourceless(code: FrontendCode, message: impl Into<Box<str>>) -> Di
     Diag::new(Severity::Error, code.stable(), Span::none(), message)
 }
 
-/// A diagnostic attached to the manifest that caused it.
+/// A diagnostic attached to the project file that caused it.
 pub(crate) fn at(
     code: FrontendCode,
     span: Span,

@@ -1,19 +1,25 @@
 //! The per-module results of resolution.
 
-use pith_hir::{Manifest, ModuleSubject};
+use pith_hir::{ModuleSubject, Project};
 use pith_ids::ContentId;
 
+use super::acquire::PROJECT_NAME;
+
 /// One module of a resolved workspace: what it declared, where its bytes
-/// came from, and the source files it owns.
+/// came from, and the files it owns.
 pub struct ResolvedModule {
     pub(super) subject: ModuleSubject,
     /// The store location the module was acquired from, rendered: for
     /// diagnostics only. Routes detect duplicates on it, but a location
     /// never becomes a semantic key: a module's identity is its declared
-    /// subject and its module-relative source set.
+    /// subject and its file set.
     pub(super) origin: Box<str>,
-    pub(super) manifest: Manifest,
-    pub(super) sources: SourceSet,
+    pub(super) project: Project,
+    pub(super) files: ProjectFiles,
+    /// Each input's name and the subject it resolved to, in declaration
+    /// order. This is the whole import environment a file of this module
+    /// may name.
+    pub(super) bindings: Box<[(Box<str>, ModuleSubject)]>,
 }
 
 impl ResolvedModule {
@@ -30,28 +36,72 @@ impl ResolvedModule {
     }
 
     #[must_use]
-    pub fn manifest(&self) -> &Manifest {
-        &self.manifest
+    pub fn project(&self) -> &Project {
+        &self.project
     }
 
     #[must_use]
-    pub fn sources(&self) -> &SourceSet {
-        &self.sources
+    pub fn files(&self) -> &ProjectFiles {
+        &self.files
     }
 
-    /// The module's bindings: each `use` clause's alias and the subject it
-    /// selected. This is the whole import environment a source file of this
-    /// module may name.
+    /// The module's bindings: each input's name and the subject it
+    /// selected.
     pub fn bindings(&self) -> impl Iterator<Item = (&str, &ModuleSubject)> {
-        self.manifest
-            .uses()
+        self.bindings
             .iter()
-            .map(|use_| (use_.alias.as_ref(), &use_.subject))
+            .map(|(name, subject)| (name.as_ref(), subject))
     }
 }
 
-/// A module's source set: the regular `.pi` files under its `src/`, in
-/// canonical module-relative order.
+/// A module's file set: its project file plus the includes its header
+/// names, includes in canonical order.
+pub struct ProjectFiles {
+    project: ModuleFile,
+    includes: SourceSet,
+}
+
+impl ProjectFiles {
+    /// The file set a module holds mid-resolution, before acquisition
+    /// reads its includes.
+    pub(super) fn unacquired() -> Self {
+        Self {
+            project: ModuleFile::new(PROJECT_NAME, ""),
+            includes: SourceSet::empty(),
+        }
+    }
+
+    /// Assemble a file set from the project file's text and the acquired
+    /// includes, which are sorted into canonical order whatever order the
+    /// header listed them in, so the merged span space of a module is a
+    /// function of its file set, never of its clause order. A repeated
+    /// include path is refused.
+    ///
+    /// # Errors
+    /// Returns [`crate::graph::FrontendInputError`] for a repeated path,
+    /// the same refusal the graph tier's source input makes.
+    pub fn new(
+        project_text: impl Into<Box<str>>,
+        includes: impl IntoIterator<Item = ModuleFile>,
+    ) -> Result<Self, crate::graph::FrontendInputError> {
+        Ok(Self {
+            project: ModuleFile::new(PROJECT_NAME, project_text),
+            includes: SourceSet::new(includes)?,
+        })
+    }
+
+    #[must_use]
+    pub fn project(&self) -> &ModuleFile {
+        &self.project
+    }
+
+    #[must_use]
+    pub fn includes(&self) -> &SourceSet {
+        &self.includes
+    }
+}
+
+/// A module's includes, in canonical module-relative order.
 pub struct SourceSet {
     pub(super) files: Box<[ModuleFile]>,
 }
@@ -68,7 +118,7 @@ impl SourceSet {
     /// set, never of a directory enumeration. A repeated path is refused.
     ///
     /// # Errors
-    /// Returns [`crate::FrontendInputError::DuplicateSourcePath`] for a
+    /// Returns [`crate::graph::FrontendInputError::DuplicateSourcePath`] for a
     /// repeated path, the same refusal the graph tier's source input makes.
     pub fn new(
         files: impl IntoIterator<Item = ModuleFile>,
@@ -98,8 +148,8 @@ impl SourceSet {
     }
 }
 
-/// One owned source file: its module-relative path, its text, and the
-/// content identity of that text.
+/// One owned file: its module-relative path, its text, and the content
+/// identity of that text.
 pub struct ModuleFile {
     path: Box<str>,
     text: Box<str>,

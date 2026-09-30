@@ -5,28 +5,28 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use pith_diag::{Diag, SourceFile, SourceId};
-use pith_hir::{FrontendCode, Manifest, ManifestRegistry, SubjectSegment};
+use pith_hir::{FrontendCode, Project, ProjectRegistry, SubjectSegment};
 
 use super::super::graph::at;
 use super::provenance::{BindingOrigin, BindingSite};
-use crate::ParsedManifestFile;
+use crate::ParsedProjectFile;
 
-pub(super) enum Project {}
-pub(super) enum User {}
+pub(super) enum ProjectSide {}
+pub(super) enum UserSide {}
 
 pub(super) trait Owner {
     const ORIGIN: BindingOrigin;
 }
-impl Owner for Project {
+impl Owner for ProjectSide {
     const ORIGIN: BindingOrigin = BindingOrigin::Project;
 }
-impl Owner for User {
+impl Owner for UserSide {
     const ORIGIN: BindingOrigin = BindingOrigin::User;
 }
 
 #[derive(Clone)]
 pub(super) struct Registry {
-    pub(super) declaration: ManifestRegistry,
+    pub(super) declaration: ProjectRegistry,
     pub(super) site: BindingSite,
 }
 
@@ -42,23 +42,20 @@ pub(super) struct Layer<Owner> {
     owner: PhantomData<Owner>,
 }
 
-impl Layer<Project> {
-    pub(super) fn project(
-        manifest: &Manifest,
-        source: &Arc<SourceFile>,
-    ) -> Result<Self, Vec<Diag>> {
-        Self::validate(manifest, source)
+impl Layer<ProjectSide> {
+    pub(super) fn project(root: &Project, source: &Arc<SourceFile>) -> Result<Self, Vec<Diag>> {
+        Self::validate(root, source)
     }
 }
 
 /// Authority supplied explicitly by the caller; loading never discovers a user file.
-pub struct UserBindings(pub(super) Layer<User>);
+pub struct UserBindings(pub(super) Layer<UserSide>);
 
-impl TryFrom<&ParsedManifestFile> for UserBindings {
+impl TryFrom<&ParsedProjectFile> for UserBindings {
     type Error = Box<[Diag]>;
 
-    fn try_from(parsed: &ParsedManifestFile) -> Result<Self, Self::Error> {
-        let manifest = parsed
+    fn try_from(parsed: &ParsedProjectFile) -> Result<Self, Self::Error> {
+        let project = parsed
             .validated()
             .map_err(|_| Box::from(parsed.diagnostics()))?;
         let source = Arc::new(SourceFile::new(
@@ -66,15 +63,15 @@ impl TryFrom<&ParsedManifestFile> for UserBindings {
             parsed.source().label.clone(),
             parsed.source().source_text(),
         ));
-        Layer::validate(&manifest, &source)
+        Layer::validate(&project, &source)
             .map(Self)
             .map_err(Into::into)
     }
 }
 
 impl<O: Owner> Layer<O> {
-    fn validate(manifest: &Manifest, source: &Arc<SourceFile>) -> Result<Self, Vec<Diag>> {
-        let registries: BTreeMap<_, _> = manifest
+    fn validate(project: &Project, source: &Arc<SourceFile>) -> Result<Self, Vec<Diag>> {
+        let registries: BTreeMap<_, _> = project
             .registries()
             .iter()
             .map(|declaration| {
@@ -90,7 +87,7 @@ impl<O: Owner> Layer<O> {
         let mut domains = BTreeMap::new();
         let mut declared = BTreeMap::new();
         let mut diagnostics = Vec::new();
-        for domain in manifest.domains() {
+        for domain in project.domains() {
             match declared.entry(domain.domain.clone()) {
                 Entry::Occupied(prior) => {
                     diagnostics.push(

@@ -1,11 +1,12 @@
-//! The measured identity of a module tree.
+//! The measured identity of a project's file set: what a lock records for
+//! a resolved input and a registry pins for a release.
 
 use std::collections::BTreeMap;
 
 use pith_ids::{ContentDigest, DigestDomain};
 
-/// A normalized module tree's identity: the manifest and the owned source
-/// files under one domain-separated digest.
+/// A project file set's identity: the project file and its includes under
+/// one domain-separated digest.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Measured(ContentDigest);
 
@@ -23,15 +24,15 @@ impl Measured {
     }
 }
 
-/// Measures a module tree from its manifest text and its module-relative
-/// sources, in the map's canonical order, so equal trees measure equal
-/// whatever order their bytes were assembled in.
+/// Measures a project from its project file and its includes, in the map's
+/// canonical order, so equal file sets measure equal whatever order their
+/// bytes were assembled in.
 #[must_use]
-pub fn measure(manifest: &str, sources: &BTreeMap<Box<str>, Box<str>>) -> Measured {
+pub fn measure(project: &str, includes: &BTreeMap<Box<str>, Box<str>>) -> Measured {
     const TREE_DOMAIN: DigestDomain = DigestDomain::new("module-tree", 1);
     let mut encoded = Vec::new();
-    pith_core::manifest::encode_str(&mut encoded, manifest);
-    for (path, text) in sources {
+    pith_core::manifest::encode_str(&mut encoded, project);
+    for (path, text) in includes {
         pith_core::manifest::encode_str(&mut encoded, path);
         pith_core::manifest::encode_str(&mut encoded, text);
     }
@@ -50,46 +51,46 @@ mod tests {
     }
 
     #[test]
-    fn equal_trees_measure_equal_in_any_assembly_order() {
+    fn equal_file_sets_measure_equal_in_any_assembly_order() {
         let first = measure(
             "module a/b 1.0\n",
-            &sources(&[("src/a.pi", "1"), ("src/b.pi", "2")]),
+            &sources(&[("types.pi", "1"), ("rules.pi", "2")]),
         );
         let second = measure(
             "module a/b 1.0\n",
-            &sources(&[("src/b.pi", "2"), ("src/a.pi", "1")]),
+            &sources(&[("rules.pi", "2"), ("types.pi", "1")]),
         );
         assert_eq!(first, second);
     }
 
     #[test]
-    fn every_input_moves_the_measurement() {
-        let base = measure("module a/b 1.0\n", &sources(&[("src/a.pi", "1")]));
+    fn every_file_moves_the_measurement() {
+        let base = measure("module a/b 1.0\n", &sources(&[("types.pi", "1")]));
         assert_ne!(
             base,
-            measure("module a/c 1.0\n", &sources(&[("src/a.pi", "1")]))
+            measure("module a/c 1.0\n", &sources(&[("types.pi", "1")]))
         );
         assert_ne!(
             base,
-            measure("module a/b 1.1\n", &sources(&[("src/a.pi", "1")]))
+            measure("module a/b 1.1\n", &sources(&[("types.pi", "1")]))
         );
         assert_ne!(
             base,
-            measure("module a/b 1.0\n", &sources(&[("src/a.pi", "2")]))
+            measure("module a/b 1.0\n", &sources(&[("types.pi", "2")]))
         );
         assert_ne!(
             base,
             measure(
                 "module a/b 1.0\n",
-                &sources(&[("src/a.pi", "1"), ("src/b.pi", "2")])
+                &sources(&[("types.pi", "1"), ("rules.pi", "2")])
             )
         );
     }
 
     #[test]
     fn a_path_boundary_cannot_be_forged_by_content() {
-        let joined = measure("m\n", &sources(&[("src/a.pi", "12")]));
-        let split = measure("m\n", &sources(&[("src/a.pi", "1"), ("src/a?.pi", "2")]));
+        let joined = measure("m\n", &sources(&[("a.pi", "12")]));
+        let split = measure("m\n", &sources(&[("a.pi", "1"), ("a?.pi", "2")]));
         assert_ne!(joined, split);
     }
 }

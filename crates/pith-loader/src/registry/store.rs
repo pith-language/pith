@@ -1,7 +1,7 @@
-//! The registry as a module store: a verified index in, admitted source
+//! The registry as a project store: a verified index in, admitted file
 //! sets out. It serves exact selections (the one release the index carries
 //! for a subject); choosing among versions is the resolver's computation.
-//! A manifest that disagrees with its cached entry, or bytes that miss the
+//! A project that disagrees with its cached entry, or bytes that miss the
 //! pinned tree, are refused here, not discovered by elaboration.
 
 use std::collections::BTreeMap;
@@ -13,16 +13,24 @@ use super::SOURCES_DIRECTORY;
 use super::line::Release;
 use super::trust::{self, Record, Verified};
 use crate::workspace::acquire::{
-    self, AcquireFailure, AcquiredManifest, AcquiredSource, ModuleStore, Route,
+    self, AcquireFailure, AcquiredProject, AcquiredSource, ProjectStore, Route,
 };
 
 /// A verified index serving modules from the directory that hosts it.
 pub struct RegistryStore {
     directory: PathBuf,
     verified: Verified,
-    /// Each located release's manifest text, kept for the tree check when
-    /// its sources arrive.
-    manifests: BTreeMap<Location, Box<str>>,
+    /// Each located release's project text and includes, kept for the tree
+    /// check once the file set is assembled.
+    file_sets: BTreeMap<Location, FileSet>,
+}
+
+/// A located release's acquired file set, measured against the entry's pin
+/// once complete.
+#[derive(Default)]
+struct FileSet {
+    project: Option<Box<str>>,
+    includes: BTreeMap<Box<str>, Box<str>>,
 }
 
 /// Where a registry route arrives: subject, selected version, pinned
@@ -63,7 +71,7 @@ impl RegistryStore {
             Self {
                 directory,
                 verified,
-                manifests: BTreeMap::new(),
+                file_sets: BTreeMap::new(),
             },
             record,
         ))
@@ -160,7 +168,7 @@ impl RegistryStore {
     }
 }
 
-impl ModuleStore for RegistryStore {
+impl ProjectStore for RegistryStore {
     type Location = Location;
 
     fn locate(
@@ -187,56 +195,64 @@ impl ModuleStore for RegistryStore {
         Ok(self.location_of(&subject, release))
     }
 
-    fn manifest(&mut self, location: &Self::Location) -> Result<AcquiredManifest, AcquireFailure> {
+    fn project(&mut self, location: &Self::Location) -> Result<AcquiredProject, AcquireFailure> {
         let release = self
             .release(location)
             .ok_or_else(|| AcquireFailure::Unreadable {
                 message: format!("the index no longer carries {location}").into(),
             })?;
-        let path = self
-            .sources_directory(location)
-            .join(acquire::MANIFEST_NAME);
-        acquire::require_regular(&path, "the manifest")?;
+        let path = self.sources_directory(location).join(acquire::PROJECT_NAME);
+        acquire::require_regular(&path, "the project file")?;
         let text = std::fs::read_to_string(&path)
-            .map_err(|error| AcquireFailure::unreadable("read the manifest", &path, &error))?;
+            .map_err(|error| AcquireFailure::unreadable("read the project file", &path, &error))?;
         check_cached_fields(release, &text, location)?;
-        self.manifests.insert(location.clone(), text.clone().into());
-        Ok(AcquiredManifest {
-            label: format!("{location}/module.pi").into(),
+        self.file_sets.entry(location.clone()).or_default().project = Some(text.clone().into());
+        Ok(AcquiredProject {
+            label: format!("{location}/{project}", project = acquire::PROJECT_NAME).into(),
             text: text.into(),
         })
     }
 
-    fn sources(
+    fn include(
         &mut self,
         location: &Self::Location,
-    ) -> Result<Vec<AcquiredSource>, AcquireFailure> {
+        path: &str,
+    ) -> Result<AcquiredSource, AcquireFailure> {
+        let on_disk = self.sources_directory(location).join(path);
+        let text = std::fs::read_to_string(&on_disk)
+            .map_err(|error| AcquireFailure::unreadable("read the include", &on_disk, &error))?;
+        self.file_sets
+            .entry(location.clone())
+            .or_default()
+            .includes
+            .insert(path.into(), text.clone().into());
+        Ok(AcquiredSource {
+            path: path.into(),
+            text: text.into(),
+        })
+    }
+
+    fn verify(&mut self, location: &Self::Location) -> Result<(), AcquireFailure> {
         let release = self
             .release(location)
             .ok_or_else(|| AcquireFailure::Unreadable {
                 message: format!("the index no longer carries {location}").into(),
             })?;
-        let directory = self.sources_directory(location);
-        let discovered = acquire::discover(&directory)?;
-        let mut sources = Vec::new();
-        let mut measured = std::collections::BTreeMap::new();
-        for (path, on_disk) in discovered {
-            let text = std::fs::read_to_string(&on_disk).map_err(|error| {
-                AcquireFailure::unreadable("read the source file", &on_disk, &error)
-            })?;
-            measured.insert(path.clone(), text.clone().into());
-            sources.push(AcquiredSource {
-                path,
-                text: text.into(),
-            });
-        }
-        let manifest = self
-            .manifests
+        let Some(project) = self
+            .file_sets
             .get(location)
-            .ok_or_else(|| AcquireFailure::Unreadable {
-                message: format!("the manifest at {location} was never read").into(),
-            })?;
-        let measured = super::tree::measure(manifest, &measured);
+            .and_then(|set| set.project.as_ref())
+        else {
+            return Err(AcquireFailure::Unreadable {
+                message: format!("the project file at {location} was never read").into(),
+            });
+        };
+        let includes = self
+            .file_sets
+            .get(location)
+            .map(|set| set.includes.clone())
+            .unwrap_or_default();
+        let measured = super::measure(project, &includes);
         if measured.digest() != release.tree() {
             return Err(refused(
                 FrontendCode::ContentMismatch,
@@ -248,11 +264,11 @@ impl ModuleStore for RegistryStore {
                 ),
             ));
         }
-        Ok(sources)
+        Ok(())
     }
 }
 
-/// The manifest a revision served, checked field by field against the
+/// The project a revision served, checked field by field against the
 /// entry's cached fields. A disagreement is a wrong cache, named with
 /// both sides, never reconciled.
 fn check_cached_fields(
@@ -260,42 +276,48 @@ fn check_cached_fields(
     text: &str,
     location: &Location,
 ) -> Result<(), AcquireFailure> {
-    let parsed = crate::source::parse_manifest(&crate::source::ManifestSource::new(
+    let parsed = crate::source::parse_project_file(&crate::source::ProjectSource::new(
         pith_diag::SourceId::from_raw(0),
-        format!("{location}/module.pi"),
+        format!("{location}/{}", acquire::PROJECT_NAME),
         text.to_string(),
     ));
-    let Ok(manifest) = parsed.validated() else {
-        // An unparsable manifest is reported by the loader under the store's
-        // own file identity; the cache check has nothing to compare against.
+    let Ok(project) = parsed.validated() else {
+        // An unparsable project file is reported by the loader under the
+        // store's own file identity; the cache check has nothing to compare
+        // against.
         return Ok(());
     };
-    if manifest.subject() != &location.subject {
+    if project.subject() != &location.subject {
         return Err(refused(
             FrontendCode::WrongIndexCache,
             format!(
-                "the entry for {location} caches the subject {}, and the manifest at its \
+                "the entry for {location} caches the subject {}, and the project at its \
                  revision declares {}: the cache is wrong",
                 location.subject,
-                manifest.subject()
+                project.subject()
             ),
         ));
     }
-    if manifest.version() != release.version() {
+    if project.version() != release.version() {
         return Err(refused(
             FrontendCode::WrongIndexCache,
             format!(
-                "the entry for {location} caches the version {}, and the manifest at its \
+                "the entry for {location} caches the version {}, and the project at its \
                  revision declares {}: the cache is wrong",
                 release.version().canonical_spelling(),
-                manifest.version().canonical_spelling()
+                project.version().canonical_spelling()
             ),
         ));
     }
-    let declared = manifest
-        .uses()
+    let declared = project
+        .inputs()
         .iter()
-        .map(|use_| (use_.subject.spelling(), use_.range.to_string()))
+        .filter_map(|input| match &input.locator {
+            pith_hir::InputLocator::Registry { subject, range, .. } => {
+                Some((subject.spelling(), range.to_string()))
+            }
+            _ => None,
+        })
         .collect::<Vec<_>>();
     let cached = release
         .requires()
@@ -311,7 +333,7 @@ fn check_cached_fields(
         return Err(refused(
             FrontendCode::WrongIndexCache,
             format!(
-                "the entry for {location} caches the requirements [{}], and the manifest at \
+                "the entry for {location} caches the requirements [{}], and the project at \
                  its revision declares [{}]: the cache is wrong",
                 cached
                     .iter()

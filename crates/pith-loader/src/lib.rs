@@ -10,6 +10,7 @@ mod loaded;
 pub mod registry;
 mod resolve;
 mod source;
+mod tree;
 mod workspace;
 
 pub use bind::{
@@ -25,10 +26,10 @@ pub use load::{elaborate_module, load_module};
 pub use loaded::LoadedModule;
 pub use pith_elaborator::{GRAMMAR_VERSION, ImportedModule};
 pub use pith_hir::{
-    DefinitionKind, DefinitionLocation, DependencySource, FrontendCode, Manifest, ManifestDomain,
-    ManifestRegistry, ManifestUse, ManifestVersion, MissingModule, ModuleSubject, ParsedManifest,
-    PositionSidecar, ReferenceSite, RootKey, RuleCategory, SubjectSegment, VersionBound,
-    VersionRange,
+    DefinitionKind, DefinitionLocation, FrontendCode, InputLocator, InputsBlock, MissingSubject,
+    ModuleSubject, ModuleVersion, PositionSidecar, Project, ProjectDomain, ProjectHeader,
+    ProjectHost, ProjectInclude, ProjectInput, ProjectRegistry, ReferenceSite, RootKey,
+    RuleCategory, SubjectSegment, VersionBound, VersionRange,
 };
 pub use resolve::{
     Derivation, MODULES_MODULE, ModuleCandidate, ModuleConstraint, ModuleRequirement,
@@ -37,15 +38,17 @@ pub use resolve::{
     resolver_rule, selections_from_value, solve,
 };
 pub use source::{
-    InvalidManifest, ManifestSource, ModuleSource, ParsedManifestFile, ParsedModule,
-    format_manifest, format_module, parse_manifest, parse_module, parse_module_sources,
+    InvalidProject, ModuleSource, ParsedModule, ParsedProjectFile, ProjectSource, format_module,
+    format_project_file, parse_module, parse_module_sources, parse_project_file,
+    parse_project_files,
 };
+pub use tree::{Measured, measure};
 pub use workspace::{
-    AcquireFailure, AcquiredManifest, AcquiredSource, AdmissionClause, AdmissionRefusal,
+    AcquireFailure, AcquiredProject, AcquiredSource, AdmissionClause, AdmissionRefusal,
     AdmissionRequest, AdmittedSource, BindingOrigin, BindingOverride, BindingPolicy, BindingSite,
     CheckedModule, Closure, ElaborateError, ElaboratedWorkspace, FrontendInputs,
-    FrontendProjection, LocalDirectory, LocalFiles, MANIFEST_NAME, ModuleFile, ModuleStore,
-    Outcome, ProjectedModule, ProjectionError, PublishedInterface, RegistryRoute, ResolvedModule,
-    RootFiles, Route, SOURCE_DIRECTORY, SOURCE_SUFFIX, SourceSet, UserBindings, Workspace,
-    WorkspaceCheck, WorkspacePass, WorkspaceResolution, admit_source,
+    FrontendProjection, LOCK_NAME, LocalDirectory, LocalFiles, LockWriteError, ModuleFile, Outcome,
+    PROJECT_NAME, ProjectFiles, ProjectStore, ProjectedModule, ProjectionError, PublishedInterface,
+    RegistryRoute, ResolvedModule, RootFiles, Route, SourceSet, UserBindings, Workspace,
+    WorkspaceCheck, WorkspacePass, WorkspaceResolution, admit_source, write_lock,
 };

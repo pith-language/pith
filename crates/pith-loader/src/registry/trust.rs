@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use pith_diag::{Diag, Severity};
-use pith_hir::{ManifestVersion, ModuleSubject, RootKey};
+use pith_hir::{ModuleSubject, ModuleVersion, RootKey};
 
 use super::keys::Public;
 use super::line::{Release, Withdrawal};
@@ -77,7 +77,7 @@ impl Subject {
 
     /// The withdrawal standing against `version`, if any.
     #[must_use]
-    pub fn withdrawal_for(&self, version: &ManifestVersion) -> Option<&Withdrawal> {
+    pub fn withdrawal_for(&self, version: &ModuleVersion) -> Option<&Withdrawal> {
         self.withdrawals
             .iter()
             .find(|withdrawal| withdrawal.version() == version)

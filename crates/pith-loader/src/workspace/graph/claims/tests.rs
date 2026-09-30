@@ -3,7 +3,6 @@ mod generated;
 use std::cell::Cell;
 
 use super::*;
-use crate::{AcquiredManifest, AcquiredSource};
 use pith_diag::SourceId;
 
 struct Locator {
@@ -11,7 +10,7 @@ struct Locator {
     calls: Cell<usize>,
 }
 
-impl ModuleStore for Locator {
+impl ProjectStore for Locator {
     type Location = u8;
 
     fn locate(&self, _: &u8, _: &Route<'_>) -> Result<u8, AcquireFailure> {
@@ -23,12 +22,12 @@ impl ModuleStore for Locator {
             })
     }
 
-    fn manifest(&mut self, _: &u8) -> Result<AcquiredManifest, AcquireFailure> {
-        unreachable!("claim agreement does not acquire manifest bytes")
+    fn project(&mut self, _: &u8) -> Result<crate::AcquiredProject, AcquireFailure> {
+        unreachable!("claim agreement does not acquire project bytes")
     }
 
-    fn sources(&mut self, _: &u8) -> Result<Vec<AcquiredSource>, AcquireFailure> {
-        unreachable!("claim agreement does not acquire source bytes")
+    fn include(&mut self, _: &u8, _: &str) -> Result<crate::AcquiredSource, AcquireFailure> {
+        unreachable!("claim agreement does not acquire include bytes")
     }
 }
 
@@ -42,20 +41,18 @@ impl Request {
         Self {
             subject: ModuleSubject::parse("example/dep")
                 .unwrap_or_else(|_| unreachable!("valid subject")),
-            source: Arc::new(SourceFile::new(SourceId::from_raw(0), "module.pi", "")),
+            source: Arc::new(SourceFile::new(SourceId::from_raw(0), "pith.pi", "")),
         }
     }
 
     fn route(&self, archive: bool) -> Route<'_> {
         if archive {
             Route::Archive {
-                subject: &self.subject,
                 url: "archive",
                 digest: "unvalidated",
             }
         } else {
             Route::Git {
-                subject: &self.subject,
                 url: "repository",
                 revision: "main",
                 subpath: None,
@@ -63,20 +60,40 @@ impl Request {
         }
     }
 
+    /// What the walk does for one input: locate its route, then claim the
+    /// subject the acquired project declared.
     fn locate(
         &self,
         claims: &mut Claims<u8>,
         store: &Locator,
         archive: bool,
-    ) -> Result<u8, Failure> {
-        claims.locate(
-            store,
-            &0,
-            &self.route(archive),
-            &self.subject,
-            &self.source,
-            Span::none(),
-        )
+    ) -> Result<u8, failure::TestFailure> {
+        let located =
+            LocatedSource::acquire(store, &0, &self.route(archive)).map_err(failure::acquire)?;
+        let location = *located.location();
+        claims
+            .claim(&self.subject, located, &self.source, Span::none())
+            .map_err(failure::conflict)?;
+        Ok(location)
+    }
+}
+
+/// The failure halves a test asserts apart. Which half failed is the fact;
+/// the payload underneath it is named by the variant it rode in on.
+mod failure {
+    use super::*;
+
+    pub(super) enum TestFailure {
+        Acquire,
+        Conflict,
+    }
+
+    pub(super) fn acquire(_: AcquireFailure) -> TestFailure {
+        TestFailure::Acquire
+    }
+
+    pub(super) fn conflict(_: Failure) -> TestFailure {
+        TestFailure::Conflict
     }
 }
 
@@ -91,10 +108,10 @@ fn a_repeated_request_cannot_hide_adapter_failure() {
         let mut claims = Claims::default();
         assert!(request.locate(&mut claims, &store, archive).is_ok());
         store.location.set(None);
-        assert!(matches!(
-            request.locate(&mut claims, &store, archive),
-            Err(Failure::Acquire(_))
-        ));
+        assert!(
+            request.locate(&mut claims, &store, archive).is_err(),
+            "a failed locate cannot ride on the claim before it"
+        );
         assert_eq!(store.calls.get(), 2);
     }
 }
@@ -123,10 +140,7 @@ fn conflict_preserves_the_original_claim() {
     let mut claims = Claims::default();
     assert!(request.locate(&mut claims, &store, false).is_ok());
     store.location.set(Some(2));
-    assert!(matches!(
-        request.locate(&mut claims, &store, false),
-        Err(Failure::Conflict(_))
-    ));
+    assert!(request.locate(&mut claims, &store, false).is_err());
     store.location.set(Some(1));
     assert!(matches!(request.locate(&mut claims, &store, false), Ok(1)));
     assert_eq!(store.calls.get(), 3);

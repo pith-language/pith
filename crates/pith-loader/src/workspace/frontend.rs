@@ -183,8 +183,8 @@ fn publish_sources(
     engine: &mut Engine,
 ) -> Result<FrontendSource, ProjectionError> {
     let subject = module.subject().spelling();
-    let mut files = Vec::with_capacity(module.sources().files().len());
-    for file in module.sources().files() {
+    let mut files = Vec::with_capacity(module.files().includes().files().len().saturating_add(1));
+    for file in std::iter::once(module.files().project()).chain(module.files().includes().files()) {
         let content = engine
             .put_blob(file.text().as_bytes())
             .map_err(ProjectionError::Store)?;

@@ -4,23 +4,22 @@
 //! under, so both produce the same refusal type over their own clause
 //! vocabularies, and neither checker can raise the other's clause.
 
-use pith_hir::{Manifest, ManifestVersion, ModuleSubject, VersionRange};
+use pith_hir::{ModuleSubject, ModuleVersion, Project, VersionRange};
 
 /// The clauses of a module-source admission, one per claim.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Clause {
-    /// The manifest declares another subject than the one the route named.
+    /// The project declares another subject than the one the route named.
     /// A route selects a module; it cannot rename one.
     Subject {
         requested: ModuleSubject,
         declared: ModuleSubject,
     },
-    /// The manifest's version falls outside the range the route wrote. A
-    /// path dependency carries no range, so this clause holds trivially
-    /// there.
+    /// The project's version falls outside the range the route wrote. A
+    /// path input carries no range, so this clause holds trivially there.
     Version {
         range: VersionRange,
-        offered: ManifestVersion,
+        offered: ModuleVersion,
     },
 }
 
@@ -32,12 +31,12 @@ impl std::fmt::Display for Clause {
                 declared,
             } => write!(
                 formatter,
-                "the route names the subject {requested}, and the manifest declares \
-                 {declared}: an alias selects, it does not rename",
+                "the route names the subject {requested}, and the project declares \
+                 {declared}: an input selects, it does not rename",
             ),
             Self::Version { range, offered } => write!(
                 formatter,
-                "the route admits versions {range}, and the manifest declares {offered}"
+                "the route admits versions {range}, and the project declares {offered}"
             ),
         }
     }
@@ -71,12 +70,12 @@ impl Request {
 }
 
 /// The evidence a held admission retains: what was admitted, at which
-/// version. Recomputed from the acquired manifest on every read, never
+/// version. Recomputed from the acquired project on every read, never
 /// stored beside the bytes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Admitted {
     subject: ModuleSubject,
-    version: ManifestVersion,
+    version: ModuleVersion,
 }
 
 impl Admitted {
@@ -86,29 +85,29 @@ impl Admitted {
     }
 
     #[must_use]
-    pub fn version(&self) -> &ManifestVersion {
+    pub fn version(&self) -> &ModuleVersion {
         &self.version
     }
 }
 
 /// Whether the manifest declares the subject the request named.
-fn subject(request: &Request, manifest: &Manifest) -> Result<(), Clause> {
+fn subject(request: &Request, project: &Project) -> Result<(), Clause> {
     differ(
-        manifest.subject() == &request.subject,
+        project.subject() == &request.subject,
         Clause::Subject {
             requested: request.subject.clone(),
-            declared: manifest.subject().clone(),
+            declared: project.subject().clone(),
         },
     )
 }
 
 /// Whether the manifest's version is one the request's range admits.
-fn version(request: &Request, manifest: &Manifest) -> Result<(), Clause> {
+fn version(request: &Request, project: &Project) -> Result<(), Clause> {
     differ(
-        request.range.satisfies(manifest.version()),
+        request.range.satisfies(project.version()),
         Clause::Version {
             range: request.range.clone(),
-            offered: manifest.version().clone(),
+            offered: project.version().clone(),
         },
     )
 }
@@ -117,15 +116,15 @@ fn differ(held: bool, clause: Clause) -> Result<(), Clause> {
     held.then_some(()).ok_or(clause)
 }
 
-/// Admits an acquired manifest against what the route asked for.
+/// Admits an acquired project against what the route asked for.
 ///
 /// # Errors
 /// Returns the first clause that refuses the source.
-pub fn admit(request: &Request, manifest: &Manifest) -> Result<Admitted, Refusal> {
-    pith_constraint::admit([subject(request, manifest), version(request, manifest)])?;
+pub fn admit(request: &Request, project: &Project) -> Result<Admitted, Refusal> {
+    pith_constraint::admit([subject(request, project), version(request, project)])?;
     Ok(Admitted {
-        subject: manifest.subject().clone(),
-        version: manifest.version().clone(),
+        subject: project.subject().clone(),
+        version: project.version().clone(),
     })
 }
 
@@ -133,14 +132,14 @@ pub fn admit(request: &Request, manifest: &Manifest) -> Result<Admitted, Refusal
 mod tests {
     use super::*;
 
-    fn manifest(subject: &str, version: &str) -> Manifest {
-        crate::source::parse_manifest(&crate::source::ManifestSource::new(
+    fn manifest(subject: &str, version: &str) -> Project {
+        crate::source::parse_project_file(&crate::source::ProjectSource::new(
             pith_diag::SourceId::from_raw(0),
-            "module.pi",
-            format!("module {subject} {version}\n"),
+            "pith.pi",
+            format!("module {subject} {version}\n\ninputs {{\n}}\n"),
         ))
         .validated()
-        .expect("the fixture manifest parses")
+        .expect("the fixture project parses")
     }
 
     fn any(subject: &str) -> Request {
@@ -148,7 +147,7 @@ mod tests {
     }
 
     #[test]
-    fn a_manifest_declaring_the_requested_subject_at_an_admitted_version_is_admitted() {
+    fn a_project_declaring_the_requested_subject_at_an_admitted_version_is_admitted() {
         let admitted = admit(&any("example/greeter"), &manifest("example/greeter", "1.2"))
             .expect("subject and version agree with the route");
         assert_eq!(
@@ -175,7 +174,7 @@ mod tests {
         let request = Request::new(
             ModuleSubject::parse("example/greeter").unwrap(),
             VersionRange::AtLeast(pith_hir::VersionBound {
-                version: ManifestVersion::from_segments([2, 0]).unwrap(),
+                version: ModuleVersion::from_segments([2, 0]).unwrap(),
                 inclusive: true,
             }),
         );
@@ -188,7 +187,7 @@ mod tests {
     fn two_spellings_that_compare_equal_are_one_version() {
         let request = Request::new(
             ModuleSubject::parse("example/greeter").unwrap(),
-            VersionRange::Exactly(ManifestVersion::from_segments([1, 2]).unwrap()),
+            VersionRange::Exactly(ModuleVersion::from_segments([1, 2]).unwrap()),
         );
         assert!(
             admit(&request, &manifest("example/greeter", "1.2.0")).is_ok(),

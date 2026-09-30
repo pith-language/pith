@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, btree_map::Entry};
 
 use super::Routing;
-use super::layer::{Domain, Layer, Project, Registry, UserBindings};
+use super::layer::{Domain, Layer, ProjectSide, Registry, UserBindings};
 use super::provenance::{BindingOverride, BindingSite};
 
 /// The authority-origin requirement; network and lock permissions are separate.
@@ -15,7 +15,7 @@ pub enum BindingPolicy {
 
 impl Routing {
     pub(super) fn merge(
-        project: Layer<Project>,
+        project: Layer<ProjectSide>,
         user: Option<UserBindings>,
         policy: BindingPolicy,
     ) -> Self {

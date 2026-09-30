@@ -3,7 +3,7 @@
 //! Module vocabulary throughout: typed segment versions, no feature
 //! coordinates, one selected version per subject.
 
-use pith_hir::{ManifestVersion, ModuleSubject, VersionRange};
+use pith_hir::{ModuleSubject, ModuleVersion, VersionRange};
 use pith_ids::{ContentId, DigestDomain};
 
 /// One hard constraint: which versions of one subject a clause admits, and
@@ -28,7 +28,7 @@ pub struct ModuleRequirement {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModuleCandidate {
     pub subject: ModuleSubject,
-    pub version: ManifestVersion,
+    pub version: ModuleVersion,
     pub requires: Box<[ModuleRequirement]>,
     pub origin: Box<str>,
 }
@@ -101,7 +101,7 @@ fn encode_candidate(encoded: &mut Vec<u8>, candidate: &ModuleCandidate) {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModuleSelection {
     pub subject: ModuleSubject,
-    pub version: ManifestVersion,
+    pub version: ModuleVersion,
 }
 
 /// One decided subject on the trail out of a solve: how many candidates

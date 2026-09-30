@@ -1,7 +1,7 @@
 //! A release line: what one version of one subject is, which publisher
 //! key asserts it, and where the signature over that claim sits.
 
-use pith_hir::ManifestVersion;
+use pith_hir::ModuleVersion;
 use pith_ids::ContentDigest;
 
 use super::super::keys::{Detached, Public, Signing};
@@ -11,7 +11,7 @@ use crate::ModuleRequirement;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Release {
-    pub(super) version: ManifestVersion,
+    pub(super) version: ModuleVersion,
     pub(super) requires: Box<[ModuleRequirement]>,
     pub(super) pin: Pin,
     pub(super) tree: ContentDigest,
@@ -22,7 +22,7 @@ pub struct Release {
 
 impl Release {
     #[must_use]
-    pub fn version(&self) -> &ManifestVersion {
+    pub fn version(&self) -> &ModuleVersion {
         &self.version
     }
 
@@ -86,7 +86,7 @@ impl Release {
     /// [`Self::render_unsigned`], and the host's admission time.
     #[must_use]
     pub fn from_claims(
-        version: ManifestVersion,
+        version: ModuleVersion,
         requires: Box<[ModuleRequirement]>,
         pin: Pin,
         tree: ContentDigest,
@@ -109,7 +109,7 @@ impl Release {
     /// everything but itself and the admission time, which arrive after it.
     #[must_use]
     pub fn signed(
-        version: ManifestVersion,
+        version: ModuleVersion,
         requires: Box<[ModuleRequirement]>,
         pin: Pin,
         tree: ContentDigest,
@@ -130,7 +130,7 @@ impl Release {
 }
 
 fn unsigned(
-    version: &ManifestVersion,
+    version: &ModuleVersion,
     requires: &[ModuleRequirement],
     pin: &Pin,
     tree: ContentDigest,
@@ -167,16 +167,16 @@ mod tests {
     fn signed_release() -> Release {
         let publisher = Signing::from_seed([3; ed25519_dalek::SECRET_KEY_LENGTH]);
         Release::signed(
-            ManifestVersion::parse("1.2.0").unwrap(),
+            ModuleVersion::parse("1.2.0").unwrap(),
             Box::new([ModuleRequirement {
                 subject: pith_hir::ModuleSubject::parse("example/dep").unwrap(),
                 range: pith_hir::VersionRange::Between {
                     lower: pith_hir::VersionBound {
-                        version: ManifestVersion::parse("1.2").unwrap(),
+                        version: ModuleVersion::parse("1.2").unwrap(),
                         inclusive: true,
                     },
                     upper: pith_hir::VersionBound {
-                        version: ManifestVersion::parse("2.0").unwrap(),
+                        version: ModuleVersion::parse("2.0").unwrap(),
                         inclusive: false,
                     },
                 },

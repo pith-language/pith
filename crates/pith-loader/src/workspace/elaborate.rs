@@ -154,19 +154,18 @@ impl Workspace {
     }
 }
 
-/// Elaborate one module under the environment its own manifest declared.
+/// Elaborate one module under the environment its own inputs declared.
 fn elaborate_one(
     module: &ResolvedModule,
     environment: &crate::ImportEnv,
 ) -> Result<LoadedModule, Box<[Diag]>> {
-    let parsed =
-        crate::source::parse_module_sources(&module.subject().spelling(), module.sources());
+    let parsed = crate::source::parse_project_files(&module.subject().spelling(), module.files());
     crate::load::elaborate_module(parsed, environment)
 }
 
-/// The environment a module elaborates under: its own `use` clauses
-/// resolved against its dependencies. `None` when a dependency did not
-/// elaborate, so the consumer is not blamed for an upstream refusal.
+/// The environment a module elaborates under: its own inputs resolved
+/// against its dependencies. `None` when a dependency did not elaborate,
+/// so the consumer is not blamed for an upstream refusal.
 fn binding_environment(
     module: &ResolvedModule,
     resolved: &[(&ResolvedModule, Outcome)],

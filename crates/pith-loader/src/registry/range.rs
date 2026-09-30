@@ -4,7 +4,7 @@
 //! closed constructor set reads and writes without loss, and a range is
 //! always one token wide.
 
-use pith_hir::{ManifestVersion, VersionBound, VersionRange};
+use pith_hir::{ModuleVersion, VersionBound, VersionRange};
 
 use super::token::{Malformed, Token};
 
@@ -47,7 +47,7 @@ pub(crate) fn parse(token: &Token) -> Result<VersionRange, Malformed> {
     let mut edges = Vec::new();
     for edge in token.spelling().split(',') {
         let bound = |spelling: &str| {
-            ManifestVersion::parse(spelling).map_err(|_| {
+            ModuleVersion::parse(spelling).map_err(|_| {
                 refuse(format!(
                     "the range edge `{edge}` bounds with a dotted numeric version"
                 ))
@@ -115,18 +115,18 @@ pub(crate) fn parse(token: &Token) -> Result<VersionRange, Malformed> {
 }
 
 enum Edge {
-    Exactly(ManifestVersion),
+    Exactly(ModuleVersion),
     AtLeast {
         inclusive: bool,
-        version: ManifestVersion,
+        version: ModuleVersion,
     },
     AtMost {
         inclusive: bool,
-        version: ManifestVersion,
+        version: ModuleVersion,
     },
 }
 
-fn bound_of(inclusive: &bool, version: &ManifestVersion) -> VersionBound {
+fn bound_of(inclusive: &bool, version: &ModuleVersion) -> VersionBound {
     VersionBound {
         version: version.clone(),
         inclusive: *inclusive,
@@ -140,7 +140,7 @@ mod tests {
 
     #[test]
     fn range_tokens_round_trip_over_the_constructor_set() {
-        let version = |spelling: &str| ManifestVersion::parse(spelling).unwrap();
+        let version = |spelling: &str| ModuleVersion::parse(spelling).unwrap();
         let bound = |spelling: &str, inclusive: bool| VersionBound {
             version: version(spelling),
             inclusive,
