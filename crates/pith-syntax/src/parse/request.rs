@@ -252,13 +252,13 @@ impl Parser<'_> {
     }
 
     /// The element type a comprehension's annotation carries, which is the
-    /// only spelling an elided `ask all [ … ]` can read.
+    /// only spelling an elided `ask all [ ... ]` can read.
     fn element_of(&mut self, expected: Option<SurfaceTypeId>) -> Option<SurfaceTypeId> {
         let Some(expected) = expected else {
             self.diagnostics.push(error(
                 FrontendCode::HeadlessRequest,
                 self.peek().span,
-                "a comprehension with no head type reads it from a `List<…>` annotation on the \
+                "a comprehension with no head type reads it from a `List<...>` annotation on the \
                  position that checks it",
                 self.source,
             ));
@@ -274,7 +274,7 @@ impl Parser<'_> {
                 self.diagnostics.push(error(
                     FrontendCode::HeadlessRequest,
                     self.peek().span,
-                    "eliding a comprehension's head type needs a `List<…>` annotation to read it \
+                    "eliding a comprehension's head type needs a `List<...>` annotation to read it \
                      from",
                     self.source,
                 ));

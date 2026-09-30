@@ -218,7 +218,7 @@ impl Parser<'_> {
                 self.diagnostics.push(error(
                     FrontendCode::UnexpectedToken,
                     *span,
-                    "a binder group pairs with `ask all ( … )`",
+                    "a binder group pairs with `ask all ( ... )`",
                     self.source,
                 ));
                 None
