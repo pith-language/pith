@@ -1,48 +1,16 @@
 use pith_core::{BodyExpr, Value};
 
 use super::evaluate::evaluate;
-use super::state::{Environment, Evaluation};
+use super::state::{Environment, Evaluation, Frame};
 
-pub(super) fn evaluate_expressions(
-    expressions: Box<[BodyExpr]>,
-    environment: Environment,
-) -> Evaluation<Vec<Value>> {
-    continue_expressions(expressions.into_iter(), environment, Vec::new())
-}
-
-fn continue_expressions(
-    mut expressions: std::vec::IntoIter<BodyExpr>,
-    environment: Environment,
-    mut values: Vec<Value>,
-) -> Evaluation<Vec<Value>> {
-    loop {
-        let Some(expression) = expressions.next() else {
-            return Evaluation::Complete(values);
-        };
-        match evaluate(expression, environment.clone()) {
-            Evaluation::Complete(value) => values.push(value),
-            Evaluation::Yield { step, resume } => {
-                return Evaluation::Yield {
-                    step,
-                    resume: Box::new(move |resumption| {
-                        resume(resumption).and_then(move |value| {
-                            values.push(value);
-                            continue_expressions(expressions, environment, values)
-                        })
-                    }),
-                };
-            }
-            Evaluation::Failed(diagnostics) => return Evaluation::Failed(diagnostics),
-        }
-    }
-}
-
+/// Fold `values` left to right under `step`, starting from `accumulator`.
+/// The element sits at `Bound(0)`, the accumulator at `Bound(1)`.
 pub(super) fn continue_fold(
     mut values: std::vec::IntoIter<Value>,
     mut accumulator: Value,
     step: BodyExpr,
     environment: Environment,
-) -> Evaluation<Value> {
+) -> Evaluation {
     loop {
         let Some(element) = values.next() else {
             return Evaluation::Complete(accumulator);
@@ -52,13 +20,14 @@ pub(super) fn continue_fold(
             Evaluation::Complete(next) => accumulator = next,
             Evaluation::Yield {
                 step: yielded,
-                resume,
+                then,
             } => {
                 return Evaluation::Yield {
                     step: yielded,
-                    resume: Box::new(move |resumption| {
-                        resume(resumption)
-                            .and_then(move |next| continue_fold(values, next, step, environment))
+                    then: then.pushed(Frame::FoldStep {
+                        pending: values,
+                        step,
+                        environment,
                     }),
                 };
             }
@@ -67,12 +36,13 @@ pub(super) fn continue_fold(
     }
 }
 
+/// Sort `values` by the canonical encoding of the key `key` maps each to.
 pub(super) fn evaluate_sort_keys(
     mut values: std::vec::IntoIter<Value>,
     key: BodyExpr,
     environment: Environment,
     mut keyed: Vec<(Vec<u8>, Value)>,
-) -> Evaluation<Value> {
+) -> Evaluation {
     loop {
         let Some(value) = values.next() else {
             keyed.sort_by(|left, right| left.0.cmp(&right.0));
@@ -84,14 +54,15 @@ pub(super) fn evaluate_sort_keys(
             Evaluation::Complete(sort_key) => {
                 keyed.push((sort_key.encode_canonical(), value));
             }
-            Evaluation::Yield { step, resume } => {
+            Evaluation::Yield { step, then } => {
                 return Evaluation::Yield {
                     step,
-                    resume: Box::new(move |resumption| {
-                        resume(resumption).and_then(move |sort_key| {
-                            keyed.push((sort_key.encode_canonical(), value));
-                            evaluate_sort_keys(values, key, environment, keyed)
-                        })
+                    then: then.pushed(Frame::SortKey {
+                        pending: values,
+                        key,
+                        environment,
+                        keyed,
+                        element: value,
                     }),
                 };
             }

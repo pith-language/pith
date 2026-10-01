@@ -8,7 +8,7 @@ use pith_diag::{Diag, DiagnosticSink, EngineCode, PithResult, Span};
 
 use crate::{PureRule, PureRuleFrame, PureStep, Resumption};
 use evaluate::evaluate;
-use state::{Environment, Evaluation, Resume};
+use state::{Cont, Environment, Evaluation};
 
 pub(crate) struct RepresentedRule {
     body: RuleBody,
@@ -36,7 +36,7 @@ enum FrameState {
         expression: BodyExpr,
         environment: Environment,
     },
-    Suspended(Resume<Value>),
+    Suspended(Cont),
     Complete,
 }
 
@@ -55,7 +55,7 @@ impl PureRuleFrame for RepresentedFrame {
                 },
                 None,
             ) => evaluate(expression, environment),
-            (FrameState::Suspended(resume), Some(resumption)) => resume(resumption),
+            (FrameState::Suspended(cont), Some(resumption)) => cont.resume(resumption),
             (FrameState::Ready { .. }, Some(_)) => {
                 return Err(internal_failure(
                     "represented rule received a resumption before yielding",
@@ -75,8 +75,8 @@ impl PureRuleFrame for RepresentedFrame {
 
         match evaluation {
             Evaluation::Complete(value) => Ok(PureStep::Complete(value)),
-            Evaluation::Yield { step, resume } => {
-                self.state = FrameState::Suspended(resume);
+            Evaluation::Yield { step, then } => {
+                self.state = FrameState::Suspended(then);
                 Ok(step)
             }
             Evaluation::Failed(diagnostics) => Err(diagnostics),

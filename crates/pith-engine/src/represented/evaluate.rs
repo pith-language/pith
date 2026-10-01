@@ -1,31 +1,89 @@
-use pith_core::{Action, BodyExpr, Int, MatchArm, Observation, Pure, RecordField, Value};
+use std::collections::VecDeque;
+
+use pith_core::{BodyExpr, EffectKind, Int, MatchArm, RecordField, Value};
 use pith_diag::DiagnosticSink;
 
 use crate::{PureStep, Resumption};
 
-use super::iteration::{continue_fold, evaluate_expressions, evaluate_sort_keys};
+use super::iteration::{continue_fold, evaluate_sort_keys};
 use super::request::{
-    evaluate_each_request, evaluate_request, evaluate_requests, yield_many, yield_one,
+    await_all, await_each, await_request, drive_dynamic_batch, drive_request_inputs,
+    drive_static_batch,
 };
-use super::state::{Environment, Evaluation};
+use super::state::{BinaryFinish, Cont, Environment, Evaluation, Frame, ResumeFrame};
 use super::{body_failure, internal_failure};
 
-pub(super) fn evaluate(expression: BodyExpr, environment: Environment) -> Evaluation<Value> {
-    match expression {
-        BodyExpr::Literal(value) => Evaluation::Complete(value),
-        BodyExpr::Bound(index) => environment.get(index).map_or_else(
-            || internal("represented body referenced an unavailable binder"),
-            Evaluation::Complete,
-        ),
-        BodyExpr::Let { bound, rest } => evaluate(*bound, environment.clone())
-            .and_then(move |value| evaluate(*rest, environment.with(value))),
-        BodyExpr::Fail { message } => evaluate(*message, environment).and_then(|value| {
-            expect_text(value).map_or_else(Evaluation::Failed, |message| {
-                Evaluation::Failed(body_failure(message))
-            })
+impl Evaluation {
+    /// Sequence `frame` behind `self`: over a completed value the frame runs
+    /// at once, onto a suspension it is pushed, and through a failure it is
+    /// dropped.
+    #[must_use]
+    pub(super) fn bind(self, frame: Frame) -> Self {
+        match self {
+            Self::Complete(value) => apply(frame, value),
+            Self::Yield { step, then } => Self::Yield {
+                step,
+                then: then.pushed(frame),
+            },
+            Self::Failed(diagnostics) => Self::Failed(diagnostics),
+        }
+    }
+}
+
+impl Cont {
+    /// Resume a suspension: the head frame handles the engine's resumption,
+    /// then the frames above it run innermost-first until the body yields
+    /// again, completes, or fails.
+    #[must_use]
+    pub(super) fn resume(self, resumption: Resumption) -> Evaluation {
+        let (head, frames) = self.into_parts();
+        let evaluation = match head {
+            ResumeFrame::One { body, environment } => match resumption {
+                Resumption::One(value) => evaluate(*body, environment.with(value)),
+                Resumption::Many(_) => internal("single request resumed with a batch"),
+            },
+            ResumeFrame::PerRequest { body, environment } => match resumption {
+                Resumption::Many(values) => {
+                    evaluate(*body, environment.with_all(values.into_iter().rev()))
+                }
+                Resumption::One(_) => internal("static batch resumed with one value"),
+            },
+            ResumeFrame::AsList { body, environment } => match resumption {
+                Resumption::Many(values) => evaluate(*body, environment.with(Value::List(values))),
+                Resumption::One(_) => internal("dynamic batch resumed with one value"),
+            },
+        };
+        advance(evaluation, frames)
+    }
+}
+
+/// Run `evaluation` under `frames`, the sequencing frames above it: a
+/// completed value passes to the next frame, a suspension keeps its
+/// continuation, a failure ends the run.
+fn advance(mut evaluation: Evaluation, mut frames: VecDeque<Frame>) -> Evaluation {
+    loop {
+        evaluation = match evaluation {
+            Evaluation::Complete(value) => match frames.pop_front() {
+                Some(frame) => apply(frame, value),
+                None => return Evaluation::Complete(value),
+            },
+            Evaluation::Yield { step, mut then } => {
+                then.append_frames(frames);
+                return Evaluation::Yield { step, then };
+            }
+            Evaluation::Failed(diagnostics) => return Evaluation::Failed(diagnostics),
+        };
+    }
+}
+
+/// Hand `value`, the value the work beneath `frame` produced, to that frame.
+fn apply(frame: Frame, value: Value) -> Evaluation {
+    match frame {
+        Frame::Let { rest, environment } => evaluate(*rest, environment.with(value)),
+        Frame::FailMessage => expect_text(value).map_or_else(Evaluation::Failed, |message| {
+            Evaluation::Failed(body_failure(message))
         }),
-        BodyExpr::Record { fields } => evaluate_record(fields, environment),
-        BodyExpr::Field { record, name } => evaluate(*record, environment).and_then(move |value| {
+        Frame::Field { name } => {
             let Value::Record(fields) = value else {
                 return internal("validated field access received a non-record value");
             };
@@ -36,148 +94,28 @@ pub(super) fn evaluate(expression: BodyExpr, environment: Environment) -> Evalua
                     || internal("validated field access could not find its field"),
                     |field| Evaluation::Complete(field.payload),
                 )
-        }),
-        BodyExpr::MakeSum {
+        }
+        Frame::MakeSum {
             declared,
             constructor,
-            payload,
-        } => match payload {
-            Some(payload) => evaluate(*payload, environment).and_then(move |payload| {
-                Evaluation::Complete(Value::Sum {
-                    type_name: declared.coordinate.spelling().into(),
-                    constructor,
-                    payload: Some(Box::new(payload)),
-                })
-            }),
-            None => Evaluation::Complete(Value::Sum {
-                type_name: declared.coordinate.spelling().into(),
-                constructor,
-                payload: None,
-            }),
-        },
-        BodyExpr::Match { scrutinee, arms } => evaluate(*scrutinee, environment.clone())
-            .and_then(move |value| evaluate_match(value, arms, environment)),
-        BodyExpr::Wrap {
-            declared,
-            representation,
-        } => evaluate(*representation, environment).and_then(move |representation| {
-            Evaluation::Complete(Value::Nominal {
-                name: declared.coordinate.spelling().into(),
-                representation: Box::new(representation),
-            })
+        } => Evaluation::Complete(Value::Sum {
+            type_name: declared.coordinate.spelling().into(),
+            constructor,
+            payload: Some(Box::new(value)),
         }),
-        BodyExpr::Unwrap { nominal } => evaluate(*nominal, environment).and_then(|value| {
+        Frame::Match { arms, environment } => evaluate_match(value, arms, environment),
+        Frame::Wrap { declared } => Evaluation::Complete(Value::Nominal {
+            name: declared.coordinate.spelling().into(),
+            representation: Box::new(value),
+        }),
+        Frame::Unwrap => {
             let Value::Nominal { representation, .. } = value else {
                 return internal("validated unwrap received a non-nominal value");
             };
             Evaluation::Complete(*representation)
-        }),
-        BodyExpr::List { items, .. } => evaluate_expressions(items, environment)
-            .and_then(|items| Evaluation::Complete(Value::List(items.into_boxed_slice()))),
-        BodyExpr::Cons { head, tail } => {
-            evaluate(*head, environment.clone()).and_then(move |head| {
-                evaluate(*tail, environment).and_then(move |tail| {
-                    let Value::List(tail) = tail else {
-                        return internal("validated cons received a non-list tail");
-                    };
-                    let mut values = Vec::with_capacity(tail.len().saturating_add(1));
-                    values.push(head);
-                    values.extend(tail);
-                    Evaluation::Complete(Value::List(values.into_boxed_slice()))
-                })
-            })
         }
-        BodyExpr::MatchList { list, empty, cons } => {
-            evaluate(*list, environment.clone()).and_then(move |value| {
-                let Value::List(values) = value else {
-                    return internal("validated list match received a non-list value");
-                };
-                let mut values = values.into_iter();
-                match values.next() {
-                    Some(head) => evaluate(
-                        *cons,
-                        environment.with(Value::List(values.collect())).with(head),
-                    ),
-                    None => evaluate(*empty, environment),
-                }
-            })
-        }
-        BodyExpr::Append { left, right } => {
-            evaluate(*left, environment.clone()).and_then(move |left| {
-                evaluate(*right, environment).and_then(move |right| {
-                    let (Value::List(left), Value::List(right)) = (left, right) else {
-                        return internal("validated append received a non-list value");
-                    };
-                    let mut values = left.into_vec();
-                    values.extend(right);
-                    Evaluation::Complete(Value::List(values.into_boxed_slice()))
-                })
-            })
-        }
-        BodyExpr::Fold { source, init, step } => {
-            evaluate(*source, environment.clone()).and_then(move |source| {
-                let Value::List(values) = source else {
-                    return internal("validated fold received a non-list source");
-                };
-                evaluate(*init, environment.clone()).and_then(move |initial| {
-                    continue_fold(values.into_iter(), initial, *step, environment)
-                })
-            })
-        }
-        BodyExpr::SortBy { list, key } => {
-            evaluate(*list, environment.clone()).and_then(move |list| {
-                let Value::List(values) = list else {
-                    return internal("validated sort received a non-list value");
-                };
-                evaluate_sort_keys(values.into_iter(), *key, environment, Vec::new())
-            })
-        }
-        BodyExpr::If {
-            condition,
-            then,
-            otherwise,
-        } => evaluate(*condition, environment.clone()).and_then(move |condition| {
-            let Value::Bool(condition) = condition else {
-                return internal("validated condition received a non-boolean value");
-            };
-            if condition {
-                evaluate(*then, environment)
-            } else {
-                evaluate(*otherwise, environment)
-            }
-        }),
-        BodyExpr::Equal { left, right } => {
-            evaluate_binary(*left, *right, environment, |left, right| {
-                Evaluation::Complete(Value::Bool(left == right))
-            })
-        }
-        BodyExpr::IntAdd { left, right } => {
-            evaluate_integers(*left, *right, environment, |left, right| left.added(&right))
-        }
-        BodyExpr::IntSubtract { left, right } => {
-            evaluate_integers(*left, *right, environment, |left, right| {
-                left.subtracted(&right)
-            })
-        }
-        BodyExpr::IntMultiply { left, right } => {
-            evaluate_integers(*left, *right, environment, |left, right| {
-                left.multiplied(&right)
-            })
-        }
-        BodyExpr::Describe { value } => evaluate(*value, environment)
-            .and_then(|value| Evaluation::Complete(Value::Text(value.describe().into()))),
-        BodyExpr::TextConcat { left, right } => {
-            evaluate_binary(*left, *right, environment, |left, right| {
-                let (Ok(left), Ok(right)) = (expect_text(left), expect_text(right)) else {
-                    return internal("validated text concatenation received a non-text value");
-                };
-                let mut joined = String::with_capacity(left.len().saturating_add(right.len()));
-                joined.push_str(&left);
-                joined.push_str(&right);
-                Evaluation::Complete(Value::Text(joined.into_boxed_str()))
-            })
-        }
-        BodyExpr::TextOfBytes { bytes } => evaluate(*bytes, environment).and_then(|value| {
+        Frame::Describe => Evaluation::Complete(Value::Text(value.describe().into())),
+        Frame::TextOfBytes => {
             let Value::Bytes(bytes) = value else {
                 return internal("validated UTF-8 decoding received a non-bytes value");
             };
@@ -188,121 +126,319 @@ pub(super) fn evaluate(expression: BodyExpr, environment: Environment) -> Evalua
                     error.utf8_error().valid_up_to()
                 ))),
             }
+        }
+        Frame::If {
+            then,
+            otherwise,
+            environment,
+        } => {
+            let Value::Bool(condition) = value else {
+                return internal("validated condition received a non-boolean value");
+            };
+            if condition {
+                evaluate(*then, environment)
+            } else {
+                evaluate(*otherwise, environment)
+            }
+        }
+        Frame::ConsHead { tail, environment } => {
+            evaluate(*tail, environment).bind(Frame::ConsTail { head: value })
+        }
+        Frame::ConsTail { head } => {
+            let Value::List(tail) = value else {
+                return internal("validated cons received a non-list tail");
+            };
+            let mut values = Vec::with_capacity(tail.len().saturating_add(1));
+            values.push(head);
+            values.extend(tail);
+            Evaluation::Complete(Value::List(values.into_boxed_slice()))
+        }
+        Frame::MatchList {
+            cons,
+            empty,
+            environment,
+        } => {
+            let Value::List(values) = value else {
+                return internal("validated list match received a non-list value");
+            };
+            let mut values = values.into_iter();
+            match values.next() {
+                Some(head) => evaluate(
+                    *cons,
+                    environment.with(Value::List(values.collect())).with(head),
+                ),
+                None => evaluate(*empty, environment),
+            }
+        }
+        Frame::BinaryLeft {
+            finish,
+            right,
+            environment,
+        } => evaluate(right, environment).bind(Frame::BinaryRight {
+            finish,
+            left: value,
         }),
-        BodyExpr::TextBreak { text, separator } => {
-            evaluate_binary(*text, *separator, environment, |text, separator| {
-                let (Ok(text), Ok(separator)) = (expect_text(text), expect_text(separator)) else {
-                    return internal("validated text break received a non-text value");
-                };
-                // An empty separator never matches anything, and Rust's
-                // `str::split` panics on one, so handle the empty case first.
-                let parts: Vec<Value> = if separator.is_empty() {
-                    vec![Value::Text(text)]
-                } else {
-                    text.split(separator.as_ref())
-                        .map(|part| Value::Text(part.into()))
-                        .collect()
-                };
-                Evaluation::Complete(Value::List(parts.into_boxed_slice()))
+        Frame::BinaryRight { finish, left } => finish_binary(finish, left, value),
+        Frame::FoldSource {
+            init,
+            step,
+            environment,
+        } => {
+            let Value::List(values) = value else {
+                return internal("validated fold received a non-list source");
+            };
+            evaluate(*init, environment.clone()).bind(Frame::FoldStep {
+                pending: values.into_iter(),
+                step: *step,
+                environment,
             })
         }
-        BodyExpr::TextJoin { list, separator } => {
-            evaluate_binary(*list, *separator, environment, |list, separator| {
-                let (Ok(list), Ok(separator)) = (expect_text_list(list), expect_text(separator))
-                else {
-                    return internal("validated text join received a non-list or non-text value");
-                };
-                let mut joined = String::new();
-                for (index, field) in list.iter().enumerate() {
-                    if index > 0 {
-                        joined.push_str(&separator);
-                    }
-                    joined.push_str(field);
-                }
-                Evaluation::Complete(Value::Text(joined.into_boxed_str()))
-            })
+        Frame::FoldStep {
+            pending,
+            step,
+            environment,
+        } => continue_fold(pending, value, step, environment),
+        Frame::SortBy { key, environment } => {
+            let Value::List(values) = value else {
+                return internal("validated sort received a non-list value");
+            };
+            evaluate_sort_keys(values.into_iter(), *key, environment, Vec::new())
         }
-        BodyExpr::Need { request, resume } => {
-            evaluate_request::<Pure>(request, environment.clone())
-                .and_then(move |request| yield_one(PureStep::Need(request), *resume, environment))
+        Frame::SortKey {
+            pending,
+            key,
+            environment,
+            mut keyed,
+            element,
+        } => {
+            keyed.push((value.encode_canonical(), element));
+            evaluate_sort_keys(pending, key, environment, keyed)
         }
-        BodyExpr::NeedAll { requests, resume } => {
-            evaluate_requests::<Pure>(requests, environment.clone()).and_then(move |requests| {
-                yield_many(
-                    PureStep::NeedAll(requests.into_boxed_slice()),
-                    *resume,
-                    environment,
-                )
-            })
+        Frame::ListItems {
+            pending,
+            environment,
+            mut values,
+        } => {
+            values.push(value);
+            drive_items(pending, environment, values)
         }
-        BodyExpr::NeedEach {
-            source,
-            request,
+        Frame::RecordFields {
+            names,
+            pending,
+            environment,
+            mut values,
+        } => {
+            values.push(value);
+            drive_fields(names, pending, environment, values)
+        }
+        Frame::RequestInputs {
+            kind,
             resume,
-        } => evaluate(*source, environment.clone()).and_then(move |source| {
-            let Value::List(values) = source else {
+            environment,
+            mut draft,
+        } => {
+            draft.values.push(value);
+            drive_request_inputs(kind, resume, environment, draft)
+        }
+        Frame::StaticBatch {
+            pending_requests,
+            environment,
+            resume,
+            evaluated,
+            mut draft,
+        } => {
+            draft.values.push(value);
+            drive_static_batch(pending_requests, environment, resume, evaluated, draft)
+        }
+        Frame::DynamicBatch {
+            pending_values,
+            template,
+            environment,
+            element_environment,
+            resume,
+            evaluated,
+            mut draft,
+        } => {
+            draft.values.push(value);
+            drive_dynamic_batch(
+                pending_values,
+                template,
+                environment,
+                element_environment,
+                resume,
+                evaluated,
+                draft,
+            )
+        }
+        Frame::EachSource {
+            template,
+            environment,
+            resume,
+        } => {
+            let Value::List(values) = value else {
                 return internal("validated dynamic batch received a non-list source");
             };
-            evaluate_each_request(values.into_iter(), request, environment.clone(), Vec::new())
-                .and_then(move |requests| {
-                    if requests.is_empty() {
-                        return evaluate(*resume, environment.with(Value::List(Box::new([]))));
-                    }
-                    Evaluation::Yield {
-                        step: PureStep::NeedAll(requests.into_boxed_slice()),
-                        resume: Box::new(move |resumption| match resumption {
-                            Resumption::Many(values) => {
-                                evaluate(*resume, environment.with(Value::List(values)))
-                            }
-                            Resumption::One(_) => internal("dynamic batch resumed with one value"),
-                        }),
-                    }
-                })
-        }),
-        BodyExpr::NeedBlob { content, resume } => {
-            evaluate(*content, environment.clone()).and_then(move |content| {
-                let Value::Blob(content) = content else {
-                    return internal("validated content request received a non-blob value");
-                };
-                yield_one(PureStep::NeedBlob(content), *resume, environment)
-            })
+            await_each(values.into_iter(), template, environment, resume)
         }
-        BodyExpr::NeedAction { request, resume } => {
-            evaluate_request::<Action>(request, environment.clone()).and_then(move |request| {
-                yield_one(PureStep::NeedAction(request), *resume, environment)
-            })
-        }
-        BodyExpr::NeedObservation { request, resume } => {
-            evaluate_request::<Observation>(request, environment.clone()).and_then(move |request| {
-                yield_one(PureStep::NeedObservation(request), *resume, environment)
-            })
+        Frame::BlobContent {
+            resume,
+            environment,
+        } => {
+            let Value::Blob(content) = value else {
+                return internal("validated content request received a non-blob value");
+            };
+            Evaluation::Yield {
+                step: PureStep::NeedBlob(content),
+                then: Cont::awaiting(ResumeFrame::One {
+                    body: resume,
+                    environment,
+                }),
+            }
         }
     }
 }
 
-fn evaluate_record(
-    fields: Box<[RecordField<BodyExpr>]>,
-    environment: Environment,
-) -> Evaluation<Value> {
+/// Evaluate one pure expression under `environment` until it completes,
+/// suspends, or fails.
+pub(super) fn evaluate(expression: BodyExpr, environment: Environment) -> Evaluation {
+    match expression {
+        BodyExpr::Literal(value) => Evaluation::Complete(value),
+        BodyExpr::Bound(index) => environment.get(index).map_or_else(
+            || internal("represented body referenced an unavailable binder"),
+            Evaluation::Complete,
+        ),
+        BodyExpr::Let { bound, rest } => {
+            evaluate(*bound, environment.clone()).bind(Frame::Let { rest, environment })
+        }
+        BodyExpr::Fail { message } => evaluate(*message, environment).bind(Frame::FailMessage),
+        BodyExpr::Record { fields } => evaluate_record(fields, environment),
+        BodyExpr::Field { record, name } => {
+            evaluate(*record, environment).bind(Frame::Field { name })
+        }
+        BodyExpr::MakeSum {
+            declared,
+            constructor,
+            payload,
+        } => match payload {
+            Some(payload) => evaluate(*payload, environment).bind(Frame::MakeSum {
+                declared,
+                constructor,
+            }),
+            None => Evaluation::Complete(Value::Sum {
+                type_name: declared.coordinate.spelling().into(),
+                constructor,
+                payload: None,
+            }),
+        },
+        BodyExpr::Match { scrutinee, arms } => {
+            evaluate(*scrutinee, environment.clone()).bind(Frame::Match { arms, environment })
+        }
+        BodyExpr::Wrap {
+            declared,
+            representation,
+        } => evaluate(*representation, environment).bind(Frame::Wrap { declared }),
+        BodyExpr::Unwrap { nominal } => evaluate(*nominal, environment).bind(Frame::Unwrap),
+        BodyExpr::List { items, .. } => drive_items(items.into_iter(), environment, Vec::new()),
+        BodyExpr::Cons { head, tail } => {
+            evaluate(*head, environment.clone()).bind(Frame::ConsHead { tail, environment })
+        }
+        BodyExpr::MatchList { list, empty, cons } => {
+            evaluate(*list, environment.clone()).bind(Frame::MatchList {
+                cons,
+                empty,
+                environment,
+            })
+        }
+        BodyExpr::Append { left, right } => {
+            evaluate_binary(*left, *right, environment, BinaryFinish::Append)
+        }
+        BodyExpr::Fold { source, init, step } => {
+            evaluate(*source, environment.clone()).bind(Frame::FoldSource {
+                init,
+                step,
+                environment,
+            })
+        }
+        BodyExpr::SortBy { list, key } => {
+            evaluate(*list, environment.clone()).bind(Frame::SortBy { key, environment })
+        }
+        BodyExpr::If {
+            condition,
+            then,
+            otherwise,
+        } => evaluate(*condition, environment.clone()).bind(Frame::If {
+            then,
+            otherwise,
+            environment,
+        }),
+        BodyExpr::Equal { left, right } => {
+            evaluate_binary(*left, *right, environment, BinaryFinish::Equal)
+        }
+        BodyExpr::IntAdd { left, right } => {
+            evaluate_binary(*left, *right, environment, BinaryFinish::IntAdd)
+        }
+        BodyExpr::IntSubtract { left, right } => {
+            evaluate_binary(*left, *right, environment, BinaryFinish::IntSubtract)
+        }
+        BodyExpr::IntMultiply { left, right } => {
+            evaluate_binary(*left, *right, environment, BinaryFinish::IntMultiply)
+        }
+        BodyExpr::Describe { value } => evaluate(*value, environment).bind(Frame::Describe),
+        BodyExpr::TextConcat { left, right } => {
+            evaluate_binary(*left, *right, environment, BinaryFinish::TextConcat)
+        }
+        BodyExpr::TextOfBytes { bytes } => evaluate(*bytes, environment).bind(Frame::TextOfBytes),
+        BodyExpr::TextBreak { text, separator } => {
+            evaluate_binary(*text, *separator, environment, BinaryFinish::TextBreak)
+        }
+        BodyExpr::TextJoin { list, separator } => {
+            evaluate_binary(*list, *separator, environment, BinaryFinish::TextJoin)
+        }
+        BodyExpr::Need { request, resume } => {
+            await_request(EffectKind::Pure, request, resume, environment)
+        }
+        BodyExpr::NeedAll { requests, resume } => await_all(requests, resume, environment),
+        BodyExpr::NeedEach {
+            source,
+            request,
+            resume,
+        } => evaluate(*source, environment.clone()).bind(Frame::EachSource {
+            template: request,
+            environment,
+            resume,
+        }),
+        BodyExpr::NeedBlob { content, resume } => {
+            evaluate(*content, environment.clone()).bind(Frame::BlobContent {
+                resume,
+                environment,
+            })
+        }
+        BodyExpr::NeedAction { request, resume } => {
+            await_request(EffectKind::Action, request, resume, environment)
+        }
+        BodyExpr::NeedObservation { request, resume } => {
+            await_request(EffectKind::Observation, request, resume, environment)
+        }
+    }
+}
+
+/// Evaluate a record's field payloads in canonical order, then assemble the
+/// record from the values.
+fn evaluate_record(fields: Box<[RecordField<BodyExpr>]>, environment: Environment) -> Evaluation {
     let (names, expressions): (Vec<_>, Vec<_>) = fields
         .into_iter()
         .map(|field| (field.name, field.payload))
         .unzip();
-    evaluate_expressions(expressions.into_boxed_slice(), environment).and_then(move |values| {
-        let fields = names
-            .into_iter()
-            .zip(values)
-            .map(|(name, payload)| RecordField { name, payload })
-            .collect();
-        Evaluation::Complete(Value::Record(fields))
-    })
+    drive_fields(
+        names.into_iter(),
+        expressions.into_iter(),
+        environment,
+        Vec::new(),
+    )
 }
 
-fn evaluate_match(
-    value: Value,
-    arms: Box<[MatchArm]>,
-    environment: Environment,
-) -> Evaluation<Value> {
+/// Select and run the arm `value`'s constructor picks.
+fn evaluate_match(value: Value, arms: Box<[MatchArm]>, environment: Environment) -> Evaluation {
     let Value::Sum {
         constructor,
         payload,
@@ -320,29 +456,144 @@ fn evaluate_match(
     }
 }
 
+/// Evaluate a list literal's items, collecting the values.
+fn drive_items(
+    mut pending: std::vec::IntoIter<BodyExpr>,
+    environment: Environment,
+    mut values: Vec<Value>,
+) -> Evaluation {
+    loop {
+        let Some(item) = pending.next() else {
+            return Evaluation::Complete(Value::List(values.into_boxed_slice()));
+        };
+        match evaluate(item, environment.clone()) {
+            Evaluation::Complete(value) => values.push(value),
+            Evaluation::Yield { step, then } => {
+                return Evaluation::Yield {
+                    step,
+                    then: then.pushed(Frame::ListItems {
+                        pending,
+                        environment,
+                        values,
+                    }),
+                };
+            }
+            Evaluation::Failed(diagnostics) => return Evaluation::Failed(diagnostics),
+        }
+    }
+}
+
+/// Evaluate a record's field payloads in canonical order, collecting the
+/// values to pair with their names.
+fn drive_fields(
+    names: std::vec::IntoIter<Box<str>>,
+    mut pending: std::vec::IntoIter<BodyExpr>,
+    environment: Environment,
+    mut values: Vec<Value>,
+) -> Evaluation {
+    loop {
+        let Some(expression) = pending.next() else {
+            let fields = names
+                .into_iter()
+                .zip(values)
+                .map(|(name, payload)| RecordField { name, payload })
+                .collect();
+            return Evaluation::Complete(Value::Record(fields));
+        };
+        match evaluate(expression, environment.clone()) {
+            Evaluation::Complete(value) => values.push(value),
+            Evaluation::Yield { step, then } => {
+                return Evaluation::Yield {
+                    step,
+                    then: then.pushed(Frame::RecordFields {
+                        names,
+                        pending,
+                        environment,
+                        values,
+                    }),
+                };
+            }
+            Evaluation::Failed(diagnostics) => return Evaluation::Failed(diagnostics),
+        }
+    }
+}
+
+/// Evaluate the left operand of a two-operand expression, holding the right
+/// and the finish for when both have landed.
 fn evaluate_binary(
     left: BodyExpr,
     right: BodyExpr,
     environment: Environment,
-    combine: impl FnOnce(Value, Value) -> Evaluation<Value> + Send + 'static,
-) -> Evaluation<Value> {
-    evaluate(left, environment.clone()).and_then(move |left| {
-        evaluate(right, environment).and_then(move |right| combine(left, right))
+    finish: BinaryFinish,
+) -> Evaluation {
+    evaluate(left, environment.clone()).bind(Frame::BinaryLeft {
+        finish,
+        right,
+        environment,
     })
 }
 
-fn evaluate_integers(
-    left: BodyExpr,
-    right: BodyExpr,
-    environment: Environment,
-    operation: impl FnOnce(Int, Int) -> Int + Send + 'static,
-) -> Evaluation<Value> {
-    evaluate_binary(left, right, environment, move |left, right| {
-        let (Value::Int(left), Value::Int(right)) = (left, right) else {
-            return internal("validated integer operation received a non-integer value");
-        };
-        Evaluation::Complete(Value::Int(operation(left, right)))
-    })
+/// Combine a two-operand expression's landed operands.
+fn finish_binary(finish: BinaryFinish, left: Value, right: Value) -> Evaluation {
+    match finish {
+        BinaryFinish::Equal => Evaluation::Complete(Value::Bool(left == right)),
+        BinaryFinish::IntAdd => finish_integers(Int::added, left, right),
+        BinaryFinish::IntSubtract => finish_integers(Int::subtracted, left, right),
+        BinaryFinish::IntMultiply => finish_integers(Int::multiplied, left, right),
+        BinaryFinish::TextConcat => {
+            let (Ok(left), Ok(right)) = (expect_text(left), expect_text(right)) else {
+                return internal("validated text concatenation received a non-text value");
+            };
+            let mut joined = String::with_capacity(left.len().saturating_add(right.len()));
+            joined.push_str(&left);
+            joined.push_str(&right);
+            Evaluation::Complete(Value::Text(joined.into_boxed_str()))
+        }
+        BinaryFinish::TextBreak => {
+            let (Ok(text), Ok(separator)) = (expect_text(left), expect_text(right)) else {
+                return internal("validated text break received a non-text value");
+            };
+            // An empty separator never matches anything, and Rust's
+            // `str::split` panics on one, so handle the empty case first.
+            let parts: Vec<Value> = if separator.is_empty() {
+                vec![Value::Text(text)]
+            } else {
+                text.split(separator.as_ref())
+                    .map(|part| Value::Text(part.into()))
+                    .collect()
+            };
+            Evaluation::Complete(Value::List(parts.into_boxed_slice()))
+        }
+        BinaryFinish::TextJoin => {
+            let (Ok(list), Ok(separator)) = (expect_text_list(left), expect_text(right)) else {
+                return internal("validated text join received a non-list or non-text value");
+            };
+            let mut joined = String::new();
+            for (index, field) in list.iter().enumerate() {
+                if index > 0 {
+                    joined.push_str(&separator);
+                }
+                joined.push_str(field);
+            }
+            Evaluation::Complete(Value::Text(joined.into_boxed_str()))
+        }
+        BinaryFinish::Append => {
+            let (Value::List(left), Value::List(right)) = (left, right) else {
+                return internal("validated append received a non-list value");
+            };
+            let mut values = left.into_vec();
+            values.extend(right);
+            Evaluation::Complete(Value::List(values.into_boxed_slice()))
+        }
+    }
+}
+
+/// Run a total integer operation over two landed operands.
+fn finish_integers(operation: fn(&Int, &Int) -> Int, left: Value, right: Value) -> Evaluation {
+    let (Value::Int(left), Value::Int(right)) = (left, right) else {
+        return internal("validated integer operation received a non-integer value");
+    };
+    Evaluation::Complete(Value::Int(operation(&left, &right)))
 }
 
 fn expect_text(value: Value) -> Result<Box<str>, DiagnosticSink> {
@@ -369,6 +620,6 @@ fn expect_text_list(value: Value) -> Result<Box<[Box<str>]>, DiagnosticSink> {
     }
 }
 
-pub(super) fn internal<T>(message: &'static str) -> Evaluation<T> {
+pub(super) fn internal(message: &'static str) -> Evaluation {
     Evaluation::Failed(internal_failure(message))
 }
