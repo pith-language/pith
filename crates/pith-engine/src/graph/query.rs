@@ -26,9 +26,10 @@ impl<'engine, S: EngineStateReader + ?Sized> EngineQuery<'engine, S> {
         request.validate_inputs()?;
         let rule = self
             .engine
+            .pure
             .rules
             .select(request)
-            .into_result(request, &self.engine.rules)?;
+            .into_result(request, &self.engine.pure.rules)?;
         Ok(RuleSelection {
             rule,
             interface: request.interface.clone(),
@@ -44,11 +45,11 @@ impl<'engine, S: EngineStateReader + ?Sized> EngineQuery<'engine, S> {
     }
 
     pub fn rules(&self) -> impl Iterator<Item = (RuleId, &'engine Rule<Pure>)> + 'engine {
-        self.engine.rules.iter()
+        self.engine.pure.rules.iter()
     }
 
     pub fn rule(&self, id: RuleId) -> Option<&'engine Rule<Pure>> {
-        self.engine.rules.get(id)
+        self.engine.pure.rules.get(id)
     }
 
     pub fn computations(

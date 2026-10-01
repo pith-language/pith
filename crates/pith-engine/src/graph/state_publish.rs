@@ -385,20 +385,8 @@ impl Engine {
                 | ReuseReason::DependencyMissing { computation } => {
                     let attempt = dependencies
                         .iter()
-                        .find_map(|edge| match edge {
-                            DependencyEdge::Request {
-                                computation: target,
-                                ..
-                            }
-                            | DependencyEdge::Action {
-                                computation: target,
-                                ..
-                            }
-                            | DependencyEdge::Observation {
-                                computation: target,
-                                ..
-                            } if target == computation => Some(*target),
-                            _ => None,
+                        .find_map(|edge| {
+                            edge.computation_id().filter(|target| target == computation)
                         })
                         .and_then(|target| self.durable_attempts.get(&target).copied());
                     match attempt {
@@ -452,7 +440,7 @@ impl Engine {
         let ComputationKind::Pure(request) = &node.kind else {
             return None;
         };
-        let rule = self.rules.get(node.rule)?;
+        let rule = self.pure.rules.get(node.rule)?;
         Some(PureComputationKey::new(rule, request))
     }
 
@@ -465,7 +453,7 @@ impl Engine {
         request: &pith_core::Request<pith_core::Action>,
         spec_digest: pith_ids::ActionSpecDigest,
     ) -> PithResult<ActionComputationKey> {
-        let Some(action_rule) = self.action_rules.get(rule) else {
+        let Some(action_rule) = self.action.rules.get(rule) else {
             return Err(internal_diag(
                 InternalInvariant::SelectedActionRuleHasNoMetadata,
             ));
@@ -481,7 +469,7 @@ impl Engine {
         rule: pith_core::RuleId,
         spec: &pith_core::ActionSpec,
     ) -> PithResult<crate::state::DurableActionPlan> {
-        let Some(action_rule) = self.action_rules.get(rule) else {
+        let Some(action_rule) = self.action.rules.get(rule) else {
             return Err(internal_diag(
                 InternalInvariant::SelectedActionRuleHasNoMetadata,
             ));

@@ -2,8 +2,8 @@
 //! evaluator's private frame. Pure data; no engine logic.
 
 use pith_core::{
-    Action, ActionComputationKey, ActionSpec, CapabilityRequirement, Interface, Observation,
-    ObservationComputationKey, Pure, Request, RuleId, Value,
+    Action, ActionComputationKey, ActionSpec, CapabilityRequirement, EffectKind, Interface,
+    Observation, ObservationComputationKey, Pure, Request, RuleId, Value,
 };
 use pith_diag::{Diag, PithResult};
 use pith_ids::{ActionSpecDigest, ComputationId, ContentId, PureComputationDigest};
@@ -78,7 +78,8 @@ pub trait PureRule: Send + Sync {
     fn start(&self, inputs: &[Value]) -> Box<dyn PureRuleFrame>;
 }
 
-/// A dependency recorded while evaluating a computation.
+/// A dependency recorded while evaluating a computation. The
+/// computation-pointing variants are the edge over each [`EffectKind`].
 #[derive(Clone, Debug)]
 pub enum DependencyEdge {
     Request {
@@ -114,12 +115,24 @@ impl DependencyEdge {
     }
 }
 
-/// Which kind of rule produced a computation node.
+/// Which kind of rule produced a computation node: one variant per
+/// [`EffectKind`], carrying the request the node was created from.
 #[derive(Clone, Debug)]
 pub enum ComputationKind {
     Pure(Request<Pure>),
     Action(Request<Action>),
     Observation(Request<Observation>),
+}
+
+impl ComputationKind {
+    /// The effect kind of computation this node holds.
+    pub const fn kind(&self) -> EffectKind {
+        match self {
+            Self::Pure(_) => EffectKind::Pure,
+            Self::Action(_) => EffectKind::Action,
+            Self::Observation(_) => EffectKind::Observation,
+        }
+    }
 }
 
 /// An action selected and planned without executing it.

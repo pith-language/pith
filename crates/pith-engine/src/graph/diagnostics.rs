@@ -1,7 +1,7 @@
 //! Diagnostic constructors for the graph evaluator, so every engine
 //! diagnostic has one code, message shape, and [`EngineCode`] home.
 
-use pith_core::{ActionSpec, PlatformRequirement, Type, Value};
+use pith_core::{ActionSpec, EffectKind, PlatformRequirement, Type, Value};
 use pith_diag::{Diag, DiagnosticSink, EngineCode, PithResult, Span};
 use pith_ids::ContentId;
 
@@ -240,11 +240,22 @@ pub(super) fn internal_diag(invariant: InternalInvariant) -> DiagnosticSink {
     ))
 }
 
+/// The diagnostic a pure-only evaluation raises on an effectful step. The
+/// listing derives its category half from the kinds, so a new kind joins it
+/// without a second edit here.
 pub(super) fn effectful_in_pure_diag() -> DiagnosticSink {
+    let refused: Vec<&str> = EffectKind::ALL
+        .iter()
+        .filter(|kind| !kind.is_pure())
+        .map(|kind| kind.step_name())
+        .collect();
     one_diag(Diag::engine(
         EngineCode::EffectfulStepInPure,
         Span::none(),
-        "effectful step (NeedBlob/NeedAction/NeedObservation) in a pure-only evaluation; use Engine::run",
+        format!(
+            "effectful step (NeedBlob/{}) in a pure-only evaluation; use Engine::run",
+            refused.join("/")
+        ),
     ))
 }
 
@@ -435,5 +446,23 @@ mod tests {
                 "internal invariant produced an empty message"
             );
         }
+    }
+
+    /// The refused-step listing is derived from the kinds rather
+    /// than spelled out here. The test pins its spelling, which is the text
+    /// a caller reads when a pure-only evaluation hits an effect.
+    #[test]
+    fn effectful_step_listing_names_every_refused_step() {
+        let diagnostics = effectful_in_pure_diag();
+        let diag = diagnostics
+            .into_inner()
+            .first()
+            .cloned()
+            .expect("effectful_in_pure_diag always emits one diagnostic");
+        assert_eq!(diag.code, EngineCode::EffectfulStepInPure.into());
+        assert_eq!(
+            &*diag.message.0,
+            "effectful step (NeedBlob/NeedAction/NeedObservation) in a pure-only evaluation; use Engine::run",
+        );
     }
 }

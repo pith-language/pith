@@ -12,7 +12,8 @@ use crate::graph::{
 };
 use crate::policy::ActionAuthorization;
 use crate::state::{
-    DurableActionProvenance, DurableAttemptState, DurableProvenance, DurableReuseDecision,
+    DurableActionProvenance, DurableAttemptState, DurableComputationKey, DurableProvenance,
+    DurableReuseDecision,
 };
 
 impl Engine {
@@ -40,7 +41,7 @@ impl Engine {
         context: &ReuseContext<'_>,
         environment: &ExecutorIdentity,
     ) -> PithResult<Option<Evaluation>> {
-        let Some(computation) = self.action_computations.get(&key).copied() else {
+        let Some(computation) = self.action.computations.get(&key).copied() else {
             return Ok(None);
         };
         let Some(node) = self.computations.get(computation) else {
@@ -91,7 +92,7 @@ impl Engine {
         else {
             return Ok(None);
         };
-        if attempt.computation.action_key() != Some(key) {
+        if attempt.computation.key() != DurableComputationKey::Action(key) {
             return Err(internal_diag(
                 InternalInvariant::ReusableIndexEntryKeyMismatch,
             ));
@@ -151,7 +152,7 @@ impl Engine {
             observation: None,
             capabilities: canonical_capabilities(&plan.spec.capabilities),
         });
-        self.index_action_computation(key, computation);
+        self.action.computations.insert(key, computation);
         self.durable_attempts.insert(computation, attempt.id);
         Ok(Some(Evaluation {
             value,

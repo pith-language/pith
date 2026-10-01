@@ -16,7 +16,7 @@ use std::task::Poll;
 
 use pith_core::{Action, ActionSpec, Request, Value};
 use pith_diag::{Diag, DiagnosticSink, EngineCode, PithResult, Span};
-use pith_ids::ComputationId;
+use pith_ids::{ComputationId, ContentId};
 
 use super::action_pipeline::{ActionRuleMeta, ActionStart, PreparedAction};
 use super::diagnostics::{cancelled_diag, effectful_in_pure_diag, is_bound_stop, wall_bound_diag};
@@ -116,6 +116,20 @@ struct Serving<'a> {
 }
 
 impl Engine {
+    /// Serve a chain's blob stop: fetch the bytes, record the content edge,
+    /// and resume the chain with them.
+    fn serve_blob(
+        &mut self,
+        scheduler: &mut Scheduler,
+        chain: ChainId,
+        id: ContentId,
+    ) -> PithResult<()> {
+        let bytes = self.fetch_blob(id)?;
+        let parent = scheduler.top(chain)?.computation;
+        self.record_edge(parent, DependencyEdge::Blob { id })?;
+        scheduler.resume(chain, Resumption::One(Value::Bytes(bytes)))
+    }
+
     /// Evaluate an entry's pure prefix, admitting blobs, and stop at the first
     /// action request with its selected contract. No action is executed. Live
     /// frames record as cancelled: the caller paused them deliberately at the
@@ -147,25 +161,7 @@ impl Engine {
             match pause {
                 ChainPause::Settled => {}
                 ChainPause::Blob(id) => {
-                    let bytes = match self.fetch_blob(id) {
-                        Ok(bytes) => bytes,
-                        Err(diagnostics) => {
-                            self.stop_live_frames(
-                                &roots.scheduler,
-                                &diagnostics,
-                                StopReason::Failed,
-                            );
-                            return Err(diagnostics);
-                        }
-                    };
-                    let admitted = (|| {
-                        let parent = roots.scheduler.top(chain)?.computation;
-                        self.record_edge(parent, DependencyEdge::Blob { id })?;
-                        roots
-                            .scheduler
-                            .resume(chain, Resumption::One(Value::Bytes(bytes)))
-                    })();
-                    if let Err(diagnostics) = admitted {
+                    if let Err(diagnostics) = self.serve_blob(&mut roots.scheduler, chain, id) {
                         self.stop_live_frames(&roots.scheduler, &diagnostics, StopReason::Failed);
                         return Err(diagnostics);
                     }
@@ -236,12 +232,7 @@ impl Engine {
         while let Some(chain) = scheduler.next_ready() {
             match self.advance_chain(scheduler, chain, &ReuseContext::PureOnly, &mut budget)? {
                 ChainPause::Settled => {}
-                ChainPause::Blob(id) => {
-                    let bytes = self.fetch_blob(id)?;
-                    let parent = scheduler.top(chain)?.computation;
-                    self.record_edge(parent, DependencyEdge::Blob { id })?;
-                    scheduler.resume(chain, Resumption::One(Value::Bytes(bytes)))?;
-                }
+                ChainPause::Blob(id) => self.serve_blob(scheduler, chain, id)?,
                 ChainPause::Action(_) | ChainPause::Observation(_) => {
                     return Err(effectful_in_pure_diag());
                 }
@@ -313,12 +304,7 @@ impl Engine {
                     .await?
                 {
                     ChainPause::Settled => {}
-                    ChainPause::Blob(id) => {
-                        let bytes = self.fetch_blob(id)?;
-                        let parent = scheduler.top(chain)?.computation;
-                        self.record_edge(parent, DependencyEdge::Blob { id })?;
-                        scheduler.resume(chain, Resumption::One(Value::Bytes(bytes)))?;
-                    }
+                    ChainPause::Blob(id) => self.serve_blob(scheduler, chain, id)?,
                     ChainPause::Action(request) => waiting.push_back((chain, request)),
                     ChainPause::Observation(request) => {
                         let serving = self.serve_observation(&request, bound).await?;

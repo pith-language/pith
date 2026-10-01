@@ -6,7 +6,7 @@ mod pure;
 mod revalidation;
 
 use indexmap::IndexMap;
-use pith_core::{ActionComputationKey, ObservationComputationKey, PureComputationKey};
+use pith_core::ComputationKey;
 use pith_diag::DiagnosticSink;
 use pith_ids::ComputationId;
 
@@ -37,29 +37,12 @@ impl<'a> ReuseContext<'a> {
 }
 
 impl Engine {
-    pub(super) fn index_action_computation(
-        &mut self,
-        key: ActionComputationKey,
-        computation: ComputationId,
-    ) {
-        self.action_computations.insert(key, computation);
-    }
-
-    pub(super) fn index_pure_computation(
-        &mut self,
-        key: PureComputationKey,
-        computation: ComputationId,
-    ) {
-        self.pure_computations.insert(key, computation);
-    }
-
     pub(super) fn reuse_decision(&self, dependencies: &[DependencyEdge]) -> ReuseDecision {
         for dependency in dependencies {
-            let computation = match dependency {
-                DependencyEdge::Blob { .. } | DependencyEdge::CapabilityUse { .. } => continue,
-                DependencyEdge::Action { computation, .. }
-                | DependencyEdge::Observation { computation, .. }
-                | DependencyEdge::Request { computation, .. } => *computation,
+            // Blob and capability edges point at nothing with a result, so
+            // they cannot disqualify the computation that recorded them.
+            let Some(computation) = dependency.computation_id() else {
+                continue;
             };
             let Some(node) = self.computations.get(computation) else {
                 return ReuseDecision::NotReusable(ReuseReason::DependencyMissing { computation });
@@ -94,6 +77,5 @@ fn read_failed(error: crate::state::EngineStateError) -> DiagnosticSink {
     internal_diag(InternalInvariant::EngineStateReadFailed(error))
 }
 
-pub(super) type PureComputationIndex = IndexMap<PureComputationKey, ComputationId>;
-pub(super) type ActionComputationIndex = IndexMap<ActionComputationKey, ComputationId>;
-pub(super) type ObservationComputationIndex = IndexMap<ObservationComputationKey, ComputationId>;
+/// The live reuse index for one category's rule applications.
+pub(super) type ComputationIndex<K> = IndexMap<ComputationKey<K>, ComputationId>;

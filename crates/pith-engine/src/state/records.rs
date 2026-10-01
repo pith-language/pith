@@ -173,8 +173,8 @@ impl std::fmt::Display for DurableAttemptId {
 pub enum DurableComputation {
     Pure(PureComputationKey),
     Action {
-        /// Digest half of the reusable-index key. [`Self::action_key`] combines
-        /// it with the rule identity and revision retained in the plan.
+        /// Digest half of the reusable-index key. [`Self::key`] combines it
+        /// with the rule identity and revision retained in the plan.
         computation_digest: ActionComputationDigest,
         /// Retained request inputs used to re-plan and verify
         /// `computation_digest`.
@@ -235,49 +235,72 @@ impl DurableObservationRequest {
 }
 
 impl DurableComputation {
-    pub const fn pure_key(&self) -> Option<PureComputationKey> {
+    /// The one key this computation is identified by. The action and
+    /// observation halves are rebuilt from the retained rule and digest,
+    /// never stored whole.
+    pub fn key(&self) -> DurableComputationKey {
         match self {
-            Self::Pure(key) => Some(*key),
-            Self::Action { .. } | Self::Observation { .. } => None,
-        }
-    }
-
-    /// The key the reusable action index is read and written under. Rebuilt
-    /// from the plan's rule and the stored digest rather than stored whole.
-    pub fn action_key(&self) -> Option<ActionComputationKey> {
-        match self {
+            Self::Pure(key) => DurableComputationKey::Pure(*key),
             Self::Action {
                 computation_digest,
                 plan,
                 ..
-            } => Some(ActionComputationKey {
+            } => DurableComputationKey::Action(ActionComputationKey {
                 rule_identity: plan.rule().identity(),
                 rule_revision: plan.rule().revision(),
                 digest: *computation_digest,
             }),
-            Self::Pure(_) => None,
-            Self::Observation { .. } => None,
-        }
-    }
-
-    /// The request-side identity of an observation attempt.
-    pub fn observation_key(&self) -> Option<ObservationComputationKey> {
-        match self {
             Self::Observation {
                 computation_digest,
                 rule,
                 ..
-            } => Some(ObservationComputationKey {
+            } => DurableComputationKey::Observation(ObservationComputationKey {
                 rule_identity: rule.identity(),
                 rule_revision: rule.revision(),
                 digest: *computation_digest,
             }),
-            Self::Pure(_) | Self::Action { .. } => None,
+        }
+    }
+}
+
+/// The key a durable computation is identified by, of the computation's own
+/// category.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum DurableComputationKey {
+    Pure(PureComputationKey),
+    Action(ActionComputationKey),
+    Observation(ObservationComputationKey),
+}
+
+impl DurableComputationKey {
+    /// The pure key, when the computation is pure.
+    pub const fn pure(self) -> Option<PureComputationKey> {
+        match self {
+            Self::Pure(key) => Some(key),
+            Self::Action(_) | Self::Observation(_) => None,
+        }
+    }
+
+    /// The action key, when the computation is an action.
+    pub const fn action(self) -> Option<ActionComputationKey> {
+        match self {
+            Self::Action(key) => Some(key),
+            Self::Pure(_) | Self::Observation(_) => None,
+        }
+    }
+
+    /// The observation key, when the computation is an observation.
+    pub const fn observation(self) -> Option<ObservationComputationKey> {
+        match self {
+            Self::Observation(key) => Some(key),
+            Self::Pure(_) | Self::Action(_) => None,
         }
     }
 }
 
 /// One dependency edge. Its position in the containing slice is semantic.
+/// The computation-pointing variants are the durable edge over each
+/// [`EffectKind`](pith_core::EffectKind).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DurableDependency {
     Pure {
@@ -296,6 +319,20 @@ pub enum DurableDependency {
     CapabilityUse {
         capability: CapabilityRequirement,
     },
+}
+
+impl DurableDependency {
+    /// The durable attempt this edge targets, when it targets one: blob
+    /// content and capability uses are not attempt-backed, so nothing can
+    /// follow them into the record graph.
+    pub const fn attempt(&self) -> Option<DurableAttemptId> {
+        match self {
+            Self::Pure { attempt, .. }
+            | Self::Action { attempt }
+            | Self::Observation { attempt } => Some(*attempt),
+            Self::Blob { .. } | Self::CapabilityUse { .. } => None,
+        }
+    }
 }
 
 /// Executor data is retained as an observation, not as proof of enforcement or

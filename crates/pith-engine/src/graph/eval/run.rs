@@ -1,3 +1,7 @@
+//! The run driver's mirror of the step machine: the same loop and decisions
+//! as the synchronous core, except a run's reuse checks await, because
+//! revalidating a recorded observation re-attests it through the observer.
+
 use super::*;
 
 impl Engine {
@@ -10,18 +14,7 @@ impl Engine {
         bound: &crate::RunBound,
     ) -> PithResult<ChainPause> {
         loop {
-            if !budget.spend() {
-                let label = scheduler.top(chain)?.request.label.clone();
-                let total = budget.total().unwrap_or_default();
-                return Err(step_budget_diag(total, &label));
-            }
-            let step = {
-                let Some(frame) = scheduler.stack_mut(chain)?.last_mut() else {
-                    return Err(internal_diag(InternalInvariant::PureLostRootFrame));
-                };
-                let resumption = frame.resume_with.take();
-                frame.body.step(resumption)?
-            };
+            let step = take_step(scheduler, chain, budget)?;
             match step {
                 PureStep::Complete(value) => {
                     if self.complete_top_frame(scheduler, chain, value)? {
@@ -55,20 +48,11 @@ impl Engine {
         bound: &crate::RunBound,
     ) -> PithResult<()> {
         let parent = scheduler.top(chain)?.computation;
-        let (rule, key) = self.select_request_run(scheduler, chain, &request)?;
-        match self
+        let (rule, key) = self.select_request(scheduler, chain, &request)?;
+        let prepared = self
             .prepare_request_run(parent, request, rule, key, context, bound)
-            .await?
-        {
-            PreparedRequest::Reused(value) => {
-                let Some(frame) = scheduler.stack_mut(chain)?.last_mut() else {
-                    return Err(internal_diag(InternalInvariant::PureLostRequestingFrame));
-                };
-                frame.resume_with = Some(Resumption::One(value));
-            }
-            PreparedRequest::Fresh(frame) => scheduler.push_frame(chain, frame)?,
-        }
-        Ok(())
+            .await?;
+        resume_or_push(scheduler, chain, prepared)
     }
 
     async fn handle_pure_need_all_run(
@@ -82,54 +66,16 @@ impl Engine {
         let parent = scheduler.top(chain)?.computation;
         let mut prepared = Vec::with_capacity(requests.len());
         for request in requests.into_vec() {
-            let (rule, key) = self.select_request_run(scheduler, chain, &request)?;
+            let (rule, key) = self.select_request(scheduler, chain, &request)?;
             prepared.push(
                 self.prepare_request_run(parent, request, rule, key, context, bound)
                     .await?,
             );
         }
-
-        if !prepared
-            .iter()
-            .any(|request| matches!(request, PreparedRequest::Fresh(_)))
-        {
-            let values = prepared
-                .into_iter()
-                .filter_map(|request| match request {
-                    PreparedRequest::Reused(value) => Some(value),
-                    PreparedRequest::Fresh(_) => None,
-                })
-                .collect::<Vec<_>>();
-            return scheduler.resume(chain, Resumption::Many(values.into_boxed_slice()));
-        }
-
-        let group = scheduler.open_group(chain, prepared.len());
-        for (slot, request) in prepared.into_iter().enumerate() {
-            match request {
-                PreparedRequest::Reused(value) => scheduler.fill_group_slot(group, slot, value)?,
-                PreparedRequest::Fresh(frame) => {
-                    scheduler.start_group_chain(group, slot, frame);
-                }
-            }
-        }
-        Ok(())
+        resume_or_fan_out(scheduler, chain, prepared)
     }
 
-    fn select_request_run(
-        &self,
-        scheduler: &Scheduler,
-        chain: ChainId,
-        request: &Request<Pure>,
-    ) -> PithResult<(RuleId, PureComputationKey)> {
-        let rule = self.resolve_pure_rule(request)?;
-        let key = self.pure_key_for(rule, request)?;
-        if let Some(labels) = scheduler.cycle_chain(chain, key.digest, &request.label) {
-            let cycle: Vec<&str> = labels.iter().map(AsRef::as_ref).collect();
-            return Err(cycle_diag(&cycle, request.span));
-        }
-        Ok((rule, key))
-    }
-
+    /// [`Self::prepare_request`] with the reuse check that awaits.
     async fn prepare_request_run(
         &mut self,
         parent: ComputationId,
@@ -139,28 +85,13 @@ impl Engine {
         context: &ReuseContext<'_>,
         bound: &crate::RunBound,
     ) -> PithResult<PreparedRequest> {
-        if let Some(reused) = self
+        match self
             .reusable_pure_evaluation_run(rule, &request, context, bound)
             .await?
         {
-            self.record_edge(
-                parent,
-                DependencyEdge::Request {
-                    computation: reused.computation,
-                    request,
-                },
-            )?;
-            return Ok(PreparedRequest::Reused(reused.value));
+            Some(reused) => self.reused_request(parent, request, reused),
+            None => self.prepare_fresh_request(parent, request, rule, key),
         }
-        let frame = self.start_frame(request.clone(), rule, key)?;
-        self.record_edge(
-            parent,
-            DependencyEdge::Request {
-                computation: frame.computation,
-                request,
-            },
-        )?;
-        Ok(PreparedRequest::Fresh(frame))
     }
 
     pub(in crate::graph) async fn open_roots_run(
@@ -172,19 +103,14 @@ impl Engine {
         let mut reused = Vec::with_capacity(requests.len());
         let mut frames = Vec::new();
         for request in requests {
-            let opened = self.open_root_run(request, context, bound).await;
-            match opened {
+            match self.open_root_run(request, context, bound).await {
                 Ok(OpenedRoot::Reused(evaluation)) => reused.push(Some(evaluation)),
                 Ok(OpenedRoot::Fresh(frame)) => {
                     frames.push(frame);
                     reused.push(None);
                 }
                 Err(diagnostics) => {
-                    let opened = frames
-                        .iter()
-                        .map(|frame| frame.computation)
-                        .collect::<Vec<_>>();
-                    self.stop_pending(&opened, &diagnostics, StopReason::Failed);
+                    self.abort_root_openings(&frames, &diagnostics);
                     return Err(diagnostics);
                 }
             }
@@ -207,14 +133,7 @@ impl Engine {
             .await?
         {
             Some(evaluation) => Ok(OpenedRoot::Reused(evaluation)),
-            None => {
-                let key = self.pure_key_for(rule, request)?;
-                Ok(OpenedRoot::Fresh(self.start_frame(
-                    request.clone(),
-                    rule,
-                    key,
-                )?))
-            }
+            None => self.open_root_fresh(request, rule).map(OpenedRoot::Fresh),
         }
     }
 }

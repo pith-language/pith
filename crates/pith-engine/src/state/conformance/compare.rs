@@ -136,7 +136,7 @@ pub(super) fn compare_reads(
 
     let mut keys: Vec<PureComputationKey> = tracked
         .iter()
-        .filter_map(|entry| entry.computation.pure_key())
+        .filter_map(|entry| entry.computation.key().pure())
         .collect();
     keys.sort_by_key(|key| *key.digest.digest().as_bytes());
     keys.dedup();
@@ -176,7 +176,7 @@ pub(super) fn compare_reads(
 
     let mut action_keys: Vec<ActionComputationKey> = tracked
         .iter()
-        .filter_map(|entry| entry.computation.action_key())
+        .filter_map(|entry| entry.computation.key().action())
         .collect();
     action_keys.sort_by_key(|key| *key.digest.digest().as_bytes());
     action_keys.dedup();

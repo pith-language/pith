@@ -3,8 +3,12 @@
 //! The evaluator is split across three modules along the sync/async seam:
 //! `scheduler` holds the set of in-flight evaluation chains and touches no
 //! arena state, `eval` is the synchronous core that runs a chain on the step
-//! machine, and `drive` is the shell that serves the effects a chain stops
-//! for. This module owns the graph itself and the public surface over it.
+//! machine (every decision a step forces lives there, called unchanged by its
+//! awaiting mirror in `eval::run`), and `drive` is the shell that serves the
+//! effects a chain stops for. This module owns the graph itself and the
+//! public surface over it. The rule machinery each effect category carries is
+//! declared once, on [`EngineCategory`], and held as one generic slot per
+//! category.
 
 mod action_pipeline;
 mod capabilities;
@@ -32,7 +36,7 @@ use std::num::NonZeroUsize;
 
 use indexmap::IndexMap;
 use pith_core::{
-    Action, BodyError, Interface, Observation, Pure, PureComputationKey, Request, Rule, RuleBody,
+    Action, BodyError, ComputationCategory, Interface, Observation, Pure, Request, Rule, RuleBody,
     RuleId, RuleIdentity, RuleRevision, RuleTable,
 };
 use pith_diag::{PithResult, Span};
@@ -48,7 +52,7 @@ use crate::state::{DurableAttemptId, EngineStateReader, EngineStateStore, Memory
 use crate::{ObservationRule, Observer};
 use eval::single_evaluation;
 use ir::StopReason;
-use reuse::{ActionComputationIndex, ObservationComputationIndex, PureComputationIndex};
+use reuse::ComputationIndex;
 
 /// A graph engine branded by the durable-state authority it holds.
 ///
@@ -57,20 +61,15 @@ use reuse::{ActionComputationIndex, ObservationComputationIndex, PureComputation
 /// register rules and inspect selection/plans, but the evaluation methods live
 /// only on the writable specialization and therefore do not exist on it.
 pub struct Engine<S: EngineStateReader + ?Sized = dyn EngineStateStore> {
-    pub(crate) rules: RuleTable<Pure>,
-    pub(crate) bodies: IndexMap<RuleId, Box<dyn PureRule>>,
+    pub(crate) pure: CategorySlot<Pure>,
     /// Revision per registered pure rule identity. `None` when two rules share
     /// an identity at different revisions: revalidation then invalidates rather
-    /// than picking one. Indexed off `rules` to avoid an arena scan.
+    /// than picking one. Indexed off the pure slot's rule table to avoid an
+    /// arena scan.
     pub(crate) pure_rule_revisions: IndexMap<RuleIdentity, Option<RuleRevision>>,
-    pub(crate) action_rules: RuleTable<Action>,
-    pub(crate) action_bodies: IndexMap<RuleId, Box<dyn ActionRule>>,
-    pub(crate) observation_rules: RuleTable<Observation>,
-    pub(crate) observation_bodies: IndexMap<RuleId, Box<dyn ObservationRule>>,
+    pub(crate) action: CategorySlot<Action>,
+    pub(crate) observation: CategorySlot<Observation>,
     pub(crate) computations: ComputationArena<ComputationNode>,
-    pure_computations: PureComputationIndex,
-    pub(crate) action_computations: ActionComputationIndex,
-    pub(crate) observation_computations: ObservationComputationIndex,
     pub(crate) store: Box<dyn ContentStore>,
     /// Durable engine metadata. Arena handles never cross this boundary; the
     /// process-local `durable_attempts` side-table maps computation nodes to
@@ -82,6 +81,73 @@ pub struct Engine<S: EngineStateReader + ?Sized = dyn EngineStateStore> {
     action_caching: bool,
     minimum_access_verification: AccessVerification,
     pub(crate) observer: Option<Box<dyn Observer>>,
+}
+
+/// The rule machinery an effect category brings to the engine: the body
+/// trait its registered rules implement. Closed with the kernel's category
+/// set.
+///
+/// ```compile_fail
+/// use pith_core::{ComputationCategory, EffectCategory};
+///
+/// struct Custom;
+/// impl EffectCategory for Custom {
+///     const CACHEABLE_AS_RESULT: bool = false;
+/// }
+/// impl ComputationCategory for Custom {
+///     type Digest = pith_ids::PureComputationDigest;
+/// }
+/// impl EngineCategory for Custom {
+///     type Body = dyn pith_engine::PureRule;
+/// }
+/// ```
+pub trait EngineCategory: ComputationCategory + 'static {
+    /// The body trait objects the engine stores for this category's rules:
+    /// `dyn PureRule`, `dyn ActionRule`, or `dyn ObservationRule`.
+    type Body: ?Sized;
+}
+
+impl EngineCategory for Pure {
+    type Body = dyn PureRule;
+}
+
+impl EngineCategory for Action {
+    type Body = dyn ActionRule;
+}
+
+impl EngineCategory for Observation {
+    type Body = dyn ObservationRule;
+}
+
+/// One effect category's rule table, bodies, and live reuse index.
+pub(crate) struct CategorySlot<K: EngineCategory> {
+    pub(crate) rules: RuleTable<K>,
+    pub(crate) bodies: IndexMap<RuleId, Box<K::Body>>,
+    pub(crate) computations: ComputationIndex<K>,
+}
+
+impl<K: EngineCategory> CategorySlot<K> {
+    #[must_use]
+    fn new() -> Self {
+        Self {
+            rules: RuleTable::new(),
+            bodies: IndexMap::new(),
+            computations: IndexMap::new(),
+        }
+    }
+
+    /// Register `rule` together with `body` and return the rule's id.
+    fn register(&mut self, rule: Rule<K>, body: Box<K::Body>) -> RuleId {
+        let id = self.rules.push(rule);
+        self.bodies.insert(id, body);
+        id
+    }
+}
+
+impl<K: EngineCategory> Default for CategorySlot<K> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// How many actions a run keeps in flight when the caller does not say.
@@ -219,17 +285,11 @@ impl Engine<dyn EngineStateReader> {
 impl<S: EngineStateReader + ?Sized> Engine<S> {
     fn from_adapters(store: impl ContentStore + 'static, state_store: Box<S>) -> Self {
         Self {
-            rules: RuleTable::new(),
-            bodies: IndexMap::new(),
+            pure: CategorySlot::new(),
             pure_rule_revisions: IndexMap::new(),
-            action_rules: RuleTable::new(),
-            action_bodies: IndexMap::new(),
-            observation_rules: RuleTable::new(),
-            observation_bodies: IndexMap::new(),
+            action: CategorySlot::new(),
+            observation: CategorySlot::new(),
             computations: ComputationArena::new(),
-            pure_computations: IndexMap::new(),
-            action_computations: IndexMap::new(),
-            observation_computations: IndexMap::new(),
             store: Box::new(store),
             state_store,
             durable_attempts: IndexMap::new(),
@@ -257,8 +317,7 @@ impl<S: EngineStateReader + ?Sized> Engine<S> {
         B: PureRule + 'static,
     {
         let (identity, revision) = (rule.identity, rule.revision);
-        let id = self.rules.push(rule);
-        self.bodies.insert(id, Box::new(body));
+        let id = self.pure.register(rule, Box::new(body));
         self.pure_rule_revisions
             .entry(identity)
             .and_modify(|known| {
@@ -306,9 +365,7 @@ impl<S: EngineStateReader + ?Sized> Engine<S> {
     where
         B: ActionRule + 'static,
     {
-        let id = self.action_rules.push(rule);
-        self.action_bodies.insert(id, Box::new(body));
-        id
+        self.action.register(rule, Box::new(body))
     }
 
     /// Register an observation rule together with its deterministic subject
@@ -317,9 +374,7 @@ impl<S: EngineStateReader + ?Sized> Engine<S> {
     where
         B: ObservationRule + 'static,
     {
-        let id = self.observation_rules.push(rule);
-        self.observation_bodies.insert(id, Box::new(body));
-        id
+        self.observation.register(rule, Box::new(body))
     }
 
     /// Configure the adapter that serves observation steps and attests
@@ -418,14 +473,14 @@ impl Engine {
         executor: &E,
         bound: &RunBound,
     ) -> Result<PithResult<Evaluation>, RuntimeError> {
-        let evaluations = runtime.block_on(self.run_inner(
+        self.run_many_bounded(
             std::slice::from_ref(request),
+            runtime,
             policy,
             executor,
-            &NeverCancelled,
             bound,
-        ))?;
-        Ok(evaluations.and_then(single_evaluation))
+        )
+        .map(|evaluations| evaluations.and_then(single_evaluation))
     }
 
     /// [`Engine::run`], stoppable. `cancel` is polled at scheduling boundaries;
@@ -442,14 +497,14 @@ impl Engine {
         executor: &E,
         cancel: &C,
     ) -> Result<PithResult<Evaluation>, RuntimeError> {
-        let evaluations = runtime.block_on(self.run_inner(
+        self.run_many_cancellable(
             std::slice::from_ref(request),
+            runtime,
             policy,
             executor,
             cancel,
-            &RunBound::none(),
-        ))?;
-        Ok(evaluations.and_then(single_evaluation))
+        )
+        .map(|evaluations| evaluations.and_then(single_evaluation))
     }
 
     /// Evaluate several requests that do not depend on one another, driving

@@ -14,8 +14,8 @@ use crate::graph::{AttemptState, Engine, ReuseDecision};
 use crate::policy::ActionAuthorization;
 use crate::state::{
     CompletedAttempt, DurableActionProvenance, DurableActionRequest, DurableAttempt,
-    DurableAttemptId, DurableAttemptState, DurableComputation, DurableDependency,
-    DurableObservationProvenance, DurableObservationRequest, DurableProvenance,
+    DurableAttemptId, DurableAttemptState, DurableComputation, DurableComputationKey,
+    DurableDependency, DurableObservationProvenance, DurableObservationRequest, DurableProvenance,
     DurableReuseDecision,
 };
 
@@ -32,10 +32,7 @@ impl Engine {
         context: &ReuseContext<'_>,
         bound: &crate::RunBound,
     ) -> PithResult<bool> {
-        let Some(attempt_id) = self.durable_attempts.get(&computation).copied() else {
-            return Ok(false);
-        };
-        let Some(attempt) = self.state_store.attempt(attempt_id).map_err(read_failed)? else {
+        let Some(attempt) = self.durable_record(computation)? else {
             return Ok(false);
         };
         let DurableAttemptState::Complete(completion) = &attempt.state else {
@@ -148,13 +145,14 @@ impl Engine {
             ))
         })?;
         let Ok(rule) = self
-            .observation_rules
+            .observation
+            .rules
             .select(&request)
-            .into_result(&request, &self.observation_rules)
+            .into_result(&request, &self.observation.rules)
         else {
             return Ok(false);
         };
-        let Some(body) = self.observation_bodies.get(&rule) else {
+        let Some(body) = self.observation.bodies.get(&rule) else {
             return Err(internal_diag(
                 InternalInvariant::SelectedObservationRuleHasNoBody,
             ));
@@ -162,13 +160,14 @@ impl Engine {
         let Ok(current_subject) = body.subject(&request.inputs) else {
             return Ok(false);
         };
-        let Some(metadata) = self.observation_rules.get(rule) else {
+        let Some(metadata) = self.observation.rules.get(rule) else {
             return Err(internal_diag(
                 InternalInvariant::SelectedObservationRuleHasNoMetadata,
             ));
         };
         let current_key = ObservationComputationKey::new(metadata, &request, &current_subject);
-        if attempt.computation.observation_key() != Some(current_key) || current_subject != subject
+        if attempt.computation.key() != DurableComputationKey::Observation(current_key)
+            || current_subject != subject
         {
             return Ok(false);
         }
@@ -191,16 +190,25 @@ impl Engine {
         computation: ComputationId,
         context: &ReuseContext<'_>,
     ) -> PithResult<bool> {
-        let Some(attempt_id) = self.durable_attempts.get(&computation).copied() else {
-            return Ok(false);
-        };
-        let Some(attempt) = self.state_store.attempt(attempt_id).map_err(read_failed)? else {
+        let Some(attempt) = self.durable_record(computation)? else {
             return Ok(false);
         };
         let DurableAttemptState::Complete(completion) = &attempt.state else {
             return Ok(false);
         };
         self.durable_completion_is_valid(completion, context)
+    }
+
+    /// The durable attempt backing an arena computation, when the side table
+    /// and the store agree one exists.
+    fn durable_record(
+        &self,
+        computation: ComputationId,
+    ) -> PithResult<Option<Arc<DurableAttempt>>> {
+        let Some(attempt_id) = self.durable_attempts.get(&computation).copied() else {
+            return Ok(None);
+        };
+        self.state_store.attempt(attempt_id).map_err(read_failed)
     }
 
     /// Revalidate a completed record against engine state, and everything the
@@ -292,7 +300,7 @@ impl Engine {
                 InternalInvariant::DurableActionEdgeTargetNotAction,
             ));
         };
-        let Some(recorded_key) = attempt.computation.action_key() else {
+        let DurableComputationKey::Action(recorded_key) = attempt.computation.key() else {
             return Err(internal_diag(
                 InternalInvariant::DurableActionEdgeTargetNotAction,
             ));
@@ -405,7 +413,7 @@ impl Engine {
         computation: PureComputationKey,
         attempt: DurableAttemptId,
     ) -> bool {
-        let Some(node) = self.pure_computations.get(&computation).copied() else {
+        let Some(node) = self.pure.computations.get(&computation).copied() else {
             return false;
         };
         if self.durable_attempts.get(&node) != Some(&attempt) {
@@ -508,7 +516,7 @@ pub(super) fn reusable_index_completion(
     attempt: &DurableAttempt,
     computation: PureComputationKey,
 ) -> PithResult<&CompletedAttempt> {
-    if attempt.computation.pure_key() != Some(computation) {
+    if attempt.computation.key() != DurableComputationKey::Pure(computation) {
         return Err(internal_diag(
             InternalInvariant::ReusableIndexEntryKeyMismatch,
         ));

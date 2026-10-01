@@ -98,17 +98,18 @@ impl Engine {
     ) -> PithResult<PreparedObservation> {
         request.validate_inputs().map_err(one_diag)?;
         let rule = self
-            .observation_rules
+            .observation
+            .rules
             .select(request)
-            .into_result(request, &self.observation_rules)
+            .into_result(request, &self.observation.rules)
             .map_err(one_diag)?;
-        let Some(body) = self.observation_bodies.get(&rule) else {
+        let Some(body) = self.observation.bodies.get(&rule) else {
             return Err(internal_diag(
                 InternalInvariant::SelectedObservationRuleHasNoBody,
             ));
         };
         let subject = body.subject(&request.inputs)?;
-        let Some(metadata) = self.observation_rules.get(rule) else {
+        let Some(metadata) = self.observation.rules.get(rule) else {
             return Err(internal_diag(
                 InternalInvariant::SelectedObservationRuleHasNoMetadata,
             ));
@@ -123,7 +124,7 @@ impl Engine {
         identity: &crate::ObserverIdentity,
         bound: &crate::RunBound,
     ) -> PithResult<Option<ObservationServing>> {
-        let Some(computation) = self.observation_computations.get(&key).copied() else {
+        let Some(computation) = self.observation.computations.get(&key).copied() else {
             return Ok(None);
         };
         let Some(node) = self.computations.get(computation) else {
@@ -182,7 +183,7 @@ impl Engine {
         prepared: &PreparedObservation,
         observer: &crate::ObserverIdentity,
     ) -> PithResult<()> {
-        let Some(rule) = self.observation_rules.get(prepared.rule) else {
+        let Some(rule) = self.observation.rules.get(prepared.rule) else {
             return Err(internal_diag(
                 InternalInvariant::SelectedObservationRuleHasNoMetadata,
             ));
@@ -220,7 +221,8 @@ impl Engine {
             result: value.clone(),
             reuse: ReuseDecision::Reusable,
         };
-        self.observation_computations
+        self.observation
+            .computations
             .insert(prepared.key, computation);
         self.publish_observation_completion(computation)?;
         Ok(ObservationServing { computation, value })

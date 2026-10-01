@@ -6,8 +6,9 @@ use pith_core::{ActionComputationKey, PureComputationKey};
 use super::validate::{AttemptLookup, TerminalAttemptState, validate_publication};
 use super::{
     AttemptStatistics, CURRENT_ENGINE_STATE_VERSIONS, CompletedAttempt, DurableAttempt,
-    DurableAttemptId, DurableAttemptState, DurableComputation, EngineStateError, EngineStateReader,
-    EngineStateStore, EngineStateVersions, InvalidationExplanation, StoppedAttempt,
+    DurableAttemptId, DurableAttemptState, DurableComputation, DurableComputationKey,
+    EngineStateError, EngineStateReader, EngineStateStore, EngineStateVersions,
+    InvalidationExplanation, StoppedAttempt,
 };
 
 /// Deterministic in-memory implementation of [`EngineStateStore`].
@@ -79,17 +80,14 @@ impl MemoryEngineStateStore {
 
         let _ = records.attempts.insert(attempt, terminal_attempt);
         let _ = records.pending.shift_remove(&attempt);
-        match reusable {
-            Some(DurableComputation::Pure(key)) => {
+        match reusable.map(|computation| computation.key()) {
+            Some(DurableComputationKey::Pure(key)) => {
                 records.latest_reusable.insert(key, attempt);
             }
-            Some(computation @ DurableComputation::Action { .. }) => {
-                if let Some(key) = computation.action_key() {
-                    records.latest_reusable_action.insert(key, attempt);
-                }
+            Some(DurableComputationKey::Action(key)) => {
+                records.latest_reusable_action.insert(key, attempt);
             }
-            Some(DurableComputation::Observation { .. }) => {}
-            None => {}
+            Some(DurableComputationKey::Observation(_)) | None => {}
         }
         Ok(())
     }
@@ -256,12 +254,8 @@ impl EngineStateStore for MemoryEngineStateStore {
         let attempt = DurableAttemptId::from_raw(records.next_attempt_identifier);
         records.next_attempt_identifier = next_identifier;
 
-        if let Some(computation) = computation.pure_key() {
-            records
-                .pure_history
-                .entry(computation)
-                .or_default()
-                .push(attempt);
+        if let DurableComputationKey::Pure(key) = computation.key() {
+            records.pure_history.entry(key).or_default().push(attempt);
         }
         let _ = records.pending.insert(attempt);
         let _ = records.attempts.insert(

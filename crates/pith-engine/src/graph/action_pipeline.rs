@@ -73,11 +73,12 @@ impl<S: EngineStateReader + ?Sized> Engine<S> {
     pub(super) fn plan_action(&self, request: &Request<Action>) -> PithResult<ActionPlan> {
         request.validate_inputs().map_err(one_diag)?;
         let rule = self
-            .action_rules
+            .action
+            .rules
             .select(request)
-            .into_result(request, &self.action_rules)
+            .into_result(request, &self.action.rules)
             .map_err(one_diag)?;
-        let Some(body) = self.action_bodies.get(&rule) else {
+        let Some(body) = self.action.bodies.get(&rule) else {
             return Err(internal_diag(
                 InternalInvariant::SelectedActionRuleHasNoBody,
             ));
@@ -180,7 +181,7 @@ impl Engine {
     }
 
     fn action_rule_meta(&self, rule: RuleId) -> PithResult<ActionRuleMeta> {
-        let Some(action_rule) = self.action_rules.get(rule) else {
+        let Some(action_rule) = self.action.rules.get(rule) else {
             return Err(internal_diag(
                 InternalInvariant::SelectedActionRuleHasNoMetadata,
             ));
@@ -280,7 +281,7 @@ impl Engine {
         if let Err(diagnostics) = self.validate_execution(spec, &execution) {
             return Err(self.fail_action(computation, diagnostics));
         }
-        let Some(body) = self.action_bodies.get(&rule_meta.rule) else {
+        let Some(body) = self.action.bodies.get(&rule_meta.rule) else {
             return Err(self.fail_action(
                 computation,
                 internal_diag(InternalInvariant::SelectedActionRuleHasNoBody),
@@ -318,7 +319,7 @@ impl Engine {
         // A `Pending` node answers no request, and an attempt the engine
         // refused to index must not be findable in the arena either.
         if let (Some(key), ReuseDecision::Reusable) = (key, &reuse) {
-            self.index_action_computation(key, computation);
+            self.action.computations.insert(key, computation);
         }
         // Scheduling boundary: publish the durable action completion. The
         // arena node is terminal, so the publish reads final state.

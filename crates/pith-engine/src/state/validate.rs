@@ -171,13 +171,8 @@ fn validate_dependency(
     terminal_state: &TerminalAttemptState,
     dependency: &DurableDependency,
 ) -> Result<Option<Arc<DurableAttempt>>, EngineStateError> {
-    let dependency_attempt = match dependency {
-        DurableDependency::Pure { attempt, .. }
-        | DurableDependency::Action { attempt }
-        | DurableDependency::Observation { attempt } => *attempt,
-        DurableDependency::Blob { .. } | DurableDependency::CapabilityUse { .. } => {
-            return Ok(None);
-        }
+    let Some(dependency_attempt) = dependency.attempt() else {
+        return Ok(None);
     };
     let invalid = |reason| EngineStateError::InvalidDependency {
         attempt,

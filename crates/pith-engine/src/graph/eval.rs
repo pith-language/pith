@@ -1,17 +1,15 @@
-//! The synchronous core: frame lifecycle and the pure steps.
-//!
-//! Nothing here awaits. [`Engine::advance_chain`] is the only place the step
-//! machine is driven, and it serves exactly the steps that need nothing outside
-//! the engine; a chain that needs blob bytes or an action stops and leaves the
-//! effect to a driver.
+//! The step machine's core: frame lifecycle, the pure steps, and every
+//! decision a step forces. Both drivers call into it. Nothing here awaits,
+//! and [`run`] holds the awaiting mirror.
 
 mod run;
 
-use pith_core::{Action, Observation, Pure, Request, RuleId, Value};
+use pith_core::{Action, Observation, Pure, PureComputationKey, Request, RuleId, Value};
 use pith_diag::{Diag, DiagnosticSink, EngineCode, PithResult};
 use pith_ids::{ComputationId, ContentId};
 use smallvec::SmallVec;
 
+use super::Engine;
 use super::diagnostics::{
     InternalInvariant, content_unavailable_diag, cycle_diag, internal_diag, one_diag,
     step_budget_diag, store_error_diag,
@@ -22,7 +20,6 @@ use super::ir::{
 };
 use super::reuse::ReuseContext;
 use super::scheduler::{ChainId, Scheduler};
-use super::{Engine, PureComputationKey};
 use crate::bound::StepBudget;
 
 /// Why [`Engine::advance_chain`] stopped.
@@ -30,11 +27,14 @@ pub(super) enum ChainPause {
     /// The chain finished, or parked waiting on a fan-out group. Nothing is
     /// owed to it; the scheduler will make it ready again if it can.
     Settled,
-    /// The chain needs the bytes of a blob before it can continue.
+    /// The chain needs the bytes of a blob, which is not an effect category
+    /// and so has no [`EffectKind`](pith_core::EffectKind).
     Blob(ContentId),
-    /// The chain needs an action executed before it can continue.
+    /// The chain needs an action executed: the stop an
+    /// [`EffectKind::Action`](pith_core::EffectKind) request yields.
     Action(Request<Action>),
-    /// The chain needs external state observed before it can continue.
+    /// The chain needs external state observed: the stop an
+    /// [`EffectKind::Observation`](pith_core::EffectKind) request yields.
     Observation(Request<Observation>),
 }
 
@@ -88,12 +88,81 @@ pub(super) fn single_evaluation(evaluations: Box<[Evaluation]>) -> PithResult<Ev
     }
 }
 
+/// Make one prepared request the requesting chain's next state: a reused
+/// result resumes the frame that asked, a fresh frame becomes the chain's
+/// top.
+fn resume_or_push(
+    scheduler: &mut Scheduler,
+    chain: ChainId,
+    prepared: PreparedRequest,
+) -> PithResult<()> {
+    match prepared {
+        PreparedRequest::Reused(value) => {
+            let Some(frame) = scheduler.stack_mut(chain)?.last_mut() else {
+                return Err(internal_diag(InternalInvariant::PureLostRequestingFrame));
+            };
+            frame.resume_with = Some(Resumption::One(value));
+        }
+        PreparedRequest::Fresh(frame) => scheduler.push_frame(chain, frame)?,
+    }
+    Ok(())
+}
+
+/// Make a prepared batch the requesting chain's next state: reused values
+/// resume the chain, fresh requests fan out into a group.
+fn resume_or_fan_out(
+    scheduler: &mut Scheduler,
+    chain: ChainId,
+    prepared: Vec<PreparedRequest>,
+) -> PithResult<()> {
+    if !prepared
+        .iter()
+        .any(|request| matches!(request, PreparedRequest::Fresh(_)))
+    {
+        let values = prepared
+            .into_iter()
+            .filter_map(|request| match request {
+                PreparedRequest::Reused(value) => Some(value),
+                PreparedRequest::Fresh(_) => None,
+            })
+            .collect::<Vec<_>>();
+        return scheduler.resume(chain, Resumption::Many(values.into_boxed_slice()));
+    }
+
+    let group = scheduler.open_group(chain, prepared.len());
+    for (slot, request) in prepared.into_iter().enumerate() {
+        match request {
+            PreparedRequest::Reused(value) => scheduler.fill_group_slot(group, slot, value)?,
+            PreparedRequest::Fresh(frame) => {
+                scheduler.start_group_chain(group, slot, frame);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Spend one unit of `budget` and advance `chain`'s top frame by one step.
+/// A body can step many times between two scheduling boundaries, so the
+/// budget is spent here rather than at the boundary.
+fn take_step(
+    scheduler: &mut Scheduler,
+    chain: ChainId,
+    budget: &mut StepBudget,
+) -> PithResult<PureStep> {
+    if !budget.spend() {
+        let label = scheduler.top(chain)?.request.label.clone();
+        let total = budget.total().unwrap_or_default();
+        return Err(step_budget_diag(total, &label));
+    }
+    let Some(frame) = scheduler.stack_mut(chain)?.last_mut() else {
+        return Err(internal_diag(InternalInvariant::PureLostRootFrame));
+    };
+    let resumption = frame.resume_with.take();
+    frame.body.step(resumption)
+}
+
 impl Engine {
     /// Run `chain` on the step machine until it settles or needs an effect.
-    ///
-    /// Each step spends one unit of `budget`. A body that yields an unbounded
-    /// sequence of distinct requests steps many times between two scheduling
-    /// boundaries, so the budget is spent here rather than at the boundary.
     pub(super) fn advance_chain(
         &mut self,
         scheduler: &mut Scheduler,
@@ -102,18 +171,7 @@ impl Engine {
         budget: &mut StepBudget,
     ) -> PithResult<ChainPause> {
         loop {
-            if !budget.spend() {
-                let label = scheduler.top(chain)?.request.label.clone();
-                let total = budget.total().unwrap_or_default();
-                return Err(step_budget_diag(total, &label));
-            }
-            let step = {
-                let Some(frame) = scheduler.stack_mut(chain)?.last_mut() else {
-                    return Err(internal_diag(InternalInvariant::PureLostRootFrame));
-                };
-                let resumption = frame.resume_with.take();
-                frame.body.step(resumption)?
-            };
+            let step = take_step(scheduler, chain, budget)?;
             match step {
                 PureStep::Complete(value) => {
                     if self.complete_top_frame(scheduler, chain, value)? {
@@ -169,22 +227,14 @@ impl Engine {
         context: &ReuseContext<'_>,
     ) -> PithResult<()> {
         let parent = scheduler.top(chain)?.computation;
-        match self.prepare_request(scheduler, chain, parent, request, context)? {
-            PreparedRequest::Reused(value) => {
-                let Some(frame) = scheduler.stack_mut(chain)?.last_mut() else {
-                    return Err(internal_diag(InternalInvariant::PureLostRequestingFrame));
-                };
-                frame.resume_with = Some(Resumption::One(value));
-            }
-            PreparedRequest::Fresh(frame) => scheduler.push_frame(chain, frame)?,
-        }
-        Ok(())
+        let (rule, key) = self.select_request(scheduler, chain, &request)?;
+        let prepared = self.prepare_request(parent, request, rule, key, context)?;
+        resume_or_push(scheduler, chain, prepared)
     }
 
     /// Handle a `PureStep::NeedAll`: each request that still needs evaluating
-    /// becomes a chain of its own, and the requesting chain parks until all of
-    /// them land. Two identical requests in one batch get a computation each:
-    /// the reusable index dedupes across time, not within a batch.
+    /// becomes a chain of its own, and the requesting chain parks until all
+    /// of them land.
     fn handle_pure_need_all(
         &mut self,
         scheduler: &mut Scheduler,
@@ -195,63 +245,74 @@ impl Engine {
         let parent = scheduler.top(chain)?.computation;
         let mut prepared = Vec::with_capacity(requests.len());
         for request in requests.into_vec() {
-            prepared.push(self.prepare_request(scheduler, chain, parent, request, context)?);
+            let (rule, key) = self.select_request(scheduler, chain, &request)?;
+            prepared.push(self.prepare_request(parent, request, rule, key, context)?);
         }
-
-        // Every request was already computed, so there is nothing to wait for
-        // and no group to open. An empty batch lands here too.
-        if !prepared
-            .iter()
-            .any(|request| matches!(request, PreparedRequest::Fresh(_)))
-        {
-            let mut values = Vec::with_capacity(prepared.len());
-            for request in prepared {
-                if let PreparedRequest::Reused(value) = request {
-                    values.push(value);
-                }
-            }
-            return scheduler.resume(chain, Resumption::Many(values.into_boxed_slice()));
-        }
-
-        let group = scheduler.open_group(chain, prepared.len());
-        for (slot, request) in prepared.into_iter().enumerate() {
-            match request {
-                PreparedRequest::Reused(value) => scheduler.fill_group_slot(group, slot, value)?,
-                PreparedRequest::Fresh(frame) => {
-                    scheduler.start_group_chain(group, slot, frame);
-                }
-            }
-        }
-        Ok(())
+        resume_or_fan_out(scheduler, chain, prepared)
     }
 
-    /// Resolve one requested pure computation: select its rule, reject a cycle,
-    /// reuse a completed result if there is one, and record the dependency edge
-    /// on `parent` either way.
-    fn prepare_request(
-        &mut self,
+    /// Resolve one requested pure computation's rule and key, rejecting a
+    /// cycle.
+    fn select_request(
+        &self,
         scheduler: &Scheduler,
         chain: ChainId,
-        parent: ComputationId,
-        request: Request<Pure>,
-        context: &ReuseContext<'_>,
-    ) -> PithResult<PreparedRequest> {
-        let rule = self.resolve_pure_rule(&request)?;
-        let key = self.pure_key_for(rule, &request)?;
+        request: &Request<Pure>,
+    ) -> PithResult<(RuleId, PureComputationKey)> {
+        let rule = self.resolve_pure_rule(request)?;
+        let key = self.pure_key_for(rule, request)?;
         if let Some(labels) = scheduler.cycle_chain(chain, key.digest, &request.label) {
             let cycle: Vec<&str> = labels.iter().map(AsRef::as_ref).collect();
             return Err(cycle_diag(&cycle, request.span));
         }
-        if let Some(reused) = self.reusable_pure_evaluation(rule, &request, context)? {
-            self.record_edge(
-                parent,
-                DependencyEdge::Request {
-                    computation: reused.computation,
-                    request,
-                },
-            )?;
-            return Ok(PreparedRequest::Reused(reused.value));
+        Ok((rule, key))
+    }
+
+    /// Prepare one request after its rule and key are resolved: reuse a
+    /// completed result if there is one, and record the dependency edge on
+    /// `parent` either way.
+    fn prepare_request(
+        &mut self,
+        parent: ComputationId,
+        request: Request<Pure>,
+        rule: RuleId,
+        key: PureComputationKey,
+        context: &ReuseContext<'_>,
+    ) -> PithResult<PreparedRequest> {
+        match self.reusable_pure_evaluation(rule, &request, context)? {
+            Some(reused) => self.reused_request(parent, request, reused),
+            None => self.prepare_fresh_request(parent, request, rule, key),
         }
+    }
+
+    /// Record the edge to a computation the reuse index served, and finish the
+    /// preparation with its result.
+    fn reused_request(
+        &mut self,
+        parent: ComputationId,
+        request: Request<Pure>,
+        reused: Evaluation,
+    ) -> PithResult<PreparedRequest> {
+        let computation = reused.computation;
+        self.record_edge(
+            parent,
+            DependencyEdge::Request {
+                computation,
+                request,
+            },
+        )?;
+        Ok(PreparedRequest::Reused(reused.value))
+    }
+
+    /// Start the frame for a request the reuse index could not serve, and
+    /// record the edge to the computation it will produce.
+    fn prepare_fresh_request(
+        &mut self,
+        parent: ComputationId,
+        request: Request<Pure>,
+        rule: RuleId,
+        key: PureComputationKey,
+    ) -> PithResult<PreparedRequest> {
         let frame = self.start_frame(request.clone(), rule, key)?;
         self.record_edge(
             parent,
@@ -280,12 +341,7 @@ impl Engine {
                     reused.push(None);
                 }
                 Err(diagnostics) => {
-                    // The roots opened before this one already have Pending
-                    // arena nodes. Fail them so an aborted setup leaves nothing
-                    // waiting on a run that will not happen.
-                    let opened: Vec<ComputationId> =
-                        frames.iter().map(|frame| frame.computation).collect();
-                    self.stop_pending(&opened, &diagnostics, StopReason::Failed);
+                    self.abort_root_openings(&frames, &diagnostics);
                     return Err(diagnostics);
                 }
             }
@@ -304,36 +360,39 @@ impl Engine {
         let rule = self.resolve_pure_rule(request)?;
         match self.reusable_pure_evaluation(rule, request, context)? {
             Some(evaluation) => Ok(OpenedRoot::Reused(evaluation)),
-            None => {
-                let key = self.pure_key_for(rule, request)?;
-                Ok(OpenedRoot::Fresh(self.start_frame(
-                    request.clone(),
-                    rule,
-                    key,
-                )?))
-            }
+            None => self.open_root_fresh(request, rule).map(OpenedRoot::Fresh),
         }
+    }
+
+    /// Start the frame for a root the reuse index could not answer.
+    fn open_root_fresh(&mut self, request: &Request<Pure>, rule: RuleId) -> PithResult<EvalFrame> {
+        let key = self.pure_key_for(rule, request)?;
+        self.start_frame(request.clone(), rule, key)
+    }
+
+    /// Fail the frames of roots opened before a failure, so nothing waits on
+    /// a run that will not happen.
+    fn abort_root_openings(&mut self, frames: &[EvalFrame], diagnostics: &DiagnosticSink) {
+        let opened: Vec<ComputationId> = frames.iter().map(|frame| frame.computation).collect();
+        self.stop_pending(&opened, diagnostics, StopReason::Failed);
     }
 
     pub(super) fn resolve_pure_rule(&self, request: &Request<Pure>) -> PithResult<RuleId> {
         request.validate_inputs().map_err(one_diag)?;
-        self.rules
+        self.pure
+            .rules
             .select(request)
-            .into_result(request, &self.rules)
+            .into_result(request, &self.pure.rules)
             .map_err(one_diag)
     }
 
     /// The computation key for applying `rule` to `request`.
-    ///
-    /// Derived once per prepared request and carried on the frame, because three
-    /// things want it: the cycle predicate, the reusable index, and the durable
-    /// attempt.
     fn pure_key_for(
         &self,
         rule: RuleId,
         request: &Request<Pure>,
     ) -> PithResult<PureComputationKey> {
-        let Some(rule_metadata) = self.rules.get(rule) else {
+        let Some(rule_metadata) = self.pure.rules.get(rule) else {
             return Err(internal_diag(InternalInvariant::SelectedRuleHasNoMetadata));
         };
         Ok(PureComputationKey::new(rule_metadata, request))
@@ -345,7 +404,7 @@ impl Engine {
         rule: RuleId,
         key: PureComputationKey,
     ) -> PithResult<EvalFrame> {
-        let Some(body) = self.bodies.get(&rule) else {
+        let Some(body) = self.pure.bodies.get(&rule) else {
             return Err(internal_diag(InternalInvariant::SelectedRuleHasNoBody));
         };
         let body = body.start(&request.inputs);
@@ -358,12 +417,10 @@ impl Engine {
             observation: None,
             capabilities: Box::new([]),
         });
-        self.index_pure_computation(key, computation);
+        self.pure.computations.insert(key, computation);
         if let Err(diagnostics) = self.create_pending_pure_attempt(computation, key) {
-            // Only a failing adapter reaches this; the memory adapter is
-            // infallible. Fail the orphaned arena node so nothing stays
-            // Pending. No durable failure is published because no durable
-            // attempt exists; the diagnostics propagate to the caller.
+            // Fail the orphaned arena node so nothing stays Pending. No
+            // durable attempt exists, so no durable failure is published.
             self.fail_pure_orphan(computation, &diagnostics);
             return Err(diagnostics);
         }
@@ -377,12 +434,11 @@ impl Engine {
         })
     }
 
-    /// Complete `completed` with `value`: type-check the result, mark the arena
-    /// node terminal, and publish the durable record. The caller pops the frame
-    /// afterwards, so the frame's computation id is still valid for the store
-    /// call.
+    /// Complete `completed` with `value`: type-check the result, mark the
+    /// arena node terminal, and publish the durable record. The caller pops
+    /// the frame afterwards, so the computation id is still valid here.
     fn finish_frame(&mut self, completed: &EvalFrame, value: Value) -> PithResult<Evaluation> {
-        let Some(rule) = self.rules.get(completed.rule) else {
+        let Some(rule) = self.pure.rules.get(completed.rule) else {
             return Err(internal_diag(
                 InternalInvariant::PureLostSelectedRuleMetadata,
             ));

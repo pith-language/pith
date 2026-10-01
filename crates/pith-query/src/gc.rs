@@ -127,7 +127,7 @@ fn retained_attempts<'a>(
             frontier.extend(
                 dependencies_of(attempt)
                     .iter()
-                    .filter_map(dependency_attempt),
+                    .filter_map(DurableDependency::attempt),
             );
         }
     }
@@ -144,15 +144,6 @@ fn dependencies_of(attempt: &DurableAttempt) -> &[DurableDependency] {
         DurableAttemptState::Failed(stopped) | DurableAttemptState::Cancelled(stopped) => {
             &stopped.dependencies
         }
-    }
-}
-
-fn dependency_attempt(dependency: &DurableDependency) -> Option<DurableAttemptId> {
-    match dependency {
-        DurableDependency::Pure { attempt, .. }
-        | DurableDependency::Action { attempt }
-        | DurableDependency::Observation { attempt } => Some(*attempt),
-        DurableDependency::Blob { .. } | DurableDependency::CapabilityUse { .. } => None,
     }
 }
 
